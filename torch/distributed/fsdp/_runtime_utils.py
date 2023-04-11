@@ -405,27 +405,27 @@ def _pre_forward(
         args (Tuple[Any, ...]): Module forward ``args``.
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
-    state.training_state = TrainingState.FORWARD_BACKWARD
-    state._exec_order_data.record_pre_forward(handles, module.training)
-    for handle in handles:
-        handle._training_state = HandleTrainingState.FORWARD
-    if unshard_fn is not None:
-        unshard_fn()
-    # Register post-backward hooks to reshard the parameters and reduce-scatter
-    # their gradients. They must be re-registered every forward pass in case
-    # the `grad_fn` is mutated.
-    _register_post_backward_hooks(state, handles)
+    with torch.profiler.record_function("FullyShardedDataParallel._pre_forward"):
+        state.training_state = TrainingState.FORWARD_BACKWARD
+        state._exec_order_data.record_pre_forward(handles, module.training)
+        for handle in handles:
+            handle._training_state = HandleTrainingState.FORWARD
+        if unshard_fn is not None:
+            unshard_fn()
+        # Register post-backward hooks to reshard the parameters and reduce-scatter
+        # their gradients. They must be re-registered every forward pass in case
+        # the `grad_fn` is mutated.
+        _register_post_backward_hooks(state, handles)
 
-    should_cast_forward_inputs = all(
-        not handle._force_full_precision for handle in state._handles
-    )
+        should_cast_forward_inputs = all(
+            not handle._force_full_precision for handle in state._handles
+        )
 
-    if should_cast_forward_inputs and state.mixed_precision.cast_forward_inputs:
-        # Recursively convert args and kwargs to specified precision.
-        input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
-        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
-    return args, kwargs
-
+        if should_cast_forward_inputs and state.mixed_precision.cast_forward_inputs:
+            # Recursively convert args and kwargs to specified precision.
+            input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
+            args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
+        return args, kwargs
 
 @no_type_check
 def _pre_forward_unshard(
@@ -477,16 +477,17 @@ def _post_forward(
     Postcondition: Each ``FlatParameter`` 's data points to the sharded flat
     parameter.
     """
-    state._exec_order_data.record_post_forward(handles)
-    if reshard_fn is not None:
-        reshard_fn()
-    # Register pre-backward hooks to unshard the flat parameters for the
-    # gradient computation (if needed)
-    output = _register_pre_backward_hooks(state, module, output, handles)
-    state.training_state = TrainingState.IDLE
-    for handle in handles:
-        handle._training_state = HandleTrainingState.IDLE
-    return output
+    with torch.profiler.record_function("FullyShardedDataParallel._post_forward"):
+        state._exec_order_data.record_post_forward(handles)
+        if reshard_fn is not None:
+            reshard_fn()
+        # Register pre-backward hooks to unshard the flat parameters for the
+        # gradient computation (if needed)
+        output = _register_pre_backward_hooks(state, module, output, handles)
+        state.training_state = TrainingState.IDLE
+        for handle in handles:
+            handle._training_state = HandleTrainingState.IDLE
+        return output
 
 
 @no_type_check
@@ -525,83 +526,81 @@ def _root_pre_forward(
         module (nn.Module): Module for which this logic tries to run. It may or
             may not be the root. If not, then this method does not do anything.
     """
-    _lazy_init(state, module)
-    _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
-    if not state._is_root:
-        return args, kwargs
+    with torch.profiler.record_function("FullyShardedDataParallel._root_pre_forward"):
+        _lazy_init(state, module)
+        _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
+        if not state._is_root:
+            return args, kwargs
 
-    # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
-    # are in full precision and if we should cast them back to lower precision, which happens when
-    # exiting eval() mode.
-    should_cast_buffers_to_full_prec = any(
-        handle._force_full_precision for handle in state._handles
-    )
-
-    if should_cast_buffers_to_full_prec:
-        _cast_buffers_to_dtype_and_device(
-            buffers=dict(module.named_buffers()).values(),
-            buffer_dtypes=list(state._buffer_name_to_orig_dtype.values()),
-            device=state.compute_device,
+        # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
+        # are in full precision and if we should cast them back to lower precision, which happens when
+        # exiting eval() mode.
+        should_cast_buffers_to_full_prec = any(
+            handle._force_full_precision for handle in state._handles
         )
-        # This flag is only set when we cast buffers to full precision, to avoid the
-        # CPU overhead that can stem from retrieving all buffers and their types in the
-        # following else branch.
-        state._needs_buffer_dtype_restore_check = True
-    elif getattr(state, "_needs_buffer_dtype_restore_check", False):
-        # Check if buffers are in full precision and we need to cast them
-        # back down.
-        (
-            buffers,
-            buffer_dtypes_for_computation,
-        ) = _get_buffers_and_dtypes_for_computation(state, module)
-        if len(buffers) > 0 and len(buffer_dtypes_for_computation) > 0:
-            if any(
-                buffer.dtype != buffer_dtype_for_computation
-                for buffer, buffer_dtype_for_computation in zip(
-                    buffers, buffer_dtypes_for_computation
-                )
-            ):
-                # Assume we have to cast everything if there is one mismatch
-                _cast_buffers_to_dtype_and_device(
-                    buffers, buffer_dtypes_for_computation, state.compute_device
-                )
-        # We don't have to check this again until we cast buffers to full precision again.
-        state._needs_buffer_dtype_restore_check = False
 
-    if state.forward_prefetch:
-        handles_keys = []
-        for fsdp_state in state._all_fsdp_states:
-            # TODO: Forward prefetch assumes singleton handles key. For the
-            # composable path, `_handles` may have more than one handle,
-            # whereas for the wrapper path, it has at most one handle.
-            handles_keys.extend((handle,) for handle in fsdp_state._handles)
-        for handles_key in handles_keys:
-            state._needs_pre_forward_unshard[handles_key] = True
-    _wait_for_computation_stream(
-        torch.cuda.current_stream(),
-        state._streams["unshard"],
-        state._streams["pre_unshard"],
-    )
-    _clear_grads_if_needed(state._all_handles)
+        if should_cast_buffers_to_full_prec:
+            _cast_buffers_to_dtype_and_device(
+                buffers=dict(module.named_buffers()).values(),
+                buffer_dtypes=list(state._buffer_name_to_orig_dtype.values()),
+                device=state.compute_device,
+            )
+            # This flag is only set when we cast buffers to full precision, to avoid the
+            # CPU overhead that can stem from retrieving all buffers and their types in the
+            # following else branch.
+            state._needs_buffer_dtype_restore_check = True
+        elif getattr(state, "_needs_buffer_dtype_restore_check", False):
+            # Check if buffers are in full precision and we need to cast them
+            # back down.
+            (
+                buffers,
+                buffer_dtypes_for_computation,
+            ) = _get_buffers_and_dtypes_for_computation(state, module)
+            if len(buffers) > 0 and len(buffer_dtypes_for_computation) > 0:
+                if any(
+                    buffer.dtype != buffer_dtype_for_computation
+                    for buffer, buffer_dtype_for_computation in zip(
+                        buffers, buffer_dtypes_for_computation
+                    )
+                ):
+                    # Assume we have to cast everything if there is one mismatch
+                    _cast_buffers_to_dtype_and_device(
+                        buffers, buffer_dtypes_for_computation, state.compute_device
+                    )
+            # We don't have to check this again until we cast buffers to full precision again.
+            state._needs_buffer_dtype_restore_check = False
 
-    # Prepares the forward inputs by moving them to ``compute_device``
-    # TODO: Do not use the side stream for tensor copies for now; investigate
-    # the perf with/without it.
-    args_tuple, kwargs_tuple = _to_kwargs(
-        args, kwargs, state.compute_device.index, False
-    )
-    args = args_tuple[0]
-    kwargs = kwargs_tuple[0]
+        if state.forward_prefetch:
+            handles_keys = []
+            for fsdp_state in state._all_fsdp_states:
+                # TODO: Forward prefetch assumes singleton handles key. For the
+                # composable path, `_handles` may have more than one handle,
+                # whereas for the wrapper path, it has at most one handle.
+                handles_keys.extend((handle,) for handle in fsdp_state._handles)
+            for handles_key in handles_keys:
+                state._needs_pre_forward_unshard[handles_key] = True
+        _wait_for_computation_stream(
+            torch.cuda.current_stream(),
+            state._streams["unshard"],
+            state._streams["pre_unshard"],
+        )
+        _clear_grads_if_needed(state._all_handles)
 
-    should_cast_forward_inputs = all(
-        not handle._force_full_precision for handle in state._handles
-    )
+        # Prepares the forward inputs by moving them to ``compute_device``
+        # TODO: Do not use the side stream for tensor copies for now; investigate
+        # the perf with/without it.
+        with torch.profiler.record_function("FullyShardedDataParallel._to_kwargs"):
+            args_tuple, kwargs_tuple = _to_kwargs(
+                args, kwargs, state.compute_device, False
+            )
+        args = args_tuple[0]
+        kwargs = kwargs_tuple[0]
 
-    if should_cast_forward_inputs and state.mixed_precision.cast_root_forward_inputs:
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
-        args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
-    return args, kwargs
 
+        if state.mixed_precision.cast_root_forward_inputs:
+            args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
+        return args, kwargs
 
 def _cast_forward_inputs(
     input_dtype: Optional[torch.dtype],
@@ -655,9 +654,7 @@ def _pre_backward_hook(
     if _handles_key and state._ran_pre_backward_hook.get(_handles_key, False):
         return
 
-    with torch.autograd.profiler.record_function(
-        "FullyShardedDataParallel._pre_backward_hook"
-    ):
+    with torch.profiler.record_function("FullyShardedDataParallel._pre_backward_hook"):
         # Queue the post-backward callback once for the root FSDP instance to
         # attach it to the outermost backward graph task so that it is called
         # after all backward calls complete
