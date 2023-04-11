@@ -90,8 +90,7 @@ def check_codegen(
                     has_dynamic = True
                     break
         self.assertTrue(
-            has_dynamic,
-            msg=f"Failed to find dynamic for loop variable\n{code}",
+            has_dynamic, msg=f"Failed to find dynamic for loop variable\n{code}"
         )
         self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
     else:
@@ -119,14 +118,12 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
-    "test_adaptive_avg_pool2d1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange2_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
     "test_as_strided_dynamic_shapes": TestFailure(("cpu",)),
-    "test_batch_norm_2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_cat_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
     "test_constant_pad_float64_dynamic_shapes": TestFailure(("cpu",)),
