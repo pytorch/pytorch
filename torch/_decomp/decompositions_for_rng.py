@@ -4,12 +4,13 @@ from typing import Callable, Dict
 import torch
 import torch._decomp as decomp
 from torch._ops import OpOverload
+from torch._prims_common import make_contiguous_strides_for
 from torch._subclasses.fake_tensor import disable_fake_tensor_mode_tracing
+
 
 aten = torch.ops.aten
 
 rng_decompositions: Dict[str, Dict[OpOverload, Callable]] = defaultdict(dict)
-offset_calculator = {}
 
 
 def throw_if_philox_offset_did_not_advance(fn):
@@ -34,46 +35,18 @@ def register_rng_decomposition(aten_op):
     return inner
 
 
-# Offset calculations depdens on the distribution
-def register_offset_calculation(aten_ops):
-    def inner(fn):
-        nonlocal aten_ops
-        aten_ops = list(aten_ops)
-        for aten_op in aten_ops:
-            offset_calculator[aten_op] = fn
-        return fn
-
-    return inner
-
-
-def get_default_stride(size):
-    """
-    A helper function to get the strides for a contiguous tensor of a given
-    shape.
-    """
-    stride = [1] * len(size) + [1]
-    for idx in reversed(range(len(size))):
-        stride[idx] = stride[idx + 1] * size[idx]
-    stride = stride[1:]
-    return stride
-
-
-class RNGFunctionalizationError(Exception):
-    pass
-
-
-def throw_on_cpu():
-    raise RNGFunctionalizationError(
-        "You are trying to functionalize a CPU RNG operator but CPU does not use "
-        "Philox/counter-based PRNG. Therefore, functionalizing a CPU RNG operator "
-        "is not supported. We are discussing the possibility of a Philox-based "
-        "RNG implementation for CPU. We will revisit this assertion in future."
+def throw_on_non_cuda(device):
+    raise RuntimeError(
+        f"You are trying to functionalize a {device.type} RNG operator but {device.type} does not "
+        f"use Philox/counter-based PRNG. Therefore, functionalizing a {device.type} RNG operator is "
+        "not supported. We are discussing the possibility of a Philox-based RNG implementation for CPU."
     )
 
 
-@register_offset_calculation([aten.rand])
 def rand_offset_calculator(shape):
-    # For impl, look at calc_execution_policy
+    # For impl, look at the function calc_execution_policy in the file
+    # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
+    # commit hash 72aa0667bd16707d50eb8fa337092a1f5d11dfb6
     numel = 1
     for dim_size in shape:
         numel *= dim_size
@@ -97,13 +70,13 @@ def rand_offset_calculator(shape):
 def rand(shape, dtype=None, layout=torch.strided, device=None, pin_memory=False):
     device = device or "cpu"
 
-    if device.type == "cpu":
-        throw_on_cpu()
+    if device.type != "cuda":
+        throw_on_non_cuda(device)
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
     dtype = dtype or torch.float32
-    stride = get_default_stride(shape)
+    stride = make_contiguous_strides_for(shape)
     r = torch.ops.prims.philox_rand(shape, seed, offset, stride, device, dtype)
-    PhiloxStateTracker.advance_offset(offset_calculator[aten.rand](shape))
+    PhiloxStateTracker.advance_offset(rand_offset_calculator(shape))
     return r
 
 
@@ -117,12 +90,12 @@ def rand_like(
     memory_format=torch.preserve_format,
 ):
     device = device or x.device
-    if device.type == "cpu":
-        throw_on_cpu()
+    if device.type != "cuda":
+        throw_on_non_cuda(device)
     dtype = dtype or x.dtype
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
     r = torch.ops.prims.philox_rand(x.shape, seed, offset, x.stride(), device, dtype)
-    PhiloxStateTracker.advance_offset(offset_calculator[aten.rand](x.shape))
+    PhiloxStateTracker.advance_offset(rand_offset_calculator(x.shape))
     return r
 
 
@@ -138,9 +111,12 @@ class PhiloxState:
         self.reset()
 
     def reset(self):
-        self.seed = torch.Tensor(0)
-        self.base_offset = torch.Tensor(0)
+        self.seed = torch.Tensor(())
+        self.base_offset = torch.Tensor(())
         self.relative_offset = 0
+
+    def validate_state(self):
+        assert self.seed.numel() != 0 and self.base_offset.numel() != 0
 
     def advance_offset(self, consumed_offset):
         self.relative_offset += consumed_offset
@@ -151,19 +127,17 @@ class PhiloxState:
         self.relative_offset = relative_offset
 
     def get_state_as_tuple(self):
+        self.validate_state()
         return (self.seed, self.base_offset + self.relative_offset)
 
     def get_state_as_tensor(self):
         # Only needed because we override get_rng_state.
-        seed_portion = self.seed.reshape(1)
-        offset_portion = (self.base_offset + self.relative_offset).reshape(1)
-        return torch.cat([seed_portion, offset_portion])
+        self.validate_state()
+        return torch.stack([self.seed, self.base_offset + self.relative_offset])
 
     def set_state_from_tensor(self, state):
         # Only needed because we override set_rng_state.
-        seed, offset = torch.split(state, 1)
-        self.seed = seed[0]
-        self.base_offset = offset[0]
+        self.seed, self.base_offset = torch.split(state, 1)
         self.relative_offset = 0
 
 
@@ -196,12 +170,6 @@ class PhiloxStateTracker:
     bwd_state = PhiloxState()
 
     @classmethod
-    def reset(cls):
-        cls.running_state = PhiloxState()
-        cls.fwd_state = PhiloxState()
-        cls.bwd_state = PhiloxState()
-
-    @classmethod
     def mark_beginning_of_forward(cls):
         # Tells the tracker to use fwd_state as the running state
         cls.running_state = cls.fwd_state
@@ -210,6 +178,17 @@ class PhiloxStateTracker:
     def mark_beginning_of_backward(cls):
         # Tells the tracker to use bwd_state as the running state
         cls.running_state = cls.bwd_state
+
+    @classmethod
+    def mark_end_of_tracing(cls):
+        # Reset the state so that next occurence of AOTAutograd has clean slate
+        cls.clear()
+
+    @classmethod
+    def clear(cls):
+        cls.running_state = PhiloxState()
+        cls.fwd_state = PhiloxState()
+        cls.bwd_state = PhiloxState()
 
     @classmethod
     def record_state(cls, seed, offset, mode):
@@ -264,7 +243,7 @@ class PhiloxStateTracker:
 
 class RNGStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple():
+    def get_torch_state_as_tuple(fake_mode=None):
         if not torch.cuda.is_available():
             return torch.tensor(0), torch.tensor(0)
         # torch.cuda.get_rng_state yields a real tensor, and upsets fake
@@ -273,7 +252,10 @@ class RNGStateHelper:
             rng_state = torch.cuda.get_rng_state()
             seed = rng_state[800:808].view(dtype=torch.int64)[0]
             offset = rng_state[808:].view(dtype=torch.int64)[0]
-            return seed, offset
+        if fake_mode:
+            seed = fake_mode.from_tensor(seed)
+            offset = fake_mode.from_tensor(offset)
+        return seed, offset
 
     @staticmethod
     def set_torch_state_tensor(seed, offset):

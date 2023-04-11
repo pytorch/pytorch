@@ -1,4 +1,4 @@
-# Owner(s): ["module: functorch"]
+# Owner(s): ["oncall: pt2"]
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -8,7 +8,6 @@ from torch.testing._internal.common_utils import (
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from functorch.compile import aot_function, nop, min_cut_rematerialization_partition
-from torch._decomp.decompositions_for_rng import RNGFunctionalizationError
 from unittest.mock import patch
 import functools
 import torch.utils.checkpoint
@@ -275,11 +274,8 @@ class NegativeTest(TestCase):
         x = torch.rand(10, device=device, dtype=dtype)
 
         aot_fn = aot_function(fn, nop)
-        try:
+        with self.assertRaises(RuntimeError):
             aot_fn(x)
-            self.assertTrue(False)
-        except RNGFunctionalizationError:
-            self.assertTrue(True)
 
 
 only_for = ("cpu",)

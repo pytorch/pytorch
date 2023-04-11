@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
+from unittest.mock import patch
 
 from functorch import make_fx
 
@@ -110,6 +111,7 @@ def preserve_rng_state():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
+
 
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
@@ -1165,7 +1167,14 @@ def create_functionalized_graph(
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
 
     if config.functionalize_rng_ops:
+        # Total offsets differ for each AOT traced graph, so they can't be saved
+        # in the PhiloxStateTracker singleton object. Therefore, we save them
+        # into aot_config object as aot_config is alive in the runtime wrapper
+        # returned by AOTAutograd (both autograd.Function for training and
+        # simple wrapper for inference)
         aot_config.philox_total_offsets = PhiloxStateTracker.get_accumulated_offsets()
+        PhiloxStateTracker.mark_end_of_tracing()
+
 
     return fx_g
 
@@ -1308,8 +1317,9 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
         if config.functionalize_rng_ops:
-            # Add the seed and offset for tracing
-            seed, offset = PhiloxStateTracker.get_state_as_tuple()
+            # Add the seed and offset as example inputs to pass to the compiler
+            fake_mode = get_live_fake_mode_from_dispatch()
+            seed, offset = RNGStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args = (seed, offset, *flat_args)
         compiled_fw = compiler(fw_module, flat_args)
 
@@ -2290,40 +2300,19 @@ def create_runtime_wrapper(
             return fw_outs
     return runtime_wrapper
 
-@contextmanager
-def patch(module, attr, patch_fn):
-    """
-    Context manager that temporarily patches attribute of a module to a given patch_fn
-    """
-    old_fn = getattr(module, attr)
-    setattr(module, attr, patch_fn)
-    try:
-        yield
-    finally:
-        setattr(module, attr, old_fn)
+def get_live_fake_mode_from_dispatch():
+    modes = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+    fake_tensor_modes = [m for m in modes if isinstance(m, FakeTensorMode)]
+    if not fake_tensor_modes:
+        return None
+    return fake_tensor_modes[-1]
 
 def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
     # Functionalization of rng ops changes the calling convention of the joint graph.
     # It goes from (primals, tangents) to (seed, offset, primals, tangents)
     # At runtime, we pass on the current seed and offset. This is hidden from
     # the user.
-    fake_mode_init = False
-    for x in args:
-        if isinstance(x, FakeTensor):
-            fake_mode = x.fake_mode
-            fake_mode_init = True
-            break
-
-    if not fake_mode_init:
-        fake_mode = (
-            FakeTensorMode(shape_env=None)
-            if config.use_fake_tensor
-            else nullcontext()
-        )
-
-    def fakify(x):
-        return fake_mode.from_tensor(x, static_shapes=True)
-
+    fake_mode = get_live_fake_mode_from_dispatch()
 
     def override_get_rng_state(device: Union[int, str, torch.device] = 'cuda'):
         out = PhiloxStateTracker.get_state_as_tensor()
@@ -2332,32 +2321,26 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
     def override_set_rng_state(x, device: Union[int, str, torch.device] = 'cuda'):
         PhiloxStateTracker.set_state_from_tensor(x)
 
-
     def traced_joint(fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, primals, tangents):
-        with patch(torch.cuda, "get_rng_state", override_get_rng_state):
-            with patch(torch.cuda, "set_rng_state", override_set_rng_state):
+        with patch("torch.cuda.get_rng_state", override_get_rng_state):
+            with patch("torch.cuda.set_rng_state", override_set_rng_state):
                 return func(primals, tangents)
 
     def traced_forward(fwd_seed, fwd_base_offset, *primals):
-        with patch(torch.cuda, "get_rng_state", override_get_rng_state):
-            with patch(torch.cuda, "set_rng_state", override_set_rng_state):
+        with patch("torch.cuda.get_rng_state", override_get_rng_state):
+            with patch("torch.cuda.set_rng_state", override_set_rng_state):
                 return func(*primals)
-
-    PhiloxStateTracker.reset()
 
     if trace_joint:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = RNGStateHelper.get_torch_state_as_tuple()
-        bwd_seed, bwd_base_offset = RNGStateHelper.get_torch_state_as_tuple()
-        fwd_seed, fwd_base_offset = fakify(fwd_seed), fakify(fwd_base_offset)
-        bwd_seed, bwd_base_offset = fakify(bwd_seed), fakify(bwd_base_offset)
+        fwd_seed, fwd_base_offset = RNGStateHelper.get_torch_state_as_tuple(fake_mode)
+        bwd_seed, bwd_base_offset = RNGStateHelper.get_torch_state_as_tuple(fake_mode)
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         PhiloxStateTracker.record_state(bwd_seed, bwd_base_offset, "backward")
         return traced_joint, (fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, *args)
     else:
         # Get the current seed and offset to setup tracing.
-        fwd_seed, fwd_base_offset = RNGStateHelper.get_torch_state_as_tuple()
-        fwd_seed, fwd_base_offset = fakify(fwd_seed), fakify(fwd_base_offset)
+        fwd_seed, fwd_base_offset = RNGStateHelper.get_torch_state_as_tuple(fake_mode)
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         return traced_forward, (fwd_seed, fwd_base_offset, *args)
 
@@ -2383,8 +2366,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         fw_metadata,
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
-
-    disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
         fx_g = create_functionalized_graph(
@@ -2433,6 +2414,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
+            if config.functionalize_rng_ops:
+                # Update example inputs for the fw_compiler
+                fake_mode = get_live_fake_mode_from_dispatch()
+                seed, offset = RNGStateHelper.get_torch_state_as_tuple(fake_mode)
+                flat_args = (seed, offset, *flat_args)
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, flat_args
             )
@@ -2778,15 +2764,12 @@ def create_aot_dispatcher_function(
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
-    fake_mode_init = False
     for x in flat_args:
         if isinstance(x, FakeTensor):
             fake_mode = x.fake_mode
             shape_env = fake_mode.shape_env
-            fake_mode_init = True
             break
-
-    if not fake_mode_init:
+    else:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = (
             FakeTensorMode(shape_env=shape_env)
@@ -2838,10 +2821,13 @@ def create_aot_dispatcher_function(
             and torch.is_grad_enabled()
         )
         with enable_python_dispatcher():
-            fw_metadata = run_functionalized_fw_and_collect_metadata(
-                flat_fn,
-                keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
-            )(*fake_flat_args)
+            # Patch set_rng_state as set_rng_state with fake tensors is
+            # nonsensical. This does not affect the collection of metadata.
+            with patch("torch.cuda.set_rng_state", lambda *args: None):
+                fw_metadata = run_functionalized_fw_and_collect_metadata(
+                    flat_fn,
+                    keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                )(*fake_flat_args)
 
         # crappy version of dispatcher
         # TODO: Do this properly

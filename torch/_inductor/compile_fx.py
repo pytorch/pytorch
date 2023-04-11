@@ -668,8 +668,6 @@ def compile_fx(
     assert not config._raise_error_for_testing
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
-    # TODO - Need to fix calling convention for Inductor at various places
-    functorch.compile.config.functionalize_rng_ops = False
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes

@@ -84,7 +84,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
 
 
 def _is_primal(node):
-    return node.op == "placeholder" and "tangents" not in node.target and "bwd_seed" not in node.target and "bwd_base_offset" not in node.target  # noqa: B950
+    return node.op == "placeholder" and "tangents" not in node.target and not _is_bwd_seed_offset(node)
 
 
 def _is_tangent(node):

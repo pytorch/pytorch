@@ -2,7 +2,7 @@ from typing import Tuple
 
 import torch
 from torch import _prims
-from torch._decomp.decompositions_for_rng import RNGStateHelper, throw_on_cpu
+from torch._decomp.decompositions_for_rng import RNGStateHelper, throw_on_non_cuda
 from torch.types import _device, _dtype
 
 
@@ -20,9 +20,8 @@ def _philox_rand(
     else:
         devices = [device]
 
-    if device.type == "cpu":
-        raise throw_on_cpu()
-    devices = [device]
+    if device.type != "cuda":
+        raise throw_on_non_cuda(device)
 
     with torch.random.fork_rng(devices):
         RNGStateHelper.set_torch_state_tensor(seed, offset)
@@ -47,5 +46,5 @@ def register_rng_prims():
         meta=_philox_rand_meta,
         impl_aten=_philox_rand,
         tags=(torch.Tag.nondeterministic_seeded,),  # type: ignore[attr-defined]
-        doc="",
+        doc="Philox based stateless rand operator",
     )
