@@ -21,8 +21,11 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const std::string& msg) {
       " (please report this error)");
 }
 
-// see TypeMeta::addTypeMetaData
-std::mutex TypeMeta::typeMetaDatasLock;
+std::mutex& TypeMeta::getTypeMetaDatasLock() {
+  static std::mutex lock;
+  return lock;
+}
+
 uint16_t TypeMeta::nextTypeIndex(NumScalarTypes);
 
 // fixed length array of TypeMetaData instances

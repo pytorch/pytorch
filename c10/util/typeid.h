@@ -514,7 +514,7 @@ class C10_API TypeMeta final {
 
   // Protects type metadata allocation.
   // NOLINTNEXTLINE(facebook-hte-NonPodStaticDeclaration)
-  static std::mutex typeMetaDatasLock;
+  static std::mutex& getTypeMetaDatasLock();
   static uint16_t nextTypeIndex;
 
   static detail::TypeMetaData* typeMetaDatas();
@@ -541,7 +541,7 @@ class C10_API TypeMeta final {
     // 1) existingMetaDataIndexForType()
     // 2) nextTypeIndex++
     // 3) the write into typeMetaDatas()
-    std::lock_guard<std::mutex> lock(typeMetaDatasLock);
+    std::lock_guard<std::mutex> lock(getTypeMetaDatasLock());
     // It may exist already if added in a different dynamic shared library.
     const uint16_t existing_index = existingMetaDataIndexForType(identifier);
     if (existing_index != MaxTypeIndex) {
