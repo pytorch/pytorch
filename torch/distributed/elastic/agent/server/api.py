@@ -564,17 +564,30 @@ class SimpleElasticAgent(ElasticAgent):
         restart_count = spec.max_restarts - self._remaining_restarts
 
         log.info(
-            f"[{spec.role}] Rendezvous complete for workers. Result:\n"
-            f"  restart_count={restart_count}\n"
-            f"  master_addr={master_addr}\n"
-            f"  master_port={master_port}\n"
-            f"  group_rank={group_rank}\n"
-            f"  group_world_size={group_world_size}\n"
-            f"  local_ranks={[worker.local_rank for worker in workers]}\n"
-            f"  role_ranks={[worker.role_rank for worker in workers]}\n"
-            f"  global_ranks={[worker.global_rank for worker in workers]}\n"
-            f"  role_world_sizes={[worker.role_world_size for worker in workers]}\n"
-            f"  global_world_sizes={[worker.world_size for worker in workers]}\n"
+            "[%(role)s] Rendezvous complete for workers. Result:\n"
+            "  restart_count=%(restart_count)s\n"
+            "  master_addr=%(master_addr)s\n"
+            "  master_port=%(master_port)s\n"
+            "  group_rank=%(group_rank)s\n"
+            "  group_world_size=%(group_world_size)s\n"
+            "  local_ranks=%(local_ranks)s\n"
+            "  role_ranks=%(role_ranks)s\n"
+            "  global_ranks=%(global_ranks)s\n"
+            "  role_world_sizes=%(role_world_sizes)s\n"
+            "  global_world_sizes=%(global_world_sizes)s\n",
+            {
+                "role": spec.role,
+                "restart_count": restart_count,
+                "master_addr": master_addr,
+                "master_port": master_port,
+                "group_rank": group_rank,
+                "group_world_size": group_world_size,
+                "local_ranks": [worker.local_rank for worker in workers],
+                "role_ranks": [worker.role_rank for worker in workers],
+                "global_ranks": [worker.global_rank for worker in workers],
+                "role_world_sizes": [worker.role_world_size for worker in workers],
+                "global_world_sizes": [worker.world_size for worker in workers]
+            }
         )
 
     def _get_ranks(
@@ -871,17 +884,19 @@ class SimpleElasticAgent(ElasticAgent):
 
             if state == WorkerState.SUCCEEDED:
                 log.info(
-                    f"[{role}] worker group successfully finished."
-                    f" Waiting {self._exit_barrier_timeout} seconds for other agents to finish."
+                    "[%s] worker group successfully finished."
+                    " Waiting %s seconds for other agents to finish.",
+                    role, self._exit_barrier_timeout
                 )
                 self._exit_barrier()
                 return run_result
             elif state in {WorkerState.UNHEALTHY, WorkerState.FAILED}:
                 if self._remaining_restarts > 0:
                     log.info(
-                        f"[{role}] Worker group {state.name}. "
-                        f"{self._remaining_restarts}/{spec.max_restarts} attempts left;"
-                        f" will restart worker group"
+                        "[%s] Worker group %s. "
+                        "%s/%s attempts left;"
+                        " will restart worker group",
+                        role, state.name, self._remaining_restarts, spec.max_restarts
                     )
                     self._remaining_restarts -= 1
                     self._restart_workers(self._worker_group)
@@ -896,9 +911,10 @@ class SimpleElasticAgent(ElasticAgent):
                 group_rank = self._worker_group.group_rank
                 if num_nodes_waiting > 0:
                     log.info(
-                        f"[{role}] Detected {num_nodes_waiting} "
-                        f"new nodes from group_rank={group_rank}; "
-                        f"will restart worker group"
+                        "[%s] Detected %s "
+                        "new nodes from group_rank=%s; "
+                        "will restart worker group",
+                        role, num_nodes_waiting, group_rank
                     )
                     self._restart_workers(self._worker_group)
             else:
@@ -912,8 +928,9 @@ class SimpleElasticAgent(ElasticAgent):
         times. This barrier keeps the agent process alive until all workers finish.
         """
         log.info(
-            f"Local worker group finished ({self._worker_group.state}). "
-            f"Waiting {self._exit_barrier_timeout} seconds for other agents to finish"
+            "Local worker group finished (%s). "
+            "Waiting %s seconds for other agents to finish",
+            self._worker_group.state, self._exit_barrier_timeout
         )
         start = time.time()
         try:
