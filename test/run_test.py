@@ -268,6 +268,7 @@ CI_SERIAL_LIST = [
     "test_tensor_creation_ops",
     "test_sparse_csr",
     "test_dispatch",
+    "test_python_dispatch",  # torch.library creation and deletion must be serialized
     "test_spectral_ops",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
@@ -703,7 +704,7 @@ def run_doctests(test_module, test_directory, options):
             import onnxruntime  # NOQA
             import onnxscript  # NOQA
         except ImportError:
-            exclude_module_list.append("torch.onnx._internal.fx.*")
+            exclude_module_list.append("torch.onnx.*")
             enabled["onnx"] = False
         else:
             enabled["onnx"] = True
