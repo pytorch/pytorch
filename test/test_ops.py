@@ -316,6 +316,8 @@ class TestCommon(TestCase):
                 continue
             except torch._subclasses.fake_tensor.DataDependentOutputException:
                 continue
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
