@@ -398,7 +398,7 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
 
 # These operators mutate striding in place and output conj depending on input
 # that is not reflected in meta registration
-@register_op_impl(lambda op: op.namespace in ("aten", "prim" and "fft" in op.name()))
+@register_op_impl(lambda op: op.namespace in ("aten", "prim") and "fft" in op.name())
 def unsupported_fft(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(func)
 
