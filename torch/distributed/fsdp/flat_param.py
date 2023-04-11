@@ -1490,7 +1490,9 @@ class FlatParamHandle:
         """
         Runs the reshard logic. This includes freeing the unsharded flat
         parameter if ``free_unsharded_flat_param`` and switching to using the
-        sharded flat parameter.
+        sharded flat parameter. Note that this also implicitly offloads
+        the sharded flat parameter (if CPU offload is enabled) by pointing
+        it to the ``_local_shard`` attribute which resides on CPU.
         """
         # Switch to the sharded `FlatParameter` before freeing to prevent
         # "use-after-free"-type bugs with external profiling tools, where for

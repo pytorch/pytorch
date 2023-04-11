@@ -7,7 +7,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo.testing import same
+from torch._dynamo.testing import same, skipIfPy311
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
@@ -77,6 +77,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
 
+    @skipIfPy311
     def test_nested_grad_mode_graph_break(self):
         def fn(x):
             before = torch.is_grad_enabled()
@@ -99,6 +100,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             opt_fn(a)
         self.assertEqual(cnts.frame_count, 3)
 
+    @skipIfPy311
     def test_torch_profiler(self):
         # wrap torch.profiler.* as NullContextVariable and do nothing
         def fn(x):
@@ -119,6 +121,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    @skipIfPy311
     def test_autograd_profiler(self):
         # wrap torch.autograd.profiler.* as NullContextVariable and do nothing
         def fn(x):
@@ -344,6 +347,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @skipIfPy311
     def test_autocast_cpu_graph_break(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -371,6 +375,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res.device.type, "cpu")
         self.assertEqual(res.dtype, torch.bfloat16)
 
+    @skipIfPy311
     def test_autocast_cpu_graph_break_2(self):
         # Regression for: https://github.com/pytorch/pytorch/issues/93890
         def fn(x):
@@ -389,6 +394,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
 
+    @skipIfPy311
     def test_autocast_cpu_graph_break_inner_fn(self):
         class MyModule(torch.nn.Module):
             @staticmethod
@@ -436,6 +442,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_32.device.type, "cpu")
         self.assertEqual(out_32.dtype, torch.float32)
 
+    @skipIfPy311
     def test_autocast_graph_break_method(self):
         class MyModule(torch.nn.Module):
             def __init__(self, bias):
