@@ -134,6 +134,26 @@ class TransformationTest(DTensorTestBase):
         )
         """
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_graph_optimization(self):
+        batch_size = 100
+        layers = 2
+        dim = 4096
+        num_iters = 5
+
+        @compile(
+            gm_transformation=GraphModuleTransformation(
+                num_iters=num_iters, enable_graph_optimization=True
+            )
+        )
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+        self._test_tran_step_with_ddp(train_step, num_iters, batch_size, layers, dim)
+
 
 if __name__ == "__main__":
     run_tests()
