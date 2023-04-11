@@ -62,7 +62,6 @@ null_context = contextlib.nullcontext
 
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.utils._sympy.value_ranges import ValueRanges
-import builtins
 import sympy
 
 
@@ -602,30 +601,14 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
-    constraint_range: Optional[StrictMinMaxConstraint]
-
-    @property
-    def _lower(self):
-        if self.constraint_range is None:
-            return 2
-        else:
-            return self.constraint_range.vr.lower
-
-    @property
-    def _upper(self):
-        if self.constraint_range is None:
-            return sympy.oo
-        else:
-            return self.constraint_range.vr.upper
+    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
+    constraint_range: StrictMinMaxConstraint
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
-        lower, upper = builtins.max(lower, self._lower), builtins.min(upper, self._upper)
-        return Constraint(
-            self.w_tensor,
-            self.t_id,
-            self.dim,
-            StrictMinMaxConstraint(ValueRanges(lower=lower, upper=upper))
+        constraint_range = StrictMinMaxConstraint(
+            self.constraint_range.vr & ValueRanges(lower=lower, upper=upper)
         )
+        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
 
     def __ge__(self, lower):
         return self._clone_with_range(lower=lower)
