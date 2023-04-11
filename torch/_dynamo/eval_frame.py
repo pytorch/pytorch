@@ -61,9 +61,10 @@ always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 
 
+import sympy
+
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.utils._sympy.value_ranges import ValueRanges
-import sympy
 
 
 # See https://github.com/python/typing/pull/240
@@ -620,13 +621,13 @@ class Constraint:
         return self._clone_with_range(lower=lower)
 
     def __gt__(self, lower):
-        return self._clone_with_range(lower=lower+1)
+        return self._clone_with_range(lower=lower + 1)
 
     def __le__(self, upper):
         return self._clone_with_range(upper=upper)
 
     def __lt__(self, upper):
-        return self._clone_with_range(upper=upper-1)
+        return self._clone_with_range(upper=upper - 1)
 
     def __bool__(self):
         # NOTE(avik): We do not support compound expressions like a <= x <= b.
@@ -634,7 +635,7 @@ class Constraint:
         # and moreover, enforces that any overload of __bool__ must return True or False.
         # FWIW, sympy also raises TypeError in this case.
         raise TypeError(
-            f"Cannot determine truth value of Constraint. "
+            "Cannot determine truth value of Constraint. "
             "If you are trying to combine Constraints with logical connectives, "
             "you can specify them separately instead."
         )
