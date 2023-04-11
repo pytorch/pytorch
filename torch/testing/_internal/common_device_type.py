@@ -502,7 +502,7 @@ class CUDATestBase(DeviceTypeTestBase):
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         t = torch.ones(1).cuda()
-        cls.no_magma =  (torch.version.hip is not None) and (not torch.cuda.has_magma)
+        cls.no_magma = (torch.version.hip is not None) and (not torch.cuda.has_magma)
 
         # Determines if cuDNN is available and its version
         cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
