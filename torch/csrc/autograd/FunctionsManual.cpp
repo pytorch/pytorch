@@ -1972,7 +1972,7 @@ Tensor max_pool_double_backward(
   }
 }
 
-Tensor max_pool2d_double_backward() {
+Tensor error_for_max_pool2d_double_backward() { // This is mps-only.
   TORCH_CHECK(
       false,
       "max_pool2d with `return_indices=False` is not infinitely differentiable.",
