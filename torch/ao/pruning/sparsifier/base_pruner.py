@@ -16,18 +16,16 @@ from .utils import (
     module_to_fqn,
 )
 
-__all__ = ["BaseSparsifier"]
+__all__ = ["BasePruner"]
 
 SUPPORTED_MODULES = {nn.Linear}
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
 
-__all__ = ["BaseSparsifier"]
-
 
 # TODO update desc with new config args
-class BaseSparsifier(abc.ABC):
-    r"""Base class for all sparsifiers.
+class BasePruner(abc.ABC):
+    r"""Base class for all pruners.
 
     Abstract methods that need to be implemented:
 
@@ -45,11 +43,11 @@ class BaseSparsifier(abc.ABC):
 
     Example::
 
-        >>> # xdoctest: +SKIP("Can't instantiate abstract class BaseSparsifier with abstract method update_mask")
+        >>> # xdoctest: +SKIP("Can't instantiate abstract class BasePruner with abstract method update_mask")
         >>> config = [{'tensor_fqn': 'layer1.weight', 'tensor_fqn': 'linear2.weight2', 'sparsity_level': 0.5}]
         >>> defaults = {'sparsity_level': 0.7}
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
-        >>> sparsifier = BaseSparsifier(config, defaults)
+        >>> pruner = BasePruner(config, defaults)
     """
 
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
@@ -245,12 +243,12 @@ class BaseSparsifier(abc.ABC):
         Examples:
             >>> # xdoctest: +SKIP("locals are undefined")
             >>> # Don't save any sparse params
-            >>> sparsifier.squash_mask()
+            >>> pruner.squash_mask()
             >>> hasattr(model.submodule1, 'sparse_params')
             False
 
             >>> # Keep sparse params per layer
-            >>> sparsifier.squash_mask(
+            >>> pruner.squash_mask(
             ...     params_to_keep_per_layer={
             ...         'submodule1.linear1': ('foo', 'bar'),
             ...         'submodule2.linear42': ('baz',)
@@ -261,7 +259,7 @@ class BaseSparsifier(abc.ABC):
             {'baz': 0.1}
 
             >>> # Keep sparse params for all layers
-            >>> sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
+            >>> pruner.squash_mask(params_to_keep=('foo', 'bar'))
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
@@ -269,7 +267,7 @@ class BaseSparsifier(abc.ABC):
 
             >>> # Keep some sparse params for all layers, and specific ones for
             >>> # some other layers
-            >>> sparsifier.squash_mask(
+            >>> pruner.squash_mask(
             ...     params_to_keep=('foo', 'bar'),
             ...     params_to_keep_per_layer={
             ...         'submodule2.linear42': ('baz',)
