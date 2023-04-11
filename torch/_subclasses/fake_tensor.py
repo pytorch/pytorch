@@ -1042,6 +1042,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
+        log.info("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1087,7 +1088,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
-                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
+                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             incr = IncrementRecursionCount()
 
