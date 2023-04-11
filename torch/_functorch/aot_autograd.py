@@ -18,7 +18,7 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import dynamo_timed, format_graph_code
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._logging import getArtifactLogger
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
@@ -58,6 +58,8 @@ OutputType = Enum(
         # Instructs the runtime code to regenerate the current output from
         # a base tensor, user_outputs[base_idx]
         "alias_of_intermediate_base_is_user_output",
+        # See Note [Intermediate Bases Optimization]
+        "unsafe_view_alias",
     )
 )
 
@@ -469,7 +471,7 @@ class ViewAndMutationMeta:
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
-            if m.output_type != OutputType.non_alias
+            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias]
         ]
 
         self.mutated_inp_indices = mutated_inp_indices
@@ -483,7 +485,7 @@ class ViewAndMutationMeta:
         self.aliased_out_indices = aliased_out_indices
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
-            [x for x in self.output_info if x.output_type == OutputType.non_alias]
+            [x for x in self.output_info if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]]
         )
         self.num_outputs_aliased_to_inputs = len(
             [
@@ -737,6 +739,13 @@ def run_functionalized_fw_and_collect_metadata(
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
+
+        # Keep track of which outputs alias other outputs
+        out_tensor_alias_counts = collections.defaultdict(int)
+        for o in flat_f_outs:
+            if isinstance(o, torch.Tensor):
+                out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] += 1
+
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
@@ -761,30 +770,46 @@ def run_functionalized_fw_and_collect_metadata(
                 and o.requires_grad
                 and o._base.requires_grad
             ):
-                # First, check if o's ._base is an existing output
-                maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
-                if maybe_existing_out_idx is not None:
-                    # Special case where the output is an alias of a graph intermediate, but that intermediate
-                    # is itself also a user output.
-                    output_type = OutputType.alias_of_intermediate_base_is_user_output
-                    base_idx = maybe_existing_out_idx
+                if out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] == 1:
+                    # Note [Intermediate Bases Optimization]
+                    # Normally if we have an output that aliases an intermediate,
+                    # we need to add the extra "intermediate base" logic further down
+                    # to prevent autograd from yelling at us if the user later tries to
+                    # mutate that output.
+                    # However, the common case here is if we have an output that aliases an intermediate,
+                    # but doesn't alias any other outputs.
+                    # In that case, autograd shouldn't have to worry about the aliasing at all
+                    # (if that output is mutated, there are no other live aliases for autograd to worry about).
+                    # The "intermediate bases" can hurt inductor perf by forcing more variables to become outputs.
+                    # So as an optimization, we won't do intermediate base handling in this case.
+                    # Instead, we'll hide the aliasing from autograd using aten._unsafe_view().
+                    output_type = OutputType.unsafe_view_alias
+                    base_idx = None
                 else:
-                    # Next, check if o's ._base is an intermediate base that we already returned
-                    maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
-                        id(o._base), None
-                    )
-                    if maybe_existing_base_output_idx is not None:
-                        output_type = OutputType.alias_of_intermediate
-                        base_idx = maybe_existing_base_output_idx
+                    # First, check if o's ._base is an existing output
+                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
+                    if maybe_existing_out_idx is not None:
+                        # Special case where the output is an alias of a graph intermediate, but that intermediate
+                        # is itself also a user output.
+                        output_type = OutputType.alias_of_intermediate_base_is_user_output
+                        base_idx = maybe_existing_out_idx
                     else:
-                        # Otherwise, take o._base and explicitly return it as an output in the compiled graph
-                        new_out_idx = len(intermediate_bases)
-                        base_idx = new_out_idx
-                        # Indicate to the logic later on (when we trace the joint)
-                        # that this particular output should get it's ._base appended to the forward graph outputs
-                        output_type = OutputType.alias_of_intermediate_save_as_output
-                        intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
-                        intermediate_bases.append(o._base)
+                        # Next, check if o's ._base is an intermediate base that we already returned
+                        maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
+                            id(o._base), None
+                        )
+                        if maybe_existing_base_output_idx is not None:
+                            output_type = OutputType.alias_of_intermediate
+                            base_idx = maybe_existing_base_output_idx
+                        else:
+                            # Otherwise, take o._base and explicitly return it as an output in the compiled graph
+                            new_out_idx = len(intermediate_bases)
+                            base_idx = new_out_idx
+                            # Indicate to the logic later on (when we trace the joint)
+                            # that this particular output should get it's ._base appended to the forward graph outputs
+                            output_type = OutputType.alias_of_intermediate_save_as_output
+                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
+                            intermediate_bases.append(o._base)
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
@@ -817,7 +842,7 @@ def run_functionalized_fw_and_collect_metadata(
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
-            if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
+            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias] and issubclass(info.raw_type, torch.Tensor)
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -927,6 +952,8 @@ def fn_prepped_for_autograd(
         ]
 
         outs = fn(*args_maybe_cloned)
+        assert isinstance(outs, (tuple, list))
+        outs = list(outs)
         assert len(meta.output_info) == len(outs)
 
         mutated_inputs_to_return = [
@@ -936,9 +963,12 @@ def fn_prepped_for_autograd(
         ]
 
         intermediate_bases = []
-        for o, info in zip(outs, meta.output_info):
+        for i, (o, info) in enumerate(zip(outs, meta.output_info)):
             if info.output_type == OutputType.alias_of_intermediate_save_as_output:
                 intermediate_bases.append(o._base)
+            elif info.output_type == OutputType.unsafe_view_alias:
+                # See Note [Intermediate Bases Optimization]
+                outs[i] = torch.ops.aten._unsafe_view.default(o, o.shape)
 
         assert meta.num_intermediate_bases == len(intermediate_bases)
 
@@ -955,7 +985,7 @@ def fn_prepped_for_autograd(
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
         output_grad_mask = [
-            meta.output_info[i].output_type == OutputType.non_alias
+            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, torch.Tensor)
@@ -1252,7 +1282,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     assert copy_count == copy_count2
 
-    aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
+    aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -1265,7 +1295,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         compiled_fw,
         runtime_metadata=fw_metadata,
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations
+        keep_input_mutations=aot_config.keep_inference_input_mutations,
+        disable_amp=disable_amp
     )
 
     return compiled_fn
@@ -2066,6 +2097,7 @@ def create_runtime_wrapper(
     runtime_metadata: ViewAndMutationMeta,
     trace_joint: bool,
     keep_input_mutations: bool,
+    disable_amp: bool
 ):
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -2076,13 +2108,13 @@ def create_runtime_wrapper(
                 all_outs = call_func_with_args(
                     compiled_fn,
                     args,
-                    disable_amp=True,
+                    disable_amp=disable_amp,
                 )
         else:
             all_outs = call_func_with_args(
                 compiled_fn,
                 args,
-                disable_amp=True,
+                disable_amp=disable_amp,
             )
 
         num_mutated_inps = runtime_metadata.num_mutated_inputs
@@ -2188,7 +2220,7 @@ def create_runtime_wrapper(
             for i, (o, info) in enumerate(zip(
                 fw_outs_no_intermediate_bases, runtime_metadata.output_info
             )):
-                if info.output_type == OutputType.non_alias:
+                if info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias:
                     fw_outs_including_aliases.append(o)
                     continue
                 if trace_joint:
@@ -2273,7 +2305,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             "Graph partitioning without functionalization is not sound, we may introduce errors"
         )
 
-    aot_joint_log.info(format_graph_code(f"====== Joint graph {aot_config.aot_id} =====\n", fx_g))
+    aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2290,8 +2322,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
-        aot_graphs_log.info(format_graph_code(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
+        aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+        aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -2348,7 +2380,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2360,7 +2392,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             else:
                 tensors_saved_for_backwards = fw_outs[num_forward_returns:]
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2449,7 +2481,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 out_tangents_filtered = [
                     x
                     for x, info in zip(out_tangents, out_info)
-                    if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
+                    if (info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias)
+                    and issubclass(info.raw_type, torch.Tensor)
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
                 flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
@@ -2536,6 +2569,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         runtime_metadata=fw_metadata,
         trace_joint=True,
         keep_input_mutations=False,
+        disable_amp=disable_amp
     )
 
     if not config.debug_assert:
@@ -2998,6 +3032,8 @@ def aot_module_simplified(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
+    seen_sources = set()
+
     full_args = []
     # First, the params
     full_args.extend(params_flat)
@@ -3011,7 +3047,10 @@ def aot_module_simplified(
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
         for name in params.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
-            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
+            source = mod._param_name_to_source[name]
+            assert source not in seen_sources, source
+            seen_sources.add(source)
+            aot_autograd_arg_pos_to_source.append(source)
 
     # Next, the input args
     full_args.extend(args)
@@ -3024,7 +3063,10 @@ def aot_module_simplified(
                     # ... but not here!
                     if aot_autograd_arg_pos_to_source is None:
                         aot_autograd_arg_pos_to_source = []
-                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
+                    source = node._dynamo_source
+                    assert source not in seen_sources, source
+                    seen_sources.add(source)
+                    aot_autograd_arg_pos_to_source.append(source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)

@@ -25,17 +25,17 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (1) get_amp_supported_dtype() -> List[torch.dtype]
         get the supported dtypes on your `foo` device in AMP, maybe the `foo` device supports one more dtype.
 
-    (2) is_autocast_foo_enabled() -> bool
+    (2) is_autocast_enabled() -> bool
         check the AMP is enabled or not on your `foo` device.
 
-    (3) get_autocast_foo_dtype() -> torch.dtype
-        get the supported dtype on your `foo` device in AMP, which is set by `set_autocast_foo_dtype` or the
+    (3) get_autocast_dtype() -> torch.dtype
+        get the supported dtype on your `foo` device in AMP, which is set by `set_autocast_dtype` or the
         default dtype, and the default dtype is `torch.float16`.
 
-    (4) set_autocast_foo_enabled(bool) -> None
+    (4) set_autocast_enabled(bool) -> None
         enable the AMP or not on your `foo` device.
 
-    (5) set_autocast_foo_dtype(dtype) -> None
+    (5) set_autocast_dtype(dtype) -> None
         set the supported dtype on your `foo` device in AMP, and the dtype be contained in the dtypes got
         from `get_amp_supported_dtype`.
 
@@ -46,6 +46,15 @@ def rename_privateuse1_backend(backend_name: str) -> None:
 
     (2) manual_seed_all(seed: int) -> None
         Sets the seed for generating random numbers for your devices.
+
+    (3) device_count() -> int:
+        Returns the number of `foo`s available.
+
+    (4) get_rng_state(device: Union[int, str, torch.device] = 'foo') -> Tensor:
+        Returns a list of ByteTensor representing the random number states of all devices.
+
+    (5) set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
+        Sets the random number generator state of the specified `foo` device.
 
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
