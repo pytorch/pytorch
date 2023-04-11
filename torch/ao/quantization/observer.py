@@ -1115,7 +1115,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         Nbins: int,
     ) -> torch.Tensor:
         # First up-sample the histogram with new data by a factor of L
-        # This creates an approximate probability density thats piecwise constant
+        # This creates an approximate probability density thats piecewise constant
         upsampled_histogram = new_hist.repeat_interleave(upsample_rate)
         # Now insert the upsampled histogram into the output
         # histogram, which is initialized with zeros.
@@ -1320,7 +1320,7 @@ class PlaceholderObserver(ObserverBase):
         dtype: dtype argument to the `quantize` node needed to implement the
                reference model spec.
         quant_min: minimum value in quantized domain (TODO: align behavior with other observers)
-        quant_min: maximum value in quantized domain
+        quant_max: maximum value in quantized domain
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
         compute_dtype (deprecated): if set, marks the future quantize function to use
@@ -1333,14 +1333,22 @@ class PlaceholderObserver(ObserverBase):
 
     def __init__(
         self, dtype=torch.float32, custom_op_name="", compute_dtype=None,
-        quant_min=None, quant_max=None, is_dynamic=False,
+        quant_min=None, quant_max=None, qscheme=None, eps=None,
+        is_dynamic=False,
     ) -> None:
         super().__init__(dtype=dtype)
+        if qscheme is None:
+            qscheme = torch.per_tensor_affine
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
+
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
+        self.qscheme = qscheme
         self.quant_min = quant_min
         self.quant_max = quant_max
+        self.eps = eps
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
         if compute_dtype:

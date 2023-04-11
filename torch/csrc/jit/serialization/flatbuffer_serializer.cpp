@@ -179,7 +179,23 @@ class FlatbufferSerializer {
     }
   };
 
-  std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
+  struct IValueEqual {
+    // Copy of this
+    // https://www.internalfb.com/code/aros/[3b875bce7ffa2adacdcea9b3e0cb6d304737a193]/xros/third-party/caffe2/caffe2/aten/src/ATen/core/ivalue.cpp?lines=266
+    // but without relying on aten::nonzero operator being present in the
+    // binary.
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      IValue eq = lhs.equals(rhs);
+      if (eq.isBool()) {
+        return eq.toBool();
+      }
+      // The only case we don't return bool is for tensor comparison. Lets do
+      // pointer comparison here.
+      return (&lhs.toTensor()) == (&rhs.toTensor());
+    }
+  };
+
+  std::unordered_map<IValue, uint32_t, IValueHash, IValueEqual> cached_ivalues_;
 
   const mobile::CompilationUnit* mcu_ = nullptr;
 };
@@ -235,7 +251,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>>
       operator_vector;
   operator_vector.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (const auto i : c10::irange(code.op_names_.size())) {
     const auto& opname = code.op_names_[i];
     const int op_size = code.operator_input_sizes_[i];
     operator_vector.push_back(CreateOperator(

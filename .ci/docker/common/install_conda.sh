@@ -7,6 +7,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
+  MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
   case "$MAJOR_PYTHON_VERSION" in
     2)
@@ -52,21 +53,23 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    # TODO: Stop using `-c malfet`
-    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 -c malfet
+    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   else
     # Install `typing-extensions` for 3.7
-    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing-extensions
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} typing-extensions
+  fi
+
+  # This is only supported in 3.8 upward
+  if [ "$MINOR_PYTHON_VERSION" -gt "7" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    # and libpython-static for torch deploy
+    conda_install llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
   fi
 
   # Use conda cmake in some cases. Conda cmake will be newer than our supported

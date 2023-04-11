@@ -140,7 +140,7 @@ logger = logging.getLogger(__name__)
 
 class _CPUinfo():
     """
-    Get CPU inforamation, such as cores list and NUMA information.
+    Get CPU information, such as cores list and NUMA information.
     """
     def __init__(self, test_input=""):
 
@@ -175,7 +175,7 @@ class _CPUinfo():
             self.node_nums = int(max([line[3] for line in self.cpuinfo])) + 1
             self.node_physical_cores: List[List[int]] = []  # node_id is index
             self.node_logical_cores: List[List[int]] = []   # node_id is index
-            self.physical_core_node_map = {}  # phyical core to numa node id
+            self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}   # logical core to numa node id
 
             for node_id in range(self.node_nums):
@@ -222,7 +222,7 @@ class _CPUinfo():
 
     def numa_aware_check(self, core_list):
         """
-        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce perforamnce.
+        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce performance.
         We strongly advice to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
@@ -232,9 +232,9 @@ class _CPUinfo():
             if numa_id not in numa_ids:
                 numa_ids.append(numa_id)
         if len(numa_ids) > 1:
-            logger.warning(f"Numa Aware: cores:{str(core_list)} on different NUMA nodes:{str(numa_ids)}. To avoid \
+            logger.warning("Numa Aware: cores:%s on different NUMA nodes:%s. To avoid \
 this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
-instance. Alternatively, please use --skip-cross-node-cores knob.")
+instance. Alternatively, please use --skip-cross-node-cores knob.", str(core_list), str(numa_ids))
         if len(numa_ids) == 0:
             raise RuntimeError("invalid number of NUMA nodes; please make sure numa_ids >= 1")
         return numa_ids
@@ -253,7 +253,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
 
     def add_lib_preload(self, lib_type):
         """
-        Enale TCMalloc/JeMalloc/intel OpenMP
+        Enable TCMalloc/JeMalloc/intel OpenMP
         """
         library_paths = []
         if "CONDA_PREFIX" in os.environ:
@@ -282,11 +282,23 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
         return lib_set or lib_find
 
 
+    def is_numactl_available(self):
+        numactl_available = False
+        try:
+            cmd = ["numactl", "-C", "0", "-m", "0", "hostname"]
+            r = subprocess.run(cmd, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if r.returncode == 0:
+                numactl_available = True
+        except Exception:
+            pass
+        return numactl_available
+
+
     def set_memory_allocator(self, enable_tcmalloc=True, enable_jemalloc=False, use_default_allocator=False):
         """
         Enable TCMalloc/JeMalloc with LD_PRELOAD and set configuration for JeMalloc.
         By default, PTMalloc will be used for PyTorch, but TCMalloc and JeMalloc can get better
-        memory resue and reduce page fault to improve performance.
+        memory reuse and reduce page fault to improve performance.
         """
         if enable_tcmalloc and enable_jemalloc:
             raise RuntimeError("Unable to enable TCMalloc and JEMalloc at the same time.")
@@ -295,7 +307,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install -c conda-forge gperftools\" to install {{0}}"
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -303,7 +315,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install -c conda-forge jemalloc\" to install {{0}}"
-                logger.warning(msg.format("Jemalloc", "jemalloc"))
+                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env("MALLOC_CONF", "oversize_threshold:1,background_thread:true,metadata_thp:auto")
@@ -327,16 +339,16 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
 
     def log_env_var(self, env_var_name=""):
         if env_var_name in os.environ:
-            logger.info(f"{env_var_name}={os.environ[env_var_name]}")
+            logger.info("%s=%s", env_var_name, os.environ[env_var_name])
 
     def set_env(self, env_name, env_value):
         if not env_value:
-            logger.warning(f"{env_name} is None")
+            logger.warning("%s is None", env_name)
         if env_name not in os.environ:
             os.environ[env_name] = env_value
         elif os.environ[env_name] != env_value:
-            logger.warning(f"Overriding value with the one set in environment variable: {env_name}. \
-Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
+            logger.warning("Overriding value with the one set in environment variable: %s. \
+Value applied: %s. Value ignored: %s", env_name, os.environ[env_name], env_value)
         self.log_env_var(env_name)
 
     # set_kmp_affinity is used to control whether to set KMP_AFFINITY or not.
@@ -351,7 +363,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
         """
         Set multi-thread configuration and enable Intel openMP and TCMalloc/JeMalloc.
         By default, GNU openMP and PTMalloc are used in PyTorch. but Intel openMP and TCMalloc/JeMalloc are better alternatives
-        to get performance benifit.
+        to get performance benefit.
         """
         self.set_memory_allocator(enable_tcmalloc, enable_jemalloc, use_default_allocator)
         self.set_env("OMP_NUM_THREADS", str(ncores_per_instance))
@@ -359,7 +371,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install mkl\" to install {{0}}"
-                logger.warning(msg.format("iomp", "iomp5"))
+                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:
@@ -373,13 +385,14 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
     def launch(self, args):
         cores = []
         set_kmp_affinity = True
+        enable_taskset = False
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
             if args.ncores_per_instance == -1:
                 raise RuntimeError("please specify the \"--ncores-per-instance\" if you have pass the --core-list params")
             elif args.ninstances > 1 and args.ncores_per_instance * args.ninstances < len(cores):
-                logger.warning(f"only first {args.ncores_per_instance * args.ninstances} cores will be used, \
-but you specify {len(cores)} cores in core_list")
+                logger.warning("only first %s cores will be used, \
+but you specify %s cores in core_list", args.ncores_per_instance * args.ninstances, len(cores))
             else:
                 args.ninstances = len(cores) // args.ncores_per_instance
 
@@ -416,9 +429,9 @@ please make sure ninstances <= total_cores)")
                     num_leftover_cores = ncore_per_node % args.ncores_per_instance
                     if args.ncores_per_instance > ncore_per_node:
                         # too many ncores_per_instance to skip cross-node cores
-                        logger.warning("there are {} core(s) per socket, but you specify {} ncores_per_instance and \
+                        logger.warning("there are %s core(s) per socket, but you specify %s ncores_per_instance and \
 skip_cross_node_cores. Please make sure --ncores-per-instance < core(s) per \
-socket".format(ncore_per_node, args.ncores_per_instance))
+socket", ncore_per_node, args.ncores_per_instance)
                         exit(-1)
                     elif num_leftover_cores == 0:
                         # aren't any cross-node cores
@@ -456,7 +469,23 @@ won\'t take effect even if it is set explicitly.')
                 args.ncores_per_instance = len(cores) // args.ninstances
 
         if args.ninstances > 1 and args.rank != -1:
-            logger.info(f"assigning {args.ncores_per_instance} cores for instance {args.rank}")
+            logger.info("assigning %s cores for instance %s", args.ncores_per_instance, args.rank)
+
+        if not args.disable_numactl:
+            numactl_available = self.is_numactl_available()
+            if not numactl_available:
+                if not args.disable_taskset:
+                    logger.warning("Core binding with numactl is not available. Disabling numactl and using taskset instead. \
+                    This may affect performance in multi-socket system; please use numactl if memory binding is needed.")
+                    args.disable_numactl = True
+                    enable_taskset = True
+                else:
+                    logger.warning("Core binding with numactl is not available, and --disable_taskset is set. \
+                    Please unset --disable_taskset to use taskset instead of numactl.")
+                    exit(-1)
+
+        if not args.disable_taskset:
+            enable_taskset = True
 
         self.set_multi_thread_and_allocator(args.ncores_per_instance,
                                             args.disable_iomp,
@@ -471,8 +500,11 @@ won\'t take effect even if it is set explicitly.')
         for i in range(args.ninstances):
             cmd = []
             cur_process_cores = ""
-            if not args.disable_numactl:
-                cmd = ["numactl"]
+            if not args.disable_numactl or enable_taskset:
+                if not args.disable_numactl:
+                    cmd = ["numactl"]
+                elif enable_taskset:
+                    cmd = ["taskset"]
                 cores = sorted(cores)
                 if args.rank == -1:  # sequentially assign ncores_per_instance to ninstances
                     core_list = cores[i * args.ncores_per_instance : (i + 1) * args.ncores_per_instance]
@@ -494,10 +526,14 @@ won\'t take effect even if it is set explicitly.')
                 for r in core_ranges:
                     cur_process_cores = f"{cur_process_cores}{r['start']}-{r['end']},"
                 cur_process_cores = cur_process_cores[:-1]
-                numa_params = f"-C {cur_process_cores} "
-                numa_ids = ",".join([str(numa_id) for numa_id in self.cpuinfo.numa_aware_check(core_list)])
-                numa_params += f"-m {numa_ids}"
-                cmd.extend(numa_params.split())
+                if not args.disable_numactl:
+                    numa_params = f"-C {cur_process_cores} "
+                    numa_ids = ",".join([str(numa_id) for numa_id in self.cpuinfo.numa_aware_check(core_list)])
+                    numa_params += f"-m {numa_ids}"
+                    cmd.extend(numa_params.split())
+                elif enable_taskset:
+                    taskset_params = f"-c {cur_process_cores} "
+                    cmd.extend(taskset_params.split())
             with_python = not args.no_python
             if with_python:
                 cmd.append(sys.executable)
@@ -553,7 +589,7 @@ def _add_multi_instance_params(parser):
 otherwise ncores_per_instance will be assigned sequentially to ninstances. Please refer to \
 https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/performance_tuning/launch_script.md")
     group.add_argument("--latency-mode", "--latency_mode", action="store_true", default=False,
-                       help="By detault 4 core per instance and use all physical cores")
+                       help="By default 4 core per instance and use all physical cores")
     group.add_argument("--throughput-mode", "--throughput_mode", action="store_true", default=False,
                        help="By default one instance per node and use all physical cores")
     group.add_argument("--node-id", "--node_id", metavar="\b", default=-1, type=int,
@@ -562,6 +598,8 @@ https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/
                        help="Whether only use physical cores")
     group.add_argument("--disable-numactl", "--disable_numactl", action="store_true", default=False,
                        help="Disable numactl")
+    group.add_argument("--disable-taskset", "--disable_taskset", action="store_true", default=False,
+                       help="Disable taskset")
     group.add_argument("--core-list", "--core_list", metavar="\b", default=None, type=str,
                        help="Specify the core list as \"core_id, core_id, ....\", otherwise, all the cores will be used.")
     group.add_argument("--log-path", "--log_path", metavar="\b", default="", type=str,
@@ -629,7 +667,7 @@ def main(args):
             if len(matches) > 0:
                 lst_valid.append(item)
             else:
-                logger.warning(f"{item} doesn't exist. Removing it from LD_PRELOAD.")
+                logger.warning("%s doesn't exist. Removing it from LD_PRELOAD.", item)
         if len(lst_valid) > 0:
             os.environ["LD_PRELOAD"] = ":".join(lst_valid)
         else:

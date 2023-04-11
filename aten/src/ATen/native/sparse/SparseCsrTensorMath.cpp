@@ -3,12 +3,12 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
@@ -800,7 +800,7 @@ Tensor add_sparse_csr(
     const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty({0, 0}, self.options().dtype(commonDtype));
+  Tensor result = at::empty_like(self, self.options().dtype(commonDtype).memory_format(at::MemoryFormat::Contiguous));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
@@ -934,6 +934,11 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
+
+    if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
+      return out;
+    }
+
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }

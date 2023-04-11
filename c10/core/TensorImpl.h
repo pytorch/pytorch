@@ -19,6 +19,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
@@ -28,6 +29,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <type_traits>
 #include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -217,7 +219,19 @@ is_channels_last_3d
 is_non_overlapping_and_dense
 #endif
 
-struct C10_API ExtraMeta {
+/**
+ * This structure is intended to hold additional metadata of the specific device
+ * backend.
+ **/
+struct C10_API BackendMeta : intrusive_ptr_target {
+  virtual ~BackendMeta(){};
+  virtual intrusive_ptr<BackendMeta> clone(
+      const intrusive_ptr<BackendMeta>& ptr) const {
+    return ptr;
+  }
+};
+
+struct C10_API SymbolicShapeMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
@@ -228,48 +242,37 @@ struct C10_API ExtraMeta {
   SymBool is_channels_last_{false};
   SymBool is_channels_last_3d_{false};
   SymBool is_non_overlapping_and_dense_{true};
+};
+
+struct C10_API ExtraMeta {
+  std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
+  intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
 
   ExtraMeta() = default;
+  ExtraMeta(const ExtraMeta& other) {
+    if (other.symbolic_shape_meta_) {
+      symbolic_shape_meta_ =
+          std::make_unique<c10::SymbolicShapeMeta>(*other.symbolic_shape_meta_);
+    }
+    if (other.named_tensor_meta_) {
+      named_tensor_meta_ = other.named_tensor_meta_->clone();
+    }
+    if (other.backend_meta_) {
+      backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
+    }
+  }
 
   ExtraMeta(
-      SymDimVector sizes,
-      SymDimVector strides,
-      SymInt numel,
-      SymInt storage_offset,
-      SymBool is_contiguous,
-      SymBool is_channels_last_contiguous,
-      SymBool is_channels_last_3d_contiguous,
-      SymBool is_channels_last,
-      SymBool is_channels_last_3d,
-      SymBool is_non_overlapping_and_dense,
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
-      : sizes_(std::move(sizes)),
-        strides_(std::move(strides)),
-        numel_(std::move(numel)),
-        storage_offset_(std::move(storage_offset)),
-        is_contiguous_(std::move(is_contiguous)),
-        is_channels_last_contiguous_(std::move(is_channels_last_contiguous)),
-        is_channels_last_3d_contiguous_(
-            std::move(is_channels_last_3d_contiguous)),
-        is_channels_last_(std::move(is_channels_last)),
-        is_channels_last_3d_(std::move(is_channels_last_3d)),
-        is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
-        named_tensor_meta_(std::move(named_tensor_meta)) {}
+      std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
+      intrusive_ptr<c10::BackendMeta> backend_meta)
+      : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
+        named_tensor_meta_(std::move(named_tensor_meta)),
+        backend_meta_(backend_meta) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
-    return std::make_unique<ExtraMeta>(
-        sizes_,
-        strides_,
-        numel_,
-        storage_offset_,
-        is_contiguous_,
-        is_channels_last_contiguous_,
-        is_channels_last_3d_contiguous_,
-        is_channels_last_,
-        is_channels_last_3d_,
-        is_non_overlapping_and_dense_,
-        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
+    return std::make_unique<ExtraMeta>(*this);
   }
 };
 
@@ -331,9 +334,9 @@ struct C10_API VariableVersion {
   // doesn't allocate the intrusive_ptr.
   // Example use cases are:
   //  - Inference tensors don't track version counter, so they'll just always
-  //    have disbaled VariableVersion.
+  //    have disabled VariableVersion.
   //  - In SavedVariable class we override version_counter_ inside its
-  //  construtor
+  //  constructor
   //    so that we can use the cheap constructor there.
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
@@ -638,7 +641,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   SymIntArrayRef sym_sizes_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->sizes_;
+      return symbolic_shape_meta().sizes_;
     } else {
       // Sizes guaranteed to be non-negative, so unchecked cast is OK
       return c10::fromIntArrayRefKnownNonNegative(sizes_default());
@@ -719,7 +722,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymInt sym_numel_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->numel_;
+      return symbolic_shape_meta().numel_;
     } else {
       return c10::SymInt(SymInt::UNCHECKED, numel_);
     }
@@ -738,7 +741,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->sizes_.size();
+      return symbolic_shape_meta().sizes_.size();
     } else {
       return sizes_and_strides_.size();
     }
@@ -775,7 +778,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymInt sym_storage_offset_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->storage_offset_;
+      return symbolic_shape_meta().storage_offset_;
     } else {
       return c10::SymInt(SymInt::UNCHECKED, storage_offset_);
     }
@@ -808,7 +811,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymIntArrayRef sym_strides_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->strides_;
+      return symbolic_shape_meta().strides_;
     } else {
       return c10::fromIntArrayRefKnownNonNegative(strides_default());
     }
@@ -834,13 +837,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return extra_meta_->is_channels_last_contiguous_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_contiguous_.guard_bool(
             __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_3d_contiguous_.guard_bool(
             __FILE__, __LINE__);
       }
-      return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__);
+      return symbolic_shape_meta().is_contiguous_.guard_bool(
+          __FILE__, __LINE__);
     }
 
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -854,9 +858,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__);
+        return symbolic_shape_meta().is_channels_last_.guard_bool(
+            __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return extra_meta_->is_channels_last_3d_.guard_bool(__FILE__, __LINE__);
+        return symbolic_shape_meta().is_channels_last_3d_.guard_bool(
+            __FILE__, __LINE__);
       } else {
         return false;
       }
@@ -873,7 +879,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->is_non_overlapping_and_dense_.guard_bool(
+      return symbolic_shape_meta().is_non_overlapping_and_dense_.guard_bool(
           __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
@@ -1498,7 +1504,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    return data_ptr_impl<T>();
+    return legacy_mutable_data_ptr_impl<T>();
   }
 
   /**
@@ -1507,7 +1513,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
-  inline T* data_ptr_impl() const {
+  inline T* mutable_data_ptr_impl() {
+    return legacy_mutable_data_ptr_impl<T>();
+  }
+
+ private:
+  // The real implementation of mutable_data_ptr_impl, but in a
+  // non-const method.
+  //
+  // TODO: move the implementation into mutable_data_ptr_impl() and
+  // delete this when data<T>() is no longer const.
+  template <typename T>
+  inline T* legacy_mutable_data_ptr_impl() const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1517,11 +1534,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
+ public:
   /**
-   * Return a void* data pointer to the actual data which this tensor refers to.
+   * Return a const void* data pointer to the actual data which this
+   * tensor refers to.
    *
    * It is invalid to call data() on a dtype-uninitialized tensor, even if the
    * size is 0.
@@ -1530,7 +1549,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
    */
-  inline void* data() const {
+  inline const void* data() const {
+    return mutable_data_impl();
+  }
+
+  /**
+   * Return a void* data pointer to the actual data which this tensor refers to.
+   *
+   * It is invalid to call mutable_data() on a dtype-uninitialized
+   * tensor, even if the size is 0.
+   *
+   * WARNING: The data pointed to by this tensor may not contiguous; do NOT
+   * assume that itemsize() * numel() is sufficient to compute the bytes that
+   * can be validly read from this tensor.
+   */
+  inline void* mutable_data() {
+    return mutable_data_impl();
+  }
+
+ private:
+  // Templated implementation of data() and mutable_data().
+  //
+  // We are able to pull this off because unsafeGetStorageImpl() is a
+  // const method that returns a non-const StorageImpl.
+  void* mutable_data_impl() const {
     TORCH_CHECK(
         has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
@@ -1541,21 +1583,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    if (is_empty()) {
+    char* const data = static_cast<char*>(storage_.mutable_data());
+    if (data == nullptr) {
       return nullptr;
     }
-    return static_cast<void*>(
-        static_cast<char*>(storage_.data()) +
-        data_type_.itemsize() * storage_offset_);
+    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
   }
 
+ public:
   /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
    */
   template <typename T>
   inline T* unsafe_data() const {
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
   }
 
   /**
@@ -1577,6 +1619,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return data_type_.itemsize();
   }
 
+  void set_backend_meta(intrusive_ptr<c10::BackendMeta> backend_meta) {
+    get_extra_meta().backend_meta_ = std::move(backend_meta);
+  }
+
+  c10::BackendMeta* get_backend_meta() {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_.get();
+  }
+
+  intrusive_ptr<c10::BackendMeta> get_backend_meta_intrusive_ptr() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_;
+  }
+
  protected:
   /**
    * Returns the human-readable name of the actual type of this object (e.g.,
@@ -1588,6 +1648,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
+
+  ExtraMeta& get_extra_meta() {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<ExtraMeta>();
+    }
+    return *extra_meta_;
+  }
+
+  c10::SymbolicShapeMeta& symbolic_shape_meta() {
+    TORCH_INTERNAL_ASSERT(extra_meta_ && extra_meta_->symbolic_shape_meta_);
+    return *extra_meta_->symbolic_shape_meta_;
+  }
+
+  const c10::SymbolicShapeMeta& symbolic_shape_meta() const {
+    TORCH_INTERNAL_ASSERT(extra_meta_ && extra_meta_->symbolic_shape_meta_);
+    return *extra_meta_->symbolic_shape_meta_;
+  }
 
  public:
   /**
@@ -1715,7 +1792,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     const auto new_dim = new_size.size();
-
+    bool overflowed = false;
     sizes_and_strides_.set_sizes(new_size);
 
     if (new_dim > 0) {
@@ -1730,15 +1807,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(dim) = 1;
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) =
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(dim + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
           }
         }
         if (dim == 0)
           break;
       }
+      TORCH_CHECK(!overflowed, "Stride calculation overflowed");
     }
 
     refresh_numel();
@@ -1795,10 +1874,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
 #endif
     if (named_tensor_meta) {
-      if (!extra_meta_) {
-        extra_meta_ = std::make_unique<ExtraMeta>();
-      }
-      extra_meta_->named_tensor_meta_ = std::move(named_tensor_meta);
+      get_extra_meta().named_tensor_meta_ = std::move(named_tensor_meta);
       key_set_ = key_set_.add(DispatchKey::Named);
     } else {
       if (extra_meta_) {
@@ -2105,11 +2181,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * If the existing data does not match the desired type, it will be deleted
    * and a new storage will be created.
    */
-  inline void* raw_mutable_data(const caffe2::TypeMeta meta) {
+  inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(
-          static_cast<char*>(storage_.data()) +
+          static_cast<char*>(storage_.mutable_data()) +
           storage_offset_ * meta.itemsize());
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
@@ -2125,7 +2201,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(
             storage_offset_ == 0); // because we just reallocated
-        return storage_.data();
+        return storage_.mutable_data();
       }
       const Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
@@ -2144,7 +2220,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
         storage_.set_data_ptr_noswap(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
-        data_type_.placementNew()(storage_.data(), numel_);
+        data_type_.placementNew()(storage_.mutable_data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr_noswap(
@@ -2154,7 +2230,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(
           storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
-      return storage_.data();
+      return storage_.mutable_data();
     }
   }
 
@@ -2167,7 +2243,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* mutable_data() {
     if (storage_initialized() && data_type_.Match<T>()) {
-      return static_cast<T*>(storage_.data()) + storage_offset_;
+      return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
@@ -2238,14 +2314,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         const auto dim_ = dim();
         sizes_and_strides_.resize(dim_);
         if (dim_ > 0) {
+          bool overflowed = false;
           const auto last_idx = dim_ - 1;
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1) *
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(i + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
           }
+          TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
         break;
       }
@@ -2406,8 +2485,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   SymInt compute_sym_numel() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_symbolic_sizes_strides_);
+    auto& sym_shape_meta{symbolic_shape_meta()};
     SymInt numel = 1;
-    for (const auto& s : extra_meta_->sizes_) {
+    for (const auto& s : sym_shape_meta.sizes_) {
       numel *= s;
     }
     return numel;
@@ -2459,7 +2539,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void refresh_numel() {
     if (has_symbolic_sizes_strides_) {
-      extra_meta_->numel_ = compute_sym_numel();
+      symbolic_shape_meta().numel_ = compute_sym_numel();
     } else {
       numel_ = compute_numel();
     }
@@ -2475,7 +2555,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       // NB: sym numel is done with symbolic integers, which handle overflow
       // checking
-      extra_meta_->numel_ = compute_sym_numel();
+      symbolic_shape_meta().numel_ = compute_sym_numel();
     } else {
       numel_ = safe_compute_numel();
     }
@@ -2490,7 +2570,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_contiguous(identity<SymBool>, SymBool b) {
-    extra_meta_->is_contiguous_ = std::move(b);
+    symbolic_shape_meta().is_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last_contiguous(identity<bool>, bool b) {
@@ -2498,7 +2578,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last_contiguous(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_contiguous_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last_3d_contiguous(identity<bool>, bool b) {
@@ -2506,7 +2586,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last_3d_contiguous(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_3d_contiguous_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_3d_contiguous_ = std::move(b);
   }
 
   void _set_is_channels_last(identity<bool>, bool b) {
@@ -2514,7 +2594,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_ = std::move(b);
   }
 
   void _set_is_channels_last_3d(identity<bool>, bool b) {
@@ -2522,7 +2602,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_channels_last_3d(identity<SymBool>, SymBool b) {
-    extra_meta_->is_channels_last_3d_ = std::move(b);
+    symbolic_shape_meta().is_channels_last_3d_ = std::move(b);
   }
 
   void _set_is_non_overlapping_and_dense(identity<bool>, bool b) {
@@ -2530,7 +2610,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void _set_is_non_overlapping_and_dense(identity<SymBool>, SymBool b) {
-    extra_meta_->is_non_overlapping_and_dense_ = std::move(b);
+    symbolic_shape_meta().is_non_overlapping_and_dense_ = std::move(b);
   }
 
   // These are little wrappers over the real compute_ functions that

@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -40,9 +42,18 @@ void runMPSGraph(
     NSDictionary* results);
 
 MPSDataType getMPSDataType(ScalarType scalar_type);
+static inline MPSDataType getMPSDataType(const Tensor& t) {
+  return getMPSDataType(t.scalar_type());
+}
 MPSDataType getMPSScalarType(ScalarType scalar_type);
+static inline MPSDataType getMPSScalarType(const Tensor& t) {
+  return getMPSScalarType(t.scalar_type());
+}
 MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type, bool short_name = false);
+static inline std::string getMPSTypeString(const Tensor& t, bool short_name = false) {
+  return getMPSTypeString(t.scalar_type(), short_name);
+}
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim);
@@ -54,8 +65,8 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
 bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape);
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input);
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
 
 // The MPSShape could vary based on memory format
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
@@ -91,6 +102,7 @@ void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
+MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
@@ -136,12 +148,30 @@ struct MPSUnaryCachedGraph : public MPSCachedGraph
   MPSGraphTensor *outputTensor_ = nil;
 };
 
+struct MPSUnaryGradCachedGraph : public MPSCachedGraph
+{
+  MPSUnaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *gradOutputTensor_ = nil;
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil; // some backward input is actually the forward's output
+  MPSGraphTensor *gradInputTensor_ = nil;
+};
+
 struct MPSBinaryCachedGraph : public MPSCachedGraph
 {
   MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
   MPSGraphTensor *inputTensor_ = nil;
   MPSGraphTensor *otherTensor_ = nil;
   MPSGraphTensor *outputTensor_ = nil;
+};
+
+struct MPSBinaryGradCachedGraph : public MPSCachedGraph
+{
+  MPSBinaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *gradOutputTensor_ = nil;
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *otherTensor_ = nil;
+  MPSGraphTensor *gradInputTensor_ = nil;
 };
 
 // TODO: Improve the overall design of MPSGraphCache.
@@ -239,6 +269,14 @@ struct MPSGraphCache
 
 };
 
+// Common math operations
+MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
+
+#define MPS_CHECK_INT64_OP_SUPPORTED(input_tensor, mac_os_13_3_plus, op_name)                                           \
+  if (!mac_os_13_3_plus && input_tensor.scalar_type() == kLong) {                                                       \
+     TORCH_WARN_ONCE("MPS: no support for int64 for ", op_name,                                                         \
+     ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3.");   \
+  }
 
 } // namespace mps
 } // namespace native

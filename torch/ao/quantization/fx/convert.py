@@ -50,6 +50,7 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 from .utils import (
     _get_module,
     _is_custom_module_lstm,
+    _is_custom_module_mha,
     get_custom_module_class_keys,
     create_getattr_from_value,
     collect_producer_nodes,
@@ -80,6 +81,11 @@ __all__ = [
     "convert_weighted_module",
 ]
 
+_QSCHEME_TO_CHOOSE_QPARAMS_OP = {
+    torch.per_tensor_affine: torch.ops.quantized_decomposed.choose_qparams.tensor,
+    torch.per_tensor_symmetric: torch.ops.quantized_decomposed.choose_qparams_symmetric.tensor,
+}
+
 def _replace_observer_with_quantize_dequantize_node_decomposed(
         model: torch.nn.Module,
         graph: Graph,
@@ -108,7 +114,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         _has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
     if skip_replacement or not _is_conversion_supported(activation_post_process):
-        # didn't find correponding quantize op and info for the activation_post_process
+        # didn't find corresponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
@@ -211,15 +217,19 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             "dynamic quantization right now"
         quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
         quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
+        qscheme = getattr(activation_post_process, "qscheme", torch.per_tensor_affine)  # type: ignore[attr-defined]
+        eps = getattr(activation_post_process, "eps", torch.finfo(torch.float32).eps)  # type: ignore[attr-defined]
         # note: scale and zero_point are missing for quantize_per_tensor op
         # we'll need to get this from choose_qparams op, which we'll add after
         # this step
         qparams = {
             "_quant_min_": quant_min,
             "_quant_max_": quant_max,
+            "_eps_": eps,
             "_dtype_": dtype_
         }
 
+        choose_qparams_op = _QSCHEME_TO_CHOOSE_QPARAMS_OP[qscheme]
         # 2. insert choose_qparams op and update the qparams list
         with graph.inserting_before(node):
             input_node = node.args[0]
@@ -230,7 +240,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 choose_qparams_op_inputs.append(value)
             choose_qparams_node = graph.create_node(
                 "call_function",
-                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                choose_qparams_op,
                 tuple(choose_qparams_op_inputs),
                 {}
             )
@@ -292,7 +302,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     elif dtype == torch.float16:
         raise NotImplementedError("decomposed to float16 op not implemented yet")
 
-    # should not reach since we have checks in the begining to make sure the
+    # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
 
 def _replace_observer_with_quantize_dequantize_node(
@@ -320,7 +330,7 @@ def _replace_observer_with_quantize_dequantize_node(
         _has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
     if skip_replacement or not _is_conversion_supported(activation_post_process):
-        # didn't find correponding quantize op and info for the activation_post_process
+        # didn't find corresponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
@@ -415,7 +425,7 @@ def _replace_observer_with_quantize_dequantize_node(
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
 
-    # should not reach since we have checks in the begining to make sure the
+    # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
 
 # this is a temporary hack for custom module, we may want to implement
@@ -461,7 +471,7 @@ def _run_weight_observers(observed: GraphModule, backend_config: BackendConfig) 
             continue
         for node_arg in node.args:
             # node_arg is weight
-            if node_arg and node_arg_is_weight(node, node_arg, backend_config):
+            if node_arg and node_arg_is_weight(node, node_arg):
                 weight_observer_nodes = collect_producer_nodes(node_arg)
                 if weight_observer_nodes is None:
                     continue
@@ -652,7 +662,7 @@ def convert_weighted_module(
     if isinstance(
             original_module,
             qat_module_classes):
-        # Converting qat module to a float module, we need to attch
+        # Converting qat module to a float module, we need to attach
         # weight fake_quant to the module, weight fake_quant is assumed to be run during
         # QAT so we don't need to run it again here
         weight_post_process = original_module.weight_fake_quant
@@ -682,7 +692,7 @@ def convert_weighted_module(
 
     fused_module = None
     float_module = original_module
-    # extract the inidividual float_module and fused module
+    # extract the individual float_module and fused module
     if isinstance(original_module, torch.ao.nn.intrinsic._FusedModule):
         fused_module = float_module
         float_module = fused_module[0]  # type: ignore[index]
@@ -805,6 +815,21 @@ def convert_custom_module(
             _remove_previous_dequantize_in_custom_module(node, inputs, graph)
             _remove_previous_dequantize_in_custom_module(node, hidden0, graph)
             _remove_previous_dequantize_in_custom_module(node, hidden1, graph)
+        elif _is_custom_module_mha(node, modules):
+            # Inputs are in the form (query, key, value)
+            # TODO: This is the first step in enabling the full fx custom module
+            # quantization path for MultiheadAttention, and only covers the inputs
+            # to the module.
+            # Additional handling is yet to be implemented for the outputs, similar
+            # to LSTM custom module
+            assert len(node.args) == 3
+            query, key, value = node.args
+            assert isinstance(query, Node)
+            assert isinstance(key, Node)
+            assert isinstance(value, Node)
+            _remove_previous_dequantize_in_custom_module(node, query, graph)
+            _remove_previous_dequantize_in_custom_module(node, key, graph)
+            _remove_previous_dequantize_in_custom_module(node, value, graph)
         else:
             # remove the previous dequant node to ensure the inputs are quantized
             arg = node.args[0]
@@ -964,7 +989,7 @@ def convert(
             cur_placeholder_node_idx = placeholder_node_seen_cnt
             placeholder_node_seen_cnt += 1
             if cur_placeholder_node_idx in input_quantized_idxs:
-                # Inputs are assumed to be quantized if the user specifid the
+                # Inputs are assumed to be quantized if the user specified the
                 # input_quantized_idxs override.
                 # we need to dequantize the inputs since all operators took
                 # floating point inputs in reference quantized models

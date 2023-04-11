@@ -123,7 +123,8 @@ class RReLU(Module):
         \end{cases}
 
     where :math:`a` is randomly sampled from uniform distribution
-    :math:`\mathcal{U}(\text{lower}, \text{upper})`.
+    :math:`\mathcal{U}(\text{lower}, \text{upper})` during training while during
+    evaluation :math:`a` is fixed with :math:`a = \frac{\text{lower} + \text{upper}}{2}`.
 
      See: https://arxiv.org/pdf/1505.00853.pdf
 
@@ -886,6 +887,24 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
+def _arg_cuda_or_cpu(x: Optional[torch.Tensor]) -> bool:
+    if x is None:
+        return True
+    else:
+        return x.is_cuda or 'cpu' in str(x.device)
+
+    return False
+
+
+def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
+    if x is None:
+        return False
+    else:
+        return x.requires_grad
+
+    return True
+
+
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces as described in the paper:
@@ -898,12 +917,14 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``forward()`` will use the optimized implementation described in
-    `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
-    conditions are met:
+    ``nn.MultiHeadAttention`` will use the optimized implementations of
+    ``scaled_dot_product_attention()`` when possible.
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
-      restriction will be loosened in the future.)
+    In addition to support for the new ``scaled_dot_product_attention()``
+    function, for speeding up Inference, MHA will use
+    fastpath inference with support for Nested Tensors, iff:
+
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor.
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
@@ -915,7 +936,7 @@ class MultiheadAttention(Module):
       nor ``attn_mask`` is passed
     - autocast is disabled
 
-    If the optimized implementation is in use, a
+    If the optimized inference fastpath implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
     ``query``/``key``/``value`` to represent padding more efficiently than using a
     padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
@@ -946,6 +967,7 @@ class MultiheadAttention(Module):
          https://arxiv.org/abs/2205.14135
 
     """
+
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]
@@ -1055,8 +1077,13 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
             If both attn_mask and key_padding_mask are supplied, their types should match.
-        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+        is_causal: If specified, applies a causal mask as attention mask.
             Default: ``False``.
+            Warning:
+            ``is_causal`` provides a hint that ``attn_mask`` is the
+            causal mask. Providing incorrect hints can result in
+            incorrect execution, including forward and backward
+            compatibility.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
@@ -1075,8 +1102,6 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-        if attn_mask is not None and is_causal:
-            raise AssertionError("Only allow causal mask or attn_mask")
 
         is_batched = query.dim() == 3
 
@@ -1088,6 +1113,16 @@ class MultiheadAttention(Module):
             target_type=query.dtype
         )
 
+        attn_mask = F._canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
+
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
@@ -1098,7 +1133,9 @@ class MultiheadAttention(Module):
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
         elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
-        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
+        elif self.in_proj_weight is None:
+            why_not_fast_path = "in_proj_weight was None"
+        elif query.dtype != self.in_proj_weight.dtype:
             # this case will fail anyway, but at least they'll get a useful error message.
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
@@ -1133,28 +1170,29 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all([(x is None or x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+            elif not all([_arg_cuda_or_cpu(x) for x in tensor_args]):
                 why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x is not None and x.requires_grad for x in tensor_args]):
+            elif torch.is_grad_enabled() and any([_arg_requires_grad(x) for x in tensor_args]):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
                 merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
 
-                return torch._native_multi_head_attention(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    merged_mask,
-                    need_weights,
-                    average_attn_weights,
-                    mask_type)
+                if self.in_proj_bias is not None and self.in_proj_weight is not None:
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        merged_mask,
+                        need_weights,
+                        average_attn_weights,
+                        mask_type)
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1219,15 +1257,6 @@ class MultiheadAttention(Module):
         """
         mask_type: Optional[int] = None
         merged_mask: Optional[Tensor] = None
-
-        attn_mask = F._canonical_mask(
-            mask=attn_mask,
-            mask_name="attn_mask",
-            other_type=F._none_or_dtype(key_padding_mask),
-            other_name="key_padding_mask",
-            target_type=query.dtype,
-            check_other=False,
-        )
 
         if attn_mask is not None:
             mask_type = 0

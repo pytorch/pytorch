@@ -16,7 +16,7 @@ from torch._guards import GuardsCheckpointState
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
-from ..source import GetItemSource, NNModuleSource
+from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -29,8 +29,8 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import VariableTracker
+from .ctx_manager import AutocastModeVariable, NullContextVariable
 from .lists import ListVariable, TupleVariable
-from .misc import AutocastModeVariable, NullContextVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -64,11 +64,15 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_default_dtype,
     torch.iinfo,
+    torch.is_autocast_cache_enabled,
+    torch.is_autocast_cpu_enabled,
+    torch.is_autocast_enabled,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
+
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -160,7 +164,7 @@ class TorchVariable(VariableTracker):
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
 
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value)
+        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
 
     def as_proxy(self):
         return self.value
@@ -168,6 +172,8 @@ class TorchVariable(VariableTracker):
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
             return type(self.value)
+        if type(self.value) is type:
+            return type
         return super().python_type()
 
     def as_python_constant(self):
@@ -185,6 +191,7 @@ class TorchVariable(VariableTracker):
             ConstantVariable,
             CUDAStreamContextVariable,
             CUDAStreamVariable,
+            DeterministicAlgorithmsVariable,
             GradModeVariable,
             SymNodeVariable,
             TensorVariable,
@@ -211,12 +218,12 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
-            if self.value is torch.nn.Softmax:
-                return self._call_softmax(tx, args, kwargs, options)
             if self.value is torch.nn.CrossEntropyLoss:
                 return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
-                unimplemented(f"construct nn.Module: {self.value.__name__}")
+                return variables.UserDefinedClassVariable(
+                    self.value, source=self.source, **options
+                ).call_function(tx, args, kwargs)
         elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
             assert len(args) == 1
             if isinstance(args[0], TensorVariable) or (
@@ -227,21 +234,25 @@ class TorchVariable(VariableTracker):
                 return ConstantVariable(True, **options)
             else:
                 return ConstantVariable(False, **options)
-        elif (
-            self.value
-            in (
-                torch.is_floating_point,
-                torch.is_complex,
-            )
-            and isinstance(args[0], TensorVariable)
-            and args[0].dtype is not None
+        elif self.value in (
+            torch.is_floating_point,
+            torch.is_complex,
         ):
-            if self.value is torch.is_floating_point:
-                return ConstantVariable(args[0].dtype.is_floating_point, **options)
-            elif self.value is torch.is_complex:
-                return ConstantVariable(args[0].dtype.is_complex, **options)
+            input_arg = None
+            if args:
+                input_arg = args[0]
             else:
-                raise AssertionError()
+                assert "input" in kwargs
+                input_arg = kwargs["input"]
+            if isinstance(input_arg, TensorVariable) and input_arg.dtype is not None:
+                if self.value is torch.is_floating_point:
+                    return ConstantVariable(
+                        input_arg.dtype.is_floating_point, **options
+                    )
+                elif self.value is torch.is_complex:
+                    return ConstantVariable(input_arg.dtype.is_complex, **options)
+                else:
+                    raise AssertionError(f"calling {self.value}")
         elif (
             self.value is torch.numel
             and isinstance(args[0], TensorVariable)
@@ -271,6 +282,15 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
             )
+        elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
+            return DeterministicAlgorithmsVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.are_deterministic_algorithms_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(
+                torch.are_deterministic_algorithms_enabled(), **options
+            ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
         elif self.value is torch.cuda.stream:
             log.warning(
                 "torch.cuda.stream() not fully supported, streams may be ignored"
@@ -324,6 +344,13 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.amp.autocast_mode.autocast:
             return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
+            assert "device_type" not in kwargs
+            if self.value is torch.cuda.amp.autocast:
+                kwargs.update({"device_type": ConstantVariable("cuda")})
+            else:
+                kwargs.update({"device_type": ConstantVariable("cpu")})
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -373,6 +400,9 @@ class TorchVariable(VariableTracker):
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=self.value(),
+                source=GeneratorStateSource(
+                    self.value.__self__.device.type, self.value.__self__.initial_seed()
+                ),
                 **options,
             )
         if (
@@ -481,9 +511,34 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if self.value == torch._C._nn.scaled_dot_product_attention:
                 # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
                 # in pytorch/torch/_meta_registrations.py
-                fake_query = args[0].as_proxy().node.meta["example_value"]
-                fake_key = args[1].as_proxy().node.meta["example_value"]
-                fake_value = args[2].as_proxy().node.meta["example_value"]
+                all_kwargs = kwargs.copy()
+                all_kwargs.update(
+                    dict(
+                        zip(
+                            (
+                                "query",
+                                "key",
+                                "value",
+                                "attn_mask",
+                                "dropout_p",
+                                "is_causal",
+                            ),
+                            args,
+                        )
+                    )
+                )
+                fake_query = all_kwargs["query"].as_proxy().node.meta["example_value"]
+                fake_key = all_kwargs["key"].as_proxy().node.meta["example_value"]
+                fake_value = all_kwargs["value"].as_proxy().node.meta["example_value"]
+                fake_mask = all_kwargs.get("attn_mask")
+                if isinstance(fake_mask, TensorVariable):
+                    fake_mask = fake_mask.as_proxy().node.meta["example_value"]
+                else:
+                    fake_mask = None
+                dropout_p = kwargs.get("dropout_p")
+                dropout_p = dropout_p.value if dropout_p is not None else 0.0
+                is_causal = kwargs.get("is_causal")
+                is_causal = is_causal.value if is_causal is not None else False
                 # We look through the stack to find a cuda autocast context
                 # If we do we will convert the fake tensors to torch.float16
                 is_cuda_autocast_context = False
@@ -502,15 +557,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     fake_value = fake_value.clone().to(amp_dtype)
 
                 backend_choice = torch._fused_sdp_choice(
-                    fake_query, fake_key, fake_value
+                    fake_query, fake_key, fake_value, fake_mask, dropout_p, is_causal
                 )
                 if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
-                    dropout_p = kwargs.get("dropout_p")
-                    # Lets see if they passed it in as not an arg
-                    if len(args) >= 5:
-                        dropout_p = args[4]
-
-                    if dropout_p is not None and dropout_p.value != 0.0:
+                    if dropout_p is not None and dropout_p != 0.0:
                         unimplemented(
                             "FlashAttention with dropout is not supported in cuda graphs"
                         )
@@ -524,6 +574,31 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
                     fn_ = sym_sqrt
+
+            if fn_ is torch.tensor:
+
+                def check_any_unspec(x):
+                    # NB: This includes UnspecializedPythonVariable
+                    if isinstance(x, (TensorVariable, SymNodeVariable)):
+                        return True
+                    elif isinstance(x, ListVariable):
+                        return any(check_any_unspec(y) for y in x.items)
+                    # TODO: there maybe other recursive structures you need to
+                    # check
+                    else:
+                        return False
+
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                # TODO: But torch.tensor(unspec) would not trace fine.  Not
+                # handled right now.
+                data_arg = None
+                if args:
+                    data_arg = args[0]
+                elif "data" in kwargs:
+                    data_arg = kwargs["data"]
+
+                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
+                    unimplemented("torch.tensor call with list of unspec")
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
@@ -591,25 +666,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return locals()[self.value.__name__](*args, **kwargs)
 
         return False
-
-    def _call_softmax(self, tx, args, kwargs, options):
-        """rewrite the pattern nn.Softmax(dim=-1)(x) to F.softmax(x, -1)"""
-        dim = args[0] if args else kwargs.get("dim", variables.ConstantVariable(None))
-
-        def fake_softmax(input):
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    torch.nn.functional.softmax,
-                    *proxy_args_kwargs([input, dim], {}),
-                ),
-                **VariableTracker.propagate([self, dim, input]),
-            )
-
-        return variables.LambdaVariable(fake_softmax, **options)
 
     def _call_cross_entropy_loss(self, tx, args, kwargs, options):
         """
@@ -717,7 +773,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchPyOperator(VariableTracker):
+class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -767,6 +823,7 @@ class TorchPyOperator(VariableTracker):
                 output=state.output._replace(
                     guard_state=GuardsCheckpointState(set()),
                     nn_modules=None,
+                    param_name_to_source=None,
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
@@ -818,7 +875,13 @@ class TorchPyOperator(VariableTracker):
             tx.output.graph = graph_checkpoint
             tx.restore_graphstate(checkpoint)
 
-            return output, graph, guards, nn_modules, comparable_state
+            return (
+                output,
+                graph,
+                guards,
+                nn_modules,
+                comparable_state,
+            )
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -879,8 +942,9 @@ class TorchPyOperator(VariableTracker):
                 false_cmp,
             ) = speculate_branch(False)
 
-            if true_cmp != false_cmp:
-                unimplemented(true_cmp.diff(false_cmp))
+            true_tracked_fakes = true_cmp.output.tracked_fakes
+            false_tracked_fakes = false_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
@@ -940,11 +1004,9 @@ class TorchPyOperator(VariableTracker):
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)
-            if parent_cmp != body_cmp:
-                diff = parent_cmp.diff(body_cmp)
-                raise unimplemented(
-                    f"Graph state change detected in map() loop body. Diagnostics: {diff}"
-                )
+            parent_tracked_fakes = parent_cmp.output.tracked_fakes
+            body_tracked_fakes = body_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
@@ -960,7 +1022,7 @@ class TorchPyOperator(VariableTracker):
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
         else:
-            unimplemented(f"PyOperator {self.value.__name__}")
+            unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
         return wrap_fx_proxy(

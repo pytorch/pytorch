@@ -88,6 +88,7 @@ pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
+
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
     for _ in range(dim - x.dim()):
@@ -405,8 +406,9 @@ def _nll_loss_backward(
         grad_output = grad_output / total_weight
 
     target = target.unsqueeze(channel_dim)
+    safe_target = torch.where(target != ignore_index, target, 0)
     grad_input = torch.zeros_like(self)
-    grad_input = torch.scatter(grad_input, channel_dim, target, -1.0)
+    grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
 
     if grad_input.dim() > grad_output.dim() > 0:
         grad_output = grad_output.unsqueeze(channel_dim)
@@ -417,9 +419,7 @@ def _nll_loss_backward(
         weight = weight.reshape(new_shape)
         grad_output = grad_output * weight
 
-    has_ignore_index = ignore_index >= 0
-    if has_ignore_index:
-        grad_output = torch.where(target != ignore_index, grad_output, 0)
+    grad_output = torch.where(target != ignore_index, grad_output, 0)
 
     return grad_input * grad_output
 
@@ -620,7 +620,6 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -1071,7 +1070,7 @@ def embedding_dense_backward(
         ones = torch.ones_like(indices)
         counts = counts.index_put([indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
-        grad_output = grad_output / grad_weights_scale.unsqueeze(1)
+        grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
     mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
     grad = grad_output.masked_fill(mask, 0)
@@ -1134,6 +1133,19 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
+    return out + beta * self
+
+
+@register_decomposition(aten.addmv)
+@out_wrapper()
+@pw_cast_for_opmath
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    out = alpha * torch.mv(mat1, vec)
+    if beta == 0:
+        return out
     return out + beta * self
 
 
@@ -1984,7 +1996,7 @@ def uniform(
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
     assert generator is None
-    return self.copy_((high - low) * torch.rand_like(self) + low)
+    return self.copy_(uniform(self, low, high))
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -2838,14 +2850,13 @@ def nll_loss_forward(
     if weight is not None:
         w = weight.unsqueeze(0) if n_dims > 1 else weight
         self = self * w
-
-    target_ = target.unsqueeze(channel_dim)
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
     # target can be [N, 1] or [1]
 
-    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
 
-    if ignore_index >= 0:
-        result = torch.where(target != ignore_index, result, 0)
+    result = torch.where(target != ignore_index, result, 0)
 
     if reduction == Reduction.NONE.value and n_dims > 1:
         total_weight = self.new_full((), 0.0)
@@ -2853,22 +2864,16 @@ def nll_loss_forward(
 
     if weight is not None:
         w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
-        if ignore_index >= 0:
-            wsum = torch.where(target != ignore_index, wsum, 0)
+        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
+        wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
-    elif ignore_index >= 0:
-        total_weight = (target != ignore_index).sum().to(self)
     else:
-        total_weight = self.new_full((), 1.0 * result.numel())
+        total_weight = (target != ignore_index).sum().to(self)
 
     if reduction == Reduction.SUM.value:
         result = result.sum()
     elif reduction == Reduction.MEAN.value:
-        if weight is None:
-            result = result.sum() / total_weight if ignore_index >= 0 else result.mean()
-        else:
-            result = result.sum() / total_weight
+        result = result.sum() / total_weight
 
     return result, total_weight
 
@@ -3059,7 +3064,7 @@ def mv(self, vec):
     )
     utils.check(
         self.size(1) == vec.size(0),
-        lambda: f"size mismatch, got {self.size(0)}x{self.size(1)},{vec.size(0)}",
+        lambda: f"size mismatch, got input ({self.size(0)}x{self.size(1)}), vec ({vec.size(0)})",
     )
     return (self * vec).sum(dim=1)
 
@@ -3333,6 +3338,20 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
+@register_decomposition(aten.aminmax)
+@out_wrapper("min", "max")
+def aminmax(self, *, dim=None, keepdim=False):
+    amin = torch.amin(self, dim=dim, keepdim=keepdim)
+    amax = torch.amax(self, dim=dim, keepdim=keepdim)
+    return amin, amax
+
+
+@register_decomposition(aten.nansum)
+@out_wrapper()
+def nansum(self, dim=None, keepdim=False, *, dtype=None):
+    return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -3346,7 +3365,6 @@ register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
 register_inplace(aten.baddbmm_, aten.baddbmm)
-register_inplace(aten.cumprod_, aten.cumprod)
 register_inplace(aten.fill_, aten.fill)
 register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
