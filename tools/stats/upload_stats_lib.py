@@ -143,7 +143,7 @@ def upload_to_s3(
     print("Done!")
 
 
-def upload_workflow_stats_to_s3(
+def upload_workflow_stats_to_s3_bc_failure(
     workflow_run_id: int,
     workflow_run_attempt: int,
     collection: str,
