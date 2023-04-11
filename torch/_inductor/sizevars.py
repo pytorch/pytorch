@@ -14,6 +14,30 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+# Note [maybe_guard vs guard]
+#
+# maybe_guard should only be used in situations where we would generate
+# correct code even if the guard always returned False; in other words,
+# it should be used to guard optional optimizations which could be applied,
+# but only if we can statically determine that the condition we're guarding on
+# is true.  NB: this means that
+#
+#   maybe_guard_leq(lhs, rhs)
+#
+# and
+#
+#   not maybe_guard_lt(rhs, lhs)
+#
+# are not equivalent!
+#
+# maybe_guard is useful in two situations: (1) we have an optional
+# optimization that may be valid if some condition holds, but we do not know
+# for certain if the condition holds,  and (2) with dynamic shapes, we may
+# decide we don't want to do the optimization if it would require a guard on a
+# dynamic shape, because guarding on it would force us to generate multiple
+# kernels as this size varies.
+
+
 class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
@@ -219,6 +243,7 @@ class SizeVarAllocator:
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
         if left == right:
@@ -228,6 +253,7 @@ class SizeVarAllocator:
             return True
         return False
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         """if left==right, guard on that fact and return true"""
         if len(left) != len(right):
@@ -238,6 +264,7 @@ class SizeVarAllocator:
             return True
         return False
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_leq(self, left: Expr, right: Expr) -> bool:
         try:
             if self.size_hint(left) > self.size_hint(right):
@@ -247,6 +274,7 @@ class SizeVarAllocator:
         self.guard_leq(left, right)
         return True
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_lt(self, left: Expr, right: Expr) -> bool:
         try:
             if self.size_hint(left) >= self.size_hint(right):
@@ -283,6 +311,7 @@ class SizeVarAllocator:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
 
+    # See Note [maybe_guard vs guard]
     def maybe_guard_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
         """if denominator divides numerator, return True and guard on that fact"""
         if sympy.gcd(numerator, denominator) == denominator:
@@ -317,7 +346,7 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
-            log.debug(f"failed on: {out}")
+            log.debug("failed on: %s", out)
             raise
 
     def size_hints(self, exprs: List[Expr]) -> int:
