@@ -136,9 +136,10 @@ inline void searchsorted_pre_check(
       "dtype but got dtype ", sorter.scalar_type());
 
     if (sorter.numel() > 0) {
-      auto [vmin, vmax] = sorter.aminmax();
-      TORCH_CHECK(vmax.item().toLong() < sorter.sizes().back(), "torch.searchsorted(): sorter index out of range");
-      TORCH_CHECK(vmin.item().toLong() >= 0, "torch.searchsorted(): sorter index out of range");
+      auto minmax = sorter.aminmax();
+      int64_t vmin = std::get<0>(minmax).item().toLong();
+      int64_t vmax = std::get<1>(minmax).item().toLong();
+      TORCH_CHECK(vmin >= 0 && vmax < sorter.sizes().back(), "torch.searchsorted(): sorter index out of range");
     }
   }
 

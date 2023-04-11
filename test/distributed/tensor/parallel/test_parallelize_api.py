@@ -58,14 +58,25 @@ class TensorParallelAPITests(DTensorTestBase):
         one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
         pg = mesh.get_dim_groups()[1]
         new_mesh = _create_1d_device_mesh(mesh, 1)
-        expected_mesh = DeviceMesh(self.device_type, one_dimention_mesh_shape, [pg])
+        expected_mesh = DeviceMesh(
+            self.device_type,
+            one_dimention_mesh_shape,
+            _init_process_groups=False
+        )
+        expected_mesh._dim_groups = [pg]
+
         self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
         self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
         # When 1D dim is 0.
         one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
         pg = mesh.get_dim_groups()[0]
         new_mesh = _create_1d_device_mesh(mesh, 0)
-        expected_mesh = DeviceMesh(self.device_type, one_dimention_mesh_shape, [pg])
+        expected_mesh = DeviceMesh(
+            self.device_type,
+            one_dimention_mesh_shape,
+            _init_process_groups=False
+        )
+        expected_mesh._dim_groups = [pg]
         self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
         self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
 

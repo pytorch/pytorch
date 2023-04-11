@@ -57,14 +57,16 @@
 namespace torch {
 namespace jit {
 
+using ResolutionCallback = std::function<py::object(std::string)>;
+
 void clear_registered_instances(void* ptr);
 
-TORCH_API IValue toIValue(
+TORCH_PYTHON_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
-TORCH_API py::object toPyObject(IValue ivalue);
+TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
@@ -701,10 +703,6 @@ inline void guardAgainstNamedTensor(const T& var) {
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
 
-// Defined in pybind_utils.cpp to break a circular dependency with
-// python_ivalue.h
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
-
 // Extract custom class registered with torchbind
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
@@ -1095,18 +1093,18 @@ inline py::object invokeScriptMethodFromPython(
       });
 }
 
-TORCH_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs);
 
-TORCH_API py::object invokeOperatorFromPython(
+TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-TORCH_API py::object _get_operation_for_overload_or_packet(
+TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
     py::args args,

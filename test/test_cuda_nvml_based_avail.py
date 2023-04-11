@@ -13,7 +13,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     # Before executing the desired tests, we need to disable CUDA initialization and fork_handler additions that would
     # otherwise be triggered by the `torch.testing._internal.common_utils` module import
     from torch.testing._internal.common_utils import (parametrize, instantiate_parametrized_tests, run_tests, TestCase,
-                                                      IS_WINDOWS)
+                                                      IS_WINDOWS, IS_JETSON, NoTest)
     # NOTE: Because `remove_device_and_dtype_suffixes` initializes CUDA context (triggered via the import of
     # `torch.testing._internal.common_device_type` which imports `torch.testing._internal.common_cuda`) we need
     # to bypass that method here which should be irrelevant to the parameterized tests in this module.
@@ -22,7 +22,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     TEST_CUDA = torch.cuda.is_available()
     if not TEST_CUDA:
         print('CUDA not available, skipping tests', file=sys.stderr)
-        TestCase = object  # type: ignore[misc, assignment] # noqa: F811
+        TestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
 
 
 class TestExtendedCUDAIsAvail(TestCase):
@@ -48,6 +48,8 @@ class TestExtendedCUDAIsAvail(TestCase):
     @parametrize("nvml_avail", [True, False])
     @parametrize("avoid_init", ['1', '0', None])
     def test_cuda_is_available(self, avoid_init, nvml_avail):
+        if IS_JETSON and nvml_avail and avoid_init == '1':
+            self.skipTest('Not working for Jetson')
         patch_env = {"PYTORCH_NVML_BASED_CUDA_CHECK": avoid_init} if avoid_init else {}
         with patch.dict(os.environ, **patch_env):
             if nvml_avail:

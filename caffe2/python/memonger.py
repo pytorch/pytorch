@@ -41,8 +41,7 @@ def share_grad_blobs(
         name = str(b)
         # Note: need to look at _{namescope} pattern as it matches
         # to handle the auto-split gradients
-        return name.endswith("_grad") and (name.startswith(namescope) or
-            name.startswith("_" + namescope)) and name not in param_grads
+        return name.endswith("_grad") and (name.startswith((namescope, "_" + namescope))) and name not in param_grads
 
     def is_grad_op(op):
         # TODO: something smarter
