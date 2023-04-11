@@ -188,22 +188,22 @@ Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::o
 
 Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& _cdist) {
   // Broadcasting might generate non-contiguous Tensors, so handle it before doing checks
-  SymInt c1 = _x1.sym_size(-1);
-  SymInt c2 = _x2.sym_size(-1);
-  SymInt r1 = _x1.sym_size(-2);
-  SymInt r2 = _x2.sym_size(-2);
+  int64_t c1 = _x1.size(-1);
+  int64_t c2 = _x2.size(-1);
+  int64_t r1 = _x1.size(-2);
+  int64_t r2 = _x2.size(-2);
   auto dim1 = _x1.dim();
   auto dim2 = _x2.dim();
-  SymIntArrayRef batch_tensor1(_x1.sym_sizes().data(), dim1 - 2);
-  SymIntArrayRef batch_tensor2(_x2.sym_sizes().data(), dim2 - 2);
-  std::vector<SymInt> expand_batch_portion = infer_size_symint(batch_tensor1, batch_tensor2);
-  std::vector<SymInt> tensor1_expand_size(expand_batch_portion);
+  IntArrayRef batch_tensor1(_x1.sizes().data(), dim1 - 2);
+  IntArrayRef batch_tensor2(_x2.sizes().data(), dim2 - 2);
+  std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+  std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
   tensor1_expand_size.insert(tensor1_expand_size.end(), {r1, c1});
-  std::vector<SymInt> tensor2_expand_size(expand_batch_portion);
+  std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
   // Compute the linearized batch size
-  const SymInt batch_product = c10::multiply_integers(expand_batch_portion);
+  const int64_t batch_product = c10::multiply_integers(expand_batch_portion);
 
   // Gracefully handle empty Tensors
   if (r1 == 0 || r2 == 0 || c1 == 0 || batch_product == 0) {
@@ -211,32 +211,32 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
   }
 
   Tensor x1 = _x1;
-  if (tensor1_expand_size != x1.sym_sizes()) {
-    x1 = x1.expand_symint(tensor1_expand_size);
+  if (tensor1_expand_size != x1.sizes()) {
+    x1 = x1.expand(tensor1_expand_size);
   }
   Tensor x2 = _x2;
-  if (tensor2_expand_size != x2.sym_sizes()) {
-    x2 = x2.expand_symint(tensor2_expand_size);
+  if (tensor2_expand_size != x2.sizes()) {
+    x2 = x2.expand(tensor2_expand_size);
   }
 
   x1 = x1.contiguous();
   x2 = x2.contiguous();
   auto cdist = _cdist.contiguous();
   auto grad = _grad.contiguous();
-  SymInt n = x1.sym_size(-2);
-  SymInt m = x1.sym_size(-1);
+  int64_t n = x1.size(-2);
+  int64_t m = x1.size(-1);
   auto device1 = x1.device().type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X1 got: ", device1);
   auto device2 = x2.device().type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
 
   Tensor grad_x1 =
-      at::empty_symint({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
 
   // Use x1.size() here and not the original size of _x1.size() as this gradient is not taking broadcasting into account
   // Broadcasting will be handled automatically by the autograd engine
-  return grad_x1.view_symint(x1.sym_sizes());
+  return grad_x1.view(x1.sizes());
 }
 
 Tensor _pdist_forward(const Tensor& self, const double p) {
