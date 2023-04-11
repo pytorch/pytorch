@@ -1,12 +1,13 @@
 import contextlib
 import copy
-from typing import Callable, Tuple, Generator, Dict, Optional
+from typing import Callable, Tuple, Generator, Dict, Optional, List
 from unittest.mock import patch
 import dataclasses
 
 import torch
 import weakref
 import torch._dynamo as torchdynamo
+from torch._dynamo.eval_frame import Constraint
 from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch.nn.utils import stateless
@@ -92,15 +93,6 @@ def _aot_capture(mod, flat_args):
         nonlocal graph_module
         graph_module = gm
 
-    num_fwd_returns = None
-
-    def partition_fn(joint_module, joint_inputs, *, num_fwd_outputs, **kwargs):
-        nonlocal num_fwd_returns
-        num_fwd_returns = num_fwd_outputs
-        return default_partition(
-            joint_module, joint_inputs, num_fwd_outputs=num_fwd_outputs, **kwargs
-        )
-
     def set_state_proxies(state_args):
         modes = get_torch_dispatch_modes()
         proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
@@ -116,7 +108,7 @@ def _aot_capture(mod, flat_args):
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=lambda gm, inputs: None,
-        partition_fn=partition_fn,
+        partition_fn=default_partition,
         decompositions=CORE_ATEN_DECOMPOSITIONS_TABLE,  # type: ignore[arg-type]
         num_params_buffers=params_len,
         aot_id=-1,
@@ -153,7 +145,6 @@ def _aot_capture(mod, flat_args):
 
     output_node = next(iter(reversed(graph_module.graph.nodes)))
     assert output_node.op == "output" and len(output_node.args) == 1
-    assert num_fwd_returns is not None
     # Turncate the output so we only output what we need.
     output_node.args = (
         output_node.args[0][
@@ -183,30 +174,33 @@ def _aot_capture(mod, flat_args):
     assert out_spec is not None
     return graph_module, mutation, out_spec
 
+    assert out_spec is not None
+    return graph_module, mutated_input_indices, out_spec
 
-@patch.object(torchdynamo.config, "dynamic_shapes", True)
-@patch.object(torchdynamo.config, "capture_scalar_outputs", True)
-@patch.object(torchdynamo.config, "guard_nn_modules", True)
-@patch.object(torchdynamo.config, "specialize_int", True)
-@patch.object(torchdynamo.config, "allow_rnn", True)
-@patch.object(torchdynamo.config, "verbose", True)
-def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
+
+
+@torchdynamo.config.patch(
+    dynamic_shapes=True,
+    capture_scalar_outputs=True,
+    guard_nn_modules=True,
+    specialize_int=True,
+    allow_rnn=True,
+    verbose=True,
+)
+def do_not_use_experimental_export(f: Callable, args: Tuple, constraints: List[Constraint]=None):
     """
     This prototype is under heavy development. Pls don't use it if you are
     not part of PyTorch 2.0 Export team.
     """
-    if training:
-        NotImplementedError("training mode is not supported yet")
-
     flattened_args, in_spec = pytree.tree_flatten(args)
     # Doing it twice so that if graph_module accidentally modifies the input
     # we still get the same original input.
     original_flat_args = tuple(flattened_args)
     flat_args = tuple(flattened_args)
 
-    graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
+    graph_module, guards = torchdynamo.export(f, *args, aten_graph=False, constraints=constraints)
     # TODO (tmanlaibaatar) do sth with guards?
-    graph_module, _, out_spec = _aot_capture(graph_module, flat_args)
+    graph_module, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
 
 
@@ -245,5 +239,4 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
-    from torch._dynamo.eval_frame import Constraint
     return Constraint(weakref.ref(t), id(t), index, StrictMinMaxConstraint(ValueRanges(lower=2, upper=sympy.oo)))

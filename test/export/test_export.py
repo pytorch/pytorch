@@ -75,5 +75,19 @@ class TestExport(TestCase):
         # self.assertEqual(mutated_buffer.sum().item(), 30)
         self.assertEqual(output, mod(*inp))
 
+    def test_export_assert_with_functionalization(self):
+        def foo(x):
+            assert x.shape[0] > 4
+            x.add_(4)
+            return x.cos() + x.sin()
+
+        inp = (torch.ones(6, 4),)
+        exported_program = do_not_use_experimental_export(foo, inp)
+        self.assertEqual(exported_program(torch.ones(6, 4)), foo(torch.ones(6, 4)))
+
+
+
+
+
 if __name__ == '__main__':
     run_tests()
