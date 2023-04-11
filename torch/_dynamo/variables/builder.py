@@ -442,7 +442,15 @@ class VariableBuilder:
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             # The autograd.function context
-            return AutogradFunctionContextVariable()
+            return self.tx.output.side_effects.track_object_existing(
+                self.source,
+                value,
+                AutogradFunctionContextVariable(
+                    value,
+                    source=self.source,
+                    guards=make_guards(GuardBuilder.TYPE_MATCH),
+                ),
+            )
         elif (
             isinstance(value, types.MethodType)
             and istype(
