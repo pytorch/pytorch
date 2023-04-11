@@ -8,6 +8,7 @@ import onnx
 import torch
 from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
+from torch.onnx._internal import exporter
 from torch.onnx._internal.exporter import (
     _DEFAULT_OPSET_VERSION,
     ExportOutputSerializer,
@@ -136,7 +137,7 @@ class TestDynamoExportAPI(unittest.TestCase):
         with self.assertRaises(roar.BeartypeException):
             ExportOutput(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
         export_output = ExportOutput(
-            onnx.ModelProto(), torch.onnx.InputFormatter(), torch.onnx.OutputFormatter()
+            onnx.ModelProto(), exporter.InputFormatter(), exporter.OutputFormatter()
         )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]

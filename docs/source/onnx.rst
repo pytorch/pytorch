@@ -737,5 +737,3 @@ Preview: torch.onnx TorchDynamo Exporter
     torch.onnx.ExportOptions
     torch.onnx.ExportOutput
     torch.onnx.ExportOutputSerializer
-    torch.onnx.InputFormatter
-    torch.onnx.OutputFormatter

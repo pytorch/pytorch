@@ -28,14 +28,6 @@ RNN_SEQUENCE_LENGTH = 11
 RNN_INPUT_SIZE = 5
 RNN_HIDDEN_SIZE = 3
 
-try:
-    from torchvision import models as torchvision_models  # noqa: F401
-
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
 
 def _skipper(condition, reason):
     def decorator(f):
@@ -166,7 +158,9 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
     return skip_dec
 
 
-def skip_min_ort_version(reason: str, version: str):
+# TODO(titaiwang): dynamic_only is specific to the situation that dynamic fx exporter
+# is not yet supported by ORT until 1.15.0. Remove dynamic_only once ORT 1.15.0 is released.
+def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
@@ -174,6 +168,9 @@ def skip_min_ort_version(reason: str, version: str):
                 packaging.version.parse(self.ort_version).release
                 < packaging.version.parse(version).release
             ):
+                if dynamic_only and not self.dynamic_shapes:
+                    return func(self, *args, **kwargs)
+
                 raise unittest.SkipTest(
                     f"ONNX Runtime version: {version} is older than required version {version}. "
                     f"Reason: {reason}."
@@ -202,6 +199,7 @@ def skip_dynamic_fx_test(reason: str):
                 raise unittest.SkipTest(
                     f"Skip verify dynamic shapes test for FX. {reason}"
                 )
+            return func(self, *args, **kwargs)
 
         return wrapper
 
