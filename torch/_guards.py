@@ -401,7 +401,7 @@ def tracing(context: TracingContext):
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
         raise NotImplementedError()
