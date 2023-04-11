@@ -329,5 +329,5 @@ class FileTimerServer:
             log.info("Process with pid=%s does not exist. Skipping", worker_pid)
             return True
         except Exception as e:
-            log.error(f"Error terminating pid={worker_pid}", exc_info=e)
+            log.error("Error terminating pid=%s", worker_pid, exc_info=e)
         return False
