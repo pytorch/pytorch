@@ -89,6 +89,36 @@ class TestSubgraphRewriter(JitTestCase):
         test_output = traced.forward(x)
         self.assertEqual(ref_output, test_output)
 
+    def test_subgraph_rewriter_with_trivial_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                val = torch.neg(x)
+                return torch.add(val, val)
+
+        def pattern(x):
+            return torch.add(x, x)
+
+        def replacement(x):
+            return x
+
+        def comparison(x):
+            return torch.neg(x)
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(1, 5)
+
+        matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement, [])
+
+        traced.graph.lint()
+
+        ref_output = comparison_fn(x)
+        test_output = traced.forward(x)
+        one_replacement = len(matches) == 1 and len(matches[0].replacements) == 0
+        self.assertEqual(ref_output, test_output)
+        self.assertTrue(one_replacement)
+
     def test_subgraph_rewriter_single_pattern_match(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -863,3 +893,33 @@ class TestSubgraphRewriter(JitTestCase):
 def forward(self, x):
     _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
     return _reshape_alias_copy_default_1""")  # noqa: B950
+
+    def test_replacement_with_attrs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor([1])
+                self.b = torch.tensor([2])
+
+            def forward(self, x):
+                return x + self.a - self.b
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor([1])
+
+            def forward(self, x):
+                return x + self.a
+
+        class Replacement(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = torch.tensor([3])
+
+            def forward(self, x):
+                return x - self.c
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
+        self.assertEqual(len(matches), 1)

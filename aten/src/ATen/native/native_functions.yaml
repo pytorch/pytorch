@@ -1161,6 +1161,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logical_not
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_logical_not
   tags: [core, pointwise]
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
@@ -1168,6 +1169,7 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: logical_not_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_logical_not_
   tags: pointwise
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -7434,6 +7436,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: masked_fill
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_masked_fill
   tags: pointwise
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
@@ -8120,6 +8123,7 @@
   variants: method
   dispatch:
     CPU, CUDA: random_
+    MPS: random_mps_
     Meta: random_meta_
   autogen: random, random.out
 
@@ -8656,6 +8660,15 @@
     CUDA: nonzero_cuda
     MPS: nonzero_mps
   tags: [dynamic_output_shape, core]
+
+- func: nonzero_static.out(Tensor self, *, int size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: nonzero_static_out_cpu
+
+- func: nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
+  variants: method, function
+  dispatch:
+    CPU: nonzero_static_cpu
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
@@ -14712,34 +14725,6 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
-
-# Collectives
-- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: all_reduce
-  variants: function
-
-- func: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: all_gather_into_tensor
-  variants: function
-
-- func: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: reduce_scatter_tensor
-  variants: function
-
-- func: wait_tensor(Tensor self) -> Tensor
-  # This should be changed to distributed but it requires changes all over the place to work
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: wait_tensor
 
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()

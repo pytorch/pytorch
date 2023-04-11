@@ -421,7 +421,7 @@ def _validate_global_plan(
             for chunk1 in value.chunks[chunk_idx + 1 :]:
                 if _check_box_overlap(chunk0, chunk1):
                     logger.warning(
-                        f"key:{key} has overlapping chunks: {chunk0} {chunk1}"
+                        "key:%s has overlapping chunks: %s %s", key, chunk0, chunk1
                     )
                     all_good = False
 
