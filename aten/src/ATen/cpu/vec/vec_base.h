@@ -89,96 +89,6 @@ constexpr bool is_reduced_floating_point_v = is_reduced_floating_point<T>::value
 
 template<size_t n> struct int_of_size;
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
-
-template <typename T>
-__m512i pack_saturate_and_clamp(
-    __m512i first,
-    __m512i second,
-    T min_val,
-    T max_val);
-
-template <>
-inline __m512i pack_saturate_and_clamp<int32_t>(
-    __m512i first,
-    __m512i second,
-    int32_t min_val,
-    int32_t max_val) {
-  // This function is for linkage only, will not be used
-  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
-}
-
-template <>
-inline __m512i pack_saturate_and_clamp<int8_t>(
-    __m512i first,
-    __m512i second,
-    int8_t min_val,
-    int8_t max_val) {
-  __m512i packed_and_sat = _mm512_packs_epi16(first, second);
-  return _mm512_max_epi8(
-      _mm512_set1_epi8(min_val),
-      _mm512_min_epi8(packed_and_sat, _mm512_set1_epi8(max_val)));
-}
-
-template <>
-inline __m512i pack_saturate_and_clamp<uint8_t>(
-    __m512i first,
-    __m512i second,
-    uint8_t min_val,
-    uint8_t max_val) {
-  __m512i packed_and_sat = _mm512_packus_epi16(first, second);
-  return _mm512_max_epu8(
-      _mm512_set1_epi8(min_val),
-      _mm512_min_epu8(packed_and_sat, _mm512_set1_epi8(max_val)));
-}
-
-#endif
-
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-
-template <typename T>
-__m256i pack_saturate_and_clamp(
-    __m256i first,
-    __m256i second,
-    T min_val,
-    T max_val);
-
-template <>
-inline __m256i pack_saturate_and_clamp<int32_t>(
-    __m256i /*first*/,
-    __m256i /*second*/,
-    int32_t /*min_val*/,
-    int32_t /*max_val*/) {
-  // This function is for linkage only, will not be used
-  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
-}
-
-template <>
-inline __m256i pack_saturate_and_clamp<int8_t>(
-    __m256i first,
-    __m256i second,
-    int8_t min_val,
-    int8_t max_val) {
-  __m256i packed_and_sat = _mm256_packs_epi16(first, second);
-  return _mm256_max_epi8(
-      _mm256_set1_epi8(min_val),
-      _mm256_min_epi8(packed_and_sat, _mm256_set1_epi8(max_val)));
-}
-
-template <>
-inline __m256i pack_saturate_and_clamp<uint8_t>(
-    __m256i first,
-    __m256i second,
-    uint8_t min_val,
-    uint8_t max_val) {
-  __m256i packed_and_sat = _mm256_packus_epi16(first, second);
-  return _mm256_max_epu8(
-      _mm256_set1_epi8(min_val),
-      _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
-}
-
-#endif
-
 #define DEFINE_INT_OF_SIZE(int_t) \
 template<> struct int_of_size<sizeof(int_t)> { using type = int_t; }
 
@@ -1160,5 +1070,37 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
     }
   }
 }
+
+#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+
+template <typename T>
+Vectorized<T> pack_saturate_and_clamp(
+    Vectorized<T> first,
+    Vectorized<T> second,
+    T min_val,
+    T max_val);
+
+template <>
+Vectorized<int32_t> pack_saturate_and_clamp<int32_t>(
+    Vectorized<int32_t> first,
+    Vectorized<int32_t> second,
+    int32_t min_val,
+    int32_t max_val);
+
+template <>
+Vectorized<int8_t> pack_saturate_and_clamp<int8_t>(
+    Vectorized<int8_t> first,
+    Vectorized<int8_t> second,
+    int8_t min_val,
+    int8_t max_val);
+
+template <>
+Vectorized<uint8_t> pack_saturate_and_clamp<uint8_t>(
+    Vectorized<uint8_t> first,
+    Vectorized<uint8_t> second,
+    uint8_t min_val,
+    uint8_t max_val);
+
+#endif
 
 }}}
