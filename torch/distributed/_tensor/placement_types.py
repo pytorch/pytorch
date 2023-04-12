@@ -101,7 +101,7 @@ class Shard(Placement):
                 shard_list.append(shard)
             return shard_list, idx_start_to_pad, pad_sizes
         else:
-            return shard_list, idx_start_to_pad, pad_sizes
+            return tensor_list, idx_start_to_pad, pad_sizes
 
     def _pad_tensor(
         self,
@@ -114,7 +114,7 @@ class Shard(Placement):
                 tensor.get_device() if torch.cuda.is_available() else "cpu"
             )
             tensor_size = list(reference_tensor.size())
-            tensor_size = [dim if dim >= self.dim else 0 for dim in tensor_size]  # type: ignore
+            tensor_size = [dim if dim >= self.dim else 0 for dim in tensor_size]  # type: ignore[attr-defined]
             return torch.zeros(tensor_size, device=device)
         else:
             pad = [0, 0] * (tensor.ndim - self.dim)
@@ -174,8 +174,7 @@ class Shard(Placement):
         # Compute chunk size for each chunk on the dimension.
         chunk_sizes = [
             max(
-                min(size_on_dim, full_chunk_size * (idx + 1))
-                - full_chunk_size * idx,
+                min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx,
                 0,
             )
             for idx in range(num_chunks)
@@ -433,9 +432,7 @@ class DTensorSpec:
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them,
         if self.tensor_meta is not None:
-            return hash(
-                (self.mesh, tuple(self.placements), self.tensor_meta.shape)
-            )
+            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
         else:
             return hash((self.mesh, tuple(self.placements)))
 
