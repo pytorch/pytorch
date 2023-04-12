@@ -182,9 +182,9 @@ class TestTransformers(NNTestCase):
             X = torch.randn(B, L, D).to(device)
 
             mha.train()  # disable fast path
-            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)  # works
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
             mha.eval()  # enable fast path
-            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)  # previously crashed (fixed)
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
 
     @parametrize("device", device_list)
     @parametrize("nhead", [1, 4, 8])
