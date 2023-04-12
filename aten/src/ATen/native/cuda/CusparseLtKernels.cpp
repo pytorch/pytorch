@@ -31,16 +31,14 @@ The following source file implements a sparse linear operator using cusparseLt
   }
 
 // create a container that holds relevant data for cusparselt linear
-// TODO: template this class based on dtype or figure out another way to
-// make dtype variable
 struct CusparseLtLinear : torch::CustomClassHolder {
   // define constants
-  constexpr static auto order        = CUSPARSE_ORDER_ROW;
-
-  // this tensor is magic, will segfault when removed ? 
+  constexpr static auto order{CUSPARSE_ORDER_ROW};
+  // this tensor is magic, will segfault when removed? 
   at::Tensor weight_compressed;
+  // cupsarselt constructs
   cusparseLtHandle_t handle;
-  cusparseLtMatDescriptor_t weight_descriptor, activation_descriptor, matC;
+  cusparseLtMatDescriptor_t weight_descriptor, activation_descriptor, res_descriptor;
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
@@ -62,8 +60,6 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
   at::Tensor masked_mm(const at::Tensor& input);
-  int64_t get_alg_id();
-  void set_alg_id(int64_t alg_id_to_set);
   void set_compressed(const at::Tensor& weight);
 
   // defining constructor, which will prune and compress the weights
@@ -100,15 +96,10 @@ struct CusparseLtLinear : torch::CustomClassHolder {
     //--------------------------------------------------------------------------
     CHECK_CUSPARSE( cusparseLtInit(&handle) )
 
-    std::cout << weight_compressed.dtype() << std::endl;
-
+    // set matrix dtype and compute type
     if (weight_compressed.dtype() == torch::kInt8) {
-      std::cout << "int" << std::endl;
       type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
-    }
-    else {
-      std::cout << "here" << std::endl;
     }
   };
 
@@ -116,9 +107,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 
 void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   // SETTING UP VALUES 
-  // m & k are for weight I think, k & n are for input
   //--------------------------------------------------------------------------
-  auto num_weight_bytes = weight.numel() * weight.element_size();
   int64_t m = weight.size(0);
   int64_t k = weight.size(1);
 
@@ -196,8 +185,6 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   // CHECK_CUDA( cudaMalloc((void**)&dA_compressed, compressed_size) )
   CHECK_CUDA( cudaMalloc((void**)&dA_compressedBuffer, compressed_buffer_size) )
 
-  std::cout << "SIZE BYTES "<< num_weight_bytes<< "  " << compressed_size <<"  "<<  (float)num_weight_bytes / (float)compressed_size << std::endl;
-
   CHECK_CUSPARSE(
     cusparseLtSpMMACompress2(
       &handle,
@@ -211,10 +198,8 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
 
 }
 
-
 // this function assumes the weight tensor already has the mask applied
 at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
-
   // create tensor
   auto res = input.new_empty({input.size(0), num_A_rows, input.size(2)});
 
@@ -234,7 +219,6 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   auto     ldb            = (is_rowmajor) ? num_B_cols : num_B_rows;
   auto     ldc            = (is_rowmajor) ? num_C_cols : num_C_rows;
 
-
   // B and C mat init
   //--------------------------------------------------------------------------
   CHECK_CUSPARSE(
@@ -251,7 +235,7 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   CHECK_CUSPARSE(
     cusparseLtDenseDescriptorInit(
       &handle,
-      &matC,
+      &res_descriptor,
       num_C_rows,
       num_C_cols,
       ldc,
@@ -283,7 +267,7 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   CHECK_CUSPARSE(
     cusparseLtMatDescSetAttribute(
       &handle,
-      &matC,
+      &res_descriptor,
       CUSPARSELT_MAT_NUM_BATCHES,
       &num_batches,
       sizeof(num_batches)) )
@@ -307,7 +291,7 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   CHECK_CUSPARSE(
     cusparseLtMatDescSetAttribute(
       &handle,
-      &matC,
+      &res_descriptor,
       CUSPARSELT_MAT_BATCH_STRIDE,
       &batch_strideC,
       sizeof(batch_strideC)) )
@@ -322,8 +306,8 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       opB,
       &weight_descriptor,
       &activation_descriptor,
-      &matC,
-      &matC,
+      &res_descriptor,
+      &res_descriptor,
       compute_type) )
 
   // SET BIAS POINTER
@@ -381,12 +365,15 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
         &alg_id,
         sizeof(alg_id)) )
   }
-  // else {
-  //   CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(
-  //                                          &handle, &alg_sel,
-  //                                          CUSPARSELT_MATMUL_ALG_CONFIG_ID,
-  //                                          &alg_id, sizeof(alg_id)))
-  // }
+  else {
+    CHECK_CUSPARSE(
+      cusparseLtMatmulAlgSetAttribute(
+        &handle,
+        &alg_sel,
+        CUSPARSELT_MATMUL_ALG_CONFIG_ID,
+        &alg_id,
+        sizeof(alg_id)) )
+  }
 
   CHECK_CUSPARSE(
     cusparseLtMatmul(
@@ -404,42 +391,17 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
 
   
   CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&activation_descriptor) )
-  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&matC) )
-  // CHECK_CUSPARSE( cusparseLtMatmulPlanDestroy(&plan) )
+  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&res_descriptor) )
+  CHECK_CUSPARSE( cusparseLtMatmulPlanDestroy(&plan) )
 
   return res;
 
 }
 
-int64_t  CusparseLtLinear::get_alg_id() {
-  // don't need this for now
-  // int max_alg_id = 0;
-  // CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
-  //                                                 CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
-  //                                                 &max_alg_id, sizeof(max_alg_id)) )
-  // std::cout <<"max alg id: " << max_alg_id << std::endl;
-  return (int64_t) alg_id;
-}
-
-
-void CusparseLtLinear::set_alg_id(int64_t alg_id_to_set) {
-  alg_id = (int) alg_id_to_set;
-  CHECK_CUSPARSE(
-    cusparseLtMatmulAlgSetAttribute(
-      &handle,
-      &alg_sel,
-      CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
-      &alg_id,
-      sizeof(alg_id)) )
-}
-  // std::cout <<"max alg id: " << max_alg_id << std::endl;
-
 TORCH_LIBRARY(cusparselt, m) {
   m.class_<CusparseLtLinear>("CusparseLtLinear")
     .def(torch::init<const at::Tensor&, const at::Tensor&>())
     .def("masked_mm", &CusparseLtLinear::masked_mm)
-    .def("get_alg_id", &CusparseLtLinear::get_alg_id)
-    .def("set_alg_id", &CusparseLtLinear::set_alg_id)
     .def("set_compressed", &CusparseLtLinear::set_compressed)
   ;
 }

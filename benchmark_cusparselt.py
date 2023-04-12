@@ -39,15 +39,17 @@ class Model(nn.Module):
 def gen_two_four_sparse_mask(m, k, dtype):
     # generate mask
     mask_id_sequence = []
+
     def random_mask_choice(i=None):
         import random
+
         choices = [
             [1, 1, 0, 0],
             [1, 0, 1, 0],
             [1, 0, 0, 1],
             [0, 1, 1, 0],
             [0, 1, 0, 1],
-            [0, 0, 1, 1]
+            [0, 0, 1, 1],
         ]
         if i is None:
             i = random.randint(0, len(choices) - 1)
@@ -74,9 +76,9 @@ def make_mask(mask_id_sequence):
     }
 
     my_mask = []
-    small_buf  = []
+    small_buf = []
     for mask_id in mask_id_sequence:
-        small_buf.insert(0,lookup[mask_id])
+        small_buf.insert(0, lookup[mask_id])
 
         if len(small_buf) == 2:
             string = "".join(small_buf)
@@ -93,7 +95,8 @@ def compare_dtype(m, k, n, batch_size, dtype):
     print(m, k, n, batch_size, dtype)
     model = Model(m, k).cuda().half().eval()
     # create input tensor
-    input_tensor = torch.randint(2,
+    input_tensor = torch.randint(
+        2,
         (batch_size, n, k),
         device=model.linear.weight.device,
         dtype=dtype,
@@ -110,23 +113,22 @@ def compare_dtype(m, k, n, batch_size, dtype):
 
     # model.linear.weight.data = weight.float()
     # model.linear.bias.data = bias.float()
-   
-    num_bytes = weight.nelement() * weight.element_size()
-    compressed_size= num_bytes * 10 // 16 
-    # compressed_size = 1536
-    print(f"weight_compressed: {num_bytes} bytes, mask size: {compressed_size} bytes") 
-    weight_compressed = torch.empty((compressed_size // weight.element_size(), ), 
-                                     dtype=dtype, 
-                                     device=device)
 
-    cslt = torch.classes.cusparselt.CusparseLtLinear(weight_compressed,
-                                                     bias)
+    num_bytes = weight.nelement() * weight.element_size()
+    compressed_size = num_bytes * 10 // 16
+    # compressed_size = 1536
+    print(f"weight_compressed: {num_bytes} bytes, mask size: {compressed_size} bytes")
+    weight_compressed = torch.empty(
+        (compressed_size // weight.element_size(),), dtype=dtype, device=device
+    )
+
+    cslt = torch.classes.cusparselt.CusparseLtLinear(weight_compressed, bias)
     cslt.set_compressed(weight)
 
     print("weight compressed")
-    print(weight_compressed[:m*k//2].view(m, -1))
+    print(weight_compressed[: m * k // 2].view(m, -1))
     print("mask")
-    print(weight_compressed[m*k//2:m*k//2+compressed_size].view(m, -1))
+    print(weight_compressed[m * k // 2 : m * k // 2 + compressed_size].view(m, -1))
     s_res = cslt.masked_mm(input_tensor.mT).mT
 
     res = (torch.matmul(weight.half(), input_tensor.mT.half()) + bias.half()).mT
@@ -142,7 +144,7 @@ def compare_dtype(m, k, n, batch_size, dtype):
 
     sparse_same_dense = torch.allclose(res, s_res)
     print(f"dense result - sparse result: {sparse_same_dense}")
-    print(res-s_res)
+    print(res - s_res)
 
     # assert torch.allclose(
     #     s_res.float(), res, rtol=1e-3, atol=1e-3
@@ -174,13 +176,14 @@ def compare_dtype(m, k, n, batch_size, dtype):
         # "speedup (d/s)": dense_latency.median / sparse_latency.median,
     }
 
+
 def compare_memory(m, k, n, batch_size):
-    print("+"*100)
+    print("+" * 100)
     print(f"start: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
     # create dense model
     model = Model(m, k).half().cuda().eval()
-    print("+"*100)
+    print("+" * 100)
     print(f"model: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
 
@@ -192,11 +195,10 @@ def compare_memory(m, k, n, batch_size):
         device=model.linear.weight.device,
         dtype=model.linear.weight.dtype,
     )
-    print("+"*100)
+    print("+" * 100)
     print(f"input: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
 
-    
     # get sparse model
     print(f"sparse start: {sizeof_fmt(torch.cuda.memory_allocated())}")
     pruner = WeightNormPruner(
@@ -204,33 +206,33 @@ def compare_memory(m, k, n, batch_size):
     )
     pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
     pruner.step()
-    print("+"*100)
+    print("+" * 100)
     print(f"step: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
 
-    sparse_model = pruner.convert(model, mapping={nn.Linear: cuSPARSELtLinear}, inplace=False)
+    sparse_model = pruner.convert(
+        model, mapping={nn.Linear: cuSPARSELtLinear}, inplace=False
+    )
 
     sparse_model.load_state_dict(torch.load("sparse_model.pt"))
 
     print(model)
-    print("+"*100)
+    print("+" * 100)
     print(f"convert: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
-
 
     # zero out dense tensor weights for correctness check
     pruner.squash_mask()
     model.load_state_dict(torch.load("dense_model.pt"))
-    print("+"*100)
+    print("+" * 100)
     print(f"squash: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
 
     del pruner
     torch.cuda.empty_cache()
-    print("+"*100)
+    print("+" * 100)
     print(f"del pruner: {sizeof_fmt(torch.cuda.memory_allocated())}")
     print(torch.cuda.memory_summary())
-
 
     assert torch.allclose(
         model(input_tensor), sparse_model(input_tensor), rtol=1e-3, atol=1e-3
@@ -253,7 +255,7 @@ def compare_memory(m, k, n, batch_size):
     # print(f"del input: {sizeof_fmt(torch.cuda.memory_allocated())}")
     # print(torch.cuda.memory_summary())
 
-    # del sparse_model 
+    # del sparse_model
     # torch.cuda.empty_cache()
     # print("+"*100)
     # print(f"del sparse: {sizeof_fmt(torch.cuda.memory_allocated())}")
@@ -261,6 +263,7 @@ def compare_memory(m, k, n, batch_size):
     torch.save(sparse_model.state_dict(), "sparse_model.pt")
     torch.save(model.state_dict(), "dense_model.pt")
     from pprint import pprint
+
     pprint(torch.load("sparse_model.pt"))
     # sparse_model_2(input_tensor)
 
@@ -271,9 +274,10 @@ def compare_memory(m, k, n, batch_size):
         "eval_batch_size": batch_size,
         "init_batch_size": batch_size,
         "alg_id": alg_id,
-        "sparse_model_size": sizeof_fmt(os.stat("sparse_model.pt").st_size), 
-        "dense_model_size": sizeof_fmt(os.stat("dense_model.pt").st_size), 
+        "sparse_model_size": sizeof_fmt(os.stat("sparse_model.pt").st_size),
+        "dense_model_size": sizeof_fmt(os.stat("dense_model.pt").st_size),
     }
+
 
 def sizeof_fmt(num, suffix="B"):
     for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
@@ -281,6 +285,7 @@ def sizeof_fmt(num, suffix="B"):
             return f"{num:3.1f}{unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
+
 
 # function to compare dense vs cusparselt linear for given m, k, n, batch_size
 def compare_linear(m, k, n, batch_size, init_batch_size=None):
@@ -294,7 +299,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size=None):
         device=model.linear.weight.device,
         dtype=model.linear.weight.dtype,
     )
-    
+
     # get sparse model
     pruner = WeightNormPruner(
         sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2
@@ -310,7 +315,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size=None):
     devnull = open("/dev/null", "w")
     oldstdout_fno = os.dup(sys.stdout.fileno())
     os.dup2(devnull.fileno(), 1)
-  
+
     assert torch.allclose(
         model(input_tensor), sparse_model(input_tensor), rtol=1e-3, atol=1e-3
     )
@@ -362,7 +367,7 @@ if __name__ == "__main__":
             "distilbert-shapes",
             "alg-id-sweep",
             "int8-fp16-linear",
-            "memory"
+            "memory",
         ],
     )
     args = parser.parse_args()
@@ -476,18 +481,22 @@ if __name__ == "__main__":
 
         results += [
             compare_linear(768, 3072, 96, batch_size, init_batch_size=init_batch_size)
-            for batch_size, init_batch_size in tqdm(product(batch_sizes, batch_sizes), total=len(batch_sizes)**2)
+            for batch_size, init_batch_size in tqdm(
+                product(batch_sizes, batch_sizes), total=len(batch_sizes) ** 2
+            )
         ]
 
     elif args.mode == "memory":
         results = [compare_memory(4096, 4096, 4096, 1)]
-   
+
     elif args.mode == "int8-fp16-linear":
         dtypes = [torch.int8]
-        batch_sizes = [1] #4, 16, 64, 256]
+        batch_sizes = [1]  # 4, 16, 64, 256]
         results = (
-            compare_dtype(64, 64, 64, batch_size, dtype) 
-            for batch_size, dtype in tqdm(product(batch_sizes, dtypes), total=len(dtypes)*len(batch_sizes))
+            compare_dtype(64, 64, 64, batch_size, dtype)
+            for batch_size, dtype in tqdm(
+                product(batch_sizes, dtypes), total=len(dtypes) * len(batch_sizes)
+            )
         )
 
     save_file = f"{args.mode}.csv"
