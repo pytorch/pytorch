@@ -4071,9 +4071,9 @@ class TestSparseOneOff(TestCase):
             x + sparse_y
 
 
-def _sparse_to_dense(tensor):
+def _sparse_to_dense(tensor, masked_grad=False):
     if tensor.dtype != torch.bool:
-        return tensor.to_dense(masked_grad=True)
+        return tensor.to_dense(masked_grad=masked_grad)
 
     # to_dense uses coalesce which isn't implemented for bool
     return tensor.to(torch.int8).to_dense().to(torch.bool)
@@ -4168,8 +4168,7 @@ class TestSparseUnaryUfuncs(TestCase):
                 check_batched_grad=False,
                 check_grad_dtypes=True,
                 nondet_tol=op.gradcheck_nondet_tol,
-                fast_mode=op.gradcheck_fast_mode,
-                masked=True))
+                fast_mode=op.gradcheck_fast_mode))
 
 
 class TestSparseMaskedReductions(TestCase):
