@@ -927,13 +927,6 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    if cmake_cache_vars['USE_ROCM']:
-        triton_req_file = os.path.join(cwd, ".github", "requirements", "triton-requirements-rocm.txt")
-        if os.path.exists(triton_req_file):
-            with open(triton_req_file) as f:
-                triton_req = f.read().strip()
-                extra_install_requires.append(triton_req)
-
     if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
@@ -1019,14 +1012,21 @@ def main():
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", "triton.txt")
+        cmake_cache_vars = get_cmake_cache_vars()
+        if cmake_cache_vars['USE_ROCM']:
+            triton_text_file = "triton-rocm.txt"
+            triton_package_name = "pytorch-triton-rocm"
+        else:
+            triton_text_file = "triton.txt"
+            triton_package_name = "pytorch-triton"
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", triton_text_file)
         triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
         if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
             with open(triton_version_file) as f:
                 triton_version = f.read().strip()
-            extras_require['dynamo'] = ['pytorch-triton==' + triton_version + '+' + triton_pin[:10], 'jinja2']
+            extras_require['dynamo'] = [triton_package_name + '==' + triton_version + '+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1207,6 +1207,16 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
+        torch_package_data.extend([
+            'share/cmake/nvfuser/*.cmake',
+            'include/nvfuser/*.h',
+            'include/nvfuser/kernel_db/*.h',
+            'include/nvfuser/multidevice/*.h',
+            'include/nvfuser/ops/*.h',
+            'include/nvfuser/python_frontend/*.h',
+            'include/nvfuser/scheduler/*.h',
+        ])
 
     if get_cmake_cache_vars()['BUILD_CAFFE2']:
         torch_package_data.extend([

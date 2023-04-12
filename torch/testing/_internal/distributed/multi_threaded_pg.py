@@ -52,6 +52,7 @@ def bitwise_reduce(tensors, op):
 
 _reduce_ops = {
     ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.AVG: partial(binop_reduce, op=torch.mean),
     ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
     ReduceOp.MIN: partial(binop_reduce, op=torch.min),
     ReduceOp.MAX: partial(binop_reduce, op=torch.max),
@@ -278,6 +279,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(output_tensor, self._world_size))
+        return self.allgather([tensor_list], [input_tensor], opts)
+
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
@@ -301,6 +306,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         res = coll.join(self._rank, (output_tensor, scatter_list))
         ProcessLocalGroup._end_coll(coll, self)
         return res
+
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(input_tensor, self._world_size))
+        return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)

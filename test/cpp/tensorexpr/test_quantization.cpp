@@ -319,10 +319,11 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
         %2 : int = prim::Constant[value=13]()
         %4 : NoneType = prim::Constant()
         %3 : int[] = prim::Constant[value=[6, 6]]()
+        %5 : bool = prim::Constant[value=1]()
         %qz : int = prim::Constant[value=13]()
         %qs : float = prim::Constant[value=0.1]()
         %q : QUInt8(1, 1, 4, 4) = aten::quantize_per_tensor(%x, %qs, %qz, %2)
-        %qu : QUInt8(1, 1, 6, 6) = aten::upsample_nearest2d(%q, %3, %4)
+        %qu : QUInt8(1, 1, 6, 6) = aten::upsample_nearest2d(%q, %3, %4, %5)
         %6 : Float(1, 1, 6, 6) = aten::dequantize(%qu)
         return (%6))IR";
   auto graph = std::make_shared<Graph>();
@@ -356,7 +357,8 @@ TEST_F(Quantization, UpsampleNearst2d) {
       graph(%x : Float(1, 1, 2, 2, strides=[2, 2, 2, 1], device=cpu)):
         %4 : NoneType = prim::Constant()
         %3 : int[] = prim::Constant[value=[4, 4]]()
-        %u : Float(1, 1, 4, 4) = aten::upsample_nearest2d(%x, %3, %4)
+        %5 : bool = prim::Constant[value=1]()
+        %u : Float(1, 1, 4, 4) = aten::upsample_nearest2d(%x, %3, %4, %5)
         return (%u))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
