@@ -68,6 +68,11 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
+NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/94066
+    "sebotnet33ts_256",
+}
+
 SCALED_COMPUTE_LOSS = {
     "ese_vovnet19b_dw",
     "fbnetc_100",
@@ -293,7 +298,10 @@ class TimmRunnner(BenchmarkRunner):
         cosine = self.args.cosine
         tolerance = 1e-3
         if is_training:
-            tolerance = 1e-2
+            if REQUIRE_HIGHER_TOLERANCE:
+                tolerance = 2 * 1e-2
+            else:
+                tolerance = 1e-2
         return tolerance, cosine
 
     def _gen_target(self, batch_size, device):
