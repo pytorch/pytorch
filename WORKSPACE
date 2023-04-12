@@ -30,20 +30,6 @@ load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
 rules_cc_toolchains()
 
 http_archive(
-    name = "rules_python",
-    sha256 = "a644da969b6824cc87f8fe7b18101a8a6c57da5db39caa6566ec6109f37d2141",
-    strip_prefix = "rules_python-0.20.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.20.0/rules_python-0.20.0.tar.gz",
-)
-
-load("@rules_python//python:repositories.bzl", "python_register_toolchains")
-
-python_register_toolchains(
-    name = "python3_8",
-    python_version = "3.8",
-)
-
-http_archive(
     name = "bazel_skylib",
     urls = [
         "https://github.com/bazelbuild/bazel-skylib/releases/download/1.0.2/bazel-skylib-1.0.2.tar.gz",
@@ -197,11 +183,29 @@ http_archive(
     ],
 )
 
+# See https://github.com/bazelbuild/rules_python for more details of
+# the following sections.
 http_archive(
     name = "rules_python",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.0.1/rules_python-0.0.1.tar.gz",
-    sha256 = "aa96a691d3a8177f3215b14b0edc9641787abaaa30363a080165d06ab65e1161",
+    sha256 = "a644da969b6824cc87f8fe7b18101a8a6c57da5db39caa6566ec6109f37d2141",
+    strip_prefix = "rules_python-0.20.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.20.0/rules_python-0.20.0.tar.gz",
 )
+
+# Use a hermetic Python 3.8 toolchain.
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+python_register_toolchains(
+    name = "python3_8",
+    python_version = "3.8",
+)
+
+# Make our PyPI requirements available to Python targets via,
+# e.g. requirement("PyYAML") after loading:
+# load("@pip_parsed_deps//:requirements.bzl", "requirement")
+load("@rules_python//python:pip.bzl", "pip_parse")
+pip_parse(requirements = "//:requirements_lock.txt")
+load("@pip_parsed_deps//:requirements.bzl", "install_deps")
+install_deps()
 
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
 python_configure(name = "local_config_python", python_version="3")
@@ -209,10 +213,6 @@ python_configure(name = "local_config_python", python_version="3")
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
-
-load("@rules_python//python:repositories.bzl", "py_repositories")
-
-py_repositories()
 
 new_local_repository(
     name = "cuda",
