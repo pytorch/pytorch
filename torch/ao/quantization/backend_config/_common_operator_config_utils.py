@@ -25,7 +25,7 @@ from ..fuser_method_mappings import (
 
 __all__: List[str] = []
 
-# TODO: rename to be more explict, e.g. qat_conv_relu
+# TODO: rename to be more explicit, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
     "_ConvMetadata",
     ["root", "transpose", "bn", "reference", "transpose_reference",

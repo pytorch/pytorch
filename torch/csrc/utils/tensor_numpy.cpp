@@ -352,6 +352,10 @@ bool is_numpy_int(PyObject* obj) {
   return is_numpy_available() && PyArray_IsScalar((obj), Integer);
 }
 
+bool is_numpy_bool(PyObject* obj) {
+  return is_numpy_available() && PyArray_IsScalar((obj), Bool);
+}
+
 bool is_numpy_scalar(PyObject* obj) {
   return is_numpy_available() &&
       (is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
