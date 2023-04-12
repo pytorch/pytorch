@@ -2147,6 +2147,47 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
+        x = torch.ones(6, 4, 4)
+        with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
+            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_range_constraint(self):
+        x = torch.ones(6, 4, 4)
+        constraints = [
+            4 < dynamic_dim(x, 0),
+            dynamic_dim(x, 0) <= 6,
+        ]
+
+        def foo(x):
+            if x.shape[0] > 3:  # ok
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(
+            foo,
+            x,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        def bar(x):
+            if x.shape[0] > 5:  # error
+                return x.sin()
+            return x.cos()
+
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(
+                bar,
+                x,
+                constraints=constraints,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    @config.patch(dynamic_shapes=True)
     def test_list_contains(self):
         def func(x):
             assert x.size(-1) in [4, 5, 6], "bad"
@@ -2223,6 +2264,28 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 if node.op == "placeholder":
                     count += 1
             self.assertEqual(count, 1)
+
+    def test_export_with_nonzero_static(self):
+        class BasicModule(torch.nn.Module):
+            def __init__(self, static_size):
+                super().__init__()
+                self.static_size = static_size
+
+            def forward(self, x):
+                return torch.nonzero_static(x, size=self.static_size)
+
+        input_tensors = torch.tensor([6, 8]), torch.zeros(2, 3)
+        static_sizes = 3, 4
+        for input_tensor, static_size in zip(input_tensors, static_sizes):
+            m = BasicModule(static_size)
+            gm, _ = torch._dynamo.export(m, input_tensor, aten_graph=True)
+            res = gm(input_tensor)
+            self.assertEqual(res.size(0), static_size)
+            self.assertTrue(
+                torch._dynamo.utils.same(
+                    res, torch.nonzero_static(input_tensor, size=static_size)
+                )
+            )
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):

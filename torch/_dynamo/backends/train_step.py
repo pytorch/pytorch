@@ -1,13 +1,14 @@
 from contextlib import contextmanager
 from copy import copy
 from typing import Any, Dict, List
+from unittest import mock
 
 import torch
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -21,19 +22,24 @@ def _rematerialize_optimizer(
     named_states: Dict[str, Any],
     params: Dict[str, torch.nn.Parameter],
 ):
-    assert opt is not None
+    if opt is None:
+        try:
+            yield
+        finally:
+            pass
+        return
 
     # update opt.state with proxy tensors
     orig_states: Dict[str, Any] = copy(opt.state)
-    for n in named_states:
-        # opt.state's key type is string, but optimizer uses Parameter as keys
-        opt.state[params[n]] = named_states[n]  # type: ignore[index]
+    if named_states:
+        for n in named_states:
+            # opt.state's key type is string, but optimizer uses Parameter as keys
+            opt.state[params[n]] = named_states[n]  # type: ignore[index]
 
     # FIXME: support multiple parameter groups
     param_group = opt.param_groups[0]
     orig_params = param_group["params"]
     # FIXME(@mrshenli): exclude buffers
-    print(f"setting optimizer to use parm0 {params}")
     param_group["params"] = params.values()
 
     try:
@@ -62,13 +68,9 @@ def train_step_compiler(backend_compile_fn):
         Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
                 (created by dynamo) to fakeify the module's parameters
         """
-        # at input dynamo puts two copies e.g.
-        #   L__model___layers_0.weight
-        #   model.layers.0.weight
-        # both as realtensor on passed in graphmodule.  `model` comes from having model as input to train_step.
-
-        print(mod.graph)
-        torch.set_grad_enabled(True)
+        assert (
+            torch.is_grad_enabled()
+        ), "Expected grad enabled when calling train_step_compile"
         torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
         assert len(fake_inputs) > 0, "Expected at least one input"
         fake_mode = fake_inputs[0].fake_mode
@@ -78,6 +80,7 @@ def train_step_compiler(backend_compile_fn):
 
         def fakeify_inputs(flat_args):
             already_fake = {}
+
             def convert(idx, x):
                 # todo: do we expect symint inputs?
                 assert isinstance(x, torch.Tensor)
@@ -100,39 +103,24 @@ def train_step_compiler(backend_compile_fn):
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
 
-        # TODO fix dynamo's "list of optimizers" on the module, and iterate them instead of hardcoding here
-        opt = mod.__optimizer_0
-        named_states = {}
-        # Pass named_states instead of opt.state to stateless_func, because
-        # the later uses nn.Parameter as key. During tracing, we need to
-        # make sure optimizers can find the states using proxy tensors.
-        for n, p in params.items():
-            if p in opt.state:
-                # opt.state's key type is string, but optimizer uses
-                # Parameter as keys
-                named_states[n] = opt.state[p]  # type: ignore[index]
+        assert (
+            "optimizers" in mod.meta
+        ), "Dynamo should populate GraphModule meta with optimizers dict"
+        optimizers = mod.meta["optimizers"]
+        assert len(optimizers) <= 1, "Multiple optimizers NYI"
 
-        opt_states_flat, spec = pytree.tree_flatten(dict(opt.state))
-        named_states_flat, spec = pytree.tree_flatten(named_states)
-        fake_named_states_flat = fakeify_inputs(named_states_flat)
-        named_states_len = len(named_states_flat)
-        # ok, sgd has no states, so this whole thing is untested for now
-
-        full_fake_args = fake_params_flat + fake_named_states_flat + fake_inputs
-
-        """
-        Step 2: Create a new graphmodule that accepts parameters and user-inputs
-                as inputs to forward(), instead of accessing parameters as attrs.
-        """
-
-        def functional_call(*args, **kwargs):
-            _params = args[:params_len]
+        def functional_call(*lifted_args, **kwargs):
+            """Call the dynamo graphmodule in a functional way safe for tracing
+            (lifts module parameters and optimizer states as inputs)
+            """
+            _params = lifted_args[:params_len]
             _params_dict = pytree.tree_unflatten(_params, params_spec)
-            _named_states = args[params_len : params_len + named_states_len]
-            _user_args = args[params_len + named_states_len :]
+            _named_states = lifted_args[params_len : params_len + named_states_len]
+            _named_states_dict = pytree.tree_unflatten(_named_states, named_states_spec)
+            _user_args = lifted_args[params_len + named_states_len :]
             with stateless._reparametrize_module(
                 mod, _params_dict
-            ), _rematerialize_optimizer(opt, _named_states, _params_dict):
+            ), _rematerialize_optimizer(opt, _named_states_dict, _params_dict):
                 out = mod(*_user_args, **kwargs)
 
             if not isinstance(out, (tuple, list)):
@@ -141,33 +129,81 @@ def train_step_compiler(backend_compile_fn):
                 )
             return out
 
-        # This fx_g contains expanded backward ops, but also accepts flat params as inputs to forward, so we can't
-        # directly return it
-        assert torch.is_grad_enabled(), "grad isn't enabled before calling make_fx"
+        opt = None
+        # for the optimizer warmup, we need empty named_states for reparametrize_optimizer,
+        # but we want to reuse the same 'functional_call' which looks for this
+        named_states = {}
+        named_states_flat, named_states_spec = pytree.tree_flatten(named_states)
+        named_states_len = len(named_states_flat)
+
+        """
+        Step 1: Warm up the optimizer(s) (if present).
+        """
+        if len(optimizers):
+            # TODO iterate properly
+            opt = optimizers["__optimizer_0"]
+            dev = params_flat[0].device
+
+            # allow_non_fake_inputs
+            #
+            # the reason for allow_non_fake_inputs is that we are initializing optimizer states implicitly
+            # on the first invocation, and the _init_group function creates size-0 tensors with real values
+            # which upset FakeTensor otherwise.
+
+            # In practice, the adam optimizer sets its state_dict["step"] values to real tensors
+            # which i'm afraid means we aren't quite tracing the program correctly unless we can
+            # restore it, which we attempt below with .zero_()
+
+            # Question: can we enforce that 'capturable' is true for the param_groups? this codepath
+            # looks like it would avoid this problem entirely but I'm not sure how to set it.
+            with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+                # This adds fake state tensors to the previously empty optimizer state dicts.
+                _ = functional_call(*fake_params_flat + fake_inputs)
+
+            # Convert the fake optimizer states to real
+            for fake_param, state_dict in opt.state.items():
+                for name, state in state_dict.items():
+                    if isinstance(state, FakeTensor):
+                        # we assume always init with zeros, which is lame: can we trace init separately?
+                        state_dict[name] = torch.zeros(
+                            state.shape, dtype=state.dtype, device=dev
+                        )
+                    else:
+                        # some of the states are singleton cpu tensors, e.g. 'step'...
+                        state_dict[name].zero_()
+
+            # Build a mapping to use for reparametrizing the optimizer during tracing
+            named_states = {}
+            for n, p in pytree.tree_unflatten(fake_params_flat, params_spec).items():
+                if p in opt.state:
+                    named_states[n] = opt.state[p]  # type: ignore[index]
+
+        named_states_flat, named_states_spec = pytree.tree_flatten(named_states)
+        fake_named_states_flat = fakeify_inputs(named_states_flat)
+        named_states_len = len(named_states_flat)
+        full_fake_args = fake_params_flat + fake_named_states_flat + fake_inputs
+
+        """
+        Step 2: Trace the full graph.
+        """
         fx_g = make_fx(functional_call)(*full_fake_args)
-        torch.set_grad_enabled(False)
-        # print(f"fx_g: {fx_g}")
 
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.
         """
-
-        def retraced_f(*args):
-            return Interpreter(fx_g).run(*args)
-
-        # we use inference mode to stop autograd complaining about inplace updating a leaf node
         with torch.inference_mode():
-            functional_fx_g = make_fx(functionalize(retraced_f))(*full_fake_args)
-            # print(f"functional_fx_g.graph {functional_fx_g.graph}")
+            # We need to disable grad, since we will be inplace-updating leaf nodes (optimizer acting on params)
+            functional_fx_g = make_fx(functionalize(fx_g))(*full_fake_args)
 
         """
         Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
-                and return a function that accepts the arguments as originally provided by dynamo
+                and return a function that accepts the arguments as originally provided by dynamo.
         """
 
         def call_without_params(*runtime_args):
-            with torch.no_grad():
+            with torch.inference_mode():
+                # See note above about disabling grad
                 return functional_fx_g(
                     *params_flat + named_states_flat + list(runtime_args)
                 )
