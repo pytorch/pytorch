@@ -43,6 +43,9 @@ class ModulePartition():
     # partition
     output_nodes: List[Node] = field(default_factory=list)
 
+    # Parameters that are being used
+    params: List[str] = field(default_factory=list)
+
 
 @compatibility(is_backward_compatible=False)
 def get_module_partitions(
@@ -80,16 +83,20 @@ def get_module_partitions(
     def make_partition(nodes: List[Node], module_type: Type) -> ModulePartition:
         input_nodes = set()
         output_nodes = set()
+        params = set()
         for node in nodes:
             for arg in node.args:
                 if isinstance(arg, Node) and arg not in nodes:
                     input_nodes.add(arg)
+            
+            if node.op == "get_attr":
+                params.add(node.target)
 
             for user in node.users.keys():
                 if user not in nodes:
                     output_nodes.add(node)
 
-        return ModulePartition(nodes, module_type, list(input_nodes), list(output_nodes))
+        return ModulePartition(nodes, module_type, list(input_nodes), list(output_nodes), list(params))
 
     ret: Dict[Type[Any], List[ModulePartition]] = {}
     for k, v in modules.items():

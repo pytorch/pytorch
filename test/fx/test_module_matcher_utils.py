@@ -2,15 +2,18 @@
 
 import os
 import sys
+import unittest 
 
 import torch
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch._dynamo.eval_frame import is_dynamo_supported
 from torch.fx.passes.utils.module_matcher_utils import get_module_partitions, check_subgraphs_connected
 from torch.testing._internal.jit_utils import JitTestCase
 
 class TestModuleMatcher(JitTestCase):
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_linear_relu_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -40,6 +43,7 @@ class TestModuleMatcher(JitTestCase):
         self.assertTrue(check_subgraphs_connected(module_partitions[torch.nn.Linear][1], module_partitions[torch.nn.ReLU][0]))
         self.assertFalse(check_subgraphs_connected(module_partitions[torch.nn.Linear][2], module_partitions[torch.nn.ReLU][0]))
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_conv_relu_maxpool(self):
         class M(torch.nn.Module):
             def __init__(self, constant_tensor: torch.Tensor) -> None:
@@ -81,6 +85,7 @@ class TestModuleMatcher(JitTestCase):
         self.assertFalse(check_subgraphs_connected(module_partitions[torch.nn.MaxPool2d][0], module_partitions[torch.nn.ReLU][0]))
         self.assertTrue(check_subgraphs_connected(module_partitions[torch.nn.ReLU][0], module_partitions[torch.nn.MaxPool2d][0]))
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_functional_conv_relu_conv(self):
         class FunctionalConv2d(torch.nn.Module):
             def __init__(self):
@@ -114,6 +119,7 @@ class TestModuleMatcher(JitTestCase):
         self.assertEqual(len(module_partitions), 1)
         self.assertEqual(len(module_partitions[FunctionalConv2d]), 2)
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_functional_linear_relu_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self):
