@@ -391,7 +391,8 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             UserError,
-            "cond: Branches must return with same length."
+            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}. "
+            "Expect true branch and false branch return with same length"
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -409,7 +410,8 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             UserError,
-            "cond: Branches must return each tensor with exact same metadata."
+            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}. "
+            "Expect each tensor returned from true branch and false branch has exact same metadata"
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -559,7 +561,8 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             UserError,
-            "cond: Branches must return with same length."
+            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}. "
+            "Expect true branch and false branch return with same length"
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -577,7 +580,8 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             UserError,
-            "cond: Branches must return each tensor with exact same metadata."
+            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}. "
+            "Expect each tensor returned from true branch and false branch has exact same metadata"
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 

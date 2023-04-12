@@ -83,6 +83,7 @@ class UserErrorType(Enum):
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
+    COND_OP_RESTRICTION = auto()
 
 
 class UserError(Unsupported):

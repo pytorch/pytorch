@@ -849,13 +849,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 else:
                     # call_function() needs a TensorVariable, therefore we construct
                     # one with inner graph proxy.
-                    if not isinstance(a, torch.Tensor):
-                        raise UserError(
-                            UserErrorType.ANTI_PATTERN,
-                            "cond: Operands must be a list of tensors but got {}".format(
-                                str(a.python_type())
-                            ),
-                        )
+                    assert isinstance(a, torch.Tensor)
                     proxy = tx.output.create_graph_input("arg")
                     args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
                 # NB: we don't bother populating graphargs, as
@@ -863,21 +857,15 @@ class TorchHigherOrderOperator(VariableTracker):
 
             try:
                 output = f.call_function(tx, args, {})
-            except Exception as e:
-                raise UserError(
-                    UserErrorType.ANTI_PATTERN,
-                    "cond: Branch signature doesn't match with operands. Reason: {}".format(
-                        e
-                    ),
-                )
+            except Exception:
+                raise
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support non single Tensor output
             if not isinstance(output, TensorVariable):
-                raise UserError(
-                    UserErrorType.ANTI_PATTERN,
-                    "cond: Branch must return a single tensor but got {}".format(
+                raise TypeError(
+                    "Expect branch out type to be a single tensor but got {}".format(
                         str(output.python_type())
                     ),
                 )
@@ -910,27 +898,47 @@ class TorchHigherOrderOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
             if len(args) != 4:
                 raise UserError(
-                    UserErrorType.ANTI_PATTERN,
-                    "cond: Expected 4 arguments but got {}.\n"
-                    "Usage: cond(pred, true_fn, false_fn, operands)".format(len(args)),
+                    UserErrorType.COND_OP_RESTRICTION,
+                    f"{UserErrorType.COND_OP_RESTRICTION.name}. "
+                    f"Expected 4 arguments but got {len(args)}.\n"
+                    f"Usage: cond(pred, true_fn, false_fn, operands)",
                 )
             # predicate
             if type(args[0]) not in (TensorVariable, SymNodeVariable, ConstantVariable):
                 raise UserError(
-                    UserErrorType.ANTI_PATTERN,
-                    "cond: Conditional statement type passed to cond must be TensorVariable, "
-                    "SymNodeVariable or ConstantVariable but got {}".format(
-                        str(args[0].python_type())
-                    ),
+                    UserErrorType.COND_OP_RESTRICTION,
+                    f"{UserErrorType.COND_OP_RESTRICTION.name}. "
+                    f"Expect pred to be traced as TensorVariable, "
+                    f"SymNodeVariable or ConstantVariable but got {str(type(args[0]))} "
+                    f"with original python type {str(args[0].python_type())}.",
                 )
+
             # operands
             if type(args[3]) is not ListVariable:
                 raise UserError(
                     UserErrorType.ANTI_PATTERN,
-                    "cond: Operands must be passed as list but got {}".format(
-                        args[3].python_type()
+                    f"{UserErrorType.COND_OP_RESTRICTION.name}. "
+                    f"Expect operands to be a list but got {args[3].python_type()}",
+                )
+            operands = args[3].unpack_var_sequence(tx)
+            if not all(
+                isinstance(operand, (TensorVariable, torch.Tensor))
+                for operand in operands
+            ):
+                raise UserError(
+                    UserErrorType.COND_OP_RESTRICTION,
+                    "{error_name}. "
+                    "Expect operands to be a list of tensors but got {actual_args}".format(
+                        error_name=UserErrorType.COND_OP_RESTRICTION.name,
+                        actual_args=[
+                            str(operand.python_type())
+                            if isinstance(operand, VariableTracker)
+                            else str(type(operand))
+                            for operand in operands
+                        ],
                     ),
                 )
+
             # branches
             assert isinstance(
                 args[1], (UserFunctionVariable, NestedUserFunctionVariable)
@@ -958,14 +966,18 @@ class TorchHigherOrderOperator(VariableTracker):
 
             graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
 
-            sub_args = args[3].unpack_var_sequence(tx)
-
             def speculate_branch(branch):
-                # NB: 0 is predicate
-                ix = 1 if branch else 2
-                return speculate_subgraph(
-                    args[ix], sub_args, graph_checkpoint, checkpoint
-                )
+                try:
+                    # NB: 0 is predicate
+                    ix = 1 if branch else 2
+                    return speculate_subgraph(
+                        args[ix], operands, graph_checkpoint, checkpoint
+                    )
+                except TypeError as e:
+                    raise UserError(
+                        UserErrorType.COND_OP_RESTRICTION,
+                        f"{UserErrorType.COND_OP_RESTRICTION.name}. {str(e)}",
+                    )
 
             (
                 true_r,
@@ -1007,7 +1019,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                [a.as_proxy() for a in sub_args],
+                [a.as_proxy() for a in operands],
             )
             # TODO: assert that the true/false return values are
             # consistent

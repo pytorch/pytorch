@@ -42,13 +42,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .config_utils import config
-from .exc import (
-    BackendCompilerFailed,
-    unimplemented,
-    Unsupported,
-    UserError,
-    UserErrorType,
-)
+from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -2041,10 +2035,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
-            raise UserError(
-                UserErrorType.ANTI_PATTERN,
-                "{}.\n  func = {}, args = {} kwargs = {}".format(
-                    e, func.get_code(), args, kwargs
+            raise TypeError(
+                "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
+                    reason=str(e),
+                    func=func.get_code(),
+                    args=[arg.python_type() for arg in args],
+                    kwargs=kwargs,
                 ),
             )
 
