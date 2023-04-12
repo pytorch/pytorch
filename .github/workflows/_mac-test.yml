@@ -18,6 +18,12 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      python-version:
+        required: false
+        type: string
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
       arch:
         required: true
         type: string
@@ -106,19 +112,10 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Setup miniconda (x86, py3.8)
-        if: ${{ runner.arch == 'X64' }}
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.8
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
-
-      - name: Setup miniconda (arm64, py3.9)
-        if: ${{ runner.arch == 'ARM64' }}
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
-        with:
-          python-version: 3.9
+          python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
@@ -165,6 +162,9 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
+          # shellcheck disable=SC1090
+          set -ex
+
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
           # sanitize the input commit message and PR body here:
@@ -185,11 +185,11 @@ jobs:
             export PATH="$CONDA_ENV/bin":$PATH
           fi
 
-          # DEBUG
-          ${CONDA_RUN} python3 --version
-          ${CONDA_RUN} which python
-          ${CONDA_RUN} which python3
-          echo "${PATH}"
+          # Print out some information about the test environment
+          ${CONDA_RUN} which python3 || true
+          ${CONDA_RUN} python3 --version || true
+          ${CONDA_RUN} which python || true
+          ${CONDA_RUN} python --version || true
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .ci/pytorch/macos-test.sh

@@ -27,7 +27,7 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
-      python_version:
+      python-version:
         required: false
         type: string
         default: "3.8"
@@ -99,7 +99,7 @@ jobs:
         if: inputs.environment-file == ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: ${{ inputs.python_version }}
+          python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
@@ -109,7 +109,7 @@ jobs:
         if: inputs.environment-file != ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: ${{ inputs.python_version }}
+          python-version: ${{ inputs.python-version }}
           environment-file: ${{ inputs.environment-file }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
