@@ -298,10 +298,10 @@ struct RandIntBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static Tensor apply(int64_t high, SymIntArrayRef shape, T... extra_args) {
+  static Tensor apply(c10::SymInt high, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_wrapper<F, Func, T...>),
                                 &rand_int_wrapper<F, Func, T...>,
-                                int64_t, T...>(shape, high, std::forward<T>(extra_args)...);
+                                c10::SymInt, T...>(shape, high, std::forward<T>(extra_args)...);
   }
 };
 
