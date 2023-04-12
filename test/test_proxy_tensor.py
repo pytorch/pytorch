@@ -1329,6 +1329,22 @@ make_fx_failures = {
     xfail('nanquantile'),
     xfail('narrow'),
 
+    # many complex operators incorrect striding, metadata
+    xfail('fft.fft', ''),
+    xfail('fft.hfft2', ''),
+    xfail('fft.hfft', ''),
+    xfail('fft.hfftn', ''),
+    xfail('fft.ifft', ''),
+    xfail('fft.ihfft2', ''),
+    xfail('fft.ihfft', ''),
+    xfail('fft.ihfftn', ''),
+    xfail('fft.irfft2', ''),
+    xfail('fft.irfft', ''),
+    xfail('fft.irfftn', ''),
+    xfail('fft.rfft2', ''),
+    xfail('fft.rfft', ''),
+    xfail('fft.rfftn', ''),
+
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
     xfail('sparse.mm', 'reduce'),
