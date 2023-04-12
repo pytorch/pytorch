@@ -85,7 +85,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         def fn2(x):
             return x.sin()
 
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def fn1(x):
             x = x.sigmoid()
             return fn2(x.cos())

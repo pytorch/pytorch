@@ -1493,7 +1493,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
 
   if (compute_pivots) {
     Tensor pivots_cpu = at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
-    auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
+    auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
       int* pivots_working_ptr = &pivots_data[i * pivots_stride];
@@ -1809,7 +1809,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
   // The driver routine geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
   Tensor tau_cpu = at::empty(tau.sizes(), tau.options().device(at::kCPU).pinned_memory(true));
-  scalar_t* tau_data = tau_cpu.mutable_data_ptr<scalar_t>();
+  scalar_t* tau_data = tau_cpu.data_ptr<scalar_t>();
   scalar_t* work_data = nullptr; // workspace is not needed for geqrf2_gpu
 
   magma_int_t info = 0;
@@ -2044,7 +2044,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
   if (input.is_complex()) {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
-    rwork_data = rwork.mutable_data_ptr<value_t>();
+    rwork_data = rwork.data_ptr<value_t>();
   }
 
   // call magmaEig once to get the optimal size of work_data
@@ -2054,7 +2054,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 
   magma_int_t lwork = std::max<magma_int_t>(1, static_cast<magma_int_t>(real_impl<scalar_t, value_t>(work_query)));
   Tensor work = at::empty({lwork}, input.dtype());
-  auto work_data = work.mutable_data_ptr<scalar_t>();
+  auto work_data = work.data_ptr<scalar_t>();
 
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
@@ -2596,7 +2596,7 @@ static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
   auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
   auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
   Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
-  auto* hwork_ptr = hwork.mutable_data_ptr<scalar_t>();
+  auto* hwork_ptr = hwork.data_ptr<scalar_t>();
 
   // MAGMA requires infos tensor to live on CPU
   infos = infos.to(at::kCPU);
