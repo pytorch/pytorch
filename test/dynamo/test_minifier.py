@@ -313,12 +313,12 @@ class MinifierTests(MinifierTestBase):
     def test_dynamo_config_serialization(self):
         run_code = textwrap.dedent(
             """\
-            import torch._dynamo.config
+            import torch._dynamo
             torch._dynamo.config.cache_size_limit = 55
             data = torch._dynamo.config.save_config()
             torch._dynamo.config.cache_size_limit = 3
             torch._dynamo.config.repro_after = "dynamo"
-            torch._dynamo.config.load_config(data)
+            torch._dynamo.config = torch._dynamo.config.load_config(data)
             assert torch._dynamo.config.cache_size_limit == 55
             assert torch._dynamo.config.repro_after == "dynamo"
         """
