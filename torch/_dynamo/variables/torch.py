@@ -782,6 +782,7 @@ class TorchHigherOrderOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -836,7 +837,7 @@ class TorchHigherOrderOperator(VariableTracker):
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
             tx.output.graphargs = []
-            tx.output.name_to_input.clear()
+            tx.output.input_name_to_proxy.clear()
 
             args = []
             # One argument to graph per sub_args
@@ -886,9 +887,12 @@ class TorchHigherOrderOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-
             assert len(args) == 4
-            assert type(args[0]) in (TensorVariable, SymNodeVariable), str(
+            assert type(args[0]) in (
+                TensorVariable,
+                SymNodeVariable,
+                ConstantVariable,
+            ), str(
                 type(args[0])
             )  # predicate
             assert isinstance(

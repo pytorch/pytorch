@@ -25,12 +25,12 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides, pattern_matcher
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
+from .fx_passes.post_grad import post_grad_passes
 from .graph import GraphLowering
-from .mkldnn import convert_outplace_to_inplace
 from .utils import (
     developer_warning,
     get_dtype_size,
@@ -84,6 +84,7 @@ def index_expanded_dims(t, expanded_dims):
 def complex_memory_overlap(t):
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
+    t = index_expanded_dims(t, get_expanded_dims(t))
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
@@ -198,7 +199,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        pattern_matcher.post_grad_passes(gm)
+        post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -405,6 +406,13 @@ def static_input(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
+def index_expanded_dims_and_copy_(dst, src, expanded_dims):
+    "Index into expanded dimensions of both dst and src then copy_"
+    dst = index_expanded_dims(dst, expanded_dims)
+    src = index_expanded_dims(src, expanded_dims)
+    dst.copy_(src)
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
@@ -412,17 +420,22 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
     assert isinstance(inputs, (list, tuple))
-    static_inputs = [
-        static_input(x).copy_(x.detach())
-        if idx not in static_input_idxs
-        else x.detach()
-        for idx, x in enumerate(inputs)
-    ]
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
         for idx, x in enumerate(inputs)
     ]
+
+    # allocate static tensor inputs
+    static_inputs = [
+        static_input(x) if idx not in static_input_idxs else x.detach()
+        for idx, x in enumerate(inputs)
+    ]
+
+    # copy over input values for fresh allocations
+    for idx, (x, expanded_dims) in enumerate(zip(inputs, inps_expanded_dims)):
+        if idx not in static_input_idxs:
+            index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
     # warmup
     torch.cuda.synchronize()
@@ -455,9 +468,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
                     # TODO - could make one single op of multiple slices
                     # and avoid dispatch.
                     # Could also pre-index the `dst` tensors
-                    dst = index_expanded_dims(dst, expanded_dims)
-                    src = index_expanded_dims(src, expanded_dims)
-                    dst.copy_(src)
+                    index_expanded_dims_and_copy_(dst, src, expanded_dims)
             new_inputs.clear()
             graph.replay()
             return static_outputs
@@ -469,9 +480,10 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
         def run(new_inputs):
             for idx in copy_indices:
-                src = index_expanded_dims(static_inputs[idx], inps_expanded_dims[idx])
-                dst = index_expanded_dims(new_inputs[idx], inps_expanded_dims[idx])
-                dst.copy_(src)
+                expanded_dims = inps_expanded_dims[idx]
+                index_expanded_dims_and_copy_(
+                    static_inputs[idx], new_inputs[idx], expanded_dims
+                )
             new_inputs.clear()
             graph.replay()
             return static_outputs
@@ -671,10 +683,6 @@ def compile_fx(
             joint_graph_passes(model)
 
         fixed = len(example_inputs) - num_example_inputs
-        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
-        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
-        # implementation is used if available.
-        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
@@ -825,7 +833,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
 
 def handle_dynamo_export_graph(gm, inputs, compile_gm):
     """
-    `torch._dynamo.export` embeds pytrees in the FX graph codgen object,
+    `torch._dynamo.export` embeds pytrees in the FX graph codegen object,
     convert that to a normal FX graph so inductor can compile it.
     """
     codegen = gm.graph._codegen
