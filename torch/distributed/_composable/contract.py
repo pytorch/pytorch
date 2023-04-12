@@ -11,7 +11,7 @@ from torch.distributed._composable_state import _State
 # properties.
 # TODO: since all composable distributed features can share the same slot.
 class _StateKey(str):
-    # Make _StateKey as str to satify the assumption that object.__dict__.keys()
+    # Make _StateKey as str to satisfy the assumption that object.__dict__.keys()
     # are strings.
     def __new__(cls, string="__composable_api_state_key"):
         return super().__new__(cls, f"{string}_{str(uuid.uuid4())}")
@@ -152,9 +152,21 @@ def contract(state_cls: Type[_State] = _State):
                         f"New FQNs: {new_only}"
                     )
 
-            check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()), "Check parameters, ")
-            check_fqn(list(orig_named_buffers.keys()), list(new_named_buffers.keys()), "Check buffer, ")
-            check_fqn(list(orig_named_modules.keys()), list(new_named_modules.keys()), "Check modules, ")
+            check_fqn(
+                list(orig_named_params.keys()),
+                list(new_named_params.keys()),
+                "Check parameters, ",
+            )
+            check_fqn(
+                list(orig_named_buffers.keys()),
+                list(new_named_buffers.keys()),
+                "Check buffer, ",
+            )
+            check_fqn(
+                list(orig_named_modules.keys()),
+                list(new_named_modules.keys()),
+                "Check modules, ",
+            )
 
             # TODO: a stricter verification should also reject changing module
             # types and monkey-patching forward() method implementations.

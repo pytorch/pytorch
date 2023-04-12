@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from unittest import skip
+
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import run_tests
@@ -25,6 +27,9 @@ class DTensorInitOpsTest(DTensorTestBase):
         self.assertEqual(local_tensor_clone, dtensor.to_local())
 
     @with_comms
+    @skip(
+        "testing RNG based ops on gpu is moved to test/distributed/_tensor/test_random_ops.py"
+    )
     def test_init_ops(self):
         self._run_init_op(
             torch.nn.init.kaiming_uniform_,
@@ -38,7 +43,6 @@ class DTensorInitOpsTest(DTensorTestBase):
 
 
 class DTensorConstructorTest(DTensorTestBase):
-
     @property
     def world_size(self):
         return 4
@@ -111,9 +115,9 @@ class DTensorConstructorTest(DTensorTestBase):
     @with_comms
     def test_zeros_submesh(self):
         # default world_size is 4
-        # construct a cuda device 1d mesh
+        # construct a cuda device 1d mesh, with no sub pg initialized
         sub_mesh_list = [0, 3]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list)
+        mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
         placements = [Shard(0)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
@@ -127,7 +131,7 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor.size(), torch.Size([0]))
             self.assertEqual(local_tensor, torch.tensor([]))
 
-        # construct a cuda device 1d mesh: unevenly
+        # construct a cuda device 1d mesh: unevenly, with subpg initialized
         sub_mesh_list = [0, 1, 3]
         mesh = DeviceMesh(self.device_type, sub_mesh_list)
         placements = [Shard(0)]
@@ -147,9 +151,9 @@ class DTensorConstructorTest(DTensorTestBase):
             self.assertEqual(local_tensor.size(), torch.Size([0]))
             self.assertEqual(local_tensor, torch.tensor([]))
 
-        # construct a cuda device 2d mesh
+        # construct a cuda device 2d mesh, with no subpg initialized
         sub_mesh_list = [[0], [3]]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list)
+        mesh = DeviceMesh(self.device_type, sub_mesh_list, _init_process_groups=False)
         placements = [Shard(0), Shard(1)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)

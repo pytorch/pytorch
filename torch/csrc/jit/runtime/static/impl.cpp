@@ -27,6 +27,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
+#include <cstdint>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -55,6 +56,12 @@ namespace torch {
 namespace jit {
 
 namespace {
+
+std::string iValueToString(const c10::IValue& val) {
+  std::ostringstream oss;
+  oss << val;
+  return oss.str();
+}
 
 bool allArgsAreTensors(const Node* node) {
   const auto& inputs = node->inputs();
@@ -395,7 +402,7 @@ ManagedTensorRanges::ManagedTensorRanges(
   const c10::FastSet<const Value*> graph_inputs(
       block.inputs().begin(), block.inputs().end());
 
-  const auto num_nodes = nodes.size();
+  const auto num_nodes = static_cast<uint32_t>(nodes.size());
   for (const auto i : c10::irange(num_nodes)) {
     auto* node = nodes[i];
     for (auto* input : node->inputs()) {
@@ -613,7 +620,7 @@ size_t StaticModule::prepareBlockInfo(
     c10::FastMap<const Value*, uint32_t>& value_to_index) {
   block_infos_.emplace(block, BlockInfo(start_idx, *block));
 
-  const auto num_inputs = block->inputs().size();
+  const auto num_inputs = static_cast<uint32_t>(block->inputs().size());
   for (const auto i : c10::irange(num_inputs)) {
     value_to_index.emplace(block->inputs()[i], start_idx + i);
   }
@@ -634,7 +641,7 @@ size_t StaticModule::prepareBlockInfo(
         cur_idx,
         " would overflow 2-byte index storage");
 
-    const auto num_outputs = node->outputs().size();
+    const auto num_outputs = static_cast<uint32_t>(node->outputs().size());
     for (const auto i : c10::irange(num_outputs)) {
       value_to_index.emplace(node->outputs()[i], cur_idx + i);
     }
@@ -720,8 +727,9 @@ size_t StaticModule::prepareStaticNodeInfos(
       node_idx +=
           prepareStaticNodeInfos(sub_block, value_to_index, alias_db, node_idx);
     }
-    ProcessedNodeInputs input_indices(node->inputs().size());
-    for (const auto input_idx : c10::irange(node->inputs().size())) {
+    const auto num_outputs = static_cast<uint32_t>(node->inputs().size());
+    ProcessedNodeInputs input_indices(num_outputs);
+    for (const auto input_idx : c10::irange<uint32_t>(num_outputs)) {
       auto* input = node->inputs()[input_idx];
       auto input_ivalue_idx = value_to_index.at(input);
       TORCH_CHECK(
@@ -751,6 +759,9 @@ size_t StaticModule::prepareStaticNodeInfos(
 
   return node_idx - node_start;
 }
+
+BlockInfo::BlockInfo(uint32_t input_idx, Block& block)
+    : input_idx_(input_idx), block_(block) {}
 
 void BlockInfo::set_nodes(
     std::vector<StaticNodeInfo> nodes,
@@ -782,7 +793,8 @@ void BlockInfo::prepare_for_memory_planner(
       continue;
     }
     auto outputs = pnode.node()->outputs();
-    for (const auto i : c10::irange(outputs.size())) {
+    const auto num_outputs = static_cast<uint32_t>(outputs.size());
+    for (const auto i : c10::irange(num_outputs)) {
       const Value* out_v = outputs[i];
       // Types are stored in the underlying TorchScript IR
       bool is_tensor_type = out_v->type()->castRaw<TensorType>();
@@ -934,18 +946,18 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
   }
   TORCH_CHECK(
       arg.type()->isSubtypeOf(schema_arg.type()),
-      c10::to_string(arg.type()),
+      arg.type()->annotation_str(),
       " is not a subtype of ",
-      c10::to_string(schema_arg.type()),
-      "; schema arg name: ",
-      schema_arg.name());
+      schema_arg.type()->annotation_str(),
+      "; schema arg name: '",
+      schema_arg.name(),
+      "', ivalue: ",
+      iValueToString(arg));
 }
 } // namespace
 
 template <typename IValueList>
-void BlockRunner::set_inputs(
-    IValueList&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+void BlockRunner::set_inputs(IValueList&& args, const KeywordArgs& kwargs) {
   const auto& schema = static_module_.schema();
   if (first_input_is_self_) {
     Input(0) = static_module_.module()._ivalue();
@@ -972,8 +984,8 @@ void BlockRunner::set_inputs(
         " inputs for schema ",
         schema ? schema->name() : "(not available)");
 
-    for (size_t i = 0; i < args.size(); ++i) {
-      set_arg(i, std::forward<IValueList>(args));
+    for (const auto i_arg : c10::irange(args.size())) {
+      set_arg(i_arg, std::forward<IValueList>(args));
     }
     return;
   }
@@ -989,27 +1001,28 @@ void BlockRunner::set_inputs(
       std::to_string(schema_args.size() - 1),
       " for schema ",
       schema->name());
-  for (size_t i = 0; i < schema_args.size() - 1; ++i) {
-    // Start at 1 since the schema always contains `self`.
-    const auto& schema_arg = schema_args[i + 1];
 
-    if (i < args.size()) {
-      check_type(schema_arg, args[i]);
-      set_arg(i, std::forward<IValueList>(args));
+  for (const auto i_arg : c10::irange(1, schema_args.size())) {
+    // Start at 1 since the schema always contains `self`.
+    const auto& schema_arg = schema_args[i_arg];
+
+    if (i_arg - 1 < args.size()) {
+      check_type(schema_arg, std::forward<IValueList>(args)[i_arg - 1]);
+      set_arg(i_arg - 1, std::forward<IValueList>(args));
       continue;
     }
 
     auto it = kwargs.find(schema_arg.name());
     if (it != kwargs.end()) {
       check_type(schema_arg, it->second);
-      set_arg(i, it->second);
+      set_arg(i_arg - 1, it->second);
       ++consumed_kwargs;
       continue;
     }
 
     auto maybe_default_val = schema_arg.default_value();
     if (maybe_default_val) {
-      set_arg(i, *maybe_default_val);
+      set_arg(i_arg - 1, *maybe_default_val);
       continue;
     }
 
@@ -1017,6 +1030,8 @@ void BlockRunner::set_inputs(
         false,
         "Static runtime is missing required kwarg ",
         schema_arg.name(),
+        " i_arg: ",
+        std::to_string(i_arg),
         " for schema ",
         schema->name());
   }
@@ -1045,7 +1060,8 @@ namespace {
 
 void destroyNodeOutputs(ProcessedNode& p_node) {
   const auto borrows_outputs = borrowsOutputs(p_node.node()->kind());
-  for (const auto i : c10::irange(p_node.num_outputs())) {
+  const auto num_outputs = static_cast<uint32_t>(p_node.num_outputs());
+  for (const auto i : c10::irange<uint32_t>(num_outputs)) {
     auto& output = p_node.Output(i);
     if (doesNotHeapAllocateWhenStoredInIValue(*output.type())) {
       continue;
@@ -1179,7 +1195,8 @@ void BlockRunner::verify_and_correct_memory_overlap(ProcessedNode& n) {
       n.verify_and_correct_memory_overlap();
     } else {
       bool overlap_detected_with_fast_check = false;
-      for (size_t i = 0; i < n.outputs().size(); i++) {
+      const auto n_outputs = static_cast<uint32_t>(n.outputs().size());
+      for (auto i : c10::irange(n_outputs)) {
         auto& output = n.Output(i);
         if (output.isTensor()) {
           overlap_detected_with_fast_check |=
@@ -1237,7 +1254,7 @@ void BlockRunner::Deallocator::cleanupImpl() {
     block_runner_.planner_->deallocate();
   } else {
     // This is the first run, and it didn't finish, so we can't use a
-    // `MemoryPlanner` to deallocate stuff. Just reset everything mannually.
+    // `MemoryPlanner` to deallocate stuff. Just reset everything manually.
     block_runner_.resetMemory();
   }
   // clean up owning refs of input tensors
@@ -1403,6 +1420,8 @@ std::string generate_latency_json(const std::string& label, double millis) {
   json["value"] = millis;
   return "PyTorchObserver " + folly::toJson(json);
 #else
+  (void)label;
+  (void)millis;
   return "";
 #endif
 }
@@ -1412,8 +1431,8 @@ std::string generate_latency_json(const std::string& label, double millis) {
 void BlockRunner::benchmark(
     const std::vector<std::vector<c10::IValue>>& args_list,
     const std::vector<KeywordArgs>& kwargs_list,
-    const int warmup_runs,
-    const int main_runs,
+    const uint32_t warmup_runs,
+    const uint32_t main_runs,
     bool print_per_node_time,
     bool generate_ai_pep_output) {
   TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
@@ -1427,7 +1446,8 @@ void BlockRunner::benchmark(
       benchmark_individual_ops(args_list, kwargs_list, warmup_runs, main_runs);
 
   if (print_per_node_time) {
-    for (const auto i : c10::irange(nodes_.size())) {
+    const auto num_nodes = static_cast<uint32_t>(nodes_.size());
+    for (const auto i : c10::irange(num_nodes)) {
       const Node* node = nodes_[i].node();
       std::cout << "Node #" << i << ": " << results.time_per_node[i]
                 << " ms/iter, ";
@@ -1512,13 +1532,13 @@ void BlockRunner::benchmark(
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
             << results.out_nodes_count << "/" << results.total_nodes_count
             << " ("
-            << 100.0 * (results.out_nodes_count) /
+            << 100.0 * static_cast<float>(results.out_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << std::endl;
   std::cout << "Total number of nodes not covered by SR/total number of nodes: "
             << unsupported_nodes_count << "/" << results.total_nodes_count
             << " ("
-            << 100.0 * (unsupported_nodes_count) /
+            << 100.0 * static_cast<float>(unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << std::endl;
 
@@ -1534,16 +1554,17 @@ void BlockRunner::benchmark(
 float BlockRunner::benchmark_model(
     const std::vector<std::vector<c10::IValue>>& args_list,
     const std::vector<KeywordArgs>& kwargs_list,
-    const int warmup_runs,
-    const int main_runs) {
-  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+    const unsigned int warmup_runs,
+    const unsigned int main_runs) {
+  TORCH_CHECK(main_runs >= 1);
   TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
 
   const bool is_kwargs_empty = kwargs_list.empty();
   const KeywordArgs empty_kwargs;
-  for (const auto i : c10::irange(warmup_runs)) {
-    (void)i; // Suppress unused variable warning
-    for (const auto j : c10::irange(args_list.size())) {
+  for (const auto _n_run : c10::irange(warmup_runs)) {
+    (void)_n_run; // Suppress unused variable warning
+    const auto num_args = static_cast<uint32_t>(args_list.size());
+    for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
       if (manage_output_tensors_enabled_) {
         deallocateOutputTensors();
@@ -1551,9 +1572,10 @@ float BlockRunner::benchmark_model(
     }
   }
   caffe2::Timer timer;
-  for (const auto i : c10::irange(main_runs)) {
-    (void)i; // Suppress unused variable warning
-    for (const auto j : c10::irange(args_list.size())) {
+  for (const auto _n_run : c10::irange(main_runs)) {
+    (void)_n_run; // Suppress unused variable warning
+    const auto num_args = static_cast<uint32_t>(args_list.size());
+    for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
       if (manage_output_tensors_enabled_) {
         deallocateOutputTensors();
@@ -1561,15 +1583,18 @@ float BlockRunner::benchmark_model(
     }
   }
   float millis = timer.MilliSeconds();
-  return millis / (static_cast<float>(main_runs) * args_list.size());
+  return millis /
+      (static_cast<float>(main_runs) * static_cast<float>(args_list.size()));
 }
 
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    for (const auto i : c10::irange(iv.toTensor().sizes().size())) {
+    const auto dims = iv.toTensor().sizes();
+    const auto n_dims = static_cast<uint32_t>(dims.size());
+    for (const auto i : c10::irange(n_dims)) {
       std::cout << iv.toTensor().sizes()[i];
-      if (iv.toTensor().sizes().size() > i + 1) {
+      if (n_dims > i + 1) {
         std::cout << ", ";
       }
     }
@@ -1599,14 +1624,16 @@ bool display_ivalue(const IValue& iv) {
 
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
-  for (const auto i : c10::irange(pnode.num_inputs())) {
+  const auto num_inputs = static_cast<uint32_t>(pnode.num_inputs());
+  for (const auto i : c10::irange(num_inputs)) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(pnode.Input(i))) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
   const auto outputs = pnode.outputs();
-  for (const auto i : c10::irange(outputs.size())) {
+  const auto num_outputs = static_cast<uint32_t>(outputs.size());
+  for (const auto i : c10::irange(num_outputs)) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
       std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
@@ -1636,8 +1663,8 @@ void BlockRunner::display_nodes(
 BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
     const std::vector<std::vector<c10::IValue>>& args_list,
     const std::vector<KeywordArgs>& kwargs_list,
-    const int warmup_runs,
-    const int main_runs) {
+    const uint32_t warmup_runs,
+    const uint32_t main_runs) {
   TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
 
@@ -1646,7 +1673,8 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   if (args_list.empty()) {
     // When the given input is empty, compute the op statistics from the given
     // graph without executing it.
-    for (const auto i : c10::irange(nodes_.size())) {
+    const auto num_nodes = static_cast<uint32_t>(nodes_.size());
+    for (const auto i : c10::irange(num_nodes)) {
       const Node* node = nodes_[i].node();
       std::string kind(node->kind().toQualString());
       // TODO: Collect op statistics from sub-blocks here.
@@ -1687,7 +1715,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   results.setup_time = timer.MilliSeconds();
 
   // The first iteration profiles each node's output Tensors' sizes and
-  // initializes the memory planner with the profile information. Folllowing
+  // initializes the memory planner with the profile information. Following
   // iterations just use the already established memory planning.
   timer.Start();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);
@@ -1697,9 +1725,10 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   results.first_iter_time = timer.MilliSeconds();
 
   // warmup runs
-  for (const auto i : c10::irange(warmup_runs - 1)) {
-    (void)i; // Suppress unused variable warning
-    for (const auto j : c10::irange(args_list.size())) {
+  for (const auto _n_run : c10::irange(warmup_runs)) {
+    (void)_n_run; // Suppress unused variable warning
+    const auto num_args = static_cast<uint32_t>(args_list.size());
+    for (const auto j : c10::irange(num_args)) {
       operator()(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
       if (manage_output_tensors) {
         deallocateOutputTensors();
@@ -1710,8 +1739,8 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   // main runs
   for (const auto i : c10::irange(main_runs)) {
     (void)i; // Suppress unused variable warning
-
-    for (const auto j : c10::irange(args_list.size())) {
+    const auto num_args = static_cast<uint32_t>(args_list.size());
+    for (const auto j : c10::irange(num_args)) {
       set_inputs(args_list[j], is_kwargs_empty ? empty_kwargs : kwargs_list[j]);
 
       timer.Start();
@@ -1720,8 +1749,8 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
       }
       float millis = timer.MilliSeconds();
       results.memory_alloc_time += millis;
-
-      for (const auto k : c10::irange(nodes_.size())) {
+      const auto num_nodes = static_cast<uint32_t>(nodes_.size());
+      for (const auto k : c10::irange<uint32_t>(num_nodes)) {
         timer.Start();
         nodes_[k].run();
         millis = timer.MilliSeconds();
@@ -1759,8 +1788,9 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
 
   // post processing
   const float num_total_iters =
-      (static_cast<float>(main_runs) * args_list.size());
-  for (const auto i : c10::irange(nodes_.size())) {
+      (static_cast<float>(main_runs) * static_cast<float>(args_list.size()));
+  const auto num_nodes = static_cast<uint32_t>(nodes_.size());
+  for (const auto i : c10::irange(num_nodes)) {
     const Node* node = nodes_[i].node();
     std::string kind = std::string(node->kind().toQualString());
     results.time_per_node[i] /= num_total_iters;
@@ -1789,7 +1819,8 @@ bool BlockRunner::check_for_memory_leak(
     bool output_returned,
     bool recurse_on_sub_blocks) {
   // check for inputs
-  for (const auto i : c10::irange(block_info_.num_inputs())) {
+  const auto num_inputs = static_cast<uint32_t>(block_info_.num_inputs());
+  for (const auto i : c10::irange(num_inputs)) {
     TORCH_CHECK(
         values_[i + block_info_.block_inputs_idx()].isNone(),
         "Input ",
@@ -1797,9 +1828,11 @@ bool BlockRunner::check_for_memory_leak(
         " was not cleaned up");
   }
   c10::FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
-  for (const auto n : c10::irange(nodes_.size())) {
+  const auto num_nodes = static_cast<uint32_t>(nodes_.size());
+  for (const auto n : c10::irange(num_nodes)) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.num_outputs())) {
+    const auto num_outputs = static_cast<uint32_t>(pnode.num_outputs());
+    for (const auto i : c10::irange(num_outputs)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       // subtlety: isManagedOutputTensorValue may give a false
@@ -1875,9 +1908,11 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
   if (!static_module_.opts().manage_output_tensors || !planner_) {
     return true;
   }
-  for (const auto n : c10::irange(nodes_.size())) {
+  const auto num_nodes = static_cast<uint32_t>(nodes_.size());
+  for (const auto n : c10::irange(num_nodes)) {
     auto& pnode = nodes_[n];
-    for (const auto i : c10::irange(pnode.num_outputs())) {
+    const auto num_outputs = static_cast<uint32_t>(pnode.num_outputs());
+    for (const auto i : c10::irange(num_outputs)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
       if (!isManagedOutputTensorValue(val) || !ival->isTensor()) {
@@ -1924,7 +1959,8 @@ void BlockRunner::disableManageOutputTensors() {
   // Reset all IValues and destruct planner_ so that it can be reconstructed in
   // the next run.
   for (auto& n : nodes_) {
-    for (const auto i : c10::irange(n.outputs().size())) {
+    const auto num_outputs = static_cast<uint32_t>(n.outputs().size());
+    for (const auto i : c10::irange(num_outputs)) {
       n.Output(i) = IValue();
     }
   }
@@ -1964,7 +2000,7 @@ ProcessedFunction::ProcessedFunction(
     f_ = [node_op = op.getOperation(node),
           has_var_args = hasVarArgs(node)](ProcessedNode* pnode) mutable {
       std::vector<IValue> stack;
-      const size_t size = pnode->num_inputs();
+      const auto size = static_cast<uint32_t>(pnode->num_inputs());
       stack.reserve(size + has_var_args);
       for (const auto i : c10::irange(size)) {
         stack.emplace_back(pnode->Input(i));
@@ -1974,8 +2010,9 @@ ProcessedFunction::ProcessedFunction(
         stack.emplace_back(static_cast<int>(size));
       }
       node_op(stack);
-      TORCH_DCHECK_EQ(stack.size(), pnode->num_outputs());
-      for (const auto i : c10::irange(pnode->num_outputs())) {
+      const auto num_outputs = static_cast<uint32_t>(pnode->num_outputs());
+      TORCH_DCHECK_EQ(stack.size(), num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
         pnode->Output(i) = std::move(stack[i]);
       }
     };
@@ -2005,8 +2042,10 @@ StaticNodeInfo::StaticNodeInfo(
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
   std::vector<IValue> result;
-  result.reserve(inputs_.size());
-  for (const auto idx : c10::irange(num_inputs())) {
+  const auto num_inputs = static_cast<uint32_t>(inputs_.size());
+  result.reserve(num_inputs);
+
+  for (const auto idx : c10::irange(num_inputs)) {
     result.emplace_back(Input(idx));
   }
   return result;
@@ -2081,12 +2120,13 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  for (const auto i : c10::irange(num_outputs())) {
+  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  for (const auto i : c10::irange(n_outputs)) {
     if (!Output(i).isTensor()) {
       continue;
     }
     const auto& out0_t = Output(i).toTensor();
-    for (const auto j : c10::irange(i + 1, num_outputs())) {
+    for (const auto j : c10::irange(i + 1, n_outputs)) {
       if (!Output(j).isTensor()) {
         continue;
       }
@@ -2117,14 +2157,15 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
             << ", num_outputs_: " << num_outputs();
     return true;
   }
-
-  for (const auto i : c10::irange(inputs_.size())) {
+  const auto n_inputs = static_cast<uint32_t>(inputs_.size());
+  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  for (const auto i : c10::irange<uint32_t>(n_inputs)) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const auto j : c10::irange(num_outputs())) {
+    for (const auto j : c10::irange(n_outputs)) {
       const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
@@ -2155,13 +2196,15 @@ bool ProcessedNode::check_and_correct_overlap_with(
 }
 
 void ProcessedNode::verify_and_correct_memory_overlap() {
-  for (const auto i : c10::irange(inputs_.size())) {
+  const auto n_inputs = static_cast<uint32_t>(inputs_.size());
+  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  for (const auto i : c10::irange(n_inputs)) {
     const IValue& in = Input(i);
     if (!in.isTensor()) {
       continue;
     }
     const auto& in_t = in.toTensor();
-    for (const auto j : c10::irange(num_outputs())) {
+    for (const auto j : c10::irange(n_outputs)) {
       auto& output = Output(j);
       if (output.isTensor()) {
         check_and_correct_overlap_with(in_t, output);

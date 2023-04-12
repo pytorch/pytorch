@@ -8,11 +8,11 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
-from .. import config, variables
+from .. import variables
+from ..config_utils import config
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-
 from ..utils import (
     fqn,
     get_fake_value,
@@ -180,6 +180,11 @@ class TensorVariable(VariableTracker):
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
+        # It's hard to get resize_() on graph input work properly across
+        # dynamo/aot/inductor, just fall back.
+        if name == "resize_" and self.source is not None:
+            unimplemented("calling resize_() on graph input")
+
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.
@@ -249,9 +254,19 @@ class TensorVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.getitem_const(dim)
+
         elif name == "size" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.getitem_const(dim)
+
         elif name == "size" and self.size is None and config.dynamic_shapes:
             return wrap_fx_proxy(
                 tx,

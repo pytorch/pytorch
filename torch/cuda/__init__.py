@@ -87,6 +87,14 @@ else:
             return -1
         raise RuntimeError("PyTorch was compiled without CUDA support")
 
+if hasattr(torch._C, '_cuda_maybeExchangeDevice'):
+    _maybe_exchange_device = torch._C._cuda_maybeExchangeDevice
+else:
+    def _maybe_exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without CUDA support")
+
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -305,7 +313,7 @@ class _DeviceGuard:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -325,7 +333,7 @@ class device:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -603,7 +611,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
                 continue
-            # Ambigous candidate
+            # Ambiguous candidate
             if best_match != -1:
                 return -1
             best_match = idx
@@ -660,7 +668,7 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
         visible_devices = _transform_uuid_to_ordinals(cast(List[str], visible_devices), uuids)
-    idx_map = {idx: real_idx for idx, real_idx in enumerate(cast(List[int], visible_devices))}
+    idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})")
     return idx_map[idx]

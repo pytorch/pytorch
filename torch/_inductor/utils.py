@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import dataclasses
 import functools
 import itertools
 import logging
@@ -11,13 +12,15 @@ import sys
 import tempfile
 import textwrap
 import time
+from collections import defaultdict
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
 
 import torch
+from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
@@ -80,7 +83,7 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
-    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    # --amp --only YituTechConvBert --dynamic-shapes
     assert isinstance(numer, int) and isinstance(
         denom, int
     ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
@@ -221,6 +224,13 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
+def pad_listlike(x, size):
+    if len(x) == 1:
+        return type(x)([x[0]]) * size
+    else:
+        return x
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
@@ -238,13 +248,14 @@ def get_fused_kernel_name(node_schedule):
         operator.or_,
         [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
-    if config.triton.descriptive_names == "aten":
+    if config.triton.descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
+        sources = sorted(set(sources))
     elif config.triton.descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
@@ -254,11 +265,35 @@ def get_fused_kernel_name(node_schedule):
                     sources.append(origin.meta["source_fn"])
                 else:
                     sources.append(origin.meta["source_fn"].__name__)
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "inductor_node":
+        sources = [
+            origin.name for origin in all_origins if origin.op == "call_function"
+        ]
     else:
         raise NotImplementedError
-    sources = set(sources)
-    sources = sorted(sources)[: config.kernel_name_max_ops]
+    sources = sources
     return "_".join(["fused"] + sources)
+
+
+def get_kernel_metadata(node_schedule):
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+    )
+    inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
+    original_aten_dict = collections.defaultdict(list)
+    for node in inductor_nodes:
+        if "original_aten" in node.meta:
+            original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
+                node.name
+            )
+    metadata = [
+        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
+    ]
+    for original_aten, nodes in sorted(original_aten_dict.items()):
+        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
+    return "\n".join(metadata)
 
 
 def gather_origins(args, kwargs):
@@ -329,14 +364,29 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = {
+    forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
     }
+    if torch.are_deterministic_algorithms_enabled():
+        forbidden_set.update(
+            {
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
     for node in gm.graph.nodes:
-        if str(node.target) in forbidden_list:
+        if str(node.target) in forbidden_set:
             return True
     return False
 
@@ -386,6 +436,10 @@ def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
 
 
+class LineContext(NamedTuple):
+    context: Any
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -393,19 +447,27 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
+        p = 1
+        linemap = []
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+                continue
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-        return buf.getvalue()
+            p += 1 + line.count("\n")
+        return buf.getvalue(), linemap
+
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self):
         buf = StringIO()
@@ -414,6 +476,8 @@ class IndentedBuffer:
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                continue
             assert isinstance(line, str)
             # backslash implies line continuation
             if line.endswith("\\"):
@@ -433,7 +497,9 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLineBase):
+        if isinstance(line, LineContext):
+            self._lines.append(line)
+        elif isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -459,12 +525,15 @@ class IndentedBuffer:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
             for line in other_code._lines:
-                if line:
+                if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
             for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
+                if isinstance(line, LineContext):
+                    self._lines.append(line)
+                else:
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -510,14 +579,17 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune_gemm mode")
+    sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if sms < 80:  # V100
+        log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
 
-def use_triton_template(layout):
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if enable_int32:
+        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
     return (
         (
             config.max_autotune
@@ -525,7 +597,7 @@ def use_triton_template(layout):
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -563,12 +635,12 @@ def run_and_get_code(fn, *args, **kwargs):
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
         torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
+        result = fn(*args, **kwargs)
+    return result, source_codes
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
+    _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"
@@ -587,25 +659,33 @@ def developer_warning(msg):
         log.info(msg)
 
 
-def get_num_bytes(*args):
+def get_num_bytes(*args, num_in_out_args=0):
     """
     Return the total number of bytes the arguments of tensor type takes.
+
+    For in/out args, tensor sizes are counted twice: once for reading and
+    once for writing.
+
+    The first num_in_out_args arguments are in out tensors.
     """
     return sum(
-        arg.numel() * arg.element_size()
-        for arg in args
+        arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
+        for i, arg in enumerate(args)
         if isinstance(arg, torch.Tensor)
     )
 
 
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
-    import colorama
-
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
-    if ms > 0.012 and gb_per_s < 650:
-        return colorama.Fore.RED + info_str + colorama.Fore.RESET
-    else:
-        return info_str
+    try:
+        import colorama
+
+        if ms > 0.012 and gb_per_s < 650:
+            info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
+    except ImportError:
+        log.warning("Colorama is not installed. Install it if you want colored output")
+
+    return info_str
 
 
 def get_benchmark_name():
@@ -639,6 +719,43 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
+_kernel_category_choices = [
+    "pointwise",
+    "reduction",
+    "persistent_reduction",
+]
+
+
+def get_kernel_category(kernel_mod):
+    """
+    Given the module defining a triton kernel, return the category of the kernel.
+    Cateogry can be one of:
+    - pointwise
+    - reduction
+    - persistent_reduction
+
+    Currently we simply decide the category depending on what decorator is imported
+    by the kernel.
+    """
+    choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
+def get_kernel_category_by_source_code(src_code):
+    """
+    Similar to get_kernel_category but use the source code. Call this API
+    if we have not compile the src_code to module yet.
+    """
+    choices = [ch for ch in _kernel_category_choices if f"@{ch}" in src_code]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
 def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -651,12 +768,33 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     from torch._inductor.codecache import PyCodeCache
 
+    def get_triton_kernel(mod):
+        from torch._inductor.triton_heuristics import CachingAutotuner
+
+        cand_list = [
+            v
+            for k, v in mod.__dict__.items()
+            if k.startswith("triton_") and isinstance(v, CachingAutotuner)
+        ]
+        assert len(cand_list) == 1
+        return cand_list[0]
+
     nfound = 0
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
+
+        triton_kernel = get_triton_kernel(kernel_mod)
+        kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
-        num_gb = get_num_bytes(*args) / 1e9
+        num_in_out_ptrs = len(
+            [
+                arg_name
+                for arg_name in triton_kernel.fn.arg_names
+                if arg_name.startswith("in_out_ptr")
+            ]
+        )
+        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -672,10 +810,13 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             )
 
         bench_result = []
+        kernel_desc = (
+            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
+        )
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
-            print(f"{benchmark_name:20} {kernel_key[:10]}")
+            print(kernel_desc)
             for launcher, ms in bench_result.items():
                 print(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
@@ -683,16 +824,16 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         else:
             ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
             assert (
-                len(kernel_mod.triton_.launchers) == 1
+                len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
-            launcher = kernel_mod.triton_.launchers[0]
+            launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
                     ms,
                     launcher.n_regs,
                     launcher.n_spills,
                     launcher.shared,
-                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
+                    prefix=f"{kernel_desc} ",
                 )
             )
 
@@ -700,4 +841,192 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     if nfound == 0:
         print(
             "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
+        )
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )
+
+
+@contextlib.contextmanager
+def maybe_profile(should_profile, *args, **kwargs):
+    if should_profile:
+        with torch.profiler.profile(*args, **kwargs) as p:
+            yield p
+    else:
+        yield
+
+
+@dataclasses.dataclass
+class ProfileEvent:
+    category: str
+    key: str
+    self_cuda_time_ms: float
+    # the benchmark is run multiple times and we average the count across all the
+    # runs. It should be an integer but define a float just in case.
+    count: float
+
+
+def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
+    def get_self_cuda_time(ev):
+        """
+        ev.self_cuda_time_total is in microsecond. Convert to millisecond.
+        """
+        return ev.self_cuda_time_total / 1000 / nruns
+
+    all_events = defaultdict(list)
+
+    def add_event(ev, category):
+        profile_ev = ProfileEvent(
+            category=category,
+            key=ev.key,
+            self_cuda_time_ms=get_self_cuda_time(ev),
+            count=ev.count / nruns,  # average across all runs
+        )
+        all_events[category].append(profile_ev)
+
+    for ev in event_list:
+        assert not ev.is_legacy, "Don't support the legacy profiler"
+        if ev.device_type == DeviceType.CPU:
+            # ignore the event on CPU side
+            continue
+
+        category = "unknown"
+        if ev.key.startswith("triton_"):
+            if ev.key.startswith("triton_poi"):
+                category = "triton_pointwise"
+            elif ev.key.startswith("triton_red"):
+                category = "triton_reduction"
+            elif ev.key.startswith("triton_per"):
+                category = "triton_persistent_reduction"
+            else:
+                category = "triton_unknown"
+
+        add_event(ev, category)
+
+    def report_category(category, profile_events):
+        from tabulate import tabulate
+
+        profile_events.sort(key=lambda ev: ev.self_cuda_time_ms, reverse=True)
+
+        rows = []
+        total_time = 0.0
+        print(f"\n  == {category} category kernels == ")
+        for ev in profile_events:
+            total_time += ev.self_cuda_time_ms
+            percent = f"{ev.self_cuda_time_ms / wall_time_ms * 100:.2f}%"
+            rows.append([ev.key[:120], ev.self_cuda_time_ms, ev.count, percent])
+        rows.append(
+            ["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"]
+        )
+        print(
+            tabulate(
+                rows, headers=["Kernel", "Self CUDA TIME (ms)", "Count", "Percent"]
+            )
+        )
+        return total_time
+
+    def report():
+        category_list = [
+            "triton_pointwise",
+            "triton_reduction",
+            "triton_persistent_reduction",
+            "triton_unknown",
+            "unknown",
+        ]
+        assert set(all_events.keys()).issubset(
+            set(category_list)
+        ), f"{list(all_events.keys())}"
+
+        per_category_wall_time = {}
+        total_cuda_ms = 0.0
+        for category in category_list:
+            if category in all_events:
+                _time = report_category(category, all_events[category])
+                per_category_wall_time[category] = _time
+                total_cuda_ms += _time
+
+        gpu_busy_percent = f"{total_cuda_ms / wall_time_ms * 100:.2f}%"
+        print(f"\nPercent of time when GPU is busy: {gpu_busy_percent}")
+        print(f"Total wall time {wall_time_ms:.3f} ms")
+
+        # output such a line so we can gather such line from all compiled modules from all
+        # benchmarks and tabulate it!
+        # Columns: benchmark_name, pointwise_percent, reduction_percent, persistent_reduction_percent,
+        #   unknown_category_percent, GPU_busy_percent, wall_time_ms
+        tabulate_line = f"Output for tabulate: {benchmark_name}"
+        for category in category_list:
+            percent = (
+                f"{per_category_wall_time.get(category, 0.0) / wall_time_ms * 100:.2f}%"
+            )
+            tabulate_line += f", {percent}"
+        tabulate_line += f", {gpu_busy_percent}, {wall_time_ms:.3f}ms"
+
+        print(tabulate_line)
+
+    report()
+
+
+def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
+    """
+    This is the function called in __main__ block of a compiled module.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--benchmark-kernels",
+        "-k",
+        action="store_true",
+        help="Whether to benchmark each individual kernels",
+    )
+    parser.add_argument(
+        "--benchmark-all-configs",
+        "-c",
+        action="store_true",
+        help="Whether to benchmark each individual config for a kernel",
+    )
+    parser.add_argument(
+        "--profile",
+        "-p",
+        action="store_true",
+        help="Whether to profile the compiled module",
+    )
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
+    else:
+        times = 10
+        repeat = 10
+        wall_time_ms = (
+            benchmark_compiled_module_fn(times=times, repeat=repeat) / times * 1000
+        )
+
+        if not args.profile:
+            return
+
+        with torch.profiler.profile(record_shapes=True) as p:
+            benchmark_compiled_module_fn(times=times, repeat=repeat)
+
+        path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+        p.export_chrome_trace(path)
+        print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
+        print(f"Chrome trace for the profile is written to {path}")
+        event_list = p.key_averages(group_by_input_shape=True)
+        print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))
+        parse_profile_event_list(
+            benchmark_name, event_list, wall_time_ms, times * repeat
         )

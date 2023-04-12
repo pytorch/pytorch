@@ -7,7 +7,7 @@
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
@@ -65,8 +65,7 @@
 #include <ATen/ops/ones.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 
@@ -524,7 +523,8 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
 SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout,
+               " conversion does not use the specified blocksize ", blocksize.value(), ".");
     }
     if (self.layout() == *layout) {
       return self;
@@ -780,25 +780,31 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       return res;
     };
 
-    const auto lhs = [&]() -> Tensor {
+    using OptTensor = c10::optional<Tensor>;
+    Tensor lhs;
+    OptTensor lhs_hash_opt;
+
+    std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
       if (t.is_coalesced()) {
-        return t;
+        return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
       } else {
         const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
         const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
+        // Probably worth having a dedicated kernel for.
         const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
         const auto res_values = t._values().index_select(0, argsort_indices_hash);
+        const auto indices_hash_sorted = indices_hash.index_select(0, argsort_indices_hash);
         // NOTE: res is not necessariy coalesced, but it is sorted.
         // We mark it as "coalesced" to skip sorting in the intersection kernel.
         auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
-        return res;
+        return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
       }
     }();
 
     const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
 
     auto res = at::empty({0}, t.options());
-    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs);
+    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
     return res._coalesced_(mask.is_coalesced());
   }
 
@@ -844,5 +850,4 @@ Tensor empty_like_sparse_coo(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
