@@ -1585,7 +1585,7 @@ void _scatter_via_index_put(
       {mut_out_contig.dim()},
       TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
     std::memcpy(
-      coord_strides.mutable_data_ptr(),
+      coord_strides.data_ptr(),
       mut_out_contig_strides.data(),
       coord_strides.nbytes());
     coord_strides = coord_strides.to(mut_out_contig.device());
@@ -2125,7 +2125,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
   auto out = at::empty({}, self.options().dtype(kLong));
-  *out.mutable_data_ptr<int64_t>() = thread_count_nonzero[0];
+  *out.data_ptr<int64_t>() = thread_count_nonzero[0];
   return out;
 }
 

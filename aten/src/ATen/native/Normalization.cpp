@@ -248,7 +248,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     TensorIterator iter(reduce_iter);
     for (const auto f : c10::irange(b_begin, b_end)) {
       // compute variance per input
-      iter.unsafe_replace_input(0, in_data + channel_stride * f);
+      iter.unsafe_replace_operand(0, in_data + channel_stride * f);
       accscalar_t var_sum = 0;
       auto mean = static_cast<accscalar_t>(save_mean_a[f]);
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
@@ -406,9 +406,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        reduce_iter_local.unsafe_replace_input(
+        reduce_iter_local.unsafe_replace_operand(
             0, in_data + f * in_channel_stride);
-        reduce_iter_local.unsafe_replace_input(
+        reduce_iter_local.unsafe_replace_operand(
             1, grad_out_data + f * grad_out_channel_stride);
 
         cpu_serial_kernel(reduce_iter_local, [&](const scalar_t i, const scalar_t go) -> void {
@@ -427,8 +427,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
             {
               unary_iter_local.unsafe_replace_operand(
                   0, grad_in_data + f * grad_in_channel_stride);
-              unary_iter_local.unsafe_replace_input(
-                  0, in_data + f * in_channel_stride);
+              unary_iter_local.unsafe_replace_operand(
+                  1, in_data + f * in_channel_stride);
               cpu_serial_kernel(unary_iter_local, [&](const scalar_t i) -> scalar_t {
                 return (i - mean) * k;
               });
@@ -438,9 +438,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
             {
               auto gI_data = grad_in_data + f * grad_in_channel_stride;
               binary_iter_local.unsafe_replace_operand(0, gI_data);
-              binary_iter_local.unsafe_replace_input(0, gI_data);
-              binary_iter_local.unsafe_replace_input(
-                  1, grad_out_data + f * grad_out_channel_stride);
+              binary_iter_local.unsafe_replace_operand(1, gI_data);
+              binary_iter_local.unsafe_replace_operand(
+                  2, grad_out_data + f * grad_out_channel_stride);
               cpu_serial_kernel(binary_iter_local, [&](scalar_t gi, scalar_t go) -> scalar_t {
                 return (go - grad_mean - gi) * invstd * w;
               });
@@ -453,8 +453,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
             {
               unary_iter_local.unsafe_replace_operand(
                   0, grad_in_data + f * grad_in_channel_stride);
-              unary_iter_local.unsafe_replace_input(
-                  0, grad_out_data + f * grad_out_channel_stride);
+              unary_iter_local.unsafe_replace_operand(
+                  1, grad_out_data + f * grad_out_channel_stride);
               cpu_serial_kernel(unary_iter_local, [&](const scalar_t i) -> scalar_t {
                 return i * invstd * w;
               });
