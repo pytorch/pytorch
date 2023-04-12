@@ -104,6 +104,18 @@ static void _cublasAdjustLdLevel3(
       *ldb = std::max<int64_t>(k, 1);
   }
 }
+
+uint8_t _getAlignment(uintptr_t address) {
+  // alignment are in bytes
+  uint8_t alignment = 1;
+  for (; alignment < 32; alignment *= 2) {
+    if (address % (alignment * 2)) {
+      return alignment;
+    }
+  }
+  return alignment;
+}
+
 } // anonymous namespace
 
 namespace at {
@@ -702,6 +714,27 @@ void gemm_and_bias(
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
       &workspaceSize,
       sizeof(workspaceSize)));
+
+  uint8_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
+  uint8_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
+  uint8_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint8_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES,
+      &a_alignment, sizeof(a_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES,
+      &b_alignment, sizeof(b_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+      &c_alignment, sizeof(c_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+      &d_alignment, sizeof(d_alignment)));
 
   auto workspace = at::empty(
       {static_cast<int64_t>(workspaceSize)},
