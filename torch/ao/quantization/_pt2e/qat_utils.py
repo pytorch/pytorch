@@ -74,7 +74,7 @@ def _get_aten_graph_module(
 def _fuse_conv_bn_qat(m: GraphModule):
     """
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
-    the fused QAT subgraph equivalent.
+    the fused QAT subgraph equivalent. The input graph should already be annotated.
     """
     m.graph.eliminate_dead_code()
     m.recompile()
@@ -84,7 +84,7 @@ def _fuse_conv_bn_qat(m: GraphModule):
     match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern)
     m.recompile()
 
-    # Do the thing
+    # Copy over metadata from original subgraph
     for mr in match_and_replacement:
         # Find original conv and bn nodes. These have the metadata we want.
         original_conv_node = None

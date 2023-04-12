@@ -7,13 +7,11 @@ from ._pt2e.utils import (
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
-
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization._pt2e.quantizer import Quantizer
 
 from typing import Tuple, Any, Dict
-
 
 def prepare_pt2e(
     model: GraphModule,
@@ -49,7 +47,6 @@ def prepare_pt2e(
     _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
-
 # TODO: update this to prepare_pt2e after we have a usable quantizer
 # implemented
 def prepare_pt2e_quantizer(
@@ -83,14 +80,12 @@ def prepare_pt2e_quantizer(
     _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
-
 # TODO: update this to prepare_qat_pt2e
 def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
 ):
     return prepare_pt2e_quantizer(model, quantizer, is_qat=True)
-
 
 def convert_pt2e(
     model: GraphModule
