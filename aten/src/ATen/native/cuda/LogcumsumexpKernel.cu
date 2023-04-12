@@ -102,7 +102,11 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
 }
 
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
+#if defined(FBCODE_CAFFE2)
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+#else
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+#endif
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
