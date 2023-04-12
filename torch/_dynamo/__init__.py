@@ -14,12 +14,14 @@ from .eval_frame import (
     run,
     skip,
 )
+from .exc import IncorrectUsage
 from .external_utils import is_compiling
 from .utils import compilation_metrics, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
+    "config",
     "disallow_in_graph",
     "forbid_in_graph",
     "graph_break",
@@ -39,6 +41,8 @@ __all__ = [
     "register_backend",
     "list_backends",
 ]
+
+from .config_utils import config
 
 
 def reset():
@@ -84,6 +88,23 @@ def allow_in_graph(fn):
     return fn
 
 
+def _disallow_in_graph_helper(throw_if_not_allowed):
+    def inner(fn):
+        if isinstance(fn, (list, tuple)):
+            return [disallow_in_graph(x) for x in fn]
+        assert callable(fn), "disallow_in_graph expects a callable"
+        if throw_if_not_allowed and not allowed_functions.is_allowed(fn):
+            raise IncorrectUsage(
+                "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
+                "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
+            )
+        allowed_functions._allowed_function_ids.remove(id(fn))
+        allowed_functions._disallowed_function_ids.add(id(fn))
+        return fn
+
+    return inner
+
+
 def disallow_in_graph(fn):
     """
     Customize which functions TorchDynamo will exclude in the generated
@@ -104,15 +125,10 @@ def disallow_in_graph(fn):
     Will break the graph on `torch.sub`, and give two graphs each with a
     single `torch.add()` op.
     """
-    if isinstance(fn, (list, tuple)):
-        return [disallow_in_graph(x) for x in fn]
-    assert callable(fn), "disallow_in_graph expects a callable"
-    allowed_functions._allowed_function_ids.remove(id(fn))
-    allowed_functions._disallowed_function_ids.add(id(fn))
-    return fn
+    return _disallow_in_graph_helper(throw_if_not_allowed=True)(fn)
 
 
-@disallow_in_graph
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break():
     """Force a graph break"""
     pass
