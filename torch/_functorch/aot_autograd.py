@@ -1294,6 +1294,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     compiled_fn = create_runtime_wrapper(
         compiled_fw,
         runtime_metadata=fw_metadata,
+        indices_of_inps_to_detach=[],
         trace_joint=False,
         keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp
@@ -2095,6 +2096,7 @@ def create_runtime_wrapper(
     compiled_fn,
     *,
     runtime_metadata: ViewAndMutationMeta,
+    indices_of_inps_to_detach: List[int],
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool
@@ -2104,10 +2106,15 @@ def create_runtime_wrapper(
 
     def runtime_wrapper(*args):
         if trace_joint:
+            args_ = list(args)
+            # See Note [Detaching inputs that never need gradients]
+            for idx in indices_of_inps_to_detach:
+                if isinstance(args_[idx], torch.Tensor):
+                    args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_with_args(
                     compiled_fn,
-                    args,
+                    args_,
                     disable_amp=disable_amp,
                 )
         else:
@@ -2321,6 +2328,66 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+
+        # Note [Detaching inputs that never need gradients]
+        # See https://github.com/pytorch/pytorch/issues/97745
+        # Suppose we have a function like this that we want to compile:
+        #
+        # def f(x, y):
+        #     return torch.add(x, y.detach())
+        #
+        # What gradients should we compute for x and y?
+        # By default, AOTAutograd will compute a gradient for **every** input that requires gradients,
+        # and so we'll compute:
+        #    x_grad_input = y
+        #    y_grad_input = None
+        # Does this preserve the semantics of eager mode?
+        # Unfortunately, no.
+        # Doing the above will cause autograd to **continue** to backprop the autograd tape
+        # that was generated from constructing y.
+        #
+        # This is **different** from what would have happened in eager mode.
+        # In eager mode, if we backprop through the output of this function, autograd will only traverse
+        # the bit of the autograd tape corresponding to "x".
+        # In particular, if a user had previously backpropped through y's autograd tape,
+        # And then they try to backprop through the output of the above function,
+        # then we'll hit the dreaded "Trying to backward through the graph a second time" error.
+        #
+        # You might think: If autograd sees that a gradient is None, shouldn't it stop early,
+        # instead of continuing the backprop through the ancestors of that node in the graph?
+        #
+        # Autograd has two passes:
+        # (1) a first pass that traverses the autograd graph and figures out which nodes need to be executed
+        # (2) a second pass that actually goes ahead and executes each node when it becomes ready,
+        #     propagating gradients
+        # By the time we're executing a node and we see that it produces a None, the set of nodes to execute
+        # is already locked-in.
+        #
+        # The fix: instead, we can recognize statically that the graph we're compiling will never contribute
+        # gradients to y, and prevent autograd from trying to traverse y's autograd tape at all.
+        # We can do this by manually detach'ing y before sending it through the `CompiledFunction`.
+        #
+        # Note that this solution is not bulletproof.
+        # It's possible to construct a case where eager may or may have have tried to autograd through y,
+        # depending on the actual grad_outputs that were passed in during the backward.
+        # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
+        # allowing autograd to re-use the graph.
+        #
+        # An example of this case is:
+        # def f(x):
+        #     return x.detach() * 2, x * 3
+        # If we were to only backprop through outs[0], in eager, we would stop
+        # If we backward only on the first output, we shouldn't send a grad through x.
+        # But the custom autograd function doesn't know that: it will materialize zero grads for x * 3
+        # and we will end up with a zero grad at x.
+        # If we later backprop through the second output, this will also require backprop'ing through x.
+        # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
+        _indices_of_inps_to_detach = []
+        bw_outs = [n for n in bw_module.graph.nodes if n.op == "output"][0].args[0]
+        assert len(bw_outs) == len(fw_metadata.input_info)
+        for i, (bw_out) in enumerate(bw_outs):
+            if bw_out is None:
+                _indices_of_inps_to_detach.append(i)
 
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
         aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
@@ -2567,6 +2634,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     compiled_function = create_runtime_wrapper(
         CompiledFunction.apply,
         runtime_metadata=fw_metadata,
+        indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
         keep_input_mutations=False,
         disable_amp=disable_amp

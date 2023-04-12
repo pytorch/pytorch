@@ -902,6 +902,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
 
+    # See https://github.com/pytorch/pytorch/issues/97745
+    def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
+        def f(a, b):
+            c = torch.ones(2, 2)
+            d = torch.ones(2, 2)
+            e = torch.matmul(a, c)
+            g_loss = torch.abs(e - d).mean()
+            g_loss.backward()
+            fake_d_pred = torch.matmul(b, e.detach())
+            d_loss = fake_d_pred.mean()
+            d_loss.backward()
+        a_ref = torch.randn(2, 2, requires_grad=True)
+        b_ref = torch.randn(2, 2, requires_grad=True)
+        out_ref = f(a_ref, b_ref)
+
+        a_test = a_ref.clone().detach().requires_grad_(True)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+        out_test = torch.compile(f, backend="aot_eager")(a_test, b_test)
+
+        self.assertEqual(out_ref, out_test)
+        print(a_ref.grad)
+        print(a_test.grad)
+        self.assertEqual(a_ref.grad, a_test.grad)
+        self.assertEqual(b_ref.grad, b_test.grad)
+
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):
             num_weights = 10
