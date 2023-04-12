@@ -5,9 +5,9 @@ from functools import reduce
 from typing import Optional
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 import torch.nn.functional as F
+from torch._dynamo import config as dynamo_config
 
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import (
@@ -93,11 +93,10 @@ def check_binary_op_kwargs_is_default(node):
     return True
 
 
-class ConvUnary2d(nn.Conv2d):
+class PackedConv2d(nn.Conv2d):
     def __init__(
         self,
         conv: nn.Module,
-        unary: Optional[nn.Module],
         input_size: Optional[list],
     ):
         super().__init__(
@@ -113,17 +112,10 @@ class ConvUnary2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, unary, input_size)
+        self._update_module_params(conv, input_size)
 
-    def _update_module_params(self, conv, unary, input_size):
+    def _update_module_params(self, conv, input_size):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr = "none"
-        self.scalars = []
-        self.algorithm = ""
-        if unary is not None:
-            self.attr, self.scalars, self.algorithm = unary_modules_map[
-                unary.__class__
-            ](unary)
         self.weight = torch.nn.Parameter(
             torch._C._nn.mkldnn_reorder_conv2d_weight(
                 self.weight.to_mkldnn(),
@@ -150,9 +142,9 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                self.attr,
-                self.scalars,
-                self.algorithm,
+                "none",
+                [],
+                "",
             )
         return torch.ops.mkldnn._convolution_pointwise(
             input,
@@ -162,9 +154,9 @@ class ConvUnary2d(nn.Conv2d):
             self.stride,
             self.dilation,
             self.groups,
-            self.attr,
-            self.scalars,
-            self.algorithm,
+            "none",
+            [],
+            "",
         )
 
     def forward(self, input):
@@ -258,8 +250,8 @@ class ConvBinary2d(nn.Conv2d):
         return self._conv_forward(input, other, self.weight, self.bias)
 
 
-class PackedLinear(nn.Linear):
-    def __init__(self, linear: nn.Module, input_size: list):
+class PackedLinearFP32(nn.Linear):
+    def __init__(self, linear: nn.Module, input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -286,10 +278,8 @@ class PackedLinear(nn.Linear):
         return y
 
 
-class LinearUnary(nn.Linear):
-    def __init__(
-        self, linear: nn.Module, unary: Optional[nn.Module], input_size: Optional[list]
-    ):
+class PackedLinearBF16(nn.Linear):
+    def __init__(self, linear: nn.Module, input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -297,17 +287,10 @@ class LinearUnary(nn.Linear):
             linear.weight.device,
             linear.weight.dtype,
         )
-        self._update_module_params(linear, unary, input_size)
+        self._update_module_params(linear, input_size)
 
-    def _update_module_params(self, linear, unary, input_size):
+    def _update_module_params(self, linear, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.attr = "none"
-        self.scalars = []
-        self.algorithm = ""
-        if unary is not None:
-            self.attr, self.scalars, self.algorithm = unary_modules_map[
-                unary.__class__
-            ](unary)
         self.batch_size = (
             reduce(lambda x, y: x * y, input_size[:-1])
             if input_size is not None
@@ -326,9 +309,9 @@ class LinearUnary(nn.Linear):
             input,
             self.packed_weight,
             self.bias,
-            self.attr,
-            self.scalars,
-            self.algorithm,
+            "none",
+            [],
+            "",
         )
         return y
 
@@ -371,11 +354,10 @@ class LinearBinary(nn.Linear):
         return y
 
 
-class ConvTransposeUnary2d(nn.ConvTranspose2d):
+class PackedConvTranspose2d(nn.ConvTranspose2d):
     def __init__(
         self,
         conv_transpose: nn.Module,
-        unary: Optional[nn.Module],
         input_size: Optional[list],
     ):
         super().__init__(
@@ -392,13 +374,10 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
             conv_transpose.weight.device,
             conv_transpose.weight.dtype,
         )
-        self._update_module_params(conv_transpose, unary, input_size)
+        self._update_module_params(conv_transpose, input_size)
 
-    def _update_module_params(self, conv_transpose, unary, input_size):
+    def _update_module_params(self, conv_transpose, input_size):
         self.__dict__ = copy.deepcopy(conv_transpose.__dict__)
-        self.attr, self.scalars, self.algorithm = (
-            unary_modules_map[unary.__class__](unary) if unary else ("none", [], "")
-        )
         packed_weight = (
             torch.ops.mkldnn._reorder_convolution_transpose_weight(
                 self.weight.to_mkldnn(),
@@ -430,9 +409,9 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                self.attr,
-                self.scalars,
-                self.algorithm,
+                "none",
+                [],
+                "",
             )
         return torch.ops.mkldnn._convolution_transpose_pointwise(
             input,
@@ -443,9 +422,9 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
             self.stride,
             self.dilation,
             self.groups,
-            self.attr,
-            self.scalars,
-            self.algorithm,
+            "none",
+            [],
+            "",
         )
 
     def forward(self, input):
@@ -454,31 +433,15 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
 
 def packed_conv_eval(conv: nn.Module, input_size: Optional[list]):
     assert not (conv.training), "Fusion only for eval!"
-    return ConvUnary2d(
+    return PackedConv2d(
         conv,
-        None,
         input_size,
     )
 
 
 def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: Optional[list]):
     assert not (conv_transpose.training), "Fusion only for eval!"
-    return ConvTransposeUnary2d(
-        conv_transpose,
-        None,
-        input_size,
-    )
-
-
-def fused_conv_unary_eval(
-    conv: nn.Module, unary: nn.Module, input_size: Optional[list]
-):
-    assert not (conv.training), "Fusion only for eval!"
-    return ConvUnary2d(
-        conv,
-        unary,
-        input_size,
-    )
+    return PackedConvTranspose2d(conv_transpose, input_size)
 
 
 def fused_conv_binary_eval(
@@ -504,32 +467,14 @@ def fused_conv_binary_unary_eval(
 def packed_linear_eval(linear: nn.Module, input_size: Optional[list]):
     assert not (linear.training), "Fusion only for eval!"
     if linear.weight.dtype == torch.bfloat16:
-        return LinearUnary(linear, None, input_size)
-    return PackedLinear(linear, input_size)
-
-
-def fused_linear_unary_eval(
-    linear: nn.Module, unary: nn.Module, input_size: Optional[list]
-):
-    assert not (linear.training), "Fusion only for eval!"
-    return LinearUnary(linear, unary, input_size)
+        return PackedLinearBF16(linear, input_size)
+    return PackedLinearFP32(linear, input_size)
 
 
 def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: Optional[list]):
     assert not (linear.training), "Fusion only for eval!"
     linear_binary = LinearBinary(linear, attr, input_size)
     return linear_binary
-
-
-def fused_conv_transpose_unary_eval(
-    conv_transpose: nn.Module, unary: nn.Module, input_size: Optional[list]
-):
-    assert not (conv_transpose.training), "Fusion only for eval!"
-    return ConvTransposeUnary2d(
-        conv_transpose,
-        unary,
-        input_size,
-    )
 
 
 def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
@@ -832,12 +777,7 @@ def pack_module(gm: torch.fx.GraphModule):
     return gm
 
 
-computation_op_unary_op_fusion_map = {
-    nn.Conv2d: fused_conv_unary_eval,
-    nn.Linear: fused_linear_unary_eval,
-    ConvBinary2d: fused_conv_binary_unary_eval,
-    nn.ConvTranspose2d: fused_conv_transpose_unary_eval,
-}
+computation_op_unary_op_fusion_map = {ConvBinary2d: fused_conv_binary_unary_eval}
 
 
 unary_modules_map = {
