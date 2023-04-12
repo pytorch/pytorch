@@ -873,11 +873,30 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
+                name = self.source.name()
+                if name not in self.tx.output.frame_state:
+                    curr_size = value
+                else:
+                    curr_size = self.tx.output.frame_state[name]
+                    if curr_size is not None and curr_size == value:
+                        pass
+                    else:
+                        curr_size = None
+                self.tx.output.frame_state[name] = curr_size
+
                 # TODO: This should be dynamic, as we in general do not
                 # know if bare integers are actually going to be sizevars
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
-                dynamic_dim = DimDynamic.DUCK
+                if curr_size is None or not config.assume_static_by_default:
+                    dynamic_dim = DimDynamic.DUCK
+                else:  # assume_static_by_default
+                    # TODO: dynamic_dim = DimDynamic.STATIC should work but
+                    # for some reason it doesn't
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
