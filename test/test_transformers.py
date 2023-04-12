@@ -35,8 +35,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
-TEST_CUDA = False
-
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
     r"""
