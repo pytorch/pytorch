@@ -2524,16 +2524,15 @@ torch.cuda.synchronize()
     def test_grad_scale_will_not_overflow(self):
         model = torch.nn.Linear(5, 1).cuda()
         optimizer = torch.optim.Adam(model.parameters())
-        scaler = torch.cuda.amp.GradScaler(growth_interval=1)
-        for _ in range(150):
-            optimizer.zero_grad()
-            x = torch.randn(1, 5).cuda()
-            y = 1e-30 * torch.randn(1, 1).cuda()
-            l = ((model(x) - y)**2).mean()
-            scaler.scale(l).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        assert(scaler._scale is not float('inf') and scaler._scale is not float('nan'))
+        scaler = torch.cuda.amp.GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
+        optimizer.zero_grad()
+        x = torch.randn(1, 5).cuda()
+        y = 1e-30 * torch.randn(1, 1).cuda()
+        l = ((model(x) - y)**2).mean()
+        scaler.scale(l).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
