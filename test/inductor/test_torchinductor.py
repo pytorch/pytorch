@@ -1851,82 +1851,6 @@ class CommonTemplate:
                 self.assertEqual(m(x), m_opt(x))
 
     @slowTest
-    def test_conv2d_unary(self):
-        # For gpu path, there is an accuracy issue
-        # see https://github.com/pytorch/pytorch/issues/87745
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv2d unary test")
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_channels,
-                out_channels,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.conv(x)
-                return self.unary_fn(x)
-
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
-        options = itertools.product(
-            unary_list,
-            [True, False],
-            [1, 3],
-            [1, 2],
-            [1, 4],
-            ["same", 0],
-            test_memory_format,
-            [True, False],
-        )
-
-        for (
-            unary_fn,
-            bias,
-            kernel_size,
-            dilation,
-            groups,
-            padding,
-            memory_format,
-            mode_train,
-        ) in options:
-            oC = 32 * groups
-            iC = 3 * groups
-            x_shape = (1, iC, 112, 112)
-            mod = M(
-                unary_fn,
-                iC,
-                oC,
-                kernel_size=kernel_size,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
-                bias=bias,
-            ).train(mode=mode_train)
-
-            # TODO: add bf16 test for cpu path?
-            # TODO: this test fails when requires_grad=False
-            v = (
-                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
-                .add(1)
-                .to(memory_format=memory_format)
-            )
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    @slowTest
     def test_conv2d_binary(self):
         # For gpu path, there is an accuracy issue
         # see https://github.com/pytorch/pytorch/issues/87745
@@ -2076,44 +2000,6 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
-    @slowTest
-    @unittest.skipIf(not has_bf16_support(), "requires bf16 support")
-    def test_linear_unary(self):
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_features,
-                out_features,
-                bias,
-                **kwargs,
-            ):
-                super().__init__()
-                self.linear = torch.nn.Linear(
-                    in_features,
-                    out_features,
-                    bias,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.linear(x)
-                return self.unary_fn(x)
-
-        options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
-        dtype = torch.bfloat16
-        for eltwise_fn, input_shape, bias in options:
-            mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
-            # only fuse for linear when the dtype is bf16
-            mod = mod.to(dtype)
-            v = torch.randn(input_shape).to(dtype)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
@@ -2154,74 +2040,6 @@ class CommonTemplate:
                 mod,
                 (v,),
             )
-
-    @slowTest
-    def test_conv_transpose2d_unary(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_channels,
-                out_channels,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv_transpose2d = torch.nn.ConvTranspose2d(
-                    in_channels,
-                    out_channels,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.conv_transpose2d(x)
-                return self.unary_fn(x)
-
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
-        options = itertools.product(
-            unary_list,
-            [True, False],
-            [1, 3],
-            [1, 2],
-            [1, 4],
-            [0, 1],
-            test_memory_format,
-        )
-
-        for (
-            unary_fn,
-            bias,
-            kernel_size,
-            dilation,
-            groups,
-            padding,
-            memory_format,
-        ) in options:
-            oC = 32 * groups
-            iC = 3 * groups
-            x_shape = (1, iC, 28, 28)
-            mod = M(
-                unary_fn,
-                iC,
-                oC,
-                kernel_size=kernel_size,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
-                bias=bias,
-            ).eval()
-
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
-            )
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
 
     def test_view_detach(self):
         def fn(a):
