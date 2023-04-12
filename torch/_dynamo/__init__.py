@@ -54,6 +54,9 @@ def reset():
     resume_execution.ContinueExecutionCache.cache.clear()
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
+    import torch
+
+    torch._inductor.cudagraph_trees.reset_cudagraph_trees()
     reset_frame_count()
 
 

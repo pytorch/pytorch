@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Optional.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -10,6 +11,7 @@
 
 #if AT_CUDNN_ENABLED()
 
+#include <ATen/cuda/CUDAGraph.h>
 #include <ATen/native/cudnn/Macros.h>
 
 #endif
@@ -779,6 +781,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+template <typename T>
+using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+
 PyObject* THCPModule_attachOutOfMemoryObserver(
     PyObject* _unused,
     PyObject* observer) {
@@ -1075,6 +1080,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     auto data_ptr = storage_impl->data_ptr().get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
+  });
+
+  m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
   });
 
   m.def(
