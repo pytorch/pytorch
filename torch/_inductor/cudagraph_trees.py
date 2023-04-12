@@ -122,7 +122,7 @@ def clear_cublass_cache():
     A tensor in the cublas workspace would continue to be in use the workspace but would also get allocated
     in the next run. The memory would be in use in two places.
 
-    To solve this, we clear cublass caches before and after warming up or recording. If a workspace is required
+    To solve this, we clear cublas caches before and after warming up or recording. If a workspace is required
     it will be allocated to the cudagraph private pool and accounted for in the allocator for the duration of the
     program. There is no overhead to this on replay since cudagraphs removes allocation overhead.
     """
@@ -131,7 +131,7 @@ def clear_cublass_cache():
 
 @contextlib.contextmanager
 def clear_cublas_manager():
-    "Context manager around clearing cublass caches that will clear on enter and exit"
+    "Context manager around clearing cublas caches that will clear on enter and exit"
     clear_cublass_cache()
     try:
         yield
@@ -1511,7 +1511,7 @@ class CUDAGraphTreeManager:
 
         # the most recently invoked cudagraph wrapping of a function. Will be None
         # when there is no output from a previous recording or execution whose memory
-        # we need to respect in the cuda caching allocaton. If you incremented generation,
+        # we need to respect in the cuda caching allocation. If you incremented generation,
         # this will also be none, as ignore those allocations.
         self.current_node: Optional[CUDAGraphNode] = None
 
