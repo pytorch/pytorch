@@ -1499,10 +1499,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 )
             else:
                 logger.warning(
-                    "%s does not support the argument "
+                    f"{self._optim_constructor} does not support the argument "
                     "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
-                    "error due to an empty parameter list",
-                    self._optim_constructor
+                    "error due to an empty parameter list"
                 )
                 self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
 
@@ -1513,17 +1512,15 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     self._bucket_assignments_per_rank[self.global_rank]
                 )
                 logger.info(
-                    "rank %s with %s parameters "
-                    "across %s buckets",
-                    self.global_rank, local_numel, num_assigned_buckets
+                    f"rank {self.global_rank} with {local_numel} parameters "
+                    f"across {num_assigned_buckets} buckets"
                 )
                 if self.global_rank == 0:
                     logger.info(
-                        "%s DDP "
-                        "buckets and "
-                        "%s bucket "
-                        "assignments",
-                        len(self._overlap_info.params_per_bucket), self._overlap_info.num_bucket_assignments
+                        f"{len(self._overlap_info.params_per_bucket)} DDP "
+                        f"buckets and "
+                        f"{self._overlap_info.num_bucket_assignments} bucket "
+                        "assignments"
                     )
         else:
             # NOTE: Passing `param_groups` into the local optimizer constructor
@@ -1639,10 +1636,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 # equivalent if `overlap_with_ddp=True`
                 optim_constructor = functional_optim_map[optimizer_class]
                 logger.info(
-                    "Using the functional optimizer %s "
-                    "instead of %s since "
-                    "`overlap_with_ddp=True`",
-                    optim_constructor, optimizer_class
+                    f"Using the functional optimizer {optim_constructor} "
+                    f"instead of {optimizer_class} since "
+                    "`overlap_with_ddp=True`"
                 )
                 return optim_constructor
             else:

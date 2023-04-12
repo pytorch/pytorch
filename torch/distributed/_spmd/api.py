@@ -27,7 +27,6 @@ import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._subclasses import FakeTensorMode
 from torch.distributed._spmd.distribute import (
     _convert_to_distributed,
     distribute,
@@ -233,10 +232,7 @@ def _dtensor_expand(
             inps.append(torch.empty(0))
             schemas.append(shard_schema)
 
-    with FakeTensorMode(allow_non_fake_inputs=True):
-        fake_inps = [torch.empty_like(inp) for inp in inps]
-
-    return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
+    return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)[0]
 
 
 @contextmanager
@@ -580,11 +576,11 @@ def compile(
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
+                output = compiled_obj.gm(*flat_inps)[0]
                 if first_iter and gm_transformation:
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
                     compiled_obj.gm = gm_transformation(compiled_obj.gm)
-                output = compiled_obj.gm(*flat_inps)[0]
                 return output
 
         return wrapper

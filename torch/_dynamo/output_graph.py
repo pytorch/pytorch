@@ -76,7 +76,6 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 class OutputGraphState(NamedTuple):
     graphargs: List[GraphArg]
-    input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
@@ -202,9 +201,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
-        # Map from graph input's `Source` to its `VariableTracker` to
-        # de-duplicate graph inputs by source and reuse the tracker
-        self.input_source_to_var: Dict[Source, VariableTracker] = {}
         self.export = export
         self.export_constraints = export_constraints
         # In export mode, we force the shape_env to strictly disallow any constraining
@@ -267,12 +263,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.cleanups: List[CleanupHook] = []
         self.should_exit = False
         self.random_values_var = None
+        self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
-
-        # Map from graph input name to its placeholder proxy object, where the
-        # map's keys give all current placeholder node names and can be used to
-        # create unique node names
-        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+        # Enables creating unique node names by tracking
+        # all current placeholder node names
+        self.name_to_input: OrderedDict[
+            str, Optional[fx.Proxy]
+        ] = collections.OrderedDict()
 
     @property
     def output(self):
@@ -307,7 +304,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
-            dict(self.input_source_to_var),
             list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
@@ -322,7 +318,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.graphargs,
-            self.input_source_to_var,
             self.tracked_fakes,
             guards_state,
             self.nn_modules,
@@ -345,6 +340,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
     def add_grapharg(self, arg: GraphArg):
+        curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
 
     def count_calls(self):
@@ -362,21 +358,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     def create_graph_input(self, name, type_expr=None):
         # unique
-        if name in self.input_name_to_proxy:
+        if name in self.name_to_input:
             for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
+                if f"{name}_{i}" not in self.name_to_input:
+                    name = f"{name}_{i}"
                     break
 
-        if self.input_name_to_proxy:
-            prev_name = next(reversed(self.input_name_to_proxy))
-            ctx = self.graph.inserting_after(self.input_name_to_proxy[prev_name].node)
+        if self.name_to_input:
+            prev_name = next(reversed(self.name_to_input))
+            ctx = self.graph.inserting_after(self.name_to_input[prev_name])
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
             proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
-            self.input_name_to_proxy[name] = proxy
+            self.name_to_input[name] = proxy.node
             return proxy
 
     def new_var(self, name="tmp"):
@@ -597,6 +592,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             rand_fn = disable(_get_gen_rand_values_fn(tx.random_calls))
             self.install_global(rand_fn_name, rand_fn)
             codegen = PyCodegen(tx, root)
+            random_calls_instructions.extend(
+                [
+                    codegen.create_load_global("random", True, add=True),
+                    codegen.create_load_attr("setstate"),
+                    codegen.create_load_const(tx.output.initial_random_state),
+                ]
+                + create_call_function(1, False),
+            )
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
@@ -850,7 +853,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if "example_value" in node.meta:
                 del node.meta["example_value"]
         self.real_value_cache.clear()
-        self.input_name_to_proxy.clear()
+        self.name_to_input.clear()
         self.side_effects.keepalive = []
 
     def create_proxy(
@@ -902,4 +905,4 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
         self.graph.erase_node(node)
-        self.input_name_to_proxy.pop(node.name, None)
+        self.name_to_input.pop(node.name, None)

@@ -82,10 +82,11 @@ class Library:
                           the dispatch key that the library was created with.
 
         Example::
+            >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
-            >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
+            >>> my_lib.impl("div.Tensor", "CPU")
         '''
         if not callable(fn):
             raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))

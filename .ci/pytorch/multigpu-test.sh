@@ -35,9 +35,6 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_init
 time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
 
-# DTensor/Random Ops tests
-time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops.py
-
 # DTensor/TP tests
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples

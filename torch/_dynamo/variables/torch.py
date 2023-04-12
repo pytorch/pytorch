@@ -836,7 +836,7 @@ class TorchHigherOrderOperator(VariableTracker):
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
             tx.output.graphargs = []
-            tx.output.input_name_to_proxy.clear()
+            tx.output.name_to_input.clear()
 
             args = []
             # One argument to graph per sub_args

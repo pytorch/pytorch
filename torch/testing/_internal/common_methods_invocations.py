@@ -6935,29 +6935,6 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_t.clone().requires_grad_(requires_grad),
                           kwargs=dict(as_tuple=as_tuple))
 
-def sample_inputs_nonzero_static(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
-
-    inputs = []
-    for shape in sizes:
-        # construct input without any non-zero elements
-        zeros = torch.zeros(shape, dtype=dtype, device=device, requires_grad=requires_grad)
-        inputs.append(zeros)
-
-        # construct input with mixed zero and non-zero elements
-        mixed = make_arg(shape).requires_grad_(False)
-        mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
-        mixed[mask_t] = 0
-        inputs.append(mixed)
-
-    nonzero_sizes = [0, 1, XS, S, M]
-
-    for input_t, nonzero_size in product(inputs, nonzero_sizes):
-        yield SampleInput(input_t.clone().requires_grad_(requires_grad),
-                          kwargs=dict(size=nonzero_size))
-
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -16808,21 +16785,6 @@ op_db: List[OpInfo] = [
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
-           )),
-    OpInfo('nonzero_static',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           sample_inputs_func=sample_inputs_nonzero_static,
-           supports_out=False,
-           supports_autograd=False,
-           decorators=[onlyCPU],
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),

@@ -112,8 +112,6 @@ static PyObject* THPStorage_pynew(
       allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::Meta) {
       allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::PrivateUse1) {
-      allocator = c10::GetAllocator(device.type());
     } else {
       TORCH_CHECK(
           false,

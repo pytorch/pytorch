@@ -607,8 +607,7 @@ def install(
     pytdir.cleanup()
     logger.info(
         "-------\nPyTorch Development Environment set up!\nPlease activate to "
-        "enable this environment:\n  $ conda activate %s",
-        env_opts[1],
+        f"enable this environment:\n  $ conda activate {env_opts[1]}"
     )
 
 

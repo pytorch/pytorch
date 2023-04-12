@@ -9250,58 +9250,64 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
-    @parametrize_test("mode", ["nearest-exact", "nearest"])
-    def test_upsamplingNearest1d(self, device, mode):
+    def test_upsamplingNearest1d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        m = nn.Upsample(size=4, mode=mode)
-        in_t = torch.ones(1, 1, 2, device=device)
-        in_uint8_t = torch.ones(1, 1, 2, dtype=torch.uint8, device=device)
-        with warnings.catch_warnings(record=True) as w:
-            out_t = m(in_t)
-            out_uint8_t = m(in_uint8_t)
-        self.assertEqual(torch.ones(1, 1, 4, device=device), out_t.data)
-        self.assertEqual(torch.ones(1, 1, 4, dtype=torch.uint8, device=device), out_uint8_t.data)
+        def helper(mode):
+            m = nn.Upsample(size=4, mode=mode)
+            in_t = torch.ones(1, 1, 2, device=device)
+            in_uint8_t = torch.ones(1, 1, 2, dtype=torch.uint8, device=device)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+                out_uint8_t = m(in_uint8_t)
+            self.assertEqual(torch.ones(1, 1, 4, device=device), out_t.data)
+            self.assertEqual(torch.ones(1, 1, 4, dtype=torch.uint8, device=device), out_uint8_t.data)
 
-        # Checks upsampling
-        input = torch.randn(1, 1, 2, requires_grad=True, device=device)
-        gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
-        gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
+            # Checks upsampling
+            input = torch.randn(1, 1, 2, requires_grad=True, device=device)
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
-        # Checks downsampling
-        input = torch.randn(1, 1, 20, requires_grad=True, device=device)
-        gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input], check_forward_ad=check_forward_ad)
-        gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
+            # Checks downsampling
+            input = torch.randn(1, 1, 20, requires_grad=True, device=device)
+            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
-        # consistency CUDA/CPU check
-        if torch.device(device).type == 'cuda':
-            input_cuda = torch.randn(1, 1, 20, device=device)
-            input_cpu = input_cuda.cpu()
-            output_cuda = F.interpolate(input_cuda, 4, mode=mode)
-            output_cpu = F.interpolate(input_cpu, 4, mode=mode)
-            self.assertEqual(output_cuda.cpu(), output_cpu)
+            # consistency CUDA/CPU check
+            if torch.device(device).type == 'cuda':
+                input_cuda = torch.randn(1, 1, 20, device=device)
+                input_cpu = input_cuda.cpu()
+                output_cuda = F.interpolate(input_cuda, 4, mode=mode)
+                output_cpu = F.interpolate(input_cpu, 4, mode=mode)
+                self.assertEqual(output_cuda.cpu(), output_cpu)
 
-            output_cuda = F.interpolate(input_cuda, 24, mode=mode)
-            output_cpu = F.interpolate(input_cpu, 24, mode=mode)
-            self.assertEqual(output_cuda.cpu(), output_cpu)
+                output_cuda = F.interpolate(input_cuda, 24, mode=mode)
+                output_cpu = F.interpolate(input_cpu, 24, mode=mode)
+                self.assertEqual(output_cuda.cpu(), output_cpu)
 
-    @parametrize_test("isize, osize", [(20, 11), (10, 15)])
-    def test_upsamplingNearest1d_correctness(self, device, isize, osize):
+        helper("nearest")
+        helper("nearest-exact")
+
+    def test_upsamplingNearest1d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
-        in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
-        out_t = F.interpolate(
-            in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest"
-        )
-        # compute expected output as OpenCV
-        expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
-        scale = 1.0 * isize / osize
-        for o in range(osize):
-            i_f32 = o * scale
-            i = int(i_f32)
-            expected_out[0, 0, o] = in_t[0, 0, i]
-        expected_out = expected_out.to(device=device)
-        self.assertEqual(out_t, expected_out)
+        def helper(isize, osize):
+            in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+            out_t = F.interpolate(
+                in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest"
+            )
+            # compute expected output as OpenCV
+            expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+            scale = 1.0 * isize / osize
+            for o in range(osize):
+                i_f32 = o * scale
+                i = int(i_f32)
+                expected_out[0, 0, o] = in_t[0, 0, i]
+            expected_out = expected_out.to(device=device)
+            self.assertEqual(out_t, expected_out)
+
+        helper(20, 11)
+        helper(10, 15)
 
     def test_upsamplingNearestExact1d_rescale(self, device):
         # Checks https://github.com/pytorch/pytorch/issues/62237
@@ -9328,228 +9334,255 @@ class TestNNDeviceType(NNTestCase):
             expected_out = in_t.repeat_interleave(2, dim=-1)
             self.assertEqual(out_t, expected_out)
 
-    @parametrize_test("isize, osize", [(20, 11), (10, 15)])
-    def test_upsamplingNearestExact1d_correctness(self, device, isize, osize):
+    def test_upsamplingNearestExact1d_correctness(self, device):
         # Here we check if output matches Scikit-Image/Scipy-like result
         # Checks https://github.com/pytorch/pytorch/issues/34808
-        in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
-        out_t = F.interpolate(
-            in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest-exact"
-        )
-        # compute expected output as scikit-image/scipy
-        expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
-        scale = 1.0 * isize / osize
-        for o in range(osize):
-            i_f32 = (o + 0.5) * scale
-            i = int(i_f32)
-            expected_out[0, 0, o] = in_t[0, 0, i]
-        expected_out = expected_out.to(device=device)
-        self.assertEqual(out_t, expected_out)
+        def helper(isize, osize):
+            in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
+            out_t = F.interpolate(
+                in_t, size=(osize, ), recompute_scale_factor=False, mode="nearest-exact"
+            )
+            # compute expected output as scikit-image/scipy
+            expected_out = torch.zeros(osize, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+            scale = 1.0 * isize / osize
+            for o in range(osize):
+                i_f32 = (o + 0.5) * scale
+                i = int(i_f32)
+                expected_out[0, 0, o] = in_t[0, 0, i]
+            expected_out = expected_out.to(device=device)
+            self.assertEqual(out_t, expected_out)
 
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-    @parametrize_test("mode", ["nearest", "nearest-exact"])
-    def test_upsamplingNearest2d(self, device, memory_format, mode):
+        helper(20, 11)
+        helper(10, 15)
+
+    def test_upsamplingNearest2d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
-        in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8, device=device).contiguous(memory_format=memory_format)
-        with warnings.catch_warnings(record=True) as w:
-            out_t = F.interpolate(in_t, size=4, mode=mode)
-            out_uint8_t = F.interpolate(in_uint8_t, size=4, mode=mode)
-            self.assertEqual(len(w), 0)
-        self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
-        self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
-        # Assert that memory format is carried through to the output
-        self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+        def helper(memory_format, mode):
+            in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8, device=device).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = F.interpolate(in_t, size=4, mode=mode)
+                out_uint8_t = F.interpolate(in_uint8_t, size=4, mode=mode)
+                self.assertEqual(len(w), 0)
+            self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
+            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-        # test forward when input's height is not same as width
-        in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
-        out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
-        self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
-        self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+            # test forward when input's height is not same as width
+            in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
+            out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
+            self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-        out_t.backward(torch.randn_like(out_t))
-        self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+            out_t.backward(torch.randn_like(out_t))
+            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-        # test backward when input's height is not same as width
-        input = torch.ones(1, 2, 2, 1, requires_grad=True, device=device).contiguous(memory_format=memory_format)
-        gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_forward_ad=check_forward_ad)
-        gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_fwd_over_rev=check_forward_ad)
+            # test backward when input's height is not same as width
+            input = torch.ones(1, 2, 2, 1, requires_grad=True, device=device).contiguous(memory_format=memory_format)
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
-        input = torch.randn(1, 2, 2, 2, requires_grad=True, device=device).contiguous(memory_format=memory_format)
-        self.assertEqual(
-            F.interpolate(input, 4, mode=mode),
-            F.interpolate(input, scale_factor=2, mode=mode))
-        gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
-        gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
+            input = torch.randn(1, 2, 2, 2, requires_grad=True, device=device).contiguous(memory_format=memory_format)
+            self.assertEqual(
+                F.interpolate(input, 4, mode=mode),
+                F.interpolate(input, scale_factor=2, mode=mode))
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
-        # Assert that cpu and cuda handle channels_last memory format in the same way
-        # https://github.com/pytorch/pytorch/issues/54590
-        if torch.device(device).type == 'cuda':
-            for shapes, scale_factor in product([
-                (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
-            ], [0.5, 1.5, 2]):
-                a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                a_cpu = a_cuda.detach().cpu().requires_grad_()
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            if torch.device(device).type == 'cuda':
+                for shapes, scale_factor in product([
+                    (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                ], [0.5, 1.5, 2]):
+                    a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                    a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
-                out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
+                    out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
+                    out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
 
-                self.assertEqual(out_cpu.cuda(), out_cuda)
+                    self.assertEqual(out_cpu.cuda(), out_cuda)
 
-                g_cuda = torch.randn_like(out_cuda)
-                g_cpu = g_cuda.cpu()
+                    g_cuda = torch.randn_like(out_cuda)
+                    g_cpu = g_cuda.cpu()
 
-                out_cuda.backward(g_cuda)
-                out_cpu.backward(g_cpu)
+                    out_cuda.backward(g_cuda)
+                    out_cpu.backward(g_cpu)
 
-                self.assertEqual(a_cuda.grad, a_cpu.grad)
+                    self.assertEqual(a_cuda.grad, a_cpu.grad)
 
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-    @parametrize_test("isize, osize", [(20, 11), (10, 15)])
-    def test_upsamplingNearest2d_correctness(self, device, memory_format, isize, osize):
+        helper(torch.contiguous_format, "nearest")
+        helper(torch.channels_last, "nearest")
+        helper(torch.contiguous_format, "nearest-exact")
+        helper(torch.channels_last, "nearest-exact")
+
+    def test_upsamplingNearest2d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
-        in_t = torch.arange(isize * isize, dtype=torch.float, device=device).reshape(1, 1, isize, isize)
-        in_t = in_t.contiguous(memory_format=memory_format)
-        out_t = F.interpolate(
-            in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest"
-        )
-        # compute expected output as OpenCV
-        expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
-        scale = 1.0 * isize / osize
-        for o1 in range(osize):
-            i1_f32 = o1 * scale
-            i1 = int(i1_f32)
-            for o2 in range(osize):
-                i2_f32 = o2 * scale
-                i2 = int(i2_f32)
-                expected_out[0, 0, o1, o2] = in_t[0, 0, i1, i2]
-        expected_out = expected_out.to(device=device)
-        self.assertEqual(out_t, expected_out)
+        def helper(memory_format, isize, osize):
+            in_t = torch.arange(isize * isize, dtype=torch.float, device=device).reshape(1, 1, isize, isize)
+            in_t = in_t.contiguous(memory_format=memory_format)
+            out_t = F.interpolate(
+                in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest"
+            )
+            # compute expected output as OpenCV
+            expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
+            scale = 1.0 * isize / osize
+            for o1 in range(osize):
+                i1_f32 = o1 * scale
+                i1 = int(i1_f32)
+                for o2 in range(osize):
+                    i2_f32 = o2 * scale
+                    i2 = int(i2_f32)
+                    expected_out[0, 0, o1, o2] = in_t[0, 0, i1, i2]
+            expected_out = expected_out.to(device=device)
+            self.assertEqual(out_t, expected_out)
 
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-    @parametrize_test("isize, osize", [(20, 11), (10, 15)])
-    def test_upsamplingNearestExact2d_correctness(self, device, memory_format, isize, osize):
+        helper(torch.contiguous_format, 20, 11)
+        helper(torch.channels_last, 20, 11)
+        helper(torch.contiguous_format, 10, 15)
+        helper(torch.channels_last, 10, 15)
+
+    def test_upsamplingNearestExact2d_correctness(self, device):
         # Here we check if output matches Scikit-Image/Scipy-like result
         # Checks https://github.com/pytorch/pytorch/issues/34808
-        in_t = torch.arange(isize * isize, dtype=torch.float, device=device).reshape(1, 1, isize, isize)
-        in_t = in_t.contiguous(memory_format=memory_format)
-        out_t = F.interpolate(
-            in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest-exact"
-        )
-        # compute expected output as Scikit-Image/Scipy
-        expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
-        scale = 1.0 * isize / osize
-        for o1 in range(osize):
-            i1_f32 = (o1 + 0.5) * scale
-            i1 = int(i1_f32)
-            for o2 in range(osize):
-                i2_f32 = (o2 + 0.5) * scale
-                i2 = int(i2_f32)
-                expected_out[0, 0, o1, o2] = in_t[0, 0, i1, i2]
-        expected_out = expected_out.to(device=device)
-        self.assertEqual(out_t, expected_out)
+        def helper(memory_format, isize, osize):
+            in_t = torch.arange(isize * isize, dtype=torch.float, device=device).reshape(1, 1, isize, isize)
+            in_t = in_t.contiguous(memory_format=memory_format)
+            out_t = F.interpolate(
+                in_t, size=(osize, osize), recompute_scale_factor=False, mode="nearest-exact"
+            )
+            # compute expected output as Scikit-Image/Scipy
+            expected_out = torch.zeros(1, 1, osize, osize, dtype=torch.float)
+            scale = 1.0 * isize / osize
+            for o1 in range(osize):
+                i1_f32 = (o1 + 0.5) * scale
+                i1 = int(i1_f32)
+                for o2 in range(osize):
+                    i2_f32 = (o2 + 0.5) * scale
+                    i2 = int(i2_f32)
+                    expected_out[0, 0, o1, o2] = in_t[0, 0, i1, i2]
+            expected_out = expected_out.to(device=device)
+            self.assertEqual(out_t, expected_out)
 
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
-    @parametrize_test("mode", ["nearest", "nearest-exact"])
-    def test_upsamplingNearest3d(self, device, memory_format, mode):
+        helper(torch.contiguous_format, 20, 11)
+        helper(torch.channels_last, 20, 11)
+        helper(torch.contiguous_format, 10, 15)
+        helper(torch.channels_last, 10, 15)
+
+    def test_upsamplingNearest3d(self, device):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        m = nn.Upsample(size=4, mode=mode)
-        in_t = torch.ones(1, 2, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-        in_uint8_t = torch.ones(
-            1, 2, 2, 2, 2, dtype=torch.uint8, device=device
-        ).contiguous(memory_format=memory_format)
-        with warnings.catch_warnings(record=True) as w:
-            out_t = m(in_t)
-            out_uint8_t = m(in_uint8_t)
-        expected_output = torch.ones(1, 2, 4, 4, 4, device=device)
-        self.assertEqual(expected_output, out_t)
-        self.assertEqual(expected_output.to(torch.uint8), out_uint8_t)
-        # Assert that memory format is carried through to the output
-        self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-        out_t.backward(torch.randn_like(out_t))
-        self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        def helper(memory_format, mode):
+            m = nn.Upsample(size=4, mode=mode)
+            in_t = torch.ones(1, 2, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+            in_uint8_t = torch.ones(
+                1, 2, 2, 2, 2, dtype=torch.uint8, device=device
+            ).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+                out_uint8_t = m(in_uint8_t)
+            expected_output = torch.ones(1, 2, 4, 4, 4, device=device)
+            self.assertEqual(expected_output, out_t)
+            self.assertEqual(expected_output.to(torch.uint8), out_uint8_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+            out_t.backward(torch.randn_like(out_t))
+            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-        input = torch.randn(
-            1, 2, 2, 2, 2, requires_grad=True, device=device
-        ).contiguous(memory_format=memory_format)
-        gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
-        gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
+            input = torch.randn(
+                1, 2, 2, 2, 2, requires_grad=True, device=device
+            ).contiguous(memory_format=memory_format)
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
-        # Assert that cpu and cuda handle channels_last memory format in the same way
-        # https://github.com/pytorch/pytorch/issues/54590
-        if torch.device(device).type == 'cuda':
-            a = torch.ones(
-                2, 2, 2, 3, 4, device=device, requires_grad=True
-            ).contiguous(memory_format=torch.channels_last_3d)
-            # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
-            a[1][1][1][2][2] = a[1][1][1][2][3] = 0
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            if torch.device(device).type == 'cuda':
+                a = torch.ones(
+                    2, 2, 2, 3, 4, device=device, requires_grad=True
+                ).contiguous(memory_format=torch.channels_last_3d)
+                # make the data asymmetric; ensure that cuda/cpu handle channels_last appropriately.
+                a[1][1][1][2][2] = a[1][1][1][2][3] = 0
 
-            out_cuda = torch.nn.functional.interpolate(a, scale_factor=2, mode=mode)
-            out_cpu = torch.nn.functional.interpolate(a.to('cpu'), scale_factor=2, mode=mode)
-            self.assertEqual(out_cpu, out_cuda.to('cpu'))
+                out_cuda = torch.nn.functional.interpolate(a, scale_factor=2, mode=mode)
+                out_cpu = torch.nn.functional.interpolate(a.to('cpu'), scale_factor=2, mode=mode)
+                self.assertEqual(out_cpu, out_cuda.to('cpu'))
 
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_forward_ad=check_forward_ad)
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_fwd_over_rev=check_forward_ad)
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_forward_ad=check_forward_ad)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_fwd_over_rev=check_forward_ad)
 
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_forward_ad=check_forward_ad)
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_fwd_over_rev=check_forward_ad)
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_forward_ad=check_forward_ad)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_fwd_over_rev=check_forward_ad)
 
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
-    @parametrize_test("isize, osize", [(20, 11), (10, 15)])
-    def test_upsamplingNearest3d_correctness(self, device, memory_format, isize, osize):
+        helper(torch.contiguous_format, "nearest")
+        helper(torch.channels_last_3d, "nearest")
+        helper(torch.contiguous_format, "nearest-exact")
+        helper(torch.channels_last_3d, "nearest-exact")
+
+    def test_upsamplingNearest3d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
-        in_t = torch.arange(isize * isize * isize, dtype=torch.float, device=device)
-        in_t = in_t.reshape(1, 1, isize, isize, isize)
-        in_t = in_t.contiguous(memory_format=memory_format)
-        out_t = F.interpolate(
-            in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest"
-        )
-        # compute expected output as OpenCV
-        expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
-        scale = 1.0 * isize / osize
-        for o1 in range(osize):
-            i1_f32 = o1 * scale
-            i1 = int(i1_f32)
-            for o2 in range(osize):
-                i2_f32 = o2 * scale
-                i2 = int(i2_f32)
-                for o3 in range(osize):
-                    i3_f32 = o3 * scale
-                    i3 = int(i3_f32)
-                    expected_out[0, 0, o1, o2, o3] = in_t[0, 0, i1, i2, i3]
-        expected_out = expected_out.to(device=device)
-        self.assertEqual(out_t, expected_out)
+        def helper(memory_format, isize, osize):
+            in_t = torch.arange(isize * isize * isize, dtype=torch.float, device=device)
+            in_t = in_t.reshape(1, 1, isize, isize, isize)
+            in_t = in_t.contiguous(memory_format=memory_format)
+            out_t = F.interpolate(
+                in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest"
+            )
+            # compute expected output as OpenCV
+            expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
+            scale = 1.0 * isize / osize
+            for o1 in range(osize):
+                i1_f32 = o1 * scale
+                i1 = int(i1_f32)
+                for o2 in range(osize):
+                    i2_f32 = o2 * scale
+                    i2 = int(i2_f32)
+                    for o3 in range(osize):
+                        i3_f32 = o3 * scale
+                        i3 = int(i3_f32)
+                        expected_out[0, 0, o1, o2, o3] = in_t[0, 0, i1, i2, i3]
+            expected_out = expected_out.to(device=device)
+            self.assertEqual(out_t, expected_out)
 
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
-    @parametrize_test("isize, osize", [(20, 11), (10, 15)])
-    def test_upsamplingNearestExact3d_correctness(self, device, memory_format, isize, osize):
+        helper(torch.contiguous_format, 20, 11)
+        helper(torch.channels_last_3d, 20, 11)
+        helper(torch.contiguous_format, 10, 15)
+        helper(torch.channels_last_3d, 10, 15)
+
+    def test_upsamplingNearestExact3d_correctness(self, device):
         # Here we check if output matches Scikit-Image/Scipy-like result
         # Checks https://github.com/pytorch/pytorch/issues/34808
-        in_t = torch.arange(isize * isize * isize, dtype=torch.float, device=device)
-        in_t = in_t.reshape(1, 1, isize, isize, isize)
-        in_t = in_t.contiguous(memory_format=memory_format)
-        out_t = F.interpolate(
-            in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest-exact"
-        )
-        # compute expected output as Scikit-Image/Scipy
-        expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
-        scale = 1.0 * isize / osize
-        for o1 in range(osize):
-            i1_f32 = (o1 + 0.5) * scale
-            i1 = int(i1_f32)
-            for o2 in range(osize):
-                i2_f32 = (o2 + 0.5) * scale
-                i2 = int(i2_f32)
-                for o3 in range(osize):
-                    i3_f32 = (o3 + 0.5) * scale
-                    i3 = int(i3_f32)
-                    expected_out[0, 0, o1, o2, o3] = in_t[0, 0, i1, i2, i3]
-        expected_out = expected_out.to(device=device)
-        self.assertEqual(out_t, expected_out)
+        def helper(memory_format, isize, osize):
+            in_t = torch.arange(isize * isize * isize, dtype=torch.float, device=device)
+            in_t = in_t.reshape(1, 1, isize, isize, isize)
+            in_t = in_t.contiguous(memory_format=memory_format)
+            out_t = F.interpolate(
+                in_t, size=(osize, osize, osize), recompute_scale_factor=False, mode="nearest-exact"
+            )
+            # compute expected output as Scikit-Image/Scipy
+            expected_out = torch.zeros(1, 1, osize, osize, osize, dtype=torch.float)
+            scale = 1.0 * isize / osize
+            for o1 in range(osize):
+                i1_f32 = (o1 + 0.5) * scale
+                i1 = int(i1_f32)
+                for o2 in range(osize):
+                    i2_f32 = (o2 + 0.5) * scale
+                    i2 = int(i2_f32)
+                    for o3 in range(osize):
+                        i3_f32 = (o3 + 0.5) * scale
+                        i3 = int(i3_f32)
+                        expected_out[0, 0, o1, o2, o3] = in_t[0, 0, i1, i2, i3]
+            expected_out = expected_out.to(device=device)
+            self.assertEqual(out_t, expected_out)
+
+        helper(torch.contiguous_format, 20, 11)
+        helper(torch.channels_last_3d, 20, 11)
+        helper(torch.contiguous_format, 10, 15)
+        helper(torch.channels_last_3d, 10, 15)
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])

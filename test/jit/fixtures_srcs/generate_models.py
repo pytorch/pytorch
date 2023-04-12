@@ -173,10 +173,10 @@ def generate_models(model_directory_path: Path):
 
         if not isinstance(a_module, torch.nn.Module):
             logger.error(
-                "The module %s "
-                "is not a torch.nn.module instance. "
-                "Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
-                "and it's registered as an instance in ALL_MODULES in generated_models.py", torch_module_name)
+                f"The module {torch_module_name} "
+                f"is not a torch.nn.module instance. "
+                f"Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
+                f"and it's registered as an instance in ALL_MODULES in generated_models.py")
 
 
         # The corresponding model name is: test_versioned_div_tensor_example_v4
@@ -197,17 +197,17 @@ def generate_models(model_directory_path: Path):
         current_operator_version = torch._C._get_max_operator_version()
         if actual_model_version >= current_operator_version + 1:
             logger.error(
-                "Actual model version %s "
-                "is equal or larger than %s + 1. "
-                "Please run the script before the commit to change operator.", actual_model_version, current_operator_version)
+                f"Actual model version {actual_model_version} "
+                f"is equal or larger than {current_operator_version} + 1. "
+                f"Please run the script before the commit to change operator.")
             continue
 
         actual_operator_list = get_operator_list(script_module)
         if expect_operator not in actual_operator_list:
             logger.error(
-                "The model includes operator: %s, "
-                "however it doesn't cover the operator %s."
-                "Please ensure the output model includes the tested operator.", actual_operator_list, expect_operator)
+                f"The model includes operator: {actual_operator_list}, "
+                f"however it doesn't cover the operator {expect_operator}."
+                f"Please ensure the output model includes the tested operator.")
             continue
 
         export_model_path = str(model_directory_path / (str(model_name) + ".ptl"))

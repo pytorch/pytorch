@@ -1,8 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from unittest import skip
-
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import run_tests
@@ -27,9 +25,6 @@ class DTensorInitOpsTest(DTensorTestBase):
         self.assertEqual(local_tensor_clone, dtensor.to_local())
 
     @with_comms
-    @skip(
-        "testing RNG based ops on gpu is moved to test/distributed/_tensor/test_random_ops.py"
-    )
     def test_init_ops(self):
         self._run_init_op(
             torch.nn.init.kaiming_uniform_,

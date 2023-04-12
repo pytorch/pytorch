@@ -298,9 +298,8 @@ class LocalElasticAgent(SimpleElasticAgent):
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
             log.error(
-                "[%s] worker pids do not match process_context pids."
-                " Expected: %s, actual: %s",
-                role, worker_pids, pc_pids
+                f"[{role}] worker pids do not match process_context pids."
+                f" Expected: {worker_pids}, actual: {pc_pids}"
             )
             return RunResult(state=WorkerState.UNKNOWN)
 

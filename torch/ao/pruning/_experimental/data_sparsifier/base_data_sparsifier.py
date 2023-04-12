@@ -1,11 +1,11 @@
 import abc
 import torch
 from typing import Optional, Tuple, List, Any, Dict
-from ...pruner.base_pruner import BasePruner
+from ...sparsifier.base_pruner import BasePruner
 from collections import defaultdict
 from torch import nn
 import copy
-from ...pruner import utils
+from ...sparsifier import utils
 from torch.nn.utils import parametrize
 import sys
 import warnings

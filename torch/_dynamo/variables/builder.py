@@ -584,9 +584,6 @@ class VariableBuilder:
         )
 
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
-        is_duplicate_sym = self.get_source() in self.tx.output.input_source_to_var
-        if is_duplicate_sym:
-            return self.tx.output.input_source_to_var[self.get_source()]
         if not is_constant_source(self.get_source()):
             self.tx.output.add_grapharg(GraphArg(self.get_source(), value, False, None))
         elif is_constant_source(self.get_source()):
@@ -597,7 +594,7 @@ class VariableBuilder:
                 sym_num=value
                 # shape Guards live their own rich life via shape_env
             )
-        sym_node_var = SymNodeVariable.create(
+        return SymNodeVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
@@ -605,8 +602,6 @@ class VariableBuilder:
             sym_num=value
             # shape Guards live their own rich life via shape_env
         )
-        self.tx.output.input_source_to_var[self.get_source()] = sym_node_var
-        return sym_node_var
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
@@ -802,10 +797,6 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
-        is_duplicate_tensor = self.get_source() in self.tx.output.input_source_to_var
-        if is_duplicate_tensor:
-            return self.tx.output.input_source_to_var[self.get_source()]
-
         tensor_proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
@@ -818,7 +809,6 @@ class VariableBuilder:
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
         )
-        self.tx.output.input_source_to_var[self.get_source()] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
@@ -982,7 +972,7 @@ def wrap_fx_proxy_cls(
     if "guards" in options and options["guards"] is not None:
         tx.output.guards.update(options["guards"])
 
-    assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
+    assert "example_value" not in proxy.node.meta
 
     initial_example_value = example_value
 
