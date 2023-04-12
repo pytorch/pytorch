@@ -327,7 +327,7 @@ void GroupNormKernelImplChannelsLastInternal(
     //
     // for each plain of HxW, scale and bias is calculated only once
     Tensor buffer = at::empty({N * G, 2 * D}, X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
-    T_ACC* buffer_data = buffer.mutable_data_ptr<T_ACC>();
+    T_ACC* buffer_data = buffer.data_ptr<T_ACC>();
 
     at::parallel_for(0, N * G, 1, [&](int64_t begin, int64_t end) {
       int64_t n{0}, g{0};
