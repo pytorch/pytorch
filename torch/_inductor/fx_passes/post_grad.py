@@ -93,8 +93,8 @@ def cat_addmm(match, inputs, dim):
 
 def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     """
-    Memory planning to remove cat.  We can't use the stock memory
-    planner since autotuning matmauls needs to know the output layout.
+    Memory planning to remove cat. We can't use the stock memory
+    planner since autotuning matmuls needs to know the output layout.
     """
     if len(inputs) == 1:
         return op(*inputs[0])
