@@ -1157,14 +1157,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
-            # RuntimeError: "clamp_min_cpu" not implemented for 'Half'
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMasked",
-                "test_reference_masked",
-                device_type="cpu",
-                dtypes=[torch.half],
-            ),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes

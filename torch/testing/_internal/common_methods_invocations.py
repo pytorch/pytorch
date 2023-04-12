@@ -8347,7 +8347,7 @@ foreach_unary_op_db: List[OpInfo] = [
 
     ForeachFuncInfo(
         'log1p',
-        dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
@@ -8387,7 +8387,8 @@ foreach_unary_op_db: List[OpInfo] = [
 
     ForeachFuncInfo(
         'trunc',
-        dtypes=all_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
     ),
@@ -12486,8 +12487,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.multilabel_soft_margin_loss",
         supports_out=False,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
         supports_forward_ad=True,
         decorators=(
@@ -13091,8 +13091,7 @@ op_db: List[OpInfo] = [
         aten_name="log_sigmoid",
         aten_backward_name='log_sigmoid_backward',
         ref=reference_logsigmoid,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         supports_autograd=True,
         assert_autodiffed=False,
         supports_forward_ad=True,
