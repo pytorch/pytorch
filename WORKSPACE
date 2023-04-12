@@ -36,6 +36,13 @@ http_archive(
     url = "https://github.com/bazelbuild/rules_python/releases/download/0.20.0/rules_python-0.20.0.tar.gz",
 )
 
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+
+python_register_toolchains(
+    name = "python3_8",
+    python_version = "3.8",
+)
+
 http_archive(
     name = "bazel_skylib",
     urls = [
