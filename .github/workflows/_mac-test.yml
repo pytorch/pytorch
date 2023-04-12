@@ -129,6 +129,7 @@ jobs:
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
+      # TODO: Move this to a setup-mac action
       - name: Install misc macOS dependencies
         uses: nick-fields/retry@v2.8.2
         with:
@@ -139,12 +140,6 @@ jobs:
             # Install dependencies
             brew install libomp
             brew link --force libomp
-
-            # TODO: The latest Rosetta version is required to run the current sccache
-            # binary for MacOS. We should get this fixed with a native sccache for M1
-            # Without this, the build job would fail with bad CPU type in executable
-            # error
-            softwareupdate --install-rosetta --agree-to-license
 
       - name: Parse ref
         id: parse-ref
