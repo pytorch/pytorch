@@ -1071,36 +1071,4 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
   }
 }
 
-#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
-
-template <typename T>
-Vectorized<T> pack_saturate_and_clamp(
-    Vectorized<T> first,
-    Vectorized<T> second,
-    T min_val,
-    T max_val);
-
-template <>
-Vectorized<int32_t> pack_saturate_and_clamp<int32_t>(
-    Vectorized<int32_t> first,
-    Vectorized<int32_t> second,
-    int32_t min_val,
-    int32_t max_val);
-
-template <>
-Vectorized<int8_t> pack_saturate_and_clamp<int8_t>(
-    Vectorized<int8_t> first,
-    Vectorized<int8_t> second,
-    int8_t min_val,
-    int8_t max_val);
-
-template <>
-Vectorized<uint8_t> pack_saturate_and_clamp<uint8_t>(
-    Vectorized<uint8_t> first,
-    Vectorized<uint8_t> second,
-    uint8_t min_val,
-    uint8_t max_val);
-
-#endif
-
 }}}
