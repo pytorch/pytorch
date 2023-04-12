@@ -1466,7 +1466,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     if (!gradient_as_bucket_view_) {
       if (optim_in_backward_) {
         // Return early if optimizer has already run.
-        runGradCallbackForVariable(variable, [&](auto& grad) {return true;});
+        runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
       } else {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
