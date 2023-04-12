@@ -133,6 +133,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
     node_list = []
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
+    input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
     distance = 0
     wait_prefixes = ("wait_comm", "wait_tensor")
     non_end_users_nodes = ("split", "reshape", "getitem", "detach", "alias")
@@ -173,14 +174,14 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
                 break
 
     # TODO: populate all the tensor metadata and remove the default.
-    tensor_meta = inputs[0].meta.get("tensor_meta", None)
+    tensor_meta = input_nodes[0].meta.get("tensor_meta", None)
     return CommBlock(
         # TODO: support symbolic shapes
         shape=torch.Size(int(s) for s in tensor_meta.shape) if tensor_meta else None,
         node_list=node_list,
         wait_nodes=wait_nodes,
         comm_node=comm_node,
-        inputs=inputs,
+        inputs=input_nodes,
         outputs=outputs,
     )
 
@@ -411,6 +412,19 @@ def _fuse_with_cat(
     return fused_comm_block
 
 
+def _expedite_comm_ops(gm: IterGraphModule, comm_blocks: List[CommBlock]) -> None:
+    node_indices = {node: i for i, node in enumerate(gm.graph.nodes)}
+    for comm_block in comm_blocks:
+        last_input = comm_block.comm_node
+        last_input_idx = -1
+        for input in comm_block.inputs:
+            input_idx = node_indices[input]
+            if input_idx > last_input_idx:
+                last_input = input
+                last_input_idx = input_idx
+        gm.graph.node_append(last_input, comm_block.comm_node)
+
+
 @graph_optimization_pass(run_after=tuple())
 def comm_fusion_with_concat(
     gm: IterGraphModule,
@@ -420,6 +434,10 @@ def comm_fusion_with_concat(
     Run fuse communication with concat.
     This implementation uses concat to concat the bucketed gradients.
     """
+    comm_blocks = get_all_comm_blocks(gm, (CommType.ALLREDUCE, "all_reduce"))
+    # First ensure the allreduce are scheduled immediately right after the gradients.
+    _expedite_comm_ops(gm, comm_blocks)
+    # Get the comm_blocks based on the new order.
     comm_blocks = get_all_comm_blocks(gm, (CommType.ALLREDUCE, "all_reduce"))
     node_indices = {node: i for i, node in enumerate(gm.graph.nodes)}
 
