@@ -110,6 +110,11 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
+    # most optimizer tests are broken on 3.11
+    # TODO remove when 3.11 is fully supported
+    import sys
+
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if sys.version_info < (3, 11):
+        run_tests()

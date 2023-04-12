@@ -893,3 +893,33 @@ class TestSubgraphRewriter(JitTestCase):
 def forward(self, x):
     _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
     return _reshape_alias_copy_default_1""")  # noqa: B950
+
+    def test_replacement_with_attrs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor([1])
+                self.b = torch.tensor([2])
+
+            def forward(self, x):
+                return x + self.a - self.b
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor([1])
+
+            def forward(self, x):
+                return x + self.a
+
+        class Replacement(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = torch.tensor([3])
+
+            def forward(self, x):
+                return x - self.c
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
+        self.assertEqual(len(matches), 1)
