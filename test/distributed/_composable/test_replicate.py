@@ -8,23 +8,20 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._composable.replicate import replicate
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import MultiProcessTestCase, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
+
 
 
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(2, 10, bias=False)
-        self.fc2 = nn.Linear(10, 50, bias=False)
-        self.fc3 = nn.Linear(50, 4, bias=False)
-        self.relu = nn.ReLU()
+        self.fc1 = nn.Linear(2, 2, bias=False)
+        self.fc2 = nn.Linear(2, 2, bias=False)
+        self.fc3 = nn.Linear(2, 2, bias=False)
 
     def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        x = self.fc3(x)
-        return F.softmax(x, dim=1)
+        return self.fc3(self.fc2(self.fc1(x)))
 
 
 class ReplicateStateDictTest(MultiProcessTestCase):
@@ -135,6 +132,38 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net()
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_replicate_ignore_module(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch.cuda.set_device(self.rank)
+        # Seed ensures diff input and thus different local grads across ranks.
+        torch.manual_seed(self.rank)
+        torch.cuda.manual_seed(self.rank)
+        model = Net().cuda()
+        replicate(model, ignored_modules=[model.fc1])
+        inp = torch.randn(5, 2, device='cuda') * (self.rank + 1)
+        out = model(inp) * 10
+        out.sum().backward()
+        # FC1 grads should not be synchronized, FC2 and 3 should be.
+        fc1_grad = model.fc1.weight.grad
+        tensor_list = [torch.zeros_like(fc1_grad) for _ in range(dist.get_world_size())]
+        dist.all_gather(tensor_list, fc1_grad)
+        grad, rest = tensor_list[0], tensor_list[1:]
+        for g in rest:
+            self.assertNotEqual(grad, g)
+
+        for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
+            tensor_list = [torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())]
+            dist.all_gather(tensor_list, dp_grad)
+            grad, rest = tensor_list[0], tensor_list[1:]
+            for g in rest:
+                self.assertEqual(grad, g)
 
     def test_replicate_multi_module(self):
         model = Net()
