@@ -2430,6 +2430,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    def test_cond_supported_pred_types(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            return x.sin()
+
+        def f_pred_traced_as_constant_var(x):
+            return cond(x.dim() > 2, true_fn, false_fn, [x])
+
+        def f_pred_traced_as_symnode_var(x):
+            return cond(x.shape[0] > 10, true_fn, false_fn, [x])
+
+        def f_pred_traced_as_tensor_var(x):
+            return cond(x.all(), true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        for f in [
+            f_pred_traced_as_constant_var,
+            f_pred_traced_as_symnode_var,
+            f_pred_traced_as_tensor_var,
+        ]:
+            gm, _ = torch._dynamo.export(f, *example_inputs)
+            self.assertEqual(gm(*example_inputs), f(*example_inputs))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

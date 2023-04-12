@@ -378,35 +378,6 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_cond_supported_pred_types(self):
-        import torch._dynamo as torchdynamo
-
-        def true_fn(x):
-            return x.cos()
-
-        def false_fn(x):
-            return x.sin()
-
-        def f_pred_constant_var(x):
-            from torch._dynamo.variables.tensor import ConstantVariable
-            pred: ConstantVariable = x.dim() > 2
-            return cond(pred, true_fn, false_fn, [x])
-
-        def f_pred_symnode_var(x):
-            from torch._dynamo.variables.tensor import SymNodeVariable
-            pred: SymNodeVariable = x.shape[0] > 10
-            return cond(pred, true_fn, false_fn, [x])
-
-        def f_pred_tensor_var(x):
-            from torch._dynamo.variables.tensor import TensorVariable
-            pred: TensorVariable = x.all()
-            return cond(pred, true_fn, false_fn, [x])
-
-        example_inputs = (torch.rand(5),)
-        for f in [f_pred_constant_var, f_pred_symnode_var, f_pred_tensor_var]:
-            gm, _ = torchdynamo.export(f, *example_inputs)
-            self.assertEqual(gm(*example_inputs), f(*example_inputs))
-
     def test_assert_on_mismatch_type_size(self):
         def true_fn(x):
             return x.sin()
