@@ -527,6 +527,30 @@ class LazyMLP(torch.nn.Module):
         return y
 
 
+class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._param = torch.nn.Parameter(torch.empty(input[0].shape).fill_(0.5))
+
+    def forward(self, input):
+        x = 0
+        for i in range(len(input)):
+            x = x + input[i]
+        return x
+
+
+class LazyModuleWithListInput(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = LazyLayerWithListInput()
+
+    def forward(self, input):
+        return self.layer(input)
+
+
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
     requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
     return requires_grad
@@ -1138,6 +1162,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             opt_m(x)
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
+
+    def test_lazy_module5(self):
+        # Test lazy module works well with list/tuple input
+        m = LazyModuleWithListInput()
+        x = [torch.rand([5, 5])] * 3
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
