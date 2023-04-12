@@ -103,7 +103,7 @@ class CoordescTuner:
 
     def autotune(
         self,
-        func: Callable[triton.Config, float],
+        func: Callable[[triton.Config], float],
         baseline_config: triton.Config,
         baseline_timing: Optional[float] = None,
     ) -> triton.Config:

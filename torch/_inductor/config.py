@@ -66,7 +66,7 @@ coordinate_descent_tuning = (
 )
 
 # control store vs recompute heuristic
-# For fanouts, rematearialization can lead to exponential blowup. So, have
+# For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
@@ -100,7 +100,7 @@ conv_1x1_as_mm = False
 split_reductions = True
 
 # Only save random seed for backwards rather than full mask
-lowmem_dropout = False
+lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -205,13 +205,13 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = False
 
     # assertions not on the fast path, steady state
-    fast_cudagraph_asserts = True
+    slow_path_cudagraph_asserts = False
 
     # assertions on the fast path
-    slow_cudagraph_asserts = False
+    fast_path_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
