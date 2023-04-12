@@ -2020,7 +2020,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_function(), "_torchdynamo_disable", False
         ):
             unimplemented(
-                f"call torch._dynamo.skip() wrapped function {func.get_function()}"
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
     @staticmethod
