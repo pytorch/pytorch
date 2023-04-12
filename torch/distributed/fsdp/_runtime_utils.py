@@ -427,6 +427,7 @@ def _pre_forward(
             args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
         return args, kwargs
 
+
 @no_type_check
 def _pre_forward_unshard(
     state: _FSDPState,
@@ -602,9 +603,13 @@ def _root_pre_forward(
             not handle._force_full_precision for handle in state._handles
         )
 
-        if should_cast_forward_inputs and state.mixed_precision.cast_root_forward_inputs:
+        if (
+            should_cast_forward_inputs
+            and state.mixed_precision.cast_root_forward_inputs
+        ):
             args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
         return args, kwargs
+
 
 def _cast_forward_inputs(
     input_dtype: Optional[torch.dtype],
