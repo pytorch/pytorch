@@ -55,8 +55,6 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
-      keep-going:
-        value: ${{ jobs.build.outputs.keep-going }}
 
 jobs:
   build:
@@ -66,7 +64,6 @@ jobs:
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
