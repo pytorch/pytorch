@@ -8,7 +8,8 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
-from .. import config, variables
+from .. import variables
+from ..config_utils import config
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -178,6 +179,11 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+
+        # It's hard to get resize_() on graph input work properly across
+        # dynamo/aot/inductor, just fall back.
+        if name == "resize_" and self.source is not None:
+            unimplemented("calling resize_() on graph input")
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is

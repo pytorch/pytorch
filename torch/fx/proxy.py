@@ -120,7 +120,7 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depricated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
@@ -201,7 +201,8 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py'
+                    'torch/_refs/nn/functional/__init__.py',
+                    'torch/utils/_stats.py',
                     ]
         while frame:
             frame = frame.f_back

@@ -15,13 +15,15 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer
 
-import torch._dynamo.config as dynamo_config
 import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import identity
 from torch._prims_common import (
+    compute_required_storage_length,
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
@@ -640,13 +642,14 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
         num_inner = 0
         for i in indices:
-            strides = V.graph.sizevars.stride_hints(i, reduction_vars)
+            i = V.graph.sizevars.simplify_with_ranges(i, ranges)
+            strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
             outer = all([s > 1 for s in strides])
             if outer:
                 num_outer += 1
@@ -812,10 +815,15 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = is_triton(device) and reduction_type not in {
-            "argmax",
-            "argmin",
-        }
+        split_reduction = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+            }
+            and config.split_reductions
+        )
         if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
@@ -1305,6 +1313,7 @@ class View(BaseView):
         assert isinstance(new_size, (tuple, list))
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
+        # Skip pointless views
         if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
             return x
 
@@ -1600,6 +1609,9 @@ class Layout(IRNode):
         stride: List[Expr],
         offset: Expr = Integer(0),
     ):
+        assert stride is None or len(size) == len(
+            stride
+        ), f"size={size}, stride={stride}"
         self.device = device
         self.dtype = dtype
         assert all(isinstance(s, (Expr, int)) for s in size)
@@ -1692,6 +1704,9 @@ class Layout(IRNode):
             and self.stride == other.stride
             and self.offset == other.offset
         )
+
+    def storage_size(self) -> sympy.Expr:
+        return compute_required_storage_length(self.size, self.stride, self.offset)
 
 
 class FixedLayout(Layout):
@@ -1859,10 +1874,20 @@ class MutationLayout(Layout):
     def stride(self):
         return self.real_layout().stride
 
+    def storage_size(self) -> sympy.Expr:
+        return self.real_layout().storage_size()
+
     def real_layout(self):
-        if isinstance(self.target, MutationLayout):
-            return self.target.real_layout()
-        return self.target.data.layout
+        def unwrap_views(target):
+            if isinstance(target, MutationLayout):
+                return unwrap_views(target.target)
+            if isinstance(target, BaseView):
+                return unwrap_views(target.unwrap_view())
+            if isinstance(target, MutableBox):
+                return unwrap_views(target.data)
+            return target
+
+        return unwrap_views(self.target).layout
 
     @classmethod
     def realize_into(cls, src, dst):
@@ -2022,9 +2047,6 @@ class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return "None"
 
-    def cpp_wrapper_codegen_reference(self):
-        return "at::Tensor()"
-
 
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
@@ -2034,7 +2056,12 @@ class ShapeAsConstantBuffer(IRNode):
     def codegen_reference(self):
         from torch._inductor.codegen.wrapper import pexpr
 
-        return pexpr(V.graph.sizevars.simplify(self.shape))
+        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        if V.graph.cpp_wrapper:
+            # wrap scalar to 0-d tensor for cpp wrapper
+            return f"torch::tensor({expr})"
+        else:
+            return expr
 
 
 @dataclasses.dataclass
@@ -2160,9 +2187,9 @@ class ComputedBuffer(Buffer):
             ):
                 reordering_reindex[i] = reads_buf.iter_reordering_reindex
 
-        def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
+        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, sizes, memory_addrs, reordering_reindex
+                x_vars, support_vars, sizes, memory_addrs, reordering_reindex
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
@@ -2178,11 +2205,12 @@ class ComputedBuffer(Buffer):
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
+        support_vars = index_vars + reduce_vars
         iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, index_size, reordering_reindex
+            index_vars, support_vars, index_size, reordering_reindex
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, reduce_size
+            reduce_vars, support_vars, reduce_size
         )
 
         # remember the reordering if not have loop collapse.
@@ -2199,7 +2227,12 @@ class ComputedBuffer(Buffer):
 
     @staticmethod
     def _apply_loop_reordering(
-        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=None
+        index_vars,
+        support_vars,
+        sizes,
+        memory_addrs,
+        reordering_reindex=None,
+        priority_idx=None,
     ):
         """
         Shuffle the order of loops around to hopefully improve performance.
@@ -2211,7 +2244,8 @@ class ComputedBuffer(Buffer):
 
         try:
             strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs
+                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
+                for expr in memory_addrs
             ]
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
@@ -2228,7 +2262,9 @@ class ComputedBuffer(Buffer):
         except Exception:
             if config.debug:
                 log.warning(
-                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                    "Did not simplify complex index:\n%s\n%s",
+                    dict(zip(index_vars, sizes)),
+                    memory_addrs,
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
@@ -2661,18 +2697,15 @@ class ExternKernel(InputsKernel):
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
-            kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
-        return kwargs
-
-    def cpp_wrapper_codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                assert arg_name in self.kwargs, (
-                    "arg %s not found in self.kwargs" % arg_name
-                )
-                v = self.kwargs.get(arg_name)
-                kwargs.append(repr(v))
+            if V.graph.cpp_wrapper:
+                for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                    assert arg_name in self.kwargs, (
+                        "arg %s not found in self.kwargs" % arg_name
+                    )
+                    v = self.kwargs.get(arg_name)
+                    kwargs.append(repr(v))
+            else:
+                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -2694,7 +2727,7 @@ class ExternKernel(InputsKernel):
 
     def canonicalize(self):
         """
-        Manually get cononicalization of the output index
+        Manually get canonicalization of the output index
         """
         # manually generate index formula for conv
         sizevars = V.graph.sizevars
@@ -2736,13 +2769,7 @@ class ExternKernelOut(ExternKernel):
 
     def codegen(self, wrapper):
         args = self.codegen_args()
-
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            kwargs = self.cpp_wrapper_codegen_kwargs()
-        else:
-            kwargs = self.codegen_kwargs()
+        kwargs = self.codegen_kwargs()
         if kwargs:
             args.extend(kwargs)
 
@@ -2795,12 +2822,14 @@ class ExternKernelAlloc(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
+        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.cpp_kernel = cpp_kernel
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
+        self.cpp_constant_args = cpp_constant_args
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
@@ -2838,6 +2867,61 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class ScatterFallback(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly.
+    This class handles both aten.scatter_ and aten.scatter_reduce_.
+    It also handle the case `src` being a scalar properly.
+    """
+
+    def codegen(self, wrapper):
+        if self.src_is_tensor:
+            (x, index, src) = [t.codegen_reference() for t in self.inputs]
+        else:
+            (x, index) = [t.codegen_reference() for t in self.inputs]
+            src = self.constant_args[1]
+        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
+        if self.kernel == "aten.scatter_":
+            if self.kwargs["reduce"]:
+                line += f", reduce={repr(self.kwargs['reduce'])}"
+        else:
+            line += ", ".join([""] + self.codegen_kwargs())
+        line += ")"
+        wrapper.writeline(line)
+
+    def should_allocate(self):
+        return False
+
+    def __init__(
+        self,
+        fn,
+        x,
+        dim: int,
+        index,
+        src,
+        *,
+        reduce: str = None,
+        include_self: bool = True,
+    ):
+        assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
+        self.kernel = fn
+        self.src_is_tensor = isinstance(src, TensorBox)
+        if self.src_is_tensor:
+            tensors = [self.realize_input(t) for t in [x, index, src]]
+            constant_args = [dim]
+        else:
+            tensors = [self.realize_input(t) for t in [x, index]]
+            constant_args = [dim, src]
+        super().__init__(
+            None,
+            MutationLayout(x),
+            self.unwrap_storage(tensors),
+            constant_args,
+            {"reduce": reduce, "include_self": include_self},
         )
         self.name = V.graph.register_buffer(self)
 
@@ -3053,6 +3137,13 @@ class MultiOutput(ExternKernel):
         return False
 
 
+def _string(shape: tuple):
+    from .codegen.wrapper import CppWrapperCodeGen
+
+    cpp_wrapper_codegen = CppWrapperCodeGen()
+    return cpp_wrapper_codegen.codegen_shape_tuple(shape)
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
@@ -3123,6 +3214,8 @@ def _prepare_convolution_fusion_create(
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
     output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
+    x.realize()
+    weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
@@ -3430,13 +3523,36 @@ class LinearUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._linear_pointwise",
+        cpp_kernel="mkldnn::_linear_pointwise",
+        cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        self.cpp_kernel_key = "linear_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            args = self.cpp_wrapper_codegen_args()
+        else:
+            args = self.codegen_args()
+
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.cpp_kernel,
+            args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -3450,11 +3566,17 @@ class LinearUnary(ExternKernelAlloc):
 
         inputs = [x, w]
         constant_args = [attr, scalars, algorithm]
+        cpp_constant_args = [
+            f'"{attr}"',
+            _string(scalars) if scalars else "{-1}",
+            f'"{algorithm}"',
+        ]
         if b is not None:
             b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)
+            cpp_constant_args.insert(0, "at::Tensor()")
 
         return LinearUnary(
             layout=FlexibleLayout(
@@ -3464,6 +3586,7 @@ class LinearUnary(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
+            cpp_constant_args=cpp_constant_args,
             kernel=kernel,
         )
 
@@ -3596,6 +3719,10 @@ class MutableBox(IRNode):
         if callable(fn):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
+
+    @property
+    def layout(self):
+        return self.data.layout
 
     def __str__(self):
         if isinstance(self.data, MutableBox):
@@ -4089,18 +4216,15 @@ class AllGatherIntoTensor(CollectiveKernel):
 
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
+    def __init__(self, layout, inputs, constant_args, reduce_op):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
-        # TODO support dim
-        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
         cls,
         x: "TensorBox",
         reduce_op: str,
-        scatter_dim: int,
         tag: str,
         ranks: List[int],
         group_size: int,
@@ -4110,7 +4234,7 @@ class ReduceScatterTensor(CollectiveKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_size = x.get_size()
-        new_size[scatter_dim] /= group_size
+        new_size[0] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
         return ReduceScatterTensor(
@@ -4118,7 +4242,6 @@ class ReduceScatterTensor(CollectiveKernel):
             inputs=[x],
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
-            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):

@@ -5,8 +5,9 @@ from typing import Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
+from ..config_utils import config
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import check_constant_args, namedtuple_fields
@@ -53,7 +54,13 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
+
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -67,7 +74,7 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
