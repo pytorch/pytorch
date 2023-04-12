@@ -1328,12 +1328,12 @@ def emit_body(
                 var = name
                 name += "_"
                 if var == "self" and inplace:
-                    if not is_inplace_foreach:
-                        stmts_prepend = "if (!original_self.has_value()) original_self = self.clone()"
-                        var = "original_self.value()"
-                    else:
-                        stmts_prepend = "if (!original_selfs[i].has_value()) original_selfs[i] = self[i].clone()"
-                        var = "original_selfs[i].value()"
+                    original_self_var = "original_self" if not is_inplace_foreach else "original_selfs[i]"
+                    self_var = var if not is_inplace_foreach else var + "[i]"
+                    stmts_prepend = (
+                        f"if (!{original_self_var}.has_value()) {original_self_var} = {self_var}.clone()"
+                    )
+                    var = f"{original_self_var}.value()"
                     assert not is_output
                 if inplace and is_output:
                     if name == "result_" and is_inplace_foreach:
