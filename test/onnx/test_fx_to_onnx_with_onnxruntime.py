@@ -795,6 +795,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
+    )
     @pytorch_test_common.skip_fx_exporters(
         {DynamoExporter: "Shapes are assumed static by default by 'dynamo.export'."}
     )

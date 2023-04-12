@@ -160,7 +160,7 @@ class ProtobufExportOutputSerializer:
 @runtime_checkable
 class InputFormatStep(Protocol):
     def format(
-        self, args: Sequence[Any], kwargs: Mapping[str, Any]
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         ...
 
@@ -275,8 +275,8 @@ class ExportOutput:
         but only flattened tensors are supported by ONNX, etc.
 
         The actual formatting steps are associated with each individual export. It
-        depends on the PyTorch model, the particular set of *args and **kwargs used for
-        the export, and export options.
+        depends on the PyTorch model, the particular set of model_args and model_kwargs
+        used for the export, and export options.
 
         This method replays the formatting steps recorded during export.
 
@@ -331,8 +331,8 @@ class ExportOutput:
         but only flattened tensors are supported by ONNX, etc.
 
         The actual formatting steps are associated with each individual export. It
-        depends on the PyTorch model, the particular set of *args and **kwargs used for
-        the export, and export options.
+        depends on the PyTorch model, the particular set of model_args and model_kwargs
+        used for the export, and export options.
 
         This method replays the formatting steps recorded during export.
 
