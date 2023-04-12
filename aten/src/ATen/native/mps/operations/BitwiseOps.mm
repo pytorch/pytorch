@@ -1,11 +1,11 @@
 #include <ATen/ExpandUtils.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/logical_not_native.h>
 #include <fmt/format.h>
-#include <torch/library.h>
 
-namespace {
+namespace at::native {
+namespace mps {
 static const char* BITWISE_OPS_TEMPLATE = R"METAL(
 
 kernel void bitwise_and_tensor(constant uint& length [[buffer(0)]],
@@ -103,7 +103,7 @@ const std::string& getMetalType(const c10::ScalarType& t) {
   return it->second;
 }
 
-const std::string& getMetalType(const at::Tensor& t) {
+const std::string& getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
@@ -162,9 +162,9 @@ void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder, id<MTLComputePip
   [commandEncoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
 }
 
-void handle_tensor_tensor_binary_op(const at::Tensor& self,
-                                    const at::Tensor& other,
-                                    at::Tensor& output,
+void handle_tensor_tensor_binary_op(const Tensor& self,
+                                    const Tensor& other,
+                                    Tensor& output,
                                     const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
@@ -194,9 +194,9 @@ void handle_tensor_tensor_binary_op(const at::Tensor& self,
   });
 }
 
-void handle_tensor_scalar_binary_op(const at::Tensor& self,
-                                    const at::Scalar& other,
-                                    at::Tensor& output,
+void handle_tensor_scalar_binary_op(const Tensor& self,
+                                    const Scalar& other,
+                                    Tensor& output,
                                     const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
@@ -226,19 +226,16 @@ void handle_tensor_scalar_binary_op(const at::Tensor& self,
   });
 }
 
-at::Tensor& _bitwise_op_out_mps(const at::Tensor& self,
-                                const at::Tensor& other,
-                                at::Tensor& output_,
-                                const std::string& op_name) {
+void _bitwise_op_out_mps(const Tensor& self, const Tensor& other, const Tensor& output_, const std::string& op_name) {
   using namespace at::mps;
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
 
-  at::Tensor output = output_;
+  Tensor output = output_;
   bool needs_output_copy = false;
 
   auto output_size = at::infer_size_dimvector(self.sizes(), other.sizes());
-  at::native::resize_output(output, output_size);
+  resize_output(output, output_size);
   if (!output.is_contiguous()) {
     output = output.contiguous();
     needs_output_copy = true;
@@ -266,31 +263,20 @@ at::Tensor& _bitwise_op_out_mps(const at::Tensor& self,
   if (needs_output_copy) {
     output_.copy_(output);
   }
-  return output_;
+  return;
 }
 
-at::Tensor& bitwise_and_out_mps(const at::Tensor& self, const at::Tensor& other, at::Tensor& output) {
-  return _bitwise_op_out_mps(self, other, output, "and");
-}
-
-at::Tensor& bitwise_or_out_mps(const at::Tensor& self, const at::Tensor& other, at::Tensor& output) {
-  return _bitwise_op_out_mps(self, other, output, "or");
-}
-
-at::Tensor& bitwise_xor_out_mps(const at::Tensor& self, const at::Tensor& other, at::Tensor& output) {
-  return _bitwise_op_out_mps(self, other, output, "xor");
-}
-
-at::Tensor& bitwise_not_out_mps(const at::Tensor& self, at::Tensor& output_) {
+void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
   // Handle boolean tensor using logical not
   if (self.scalar_type() == c10::ScalarType::Bool) {
-    return at::native::logical_not_out_mps(self, output_);
+    logical_not_out_mps(self, const_cast<Tensor&>(output_));
+    return;
   }
 
-  at::Tensor output = output_;
+  Tensor output = output_;
   bool needs_output_copy = false;
 
-  at::native::resize_output(output, self.sizes());
+  resize_output(output, self.sizes());
   if (!output.is_contiguous()) {
     output = output.contiguous();
     needs_output_copy = true;
@@ -302,11 +288,11 @@ at::Tensor& bitwise_not_out_mps(const at::Tensor& self, at::Tensor& output_) {
     } else {
       output.fill_(c10::Scalar(~self.item<int64_t>()));
     }
-    return output_;
+    return;
   }
   uint32_t length = output.numel();
   if (length == 0) {
-    return output_;
+    return;
   }
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
@@ -331,14 +317,23 @@ at::Tensor& bitwise_not_out_mps(const at::Tensor& self, at::Tensor& output_) {
   if (needs_output_copy) {
     output_.copy_(output);
   }
-  return output_;
 }
 
-TORCH_LIBRARY_IMPL(aten, MPS, m) {
-  m.impl("bitwise_and.Tensor_out", bitwise_and_out_mps);
-  m.impl("bitwise_or.Tensor_out", bitwise_or_out_mps);
-  m.impl("bitwise_xor.Tensor_out", bitwise_xor_out_mps);
-  m.impl("bitwise_not.out", bitwise_not_out_mps);
+} // namespace mps
+
+TORCH_IMPL_FUNC(bitwise_and_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::_bitwise_op_out_mps(self, other, output, "and");
 }
 
-} // anonymous namespace
+TORCH_IMPL_FUNC(bitwise_or_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::_bitwise_op_out_mps(self, other, output, "or");
+}
+
+TORCH_IMPL_FUNC(bitwise_xor_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::_bitwise_op_out_mps(self, other, output, "xor");
+}
+
+TORCH_IMPL_FUNC(bitwise_not_out_mps)(const Tensor& self, const Tensor& output) {
+  mps::_bitwise_not_out_mps(self, output);
+}
+} // namespace at::native

@@ -80,7 +80,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
         if name == "from":
             assert kind == Parameter.POSITIONAL_OR_KEYWORD
             # ParameterKind type is internal implementation detail to inspec package
-            # which makes it hard to do type annoation
+            # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
             for idx, p in enumerate(parameters):
