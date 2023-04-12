@@ -289,15 +289,18 @@ def get_manager(
     return get_container(device_index).tree_manager
 
 
-def cudagraphify_impl(model, inputs, *args, **kwargs):
+def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
     fn = None
+    # remove unaligned idxs on initial compilation before unaligned inputs have
+    # been copied out
+    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
     def deferred_cudagraphify(second_inputs):
         nonlocal fn
         if fn is not None:
             return fn(second_inputs)
 
-        fn, out = cudagraphify(model, inputs, *args, **kwargs)
+        fn, out = cudagraphify(model, inputs, static_input_idxs, *args, **kwargs)
         return out
 
     return deferred_cudagraphify
@@ -901,7 +904,9 @@ class CUDAGraphNode:
         self,
     ) -> List[Union[UntypedStorage, None, int]]:
         output_storages = []
-        for (output_storage_alias, metadata) in zip(self.output_storage_alias, self.outputs_metadata):
+        for output_storage_alias, metadata in zip(
+            self.output_storage_alias, self.outputs_metadata
+        ):
             output_storages.append(
                 self.prepare_alias_info_for_tensor_construction(
                     output_storage_alias, metadata
@@ -1696,9 +1701,7 @@ class CUDAGraphTreeManager:
     ) -> Tuple[Callable, List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
-        self.ids_to_funcs[id] = WrappedFunction(
-            model, remove_unaligned_input_idxs(inputs, static_input_idxs), id
-        )
+        self.ids_to_funcs[id] = WrappedFunction(model, static_input_idxs, id)
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
 
