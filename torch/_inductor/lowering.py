@@ -3553,8 +3553,10 @@ def pow(a, b):
     elif isinstance(b, int) and b == 1:
         return a
 
-    dtype = a.get_dtype() if isinstance(a, ir.TensorBox) else b.get_dtype()
+    # Type promotion ensures all tensor arguments have the same type
+    dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
     is_integer_pow = is_integer_dtype(dtype)
+
     # Optimize away small fixed powers, or for integers avoid falling back to ATen
     embed_exponent = isinstance(b, int) and (
         -32 < b < 32 or (is_integer_pow and b >= 0)
