@@ -56,6 +56,7 @@ struct Vectorizedqi {
   }
 };
 
+
 template <typename T>
 __m512i pack_saturate_and_clamp(
     __m512i first,
