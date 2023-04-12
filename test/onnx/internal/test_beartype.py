@@ -45,7 +45,7 @@ class TestBeartype(common_utils.TestCase):
             _beartype.RuntimeTypeCheckState.WARNINGS,
         )
         decorated = decorator(func_with_incorrect_type_hint)
-        with self.assertWarns(torch.onnx.errors.CallHintViolationWarning):
+        with self.assertWarns(_beartype.CallHintViolationWarning):
             decorated("string_input")  # type: ignore[arg-type]
 
     @common_utils.parametrize("arg", [1, "string_input"])
