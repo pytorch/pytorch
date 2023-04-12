@@ -25,6 +25,7 @@ setup_test_python() {
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
+  echo "Python version: $(python --version)"
 
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
@@ -45,9 +46,6 @@ test_python_shard() {
   fi
 
   setup_test_python
-
-  which python
-  python --version
 
   time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS"
 
