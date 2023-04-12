@@ -686,6 +686,21 @@ if (!grad_fns.empty()) {
 """
 )
 
+LOOP_OVER_VECTOR_OF_GRAD_FNS = CodeTemplate(
+    """\
+if (!grad_fns.empty()) {
+    ${preamble}
+    for (const auto& i : c10::irange(grad_fns.size())) {
+        auto grad_fn = grad_fns[i];
+        if (grad_fn != nullptr) {
+            ${statements}
+        }
+    }
+    ${epilog}
+}
+"""
+)
+
 CONDITIONAL = CodeTemplate(
     """\
 if (${cond}) {
@@ -1155,12 +1170,8 @@ def emit_body(
         if is_inplace_foreach:
             save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
             if save_input_stmts:
-                setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
-                setup.append("  auto grad_fn = grad_fns[i];")
-                setup.append("  if (grad_fn != nullptr) {")
-                setup.extend([f"    {stmt}" for stmt in save_input_stmts])
-                setup.append("  }")
-                setup.append("}")
+                setup.append(
+                    LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(preamble="", statements=save_input_stmts, epilog=""))
         else:
             setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
             for arg in args_with_derivatives:
@@ -1631,18 +1642,7 @@ def emit_body(
             if not is_inplace_foreach:
                 return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
             else:
-                stmts = (
-                    [
-                        "for (const auto& i : c10::irange(grad_fns.size())) {",
-                        "  auto grad_fn = grad_fns[i];",
-                        "  if (grad_fn != nullptr) {",
-                    ]
-                    + [f"    {s}" for s in stmts]
-                    + ["  }", "}"]
-                )
-                return CONDITIONAL.substitute(
-                    cond="!grad_fns.empty()", statements=stmts
-                )
+                return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(preamble="", statements=stmts, epilog="")
         return ""
 
     def emit_any_requires_grad() -> List[str]:
