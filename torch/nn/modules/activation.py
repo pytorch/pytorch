@@ -1272,8 +1272,8 @@ class MultiheadAttention(Module):
                 attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
             elif attn_mask.dim() == 2:
                 attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
-
             merged_mask = attn_mask_expanded
+
             if key_padding_mask is not None:
                 key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
                 merged_mask = attn_mask_expanded + key_padding_mask_expanded
