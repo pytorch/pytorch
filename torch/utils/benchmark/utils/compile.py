@@ -16,6 +16,7 @@ try:
     HAS_TABULATE = True
 except ImportError:
     HAS_TABULATE = False
+    print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
     def _enable_tensor_cores():
@@ -64,7 +65,7 @@ if HAS_TABULATE:
 
         # Get the average time per iteration in milliseconds
         avg_time = result.mean * 1000
-        return round(avg_time, 4)
+        return round(avg_time, 2)
 
     def benchmark_compile(
         model: Union[torch.nn.Module, Callable],
@@ -104,8 +105,8 @@ if HAS_TABULATE:
             compilation_time = None
             running_time = bench_loop(opt_model, sample_input, num_iters, optimizer, loss_fn)
 
-        compilation_time = round(compilation_time, 4) if compilation_time else None
-        running_time = round(running_time, 4) if running_time else None
+        compilation_time = round(compilation_time, 2) if compilation_time else None
+        running_time = round(running_time, 2) if running_time else None
 
 
         return compilation_time, running_time
@@ -133,24 +134,8 @@ if HAS_TABULATE:
 
         If a compilation fails for any reason including the dependency not being included
         then we will print Failed to compile {backend} with mode {mode}
-
-        | Train/Inference   | Backend         | Mode   | Compilation Time   | Average Running Time   | Speedup        |
-        |-------------------|-----------------|--------|--------------------|------------------------|----------------|
-        | Inference         | Eager           | -      | -                  | 0.0172 ms              | -              |
-        | Inference         | aot_ts_nvfuser  | -      | 0.1658 ms          | 0.0789 ms              | 0.2180x slower |
-        | Inference         | cudagraphs      | -      | 0.2327 ms          | 0.1293 ms              | 0.1330x slower |
-        | Inference         | nvprims_nvfuser | -      | 0.1963 ms          | 0.1344 ms              | 0.1280x slower |
-
-        | Train/Inference   | Backend         | Mode   | Compilation Time   | Average Running Time   | Speedup        |
-        |-------------------|-----------------|--------|--------------------|------------------------|----------------|
-        | Training          | Eager           | -      | -                  | 0.0184 ms              | -              |
-        | Training          | aot_ts_nvfuser  | -      | 0.1376 ms          | 0.0842 ms              | 0.2185x slower |
-        | Training          | cudagraphs      | -      | 0.2154 ms          | 0.1321 ms              | 0.1393x slower |
-        | Training          | nvprims_nvfuser | -      | 0.1824 ms          | 0.125 ms               | 0.1472x slower |
-
-
         """
-        field_names = ["Train/Inference", "Backend", "Mode", "Compilation Time", "Average Running Time", "Speedup"]
+        field_names = ["Train/Inference", "Backend", "Mode", "Compilation Time", "Average Running Time"]
         table = []
 
 
@@ -158,7 +143,8 @@ if HAS_TABULATE:
         torch._dynamo.reset()
         _, eager_time = benchmark_compile(model, sample_input, num_iters, None, None, optimizer)
         table.append(
-            [("Training" if optimizer else "Inference"), "Eager", "-", "-", f"{eager_time} ms", "-"])
+            [("Training" if optimizer else "Inference"), "Eager", "-", "-", f"{eager_time} ms"]
+        )
 
         for backend in torch._dynamo.list_backends():
 
@@ -176,21 +162,13 @@ if HAS_TABULATE:
                     finally:
                         if torch.cuda.is_available():
                             _disable_tensor_cores()
-                            if running_time is not None:
-                                speedup_ratio = eager_time / running_time
-                                speedup = (
-                                    f"{abs(speedup_ratio):.4f}x faster"
-                                    if speedup_ratio >= 1
-                                    else f"{abs(speedup_ratio):.4f}x slower"
-                                )
-                                table.append([
-                                    ("Training" if optimizer else "Inference"),
-                                    backend if backend else "-",
-                                    mode if mode is not None else "-",
-                                    f"{compilation_time} ms " if compilation_time else "-",
-                                    f"{running_time} ms " if running_time else "-",
-                                    speedup if speedup else "-"
-                                ])
+                            table.append([
+                                ("Training" if optimizer else "Inference"),
+                                backend if backend else "-",
+                                mode if mode is not None else "-",
+                                f"{compilation_time} ms " if compilation_time else "-",
+                                f"{running_time} ms " if running_time else "-",
+                            ])
 
             else:
                 torch._dynamo.reset()
@@ -198,15 +176,11 @@ if HAS_TABULATE:
                     model, sample_input, num_iters, backend, None, optimizer, loss_fn)
 
                 if running_time is not None:
-                    speedup_ratio = eager_time / running_time
-                    speedup = f"{abs(speedup_ratio):.4f}x faster" if speedup_ratio >= 1 else f"{abs(speedup_ratio):.4f}x slower"
-
                     table.append([
                         ("Training" if optimizer else "Inference"),
                         backend, "-",
                         f"{compilation_time} ms " or "-",
                         f"{running_time} ms ",
-                        speedup if speedup else "-"
                     ])
 
 
