@@ -950,10 +950,8 @@ class FakeTensor(torch.Tensor):
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
-                if fake_mode is None:
-                    fake_mode = arg.fake_mode
-                else:
-                    assert fake_mode is arg.fake_mode, "Mixing modes NYI"
+                fake_mode = arg.fake_mode
+                break
 
         assert fake_mode is not None
         with fake_mode:  # type: ignore[attr-defined]
@@ -1309,6 +1307,9 @@ class FakeTensorMode(TorchDispatchMode):
                     )
 
                 return converter(self, x)
+            else:
+                assert x.fake_mode is self, "Mixing fake modes NYI"
+
             return x
 
         return tree_map_only(
