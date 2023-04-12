@@ -1627,10 +1627,10 @@ class TestSparse(TestSparseBase):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
 
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
             gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
             # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True)
+            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=False), [a, b])
 
         # TODO: Re-enable these
         # test_shape(2, 3, [2, 3, 4, 5])
@@ -2017,13 +2017,20 @@ class TestSparse(TestSparseBase):
 
         shape = (5, 5)
         sparse_dims = len(shape)
-        nnzs = (0, 5, 25)
+        nnzs = (0, 5, 15, 25)
+
+        lhs_data = torch.arange(25, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
+        rhs_data = lhs_data.clone()
 
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
-                lhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, lhs_is_coalesced)
+                lhs = lhs_data.clone()
+                lhs._values()[nnz:].fill_(0)
                 lhs.requires_grad_(True)
-                rhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, rhs_is_coalesced)
+
+                rhs = rhs_data.clone()
+                rhs._values()[:-nnz].fill_(0)
+
                 gradcheck(lambda t: t.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,))
                 gradcheck(lambda t: t.sparse_mask(lhs.detach()).to_dense(masked_grad=False), (lhs,))
 
@@ -3790,8 +3797,8 @@ class TestSparse(TestSparseBase):
         #     if dtype in {torch.double, torch.cdouble}:
         #         xa = x.detach().clone().requires_grad_(True)
         #         ya = y.detach().clone().requires_grad_(True)
-        #         gradcheck(lambda a, b: (a * b).to_dense(), (xa, ya), masked=True)
-        #         gradcheck(lambda a, b: (a * b).to_dense(), (ya, xa), masked=True)
+        #         gradcheck(lambda a, b: (a * b).to_dense(masked_grad=False), (xa, ya))
+        #         gradcheck(lambda a, b: (a * b).to_dense(masked_grad=False), (ya, xa))
 
         for dim in range(len(shape) + 1):
             sub_shape = shape[dim:]
