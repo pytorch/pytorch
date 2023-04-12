@@ -60,6 +60,12 @@ always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 
 
+import sympy
+
+from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.utils._sympy.value_ranges import ValueRanges
+
+
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
     token = 0
@@ -369,7 +375,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
-            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -431,8 +437,13 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.platform == "win32":
         raise RuntimeError("Windows not yet supported for torch.compile")
-    if sys.version_info >= (3, 11):
-        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 12):
+        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
+    elif sys.version_info >= (3, 11):
+        warnings.warn(
+            "torch.compile support of Python 3.11 is experimental. "
+            "Program may generate incorrect results or segfault."
+        )
 
 
 def is_dynamo_supported():
@@ -533,7 +544,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason is not None:
+        if gm.compile_subgraph_reason.graph_break:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
@@ -596,9 +607,37 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
-    constraint_range: Optional[
-        torch.fx.experimental.symbolic_shapes.StrictMinMaxConstraint
-    ]
+    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
+    constraint_range: StrictMinMaxConstraint
+
+    def _clone_with_range(self, lower=2, upper=sympy.oo):
+        constraint_range = StrictMinMaxConstraint(
+            self.constraint_range.vr & ValueRanges(lower=lower, upper=upper)
+        )
+        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
+
+    def __ge__(self, lower):
+        return self._clone_with_range(lower=lower)
+
+    def __gt__(self, lower):
+        return self._clone_with_range(lower=lower + 1)
+
+    def __le__(self, upper):
+        return self._clone_with_range(upper=upper)
+
+    def __lt__(self, upper):
+        return self._clone_with_range(upper=upper - 1)
+
+    def __bool__(self):
+        # NOTE(avik): We do not support compound expressions like a <= x <= b.
+        # This is because Python implicitly desugars them into bool(a <= x) and bool(x <= b),
+        # and moreover, enforces that any overload of __bool__ must return True or False.
+        # FWIW, sympy also raises TypeError in this case.
+        raise TypeError(
+            "Cannot determine truth value of Constraint. "
+            "If you are trying to combine Constraints with logical connectives, "
+            "you can specify them separately instead."
+        )
 
 
 def export(

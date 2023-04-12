@@ -993,7 +993,9 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__contains__, (self,), self, element)
-        if isinstance(element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)):
+        if isinstance(
+            element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
+        ):
             # type hint doesn't understand the __contains__ result array
             return (element == self).any().item()  # type: ignore[union-attr]
 
