@@ -264,7 +264,7 @@ class PassManager:
             # Run the set of passes on the graph module
             for i, fn in enumerate(self.passes):
                 fn_name = fn.__name__ if inspect.isfunction(fn) else type(fn).__name__
-                logger.debug(f"Running pass '{fn_name}'")
+                logger.debug("Running pass '%s'", fn_name)
 
                 try:
                     res = fn(module)

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
-from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning import BasePruner
 import torch
 import torch.nn.functional as F
 from torch import nn
 
-class ImplementedSparsifier(BaseSparsifier):
+class ImplementedPruner(BasePruner):
     def __init__(self, **kwargs):
         super().__init__(defaults=kwargs)
 

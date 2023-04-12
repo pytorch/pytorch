@@ -558,7 +558,9 @@ class BuiltinVariable(VariableTracker):
             except TypeError as exc:
                 if not has_constant_handler:
                     log.warning(
-                        f"incorrect arg count {handler} {exc} and no constant handler"
+                        "incorrect arg count %s %s and no constant handler",
+                        handler,
+                        exc,
                     )
                 handler = None
 

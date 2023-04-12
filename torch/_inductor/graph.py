@@ -181,7 +181,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.info(f"Using FallbackKernel: {name}")
+            log.info("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -681,8 +681,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.debug(f"Output code written to: {mod.__file__}")
-        output_code_log.debug(f"Output code: \n{code}")
+        log.debug("Output code written to: %s", mod.__file__)
+        output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -694,7 +694,7 @@ class GraphLowering(torch.fx.Interpreter):
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()
-            output_code_log.debug(f"Output code: \n{code}")
+            output_code_log.debug("Output code: \n%s", code)
 
             libpath = AotCodeCache.compile(
                 code, cuda=(self.get_single_device() == "cuda")
