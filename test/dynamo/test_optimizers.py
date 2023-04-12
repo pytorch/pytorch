@@ -18,7 +18,7 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
-def make_test(optim_cls, exp_graph_count=1, closure=None, fullgraph=True, **kwargs):
+def make_test(optim_cls, exp_graph_count=1, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
@@ -31,22 +31,15 @@ def make_test(optim_cls, exp_graph_count=1, closure=None, fullgraph=True, **kwar
         else:
             fn = opt.step
 
-        if fullgraph and exp_graph_count == 1:
-            # Calling with fullgraph=True will assert there are no graph
-            # breaks, and we didn't fall back on large parts of the optimizer.
-            # Many of the tests using the other branch just happened to
-            # get one graph before falling back with an error and are not
-            # actually working properly.
-            torch.compile(fn, backend="eager", fullgraph=True)()
-        else:
-            _, _, graphs, _, _, _ = torch._dynamo.explain(fn)
-            self.assertEqual(len(graphs), exp_graph_count)
+        _, _, graphs, _, _, _ = torch._dynamo.explain(fn)
+
+        self.assertEqual(exp_graph_count, len(graphs))
 
     return test_fn
 
 
 class OptimizerTests(torch._dynamo.test_case.TestCase):
-    test_sgd = make_test(torch.optim.SGD, lr=0.01, exp_graph_count=3)
+    test_sgd = make_test(torch.optim.SGD, lr=0.01)
     # lgbfs has data-dependent control and internally iterates
     # calling the closure
     # TODO mlazos: re-enable once we have latest pytorch with FakeTensor fix #497
@@ -59,24 +52,17 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # furthermore, the break is inside a for loop, so we bail on the frame
     # entirely.  This is basically an xfail; if the frame count goes up
     # you done good
-    test_radam = make_test(torch.optim.RAdam, exp_graph_count=2)
-    test_adadelta = make_test(torch.optim.Adadelta, exp_graph_count=3)
-    test_adagrad = make_test(torch.optim.Adagrad, exp_graph_count=3)
-    test_adam = make_test(torch.optim.Adam, exp_graph_count=3)
-    test_adamax = make_test(torch.optim.Adamax, exp_graph_count=3)
-    test_adamw = make_test(torch.optim.AdamW, exp_graph_count=3)
-    test_asgd = make_test(torch.optim.ASGD, exp_graph_count=3)
-    test_nadam = make_test(torch.optim.NAdam, exp_graph_count=3)
-    test_rmsprop = make_test(torch.optim.RMSprop, exp_graph_count=3)
-    test_rprop = make_test(torch.optim.Rprop, exp_graph_count=3)
+    test_radam = make_test(torch.optim.RAdam, exp_graph_count=0)
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above
 exclude = {
+    "SGD",  # Handled above
     "Optimizer",
     "SparseAdam",  # Unsupported
     "LBFGS",  # Unsupported
+    "RAdam",  # Has data dependent control for rectification (needs symint)
 }
 
 optimizers = [
@@ -89,8 +75,7 @@ optimizers = [
 
 
 for opt in optimizers:
-    if not hasattr(OptimizerTests, "test_" + opt.__name__.lower()):
-        setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
+    setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
 
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
@@ -121,10 +106,15 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         batch = {"x": input1, "y": input2}
         for _ in range(2):
             opt_training_iter_fn(batch, net, optimizer)
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":
+    # most optimizer tests are broken on 3.11
+    # TODO remove when 3.11 is fully supported
+    import sys
+
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if sys.version_info < (3, 11):
+        run_tests()

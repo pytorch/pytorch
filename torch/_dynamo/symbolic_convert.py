@@ -784,11 +784,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if package is not None:
             if spec is not None and package != spec.parent:
                 log.warning(
-                    "__package__ != __spec__.parent "
-                    f"({package!r} != {spec.parent!r})",
-                    ImportWarning,
+                    "__package__ != __spec__.parent (%r != %r)",
+                    package,
+                    spec.parent,
                     stacklevel=3,
-                )  # type: ignore[call-arg]
+                )
             return package
         elif spec is not None:
             return spec.parent
