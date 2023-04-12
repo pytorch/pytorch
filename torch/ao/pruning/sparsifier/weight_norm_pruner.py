@@ -4,23 +4,23 @@ from typing import Callable, Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
 
-from .base_sparsifier import BaseSparsifier
+from .base_pruner import BasePruner
 
-__all__ = ["WeightNormSparsifier"]
+__all__ = ["WeightNormPruner"]
 
 def _flat_idx_to_2d(idx, shape):
     rows = idx // shape[1]
     cols = idx % shape[1]
     return rows, cols
 
-class WeightNormSparsifier(BaseSparsifier):
-    r"""Weight-Norm Sparsifier
+class WeightNormPruner(BasePruner):
+    r"""Weight-Norm Pruner
 
-    This sparsifier computes the norm of every sparse block and "zeroes-out" the
+    This pruner computes the norm of every sparse block and "zeroes-out" the
     ones with the lowest norm. The level of sparsity defines how many of the
     blocks is removed.
 
-    This sparsifier is controlled by three variables:
+    This pruner is controlled by three variables:
     1. `sparsity_level` defines the number of *sparse blocks* that are zeroed-out
     2. `sparse_block_shape` defines the shape of the sparse blocks. Note that
         the sparse blocks originate at the zero-index of the tensor.
@@ -46,7 +46,7 @@ class WeightNormSparsifier(BaseSparsifier):
         channels, while the `block_COLS` would refer to the input channels.
 
     Note::
-        All arguments to the WeightNormSparsifier constructor are "default"
+        All arguments to the WeightNormPruner constructor are "default"
         arguments and could be overriden by the configuration provided in the
         `prepare` step.
     """

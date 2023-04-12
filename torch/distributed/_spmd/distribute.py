@@ -470,7 +470,7 @@ def _convert_to_distributed(
     output_schemas: Dict[str, Schema] = {}
     for i, node in enumerate(gm.graph.nodes):
         assert logger is not None
-        logger.info(f"node{i}: op={node.op} target={node.target}")
+        logger.info("node%s: op=%s target=%s", i, node.op, node.target)
         if node.op == OP.PLACEHOLDER:
             assert i < len(
                 inps
