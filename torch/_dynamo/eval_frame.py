@@ -44,7 +44,7 @@ else:
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
-from . import config, convert_frame, skipfiles, utils
+from . import config, convert_frame, external_utils, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
@@ -339,6 +339,20 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
         )
+
+    def __call__(self, fn):
+        if _will_skip(fn):
+            # this is likely a torch.nn.* instance in skipfiles.py
+            # workaround to add an extra frame we can capture
+            fn = external_utils.wrap_inline(fn)
+        return super().__call__(fn)
+
+
+def _will_skip(fn):
+    code = getattr(getattr(fn, "forward", fn), "__code__", None)
+    if hasattr(code, "co_filename"):
+        return skipfiles.check(code.co_filename)
+    return False
 
 
 class RunOnlyContext(_TorchDynamoContext):

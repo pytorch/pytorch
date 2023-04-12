@@ -958,6 +958,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, ifdyn(13, 11))
 
+    def test_module_in_skipfiles(self):
+        model = nn.Linear(10, 10)
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(model, backend=cnt, fullgraph=True)(torch.randn([5, 10]))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     def test_slicing_dynamic_shape(self):
         def fn(y):
             x = torch.ones(8)
