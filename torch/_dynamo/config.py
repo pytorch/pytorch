@@ -1,4 +1,3 @@
-import logging
 import os
 import sys
 import tempfile
@@ -17,16 +16,6 @@ from . import external_utils
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
 log_file_name = None
-
-# Note (mlazos): This is deprecated and will be removed very soon
-# to configure logging for dynamo, aot, and inductor
-# use the following API in the torch._logging module
-# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
-# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
-# see this design doc for more detailed info
-# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-log_level = logging.ERROR
-output_code = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
@@ -201,7 +190,7 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
-skip_nnmodule_hook_guards = False
+skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
