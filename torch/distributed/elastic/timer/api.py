@@ -196,11 +196,11 @@ class TimerServer(abc.ABC):
                 f" Expired timers: {self._get_scopes(expired_timers)}"
             )
             if self._reap_worker_no_throw(worker_id):
-                log.info(f"Successfully reaped worker=[{worker_id}]")
+                log.info("Successfully reaped worker=[%s]", worker_id)
                 reaped_worker_ids.add(worker_id)
             else:
                 log.error(
-                    f"Error reaping worker=[{worker_id}]. Will retry on next watchdog."
+                    "Error reaping worker=[%s]. Will retry on next watchdog.", worker_id
                 )
         self.clear_timers(reaped_worker_ids)
 
@@ -220,7 +220,7 @@ class TimerServer(abc.ABC):
         self._watchdog_thread.start()
 
     def stop(self) -> None:
-        log.info(f"Stopping {type(self).__name__}")
+        log.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:
             log.info("Stopping watchdog thread...")
@@ -239,7 +239,7 @@ def configure(timer_client: TimerClient):
     """
     global _timer_client
     _timer_client = timer_client
-    log.info(f"Timer client configured to: {type(_timer_client).__name__}")
+    log.info("Timer client configured to: %s", type(_timer_client).__name__)
 
 
 @contextmanager
