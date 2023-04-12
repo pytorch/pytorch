@@ -1,16 +1,17 @@
-from __future__ import annotations
-
 import pathlib
 import subprocess
 import sys
+from typing import List
 
-def main(argv: list[str]) -> None:
+print(sys.version, file=sys.stderr)
+
+def main(argv: List[str]) -> None:
     template_path = pathlib.Path(sys.argv[1])
     output_path = pathlib.Path(sys.argv[2])
     definitions = list(sys.argv[3:])
     cmake_configure_file(template_path, definitions, output_path)
 
-def cmake_configure_file(template_path: pathlib.Path, definitions: list[str], output_path: pathlib.Path):
+def cmake_configure_file(template_path: pathlib.Path, definitions: List[str], output_path: pathlib.Path):
     command = ["sed", "--regexp-extended"]
     for definition in definitions:
         command.append(

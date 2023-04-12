@@ -26,6 +26,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
+
 from torch import fx
 from torch._subclasses import FakeTensorMode
 from torch.distributed._spmd.distribute import (
@@ -480,7 +481,7 @@ def _compile(
         ) if opt else nullcontext():
             ret = func(*args, **kwargs)
             # make sure updated parameters are returned
-            return ret, list(mod.parameters())  # type: ignore[union-attr]
+            return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
 
     # FIXME: Using symbolic tracing to work around. Otherwise it hits
     # shape mismatch error, as we use local inputs to trace local graph
