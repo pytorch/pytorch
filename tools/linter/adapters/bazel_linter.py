@@ -8,6 +8,7 @@ https://github.com/community/community/discussions/46034.
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import xml.etree.ElementTree as ET
 from enum import Enum
@@ -64,12 +65,12 @@ def get_disallowed_checksums(
         # Use bazel to get the list of external dependencies in XML format
         proc = subprocess.run(
             [binary, "query", "kind(http_archive, //external:*)", "--output=xml"],
-            capture_output=True,
+            capture_output=True, check=True, text=True,
         )
     except OSError:
         raise
 
-    stdout = str(proc.stdout, "utf-8").strip()
+    stdout = proc.stdout.strip()
     root = ET.fromstring(stdout)
 
     disallowed_checksums = set()
@@ -161,7 +162,16 @@ def main() -> None:
             name="command-failed",
             original=None,
             replacement=None,
-            description=(f"Failed due to {e.__class__.__name__}:\n{e}"),
+            description=(
+                f"Failed due to {err.__class__.__name__}:\n{err}"
+                if not isinstance(e, subprocess.CalledProcessError)
+                else '\n'.join([
+                        f"COMMAND (exit code {e.returncode})\n",
+                        f"{shlex.join(e.cmd)}\n\n",
+                        f"STDERR\n{e.stderr.strip() or '(empty)'}\n\n",
+                        f"STDOUT\n{e.stdout.strip() or '(empty)'}",
+                ]),
+            )
         )
         print(json.dumps(err_msg._asdict()), flush=True)
         exit(0)
