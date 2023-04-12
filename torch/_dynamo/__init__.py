@@ -20,10 +20,12 @@ from .utils import compilation_metrics, guard_failures, orig_code_map, reset_fra
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
+    "config",
     "disallow_in_graph",
     "forbid_in_graph",
     "graph_break",
     "mark_dynamic",
+    "mark_static",
     "optimize",
     "optimize_assert",
     "export",
@@ -38,6 +40,8 @@ __all__ = [
     "register_backend",
     "list_backends",
 ]
+
+from .config_utils import config
 
 
 def reset():
@@ -167,3 +171,27 @@ def mark_dynamic(t, index):
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i)
+
+
+@forbid_in_graph
+def mark_static(t, index=None):
+    """
+    Mark a tensor as having a static dim.
+
+    This will prevent us from attempting to compile it dynamically
+    when dynamic=True; this can improve trace-time performance.
+
+    This has lower precedence than mark_dynamic.
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_static_indices"):
+            t._dynamo_static_indices = set()
+        # TODO(voz): Should we bounds check?
+        t._dynamo_static_indices.add(index)
+    elif index is None:
+        for i in range(t.dim()):
+            mark_static(t, i)
+    else:
+        assert isinstance(index, (list, tuple))
+        for i in index:
+            mark_static(t, i)

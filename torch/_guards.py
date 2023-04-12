@@ -7,7 +7,7 @@ import traceback
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import Any, Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ def tracing(context: TracingContext):
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
         raise NotImplementedError()
@@ -419,3 +419,40 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+
+def detect_fake_mode(inputs: Any = None):
+    """
+    Attempts to "detect" what the current fake mode is.  If there is one ambiently
+    available from TracingContext, we preferentially use that.  Otherwise, we
+    heuristically detect the fake mode via the following sources, in order of
+    priority:
+
+        - Currently active fake mode on stack
+        - Fake mode associated with passed in tensors (inputs does not
+          have to be flattened)
+    """
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch.utils._pytree import tree_flatten
+
+    context = TracingContext.get()
+    if context is not None:
+        fake_mode = context.fake_mode
+        if fake_mode is not None:
+            return fake_mode
+
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for m in reversed(_get_current_dispatch_mode_stack()):
+        if isinstance(m, FakeTensorMode):
+            return m
+
+    fake_mode = None
+    flat_inputs, _ = tree_flatten(inputs)
+    for flat_input in flat_inputs:
+        if isinstance(flat_input, FakeTensor):
+            if fake_mode is None:
+                fake_mode = flat_input.fake_mode
+            else:
+                assert fake_mode is flat_input.fake_mode
+    return fake_mode

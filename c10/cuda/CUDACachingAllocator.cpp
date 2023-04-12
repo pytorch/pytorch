@@ -195,8 +195,11 @@ struct Block {
   BlockPool* pool{nullptr}; // owning memory pool
   void* ptr{nullptr}; // memory address
   bool allocated{false}; // in-use flag
-  bool mapped{true}; // is memory in expandable_segment_
-                     // present, only false when allocated is also false.
+  bool mapped{true}; // is the virtual address range this Block references
+                     // backed by physical pages. Always true when
+                     // expandable_segment_ is null. When false
+                     // This Block will be aligned to the segment size
+                     // of its expandable_segment_.
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding CUDA events
@@ -233,10 +236,12 @@ struct Block {
   }
   void splice(Block* before, Block* after) {
     if (before) {
+      TORCH_INTERNAL_ASSERT(before->next == after);
       before->next = this;
     }
     prev = before;
     if (after) {
+      TORCH_INTERNAL_ASSERT(after->prev == before);
       after->prev = this;
     }
     next = after;
@@ -296,7 +301,7 @@ memory at the end of these segments. The allocator at some point will need to
 cudaMalloc a new (N + 1)*A*B segment. If there is not enough memory, there is
 now no way to recover the slices of memory that are free at the end of existing
 segments. With models 50+ layers deep, this pattern might repeat 50+ times
-created many slivers.
+creating many slivers.
 
 Approach
 
@@ -331,10 +336,12 @@ A current limitation of CUDA's API is that physical memory cannot be split up
 after it is mapped, and the cost to map/unmap memory is proportional the number
 of physical memory chunks that were allocated (mapping 10 separately allocated
 2MiB pages takes 10x time compared to mapping one 20MiB physical allocation of
-10 pages).  So we use 2MiB pages for our small pool and 20MiB pages for our
-large pool. Initially allocation using expandable_blocks will be slower than
-cudaMalloc, though still in the milliseconds range for mapping the entire
-memory.
+10 pages).  Changing memory mappings also appears to involve at least some
+synchronous actions with the GPU and so should be considered an expensive
+operation. To limit overhead, we use 2MiB pages for our small pool and 20MiB
+pages for our large pool. Initially allocation using expandable_blocks will be
+slower than cudaMalloc, though still in the milliseconds range for mapping the
+entire memory.
 
 When mapping new memory to expand the segment, we look for the lowest address at
 which we can fit a new allocation by adding new pages. Normally this will be at
@@ -429,7 +436,7 @@ struct ExpandableSegment {
 
   // unmaps all the completely empty segment_size_ segments between
   // [begin, begin + size), returns the offset where the range begin,
-  // and the actual size unmapped (multipke of segment_size_)
+  // and the actual size unmapped (multiple of segment_size_)
   SegmentRange unmap(SegmentRange range) {
     auto begin = segmentRight(range.ptr);
     auto end = segmentLeft(range.ptr + range.size);
@@ -524,6 +531,8 @@ struct ExpandableSegment {
   size_t max_handles_;
   size_t segment_size_;
   std::vector<c10::optional<CUmemGenericAllocationHandle>> handles_;
+  // devices on which this memory should be mapped in addition
+  // to the device where the physical memory lives (device_).
   std::vector<int> peers_;
 };
 #else
@@ -2152,6 +2161,9 @@ class DeviceCachingAllocator {
          it != pool->unmapped.end() && (*it)->stream == stream;
          ++it) {
       Block* c = *it;
+      // we found the lowest address of an unmapped segment
+      // but there might be a free segment we can also use
+      // right before it
       if (allocateable(c->prev)) {
         c = c->prev;
       }
@@ -2580,6 +2592,8 @@ class DeviceCachingAllocator {
       return false;
     } else if (
         CachingAllocatorConfig::expandable_segments() &&
+        // our checkpointing logic for private pools doesn't support
+        // the expandable_segments_ structure yet
         !p.pool->owner_PrivatePool) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
@@ -2879,12 +2893,12 @@ class DeviceCachingAllocator {
 
   void insert_events(Block* block) {
     int prev_device;
-    C10_CUDA_CHECK(cudaGetDevice(&prev_device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
 
     stream_set streams(std::move(block->stream_uses));
     AT_ASSERT(block->stream_uses.empty());
     for (auto& stream : streams) {
-      C10_CUDA_CHECK(cudaSetDevice(stream.device_index()));
+      C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
       EventPool::Event event =
           create_event_internal(static_cast<int>(stream.device_index()));
@@ -2894,7 +2908,7 @@ class DeviceCachingAllocator {
       cuda_events[stream].emplace_back(std::move(event), block);
     }
 
-    C10_CUDA_CHECK(cudaSetDevice(prev_device));
+    C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(prev_device));
   }
 
   void insert_events_deferred_until_no_capture() {
@@ -3088,11 +3102,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         "invalid fraction:",
         fraction,
         ". Please set within (0, 1).");
-    int activated_device;
-    C10_CUDA_CHECK(cudaGetDevice(&activated_device));
-    if (activated_device != device) {
-      C10_CUDA_CHECK(cudaSetDevice(device));
-    }
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     device_allocator[device]->setMemoryFraction(fraction);
   }
 
@@ -3102,7 +3112,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) override {
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->recordHistory(
         enabled,
         std::move(context_recorder),
@@ -3112,7 +3122,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
   }
 
@@ -3211,7 +3221,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (forceUncachedAllocator()) {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
@@ -3288,7 +3298,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
@@ -3299,7 +3309,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, stream);
     return r;
@@ -3376,7 +3386,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         &dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
     // devPtr has to be deleted in same device when created.
     int curr_device;
-    C10_CUDA_CHECK(cudaGetDevice(&curr_device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto sp =
         std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
           cuda::CUDAGuard device_guard(curr_device);
