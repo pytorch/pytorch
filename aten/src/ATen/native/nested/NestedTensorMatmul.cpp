@@ -98,7 +98,7 @@ matmul_nested_helper(
       ndims = self_sizes[0].size();
   std::vector<int64_t> batch_sizes(ntensors, 1);
   Tensor sizemat = at::empty({ntensors, ndims}, sizemat_op);
-  int64_t* sizemat_ptr = sizemat.mutable_data_ptr<int64_t>();
+  int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
   int64_t numel = 0;
   for (int64_t i = 0; i < ntensors; i++) {
     const IntArrayRef& self_size = self_sizes[i],
@@ -160,21 +160,21 @@ Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
 
   // viewed metadata for self
   auto self_new_sizes = at::empty({N * n_heads, 2}, opt);
-  int64_t* self_new_sizes_ptr = self_new_sizes.mutable_data_ptr<int64_t>();
+  int64_t* self_new_sizes_ptr = self_new_sizes.data_ptr<int64_t>();
 
   auto self_new_strides = at::empty({N * n_heads, 2}, opt);
-  int64_t* self_new_strides_ptr = self_new_strides.mutable_data_ptr<int64_t>();
+  int64_t* self_new_strides_ptr = self_new_strides.data_ptr<int64_t>();
   auto self_new_offsets = at::empty({N * n_heads}, opt);
-  int64_t *self_new_offsets_ptr = self_new_offsets.mutable_data_ptr<int64_t>();
+  int64_t *self_new_offsets_ptr = self_new_offsets.data_ptr<int64_t>();
 
   // viewed metadata for mat2
   auto mat2_new_sizes = at::empty({N * n_heads, 2}, opt2);
-  int64_t* mat2_new_sizes_ptr = mat2_new_sizes.mutable_data_ptr<int64_t>();
+  int64_t* mat2_new_sizes_ptr = mat2_new_sizes.data_ptr<int64_t>();
 
   auto mat2_new_strides = at::empty({N * n_heads, 2}, opt2);
-  int64_t* mat2_new_strides_ptr = mat2_new_strides.mutable_data_ptr<int64_t>();
+  int64_t* mat2_new_strides_ptr = mat2_new_strides.data_ptr<int64_t>();
   auto mat2_new_offsets = at::empty({N * n_heads}, opt);
-  int64_t *mat2_new_offsets_ptr = mat2_new_offsets.mutable_data_ptr<int64_t>();
+  int64_t *mat2_new_offsets_ptr = mat2_new_offsets.data_ptr<int64_t>();
 
   for (int64_t i = 0; i < N; i++) {
     const IntArrayRef& self_size_i = self_sizes[i];
@@ -220,7 +220,7 @@ Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   auto out_new_sizes = at::empty({N, 3}, opt);
   auto out_new_strides = at::empty({N, 3}, opt);
   auto out_new_offsets = at::empty({N}, opt);
-  int64_t *out_new_offsets_ptr = out_new_offsets.mutable_data_ptr<int64_t>();
+  int64_t *out_new_offsets_ptr = out_new_offsets.data_ptr<int64_t>();
 
   int64_t* out_new_sizes_ptr = out_new_sizes.data_ptr<int64_t>();
   int64_t* out_new_strides_ptr = out_new_strides.data_ptr<int64_t>();

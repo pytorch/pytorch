@@ -226,7 +226,7 @@ index_select_add(
       if (offsets.numel() > 0) {
         std::memcpy(
             offsets_include_last.data(),
-            offsets.const_data_ptr<index_t>(),
+            offsets.data_ptr<index_t>(),
             sizeof(index_t) * offsets.numel());
       }
       offsets_include_last[offsets.numel()] = select_indices.numel();
@@ -330,7 +330,7 @@ index_select_add(
     auto numel = add_indices.numel();
 
     Tensor src_fp32 = at::empty({ddim}, src.options().dtype(at::kFloat));
-    auto* src_data_fp32 = src_fp32.mutable_data_ptr<float>();
+    auto* src_data_fp32 = src_fp32.data_ptr<float>();
 
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
@@ -405,7 +405,7 @@ index_select_add(const Tensor &select_indices,
       if (offsets.numel() > 0) {
         std::memcpy(
             offsets_include_last.data(),
-            offsets.const_data_ptr<index_t>(),
+            offsets.data_ptr<index_t>(),
             sizeof(index_t) * offsets.numel());
       }
       offsets_include_last[offsets.numel()] = select_indices.numel();
@@ -596,14 +596,14 @@ index_select_scale_add(
       offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
           offsets_include_last.data(),
-          offsets.const_data_ptr<index_t>(),
+          offsets.data_ptr<index_t>(),
           sizeof(index_t) * offsets.numel());
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
     }
 
     Tensor scale_fp32 = at::empty(scale.sizes(), scale.options().dtype(at::kFloat));
-    auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
+    auto* scale_data_fp32 = scale_fp32.data_ptr<float>();
 
 #if defined(USE_FBGEMM)
     bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
@@ -786,7 +786,7 @@ index_select_scale_add(const Tensor &select_indices,
       offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
           offsets_include_last.data(),
-          offsets.const_data_ptr<index_t>(),
+          offsets.data_ptr<index_t>(),
           sizeof(index_t) * offsets.numel());
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
