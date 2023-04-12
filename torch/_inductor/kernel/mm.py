@@ -107,15 +107,14 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = [aten_mm.bind((mat1, mat2), layout)]
     if use_triton_template(layout):
         for config in mm_configs(m, n, k):
-            choices.append(
-                mm_template.generate(
-                    (mat1, mat2),
-                    layout,
-                    **mm_options(config, k, layout),
-                )
+            mm_template.maybe_append_choice(
+                choices,
+                (mat1, mat2),
+                layout,
+                **mm_options(config, k, layout),
             )
 
-    return autotune_select_algorithm(choices, [mat1, mat2], layout)
+    return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten._int_mm)
@@ -128,14 +127,13 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
         for config in int8_mm_configs(m, n, k):
-            choices.append(
-                mm_template.generate(
-                    (mat1, mat2),
-                    layout,
-                    **mm_options(config, k, layout),
-                )
+            mm_template.maybe_append_choice(
+                choices,
+                (mat1, mat2),
+                layout,
+                **mm_options(config, k, layout),
             )
-    return autotune_select_algorithm(choices, [mat1, mat2], layout)
+    return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm)
@@ -143,7 +141,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if not use_triton_template(layout):
         choices = [aten_addmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
-        return autotune_select_algorithm(choices, [inp, mat1, mat2], layout)
+        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
 
     choices = [
         aten_addmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)
@@ -158,14 +156,15 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     for config in mm_configs(m, n, k):
-        choices.append(
-            mm_template.generate(
-                (inp_expanded, mat1, mat2),
-                layout,
-                **mm_options(config, k, layout),
-                prefix_args=1,
-                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-            )
+        mm_template.maybe_append_choice(
+            choices,
+            (inp_expanded, mat1, mat2),
+            layout,
+            **mm_options(config, k, layout),
+            prefix_args=1,
+            epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
         )
 
-    return autotune_select_algorithm(choices, [inp_expanded, mat1, mat2], layout)
+    return autotune_select_algorithm(
+        "addmm", choices, [inp_expanded, mat1, mat2], layout
+    )

@@ -120,7 +120,7 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depricated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
