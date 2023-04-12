@@ -125,8 +125,6 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
       "manual_seed expected a long, "
       "but got %s",
       THPUtils_typename(seed));
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(generator.mutex());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t seed_unpacked;
   try {
@@ -144,9 +142,11 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
       throw;
     }
   }
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(generator.mutex());
   generator.set_current_seed(seed_unpacked);
   Py_INCREF(self);
-  return (PyObject*)self;
+  return _self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -159,8 +159,6 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
       "manual_offset expected a long, "
       "but got %s",
       THPUtils_typename(offset));
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(generator.mutex());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t offset_unpacked;
   try {
@@ -178,9 +176,11 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
       throw;
     }
   }
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(generator.mutex());
   generator.set_offset(offset_unpacked);
   Py_INCREF(self);
-  return (PyObject*)self;
+  return _self;
   END_HANDLE_TH_ERRORS
 }
 

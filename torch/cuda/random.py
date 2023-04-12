@@ -69,7 +69,7 @@ def set_rng_state_offset(offset: int, device: Union[int, str, torch.device] = 'c
     r"""Sets the random number generator state offset of the specified GPU.
 
     Args:
-        new_state (torch.ByteTensor): The desired state
+        offset (int): The desired offset
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
     """
