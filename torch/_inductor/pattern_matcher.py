@@ -465,7 +465,7 @@ def register_replacement(
 ):
     """
     Create a replacement rule based on example functions that get traced
-    to create patterns.  This supports both training an inference when
+    to create patterns.  This supports both training and inference when
     run on a joint foward+backward graph.
 
     Args:
