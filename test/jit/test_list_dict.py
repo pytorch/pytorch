@@ -2103,9 +2103,9 @@ class TestNamedTuple(JitTestCase):
 
     def test_namedtuple_input_forwardref(self):
         class MyNamedTuple(NamedTuple):
-            a : int
-            b : float
-            c : torch.Tensor
+            a : 'int'
+            b : 'float'
+            c : 'torch.Tensor'
 
         make_global(MyNamedTuple)
 
