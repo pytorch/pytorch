@@ -61,7 +61,7 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # control store vs recompute heuristic
-# For fanouts, rematearialization can lead to exponential blowup. So, have
+# For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
@@ -90,6 +90,12 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
+# Enable split reductions for better utilization when the dimension
+# being reduced over is large (by splitting it)
+split_reductions = True
+
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -160,6 +166,10 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Do not generate loops when the condition doesn't hold, like:
+    # for(long i0=4096; i0<4096; i0+=1)
+    no_redundant_loops = True
+
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
@@ -193,10 +203,10 @@ class triton:
     cudagraph_trees = False
 
     # assertions not on the fast path, steady state
-    fast_cudagraph_asserts = True
+    slow_path_cudagraph_asserts = False
 
     # assertions on the fast path
-    slow_cudagraph_asserts = False
+    fast_path_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -237,6 +247,9 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
+    # hint to Triton when arguments are divisible by 16
+    divisible_by_16 = True
+
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
@@ -251,7 +264,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = True
+    debug_log = False
 
     # Save python logger call >=logging.INFO
     info_log = False
