@@ -126,17 +126,6 @@ jobs:
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
-      - name: Install macOS homebrew dependencies
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libomp
-            brew link --force libomp
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py

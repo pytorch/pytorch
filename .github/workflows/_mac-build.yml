@@ -113,24 +113,6 @@ jobs:
           environment-file: ${{ inputs.environment-file }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
-      - name: Install misc macOS dependencies
-        if: ${{ runner.arch == 'ARM64' }}
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libomp
-            brew link --force libomp
-
-            # TODO: The latest Rosetta version is required to run the current sccache
-            # binary for MacOS. We should get this fixed with a native sccache for M1
-            # Without this, the build job would fail with bad CPU type in executable
-            # error. This is only needed on M1
-            softwareupdate --install-rosetta --agree-to-license
-
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
