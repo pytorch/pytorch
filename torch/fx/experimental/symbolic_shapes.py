@@ -689,7 +689,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            log.warning(f"Failed to convert to int: {r}")
+            log.warning("Failed to convert to int: %s", r)
             raise
 
     def guard_float(self, file, line):
@@ -699,7 +699,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            log.warning(f"Failed to convert to float: {r}")
+            log.warning("Failed to convert to float: %s", r)
             raise
 
     def guard_bool(self, file, line):
@@ -709,7 +709,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            log.warning(f"Failed to convert to bool: {r}")
+            log.warning("Failed to convert to bool: %s", r)
             raise
 
     def bool_(self):
@@ -850,7 +850,7 @@ def safe_expand(r):
         try:
             return sympy.expand(r)
         except RecursionError:
-            log.warning(f"RecursionError in sympy.expand({r})")
+            log.warning("RecursionError in sympy.expand(%s)", r)
             return r
     else:
         return r
@@ -1126,7 +1126,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr, other_expr)
         except Exception:
-            log.warning(f"failed to eval {method}({expr}, {other_expr})")
+            log.warning("failed to eval %s(%s, %s)", method, expr, other_expr)
             raise
         out = safe_expand(out)
         pytype: Type
@@ -1160,7 +1160,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            log.warning(f"failed to eval {method}({expr})")
+            log.warning("failed to eval %s(%s)", method, expr)
             raise
 
         out_hint = None
@@ -1201,7 +1201,7 @@ def _make_node_sizes_strides(method, func):
         try:
             out = func(size_exprs, stride_exprs)
         except Exception:
-            log.warning(f"failed to eval {method}({size_exprs}, {stride_exprs})")
+            log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
             raise
         # bool is never expandable
 
@@ -1737,7 +1737,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1878,7 +1878,7 @@ class ShapeEnv:
                         else:
                             raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
-                log.warning(f"Failing guard allocated at: \n{tb}")
+                log.warning("Failing guard allocated at: \n%s", tb)
                 raise
 
         # 3. Every symbol must be within its value range (this handles 0/1
@@ -1903,7 +1903,7 @@ class ShapeEnv:
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
                             record_constraint_violation(lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
+                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
                                 "constrain_range manually, or we forgot to update this error message? "
@@ -2127,7 +2127,7 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            log.debug(f"Data dependent variable '{s}' allocated at:\n{self.var_to_stack[s]}")
+            log.debug("Data dependent variable '%s' allocated at:\n%s", s, self.var_to_stack[s])
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
@@ -2150,7 +2150,7 @@ class ShapeEnv:
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
             # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
             if a not in self.replacements or expr != self.replacements[a]:
-                log.warning(f"Specializing {self.var_to_sources[a][0].name()} to {expr}")
+                log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
 
@@ -2211,7 +2211,7 @@ class ShapeEnv:
             except NotImplementedError:
                 pass
             except RecursionError:
-                log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+                log.warning("RecursionError in sympy.solve(%s - %s, %s)", lhs, rhs, free[0])
         if expr.has(sympy.Mod):
             mod_expr = tuple(expr.atoms(sympy.Mod))[0]
             try:
@@ -2257,7 +2257,7 @@ class ShapeEnv:
                 # current_loc describes a line in the current frame
                 user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
                 expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
-                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
+                log.warning("Adding shape guard %s at \n%s", expr, user_stack)
             log.debug("SHAPE GUARD", stack_info=True)
         self.guards.append(guard)
 
