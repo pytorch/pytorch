@@ -936,7 +936,7 @@ class DistributedDataParallel(Module, Joinable):
         # https://github.com/pytorch/pytorch/issues/90052.
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
-        if any(hasattr(p, '_in_backward_optimizers') for p in self._module_parameters):
+        if any(hasattr(p, "_in_backward_optimizers") for p in self._module_parameters):
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
@@ -955,6 +955,7 @@ class DistributedDataParallel(Module, Joinable):
             from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
                 _apply_optim_in_backward_hook,
             )
+
             self.register_comm_hook(
                 ddp_weakref,
                 _apply_optim_in_backward_hook(
