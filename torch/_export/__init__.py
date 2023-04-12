@@ -38,7 +38,7 @@ from .workflow import ExportedProgram
 
 CORE_ATEN_DECOMPOSITIONS_TABLE = core_aten_decompositions()
 
-__all__ = ["experimental_export"]
+__all__ = ["do_not_use_experimental_export"]
 
 
 def _aot_capture(mod, flat_args):
@@ -155,28 +155,25 @@ def _aot_capture(mod, flat_args):
     graph_module.graph.eliminate_dead_code()
     graph_module.recompile()
 
-    def find_mutation_destinations(gm, w):
-        assert isinstance(w, torch.Tensor)
-        ret = [
-            name for name, x in [*gm.named_parameters(), *gm.named_buffers()] if x is w
-        ]
-        assert len(ret) != 0, "Cannot find mutation destination."
-        return ret
+    def _find_source(node):
+        queue = [node]
+        while len(queue) > 0:
+            current_node = queue.pop(0)
+            if current_node.op == "placeholder" or current_node.op == "get_attr":
+                return current_node
+            for parent in current_node._input_nodes:
+                queue.append(parent)
 
-    mutation = [
-        (
-            "copy_",
-            output_node.args[0][k].name,
-            find_mutation_destinations(graph_module, param_list[i][1]),
-        )
-        for k, i in enumerate(mutated_input_indices)
-    ]
-    assert out_spec is not None
-    return graph_module, mutation, out_spec
+        assert False, "should never get here"
+
+    mutations = []
+    for idx, val in enumerate(mutated_input_indices):
+        dest = output_node.args[0][idx]
+        # mapping the original node and the mutated node
+        mutations.append((_find_source(dest), output_node.args[0][idx]))
 
     assert out_spec is not None
-    return graph_module, mutated_input_indices, out_spec
-
+    return graph_module, mutations, out_spec
 
 
 @torchdynamo.config.patch(
@@ -200,9 +197,8 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, constraints: List[C
 
     graph_module, guards = torchdynamo.export(f, *args, aten_graph=False, constraints=constraints)
     # TODO (tmanlaibaatar) do sth with guards?
-    graph_module, out_spec = _aot_capture(graph_module, flat_args)
-    return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
-
+    graph_module, mutations, out_spec = _aot_capture(graph_module, flat_args)
+    return ExportedProgram(fw_module=graph_module, mutations=mutations, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
 
 
 # Note - [On Export Dynamic Dimension UX]

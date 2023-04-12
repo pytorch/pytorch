@@ -76,18 +76,36 @@ class TestExport(TestCase):
         self.assertEqual(output, mod(*inp))
 
     def test_export_assert_with_functionalization(self):
-        def foo(x):
-            assert x.shape[0] > 4
-            x.add_(4)
-            return x.cos() + x.sin()
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 1))
+                self.register_buffer("buffer2", torch.ones(6, 2))
 
-        inp = (torch.ones(6, 4),)
+            def forward(self, x, y):
+                self.buffer1.add_(2)
+                x.add_(3)
+                assert x.shape[0] > 4
+                return x.sum() + self.buffer1.sum()
+
+        inp = (torch.ones(6, 4), torch.zeros(6, 4))
+        foo = Foo()
         exported_program = do_not_use_experimental_export(foo, inp)
-        self.assertEqual(exported_program(torch.ones(6, 4)), foo(torch.ones(6, 4)))
+        inp2 = (torch.ones(6, 4), torch.zeros(6, 4))
+        inp3 = (torch.ones(6, 4), torch.zeros(6, 4))
+        # TODO this is kind of strange, need to make it more intuitive
+        self.assertEqual(exported_program(*inp2), Foo()(*inp3) + 12)
 
+        count = 0
+        for node in exported_program.fw_module.graph.nodes:
+            if node.target == torch.ops.aten._assert_async.msg:
+                count += 1
 
+        # Check if the input mutation actually happened at the corect place
+        self.assertEqual(inp2[0].sum(), 96)
 
-
+        # There should be one assert node in the graph
+        self.assertEqual(count, 1)
 
 if __name__ == '__main__':
     run_tests()
