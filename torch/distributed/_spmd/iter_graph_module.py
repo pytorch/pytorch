@@ -533,11 +533,13 @@ class IterGraph(fx.Graph):
             fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), kwargs
         )
         setup_node = self._lookup_node(node, self.setup_graph)
+        assert setup_node is not None
         setup_node.kwargs = setup_kwargs
         cleanup_kwargs = tree_map_only(
             fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), kwargs
         )
         cleanup_node = self._lookup_node(node, self.cleanup_graph)
+        assert cleanup_node is not None
         cleanup_node.kwargs = cleanup_kwargs
         node.kwargs = kwargs
 

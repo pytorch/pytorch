@@ -739,7 +739,7 @@ def _split_fused_adam(
     """
     Split the `orig_optim_block` into two FusedOptimizerBlock. The first one
     will be the optimizer that optimize `split_gradients`. The second one is
-    used to optimizer the remaining gradients.
+    used to optimize the remaining gradients.
     An assert will be raised if one of the optimizer optimize zero gradients.
     """
     orig_optim_args = AdamArgs(*orig_optim_block.optim.optim_node.args)
@@ -753,6 +753,9 @@ def _split_fused_adam(
         orig_optim_indices[group_idx].append(idx)
         # Get the argument for idx-th gradient from orig_optim_args
         for orig_arg, optim_arg in zip(orig_optim_args, optim_args[group_idx]):
+            # Only add the argument to the list if the original argument list
+            # is not empty. If the original argument list is empty, the new
+            # one must be an empty list as well.
             if orig_arg:
                 optim_arg.append(orig_arg[idx])
 
@@ -770,22 +773,20 @@ def _split_fused_adam(
         old_step_idx = old_step_getitem.args[1]
         orig_step_indices[group_idx].append(old_step_idx)
 
-    if not (
-        orig_step_indices[0]
-        and orig_step_indices[1]
-        and orig_optim_indices[0]
-        and orig_optim_indices[1]
-    ):
+    if not all(l for l in (orig_step_indices + orig_optim_indices)):
         raise ValueError("At least one split optimizer does not have input.")
 
     output = get_output(gm.graph)
     result: List[FusedOptimizerBlock] = []
     flatten_output_args, spec = tree_flatten((output.args, output.kwargs))
+    flatten_output_args_indices: DefaultDict[fx.Node, Set[int]] = collections.defaultdict(set)
+    for idx, output_arg in enumerate(flatten_output_args):
+        if isinstance(output_arg, fx.Node):
+            flatten_output_args_indices[output_arg].add(idx)
 
     def replace_flatten_output_args(orig_node: fx.Node, new_node: fx.Node):
-        for i in range(len(flatten_output_args)):
-            if flatten_output_args[i] == orig_node:
-                flatten_output_args[i] = new_node
+        for idx in flatten_output_args_indices[orig_node]:
+            flatten_output_args[idx] = new_node
 
     # Create the new step and optim nodes and blocks.
     for group_idx in range(2):
@@ -794,14 +795,12 @@ def _split_fused_adam(
         # We have to create the new step node and block first because it is used
         # for the new optim node as the input.
         with gm.graph.inserting_after(orig_optim_block.optim.optim_node):
-            assert orig_step_indices[group_idx], orig_step_indices
             for idx in orig_step_indices[group_idx]:
                 step_args.append(
                     cast(Tuple[fx.Node, ...], orig_optim_block.step.add_node.args[0])[
                         idx
                     ]
                 )
-                assert step_args, step_args
                 orig_step_outputs.append(orig_optim_block.step.outputs[idx])
             step = gm.graph.call_function(
                 torch.ops.aten._foreach_add.Scalar,
