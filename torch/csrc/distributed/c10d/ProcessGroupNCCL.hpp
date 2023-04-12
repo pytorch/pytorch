@@ -404,9 +404,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int srcRank,
       int tag) override;
 
-  static void groupStart();
+  void groupStart();
 
-  static void groupEnd();
+  void groupEnd();
+
+  void groupEndNonblocking(std::vector<std::shared_ptr<NCCLComm>> comms);
 
   // Unsupported Ops
   c10::intrusive_ptr<Work> gather(

@@ -2125,7 +2125,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
   auto out = at::empty({}, self.options().dtype(kLong));
-  *out.mutable_data_ptr<int64_t>() = thread_count_nonzero[0];
+  *out.data_ptr<int64_t>() = thread_count_nonzero[0];
   return out;
 }
 

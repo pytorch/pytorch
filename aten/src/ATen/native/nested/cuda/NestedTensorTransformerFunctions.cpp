@@ -122,7 +122,7 @@ Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
   int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
   int64_t ef_sizes_size_0 = ef_sizes.sizes()[0];
   Tensor offsets = at::empty({1 + ef_sizes_size_0}, at::kLong);
-  int64_t* offsets_ptr = offsets.mutable_data_ptr<int64_t>();
+  int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   int64_t ef_sizes_size_1 = ef_sizes.sizes()[1];
   for (const auto i : c10::irange(ef_sizes_size_0)) {
