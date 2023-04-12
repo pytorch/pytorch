@@ -411,7 +411,11 @@ class DimDynamic(Enum):
 # eager code with StrictMinMaxConstraint will keep working in the future!
 
 @dataclass(frozen=True)
-class StrictMinMaxConstraint:
+class Constraint:
+    warn_only: bool
+
+@dataclass(frozen=True)
+class StrictMinMaxConstraint(Constraint):
     """
     For clients: the size at this dimension must be within 'vr' (which
     specifies a lower and upper bound, inclusive-inclusive) AND it
@@ -437,7 +441,7 @@ class StrictMinMaxConstraint:
         return f"{self.vr.lower} <= {source.name()} <= {self.vr.upper}"
 
 @dataclass(frozen=True)
-class RelaxedUnspecConstraint:
+class RelaxedUnspecConstraint(Constraint):
     """
     For clients: no explicit constraint; constraint is whatever is implicitly
     inferred by guards from tracing.
@@ -1748,11 +1752,11 @@ class ShapeEnv:
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(list)
         dynamic_sources = []
-        constraint_violations = []
+        constraint_violations : List[Tuple[Constraint, Callable[[], str]]] = []
 
-        def record_constraint_violation(msg_fn):
+        def record_constraint_violation(constraint, msg_fn):
             assert callable(msg_fn)
-            constraint_violations.append(msg_fn)
+            constraint_violations.append((constraint, msg_fn))
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -1791,7 +1795,7 @@ class ShapeEnv:
                             else:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
-                        record_constraint_violation(lambda: (
+                        record_constraint_violation(constraint, lambda: (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
                             f"{s}.  {hint()}"
@@ -1802,7 +1806,7 @@ class ShapeEnv:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 if constraint is not None:
-                    record_constraint_violation(lambda: (
+                    record_constraint_violation(constraint, lambda: (
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
                         # TODO: fold this into TORCH_LOGS
@@ -1866,7 +1870,7 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            record_constraint_violation(lambda: (
+                            record_constraint_violation(c, lambda: (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "
                                 f"was allocated at:\n{tb}"
@@ -1903,7 +1907,7 @@ class ShapeEnv:
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
-                            record_constraint_violation(lambda: (
+                            record_constraint_violation(c_vr, lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
                                 f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
                                 "This is actually supposed to be impossible to "
@@ -1931,9 +1935,19 @@ class ShapeEnv:
                     exprs.append(" <= ".join(bounds))
 
         if constraint_violations:
-            msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
-            msgs = "\n".join(msgs)
-            raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
+            warn_msgs = []
+            error_msgs = []
+            for constraint, msg in constraint_violations:
+                if constraint.warn_only:
+                    msg = f"  {len(warn_msgs) + 1}. {msg}"
+                    warn_msgs.append(msg)
+                else:
+                    msg = f"  {len(error_msgs) + 1}. {msg}"
+                    error_msgs.append(msg)
+            log.warning(f"Warning only constraints violated \n {warn_msgs}")
+            if len(error_msgs) > 0:
+                raise ConstraintViolationError(f"Constraints violated!\n{error_msgs}")
+
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):

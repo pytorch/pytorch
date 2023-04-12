@@ -1806,10 +1806,17 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
+        frame_state,
     ):
         super().__init__(
             output=OutputGraph(
-                f_globals, code_options, compiler_fn, self, export, export_constraints
+                f_globals,
+                code_options,
+                compiler_fn,
+                self,
+                export,
+                export_constraints,
+                frame_state,
             ),
             instructions=instructions,
             f_locals=f_locals,

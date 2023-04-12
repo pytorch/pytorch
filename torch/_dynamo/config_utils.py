@@ -63,7 +63,13 @@ class DynamoConfig:
     # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
     # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
     # see [Note - on the state of mark_dynamic]
-    assume_static_by_default: bool = False
+    assume_static_by_default: bool = True
+
+    # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
+    # with assume_static_by_default=True.
+    # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
+    # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
+    automatic_dynamic_shapes = True
 
     # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
     guard_nn_modules: bool = False

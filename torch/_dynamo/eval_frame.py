@@ -369,7 +369,9 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size):
+    def catch_errors(frame, cache_size, frame_state):
+        assert frame_state is not None
+
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -395,10 +397,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks)
+                    return hijacked_callback(frame, cache_size, hooks, frame_state)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks)
+            return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
@@ -613,7 +615,7 @@ class Constraint:
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
-            self.constraint_range.vr & ValueRanges(lower=lower, upper=upper)
+            vr = self.constraint_range.vr & ValueRanges(lower=lower, upper=upper), warn_only=False
         )
         return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
 
