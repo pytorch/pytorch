@@ -284,5 +284,20 @@ class TestMakeFx(MultiThreadedTestCase):
             .check("wait_tensor").run(str(mesh_dim_graph.graph))
 
 
+    def test_all_gather_tracing(self):
+        from torch.distributed._tensor import DeviceMesh
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        def allgather(input):
+            # return ft_c.all_gather_tensor(input, gather_dim=0, group=(mesh, 0)) + 1
+            return mesh.all_gather(input, mesh_dim=0, gather_dim=0)
+
+        graph = make_fx(allgather)(torch.rand(4))
+        print(graph.graph)
+        # nodes = list(graph.graph.nodes)
+
+        # self.assertEqual("aten::all_reduce", nodes[1].target.name())
+        # self.assertEqual("aten::wait_tensor", nodes[2].target.name())
+
+
 if __name__ == "__main__":
     run_tests()

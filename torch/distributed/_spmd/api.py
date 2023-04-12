@@ -24,19 +24,32 @@ import torch.distributed as dist
 
 # We need to import _functional_collectives to trigger op registration
 import torch.distributed._functional_collectives
+import torch.library
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch import fx
+
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.distribute import (
     _convert_to_distributed,
     distribute,
     Schema,
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
+from torch.distributed._spmd.parallel_mode import DataParallel, ParallelMode
+from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate, Shard
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
+
+
+# used by data parallel to tag gradients.
+_spmd_lib_def = torch.library.Library("_spmd", "DEF")
+_spmd_lib_def.define("tag_grad(Tensor self) -> Tensor")
+
+_spmd_lib_impl = torch.library.Library("_spmd", "IMPL")
+for dispatch_key in ("CPU", "CUDA", "Meta"):
+    _spmd_lib_impl.impl("tag_grad", lambda x: x, dispatch_key)
 
 
 class SPMD(nn.Module):
@@ -187,10 +200,10 @@ def _override_placements(t: torch.Tensor, placements: List[Placement]):
 
 def _dtensor_expand(
     gm: fx.GraphModule,
+    params_and_buffers: Dict[str, Any],
+    named_states: Dict[str, Any],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    named_states: Dict[str, Any],
-    params_and_buffers: Dict[str, Any],
 ) -> fx.GraphModule:
     flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
 
@@ -201,6 +214,11 @@ def _dtensor_expand(
 
     inps, schemas = [], []
 
+    for p in pytree.tree_flatten(params_and_buffers)[0]:
+        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
+        inps.append(p)
+        schemas.append(replicate_schema)
+
     for o in pytree.tree_flatten(named_states)[0]:
         if isinstance(o, torch.Tensor):
             inps.append(o)
@@ -208,11 +226,6 @@ def _dtensor_expand(
         else:
             inps.append(torch.empty(0))
             schemas.append(replicate_schema)
-
-    for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
-        inps.append(p)
-        schemas.append(replicate_schema)
 
     for a in flat_args:
         if isinstance(a, torch.Tensor):
@@ -423,21 +436,41 @@ class _CompiledResult:
 def _compile(
     func: Callable,
     module_override: Optional[Dict[Type[Any], Override]],
+    parallel_mode: ParallelMode,
     *args: Any,
     **kwargs: Any,
 ) -> _CompiledResult:
     # 1. Extract nn.Module and Optimizer from args and kwargs
     # FIXME(@mrshenli): support multiple nn.Module instances
     # FIXME(@mrshenli): support multiple Optiimzer instances
-    # FIXME(@mrshenli): need to broadcast model to sync parameters
     mod, opt = None, None
-    for arg in pytree.tree_flatten(list(args) + list(kwargs.values()))[0]:
+    mod_idx, opt_idx = 0, 0
+    full_flat_args, full_spec = pytree.tree_flatten((args, kwargs))
+    flat_args = []
+    fake_mode = FakeTensorMode()
+    for idx, arg in enumerate(full_flat_args):
         if isinstance(arg, nn.Module):
             assert mod is None, "Only support single nn.Module for now"
             mod = arg
-        if isinstance(arg, torch.optim.Optimizer):
+            mod_idx = idx
+        elif isinstance(arg, torch.optim.Optimizer):
             assert opt is None, "Only support single Optimizer for now"
             opt = arg
+            opt_idx = idx
+        elif isinstance(arg, torch.Tensor):
+            # since compilation happen in the first iteration and we
+            # receives mini-batch input, convert them to full batch
+            # fake tensor input first for sharding propagation
+            fake_arg = fake_mode.from_tensor(arg)
+            arg_dims = [1] * arg.ndim
+            arg_dims[0] *= dist.get_world_size()
+            repeated_bach_dim_arg = fake_arg.repeat(arg_dims)
+            print(
+                f">>>> expand arg dim from {arg.shape} to {repeated_bach_dim_arg.shape}"
+            )
+            flat_args.append(repeated_bach_dim_arg)
+        else:
+            flat_args.append(arg)
 
     assert mod is not None, "Couldn't find nn.Module instances from the arguments."
 
@@ -469,17 +502,62 @@ def _compile(
                 # Parameter as keys
                 named_states[n] = opt.state[p]  # type: ignore[index]
 
-    # Lift states and parameters as function arguments so that make_fx
+    # Lift parameters and states as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, named_states, params_and_buffers, args, kwargs):
+    def stateless_func(func, params_and_buffers, named_states, flat_args):
+        # the inputs are flattened args, prepare the full args in original
+        # order that the original function expects.
+        full_args_flat = []
+        flat_args_idx = 0
+        for i in range(len(full_flat_args)):
+            if i == mod_idx:
+                full_args_flat.append(mod)
+            elif i == opt_idx:
+                full_args_flat.append(opt)
+            else:
+                full_args_flat.append(flat_args[flat_args_idx])
+                flat_args_idx += 1
+
+        args, kwargs = pytree.tree_unflatten(full_args_flat, full_spec)
+
         with stateless._reparametrize_module(
             cast(nn.Module, mod), params_and_buffers
         ), _rematerialize_optimizer(
             opt, named_states, params_and_buffers
         ) if opt else nullcontext():
+            # full_runtime_args = []
+            # args_iter = iter(full_args)
+            # for i in range(len(args)):
+            #     if i == mod_idx:
+            #         full_runtime_args.append(mod)
+            #     elif i == opt_idx:
+            #         full_runtime_args.append(opt)
+            #     else:
+            #         full_runtime_args.append(next(args_iter))
+
+            tagging_hooks = []
+            if isinstance(parallel_mode, DataParallel):
+                # install hooks first to tag the graidents, we would remove those
+                # nodes later, this is safe to trace
+                for p in params_and_buffers.values():
+                    h = p.register_hook(lambda grad: torch.ops._spmd.tag_grad(grad))
+                    tagging_hooks.append(h)
+
             ret = func(*args, **kwargs)
+
+            # clear up the hooks after the train step
+            for h in tagging_hooks:
+                h.remove()
             # make sure updated parameters are returned
             return ret, list(mod.parameters())  # type: ignore[union-attr]
+
+    # if isinstance(parallel_mode, DataParallel):
+    #     # install hooks first to tag the graidents, we would remove those
+    #     # nodes later, this is safe to trace
+    #     for p in params_and_buffers.values():
+    #         print(f"Installing hooks, param requires_grad:{p.requires_grad} for {p}...")
+    #         h = p.register_hook(lambda grad: torch.ops._spmd.tag_grad(grad))
+    #         print(h)
 
     # FIXME: Using symbolic tracing to work around. Otherwise it hits
     # shape mismatch error, as we use local inputs to trace local graph
@@ -492,13 +570,23 @@ def _compile(
         # Issue: https://github.com/pytorch/pytorch/issues/97852
         gm = make_fx(
             partial(stateless_func, func),
-            tracing_mode="symbolic",
+            # tracing_mode="symbolic",
+            tracing_mode="fake",
             decomposition_table=FOREACH_DECOMP_TABLE,
-            _allow_non_fake_inputs=False,
-        )(named_states, params_and_buffers, args, kwargs)
+            # _allow_non_fake_inputs=True,
+        )(params_and_buffers, named_states, flat_args)
+
+        print(gm.graph)
+        # gm.print_readable()
+
+    # print(f">!>>>>>>>!!>> args: {args} kwargs: {kwargs}")
+    if isinstance(parallel_mode, DataParallel):
+        parallel_mode.partition(gm, params_and_buffers, named_states, args, kwargs)
+    else:
+        raise RuntimeError(f"Unsupported parallel mode: {parallel_mode}")
 
     # 4. Use DTensor to insert collectives
-    gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
+    # gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
@@ -506,7 +594,7 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
+    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
     # 6. dedup comm operators.
@@ -538,6 +626,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 def compile(
     module_override: Optional[Dict[Type[Any], Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+    parallel_mode: Optional[ParallelMode] = None,
 ):
     r"""
     Compile and optimize a callable, which can be a train step within a training
@@ -566,15 +655,29 @@ def compile(
             compiled_obj = wrapper.__dict__.get(COMPILED_OBJECT_KEY, None)
             if compiled_obj is None:
                 first_iter = True
-                compiled_obj = _compile(func, module_override, *args, **kwargs)
+                compiled_obj = _compile(
+                    func, module_override, parallel_mode, *args, **kwargs
+                )
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
-            flat_inps = compiled_obj.flat_state + pytree.tree_flatten([args, kwargs])[0]
+            # flat_inps = compiled_obj.flat_state + pytree.tree_flatten([args, kwargs])[0]
+            full_flattened_args = pytree.tree_flatten([args, kwargs])[0]
+            flat_inputs = []
+            flat_local_states = pytree.tree_map_only(
+                DTensor, lambda t: t.to_local(), compiled_obj.flat_state
+            )
+            flat_inputs.extend(flat_local_states)
+            print(f"flat_inputs 0: {compiled_obj.flat_state[0]}")
+            for arg in full_flattened_args:
+                if not isinstance(arg, nn.Module) and not isinstance(
+                    arg, torch.optim.Optimizer
+                ):
+                    flat_inputs.append(arg)
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
-                output = compiled_obj.gm(*flat_inps)[0]
+                output = compiled_obj.gm(*flat_inputs)[0]
                 if first_iter and gm_transformation:
                     # TODO: SPMD should provid a default and configurable
                     # transformation.

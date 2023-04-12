@@ -353,7 +353,6 @@ class DeviceMesh(object):
         """
         all_gather the tensor on each rank to the tensor_list on a
         device mesh dimension.
-
         Args:
             tensor_list (List[torch.Tensor]): The gathered tensor list.
             tensor (torch.Tensor): tensor to be gathered on each rank.
@@ -361,7 +360,6 @@ class DeviceMesh(object):
                 to scatter on, we by default choose the first rank on the
                 mesh dimension as source of truth.
             gather_dim (int, optional): Dimension to concatenate the resulting tensor.
-
             This suppport up to 1 elem of padding on gather_dim.
         Returns:
             A :class:`torch.Tensor` object
@@ -411,7 +409,6 @@ class DeviceMesh(object):
         """
         reduce the input on each rank on a device mesh dimension, and scatter
         the results to the output tensor on each rank.
-
         Args:
             input (torch.Tensor): tensor to be reduced and scattered
                 and scattered on each rank.
@@ -419,7 +416,6 @@ class DeviceMesh(object):
                 the reduction op of reduce_scatter (i.e. ReduceOp.SUM)
             mesh_dim (int, optional): indicate which mesh dimension we want
                 to scatter on.
-
         Returns:
             A :class:`torch.Tensor` object
         """

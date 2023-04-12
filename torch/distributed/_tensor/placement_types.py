@@ -321,13 +321,17 @@ class _Partial(Placement):
 
 
 # used internally to propagate the placements
-@dataclass
 class DTensorSpec:
-    mesh: DeviceMesh
-    placements: Sequence[Placement]
-
-    # tensor meta will only be set during sharding propagation
-    tensor_meta: Optional[TensorMetadata] = None
+    def __init__(
+        self,
+        mesh: DeviceMesh,
+        placements: Sequence[Placement],
+        tensor_meta: Optional[TensorMetadata] = None,
+    ) -> None:
+        self.mesh = mesh
+        self.placements = placements
+        # tensor meta will only be set during sharding propagation
+        self.tensor_meta = tensor_meta
 
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -346,6 +350,10 @@ class DTensorSpec:
             and self.placements == __o.placements
             and self.tensor_meta == __o.tensor_meta
         )
+
+    def __str__(self) -> str:
+        placements_str = "".join([str(p) for p in self.placements])
+        return f"{placements_str}@mesh{self.mesh.mesh.tolist()}"
 
     @property
     def shape(self) -> torch.Size:
