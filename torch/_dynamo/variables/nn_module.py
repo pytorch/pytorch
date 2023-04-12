@@ -681,7 +681,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if method is torch.nn.Module.parameters:
                 assert not args or kwargs
                 if tx.output.side_effects.has_pending_mutation(self):
-                    unimplemented(f"Module.parameters with pending mutation")
+                    unimplemented("Module.parameters() with pending mutation")
                 options["guards"].add(
                     self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
