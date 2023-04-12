@@ -593,7 +593,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
 
-        reuse_input_obs_or_fq = node.meta["target_dtype_info"]["reuse_input_obs_or_fq"]
+        # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
+        # we'll default to False, this makes configuring this field optional for users
+        reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
 
         act_post_process_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] if is_weight else \
             node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]
@@ -714,12 +716,6 @@ def _maybe_insert_input_observers_for_node(
 
     Note: backend_config only needed for standalone_module node
     """
-    if qconfig is None:
-        # if quantization is turned off for this node, we do not need
-        # to insert input observers
-        return
-    assert qconfig is not None
-
     # Look through every input arg.  If that arg's target dtype does not
     # match the current node's target dtype, insert an observer.
     new_args = []
@@ -962,7 +958,7 @@ def propagate_dtypes_for_known_nodes(
                     arg_list = [arg]
 
                 for cur_arg in arg_list:
-                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propgated
+                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propagated
                     if isinstance(cur_arg, torch.fx.node.Node):
                         _maybe_propagate_dtype_for_node(
                             cur_arg, arg_type, node_name_to_match_result_with_qconfig)
@@ -1155,7 +1151,7 @@ def insert_observers_for_model(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
     processed_nodes: Set[Node] = set()
-    # initalize target_dtype_info
+    # initialize target_dtype_info
     for node in model.graph.nodes:
         node.meta["target_dtype_info"] = copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
@@ -1411,9 +1407,9 @@ def insert_observers_for_model(
                                 _is_observer_in_same_graph_ = _is_observer_in_same_graph(
                                     node, named_modules)
 
-                                # for general tensor value ops, we modify the graph
+                                # for ops whose inputs and outputs share observer/fqs, we modify the graph
                                 # to make all inputs and outputs use the first input's
-                                # observer
+                                # observer/fq
                                 if (input_output_share_observers and _is_observer_in_same_graph_) or \
                                         reuse_input_obs_or_fq:
                                     if not _maybe_make_input_output_share_observers(node, model, named_modules):
