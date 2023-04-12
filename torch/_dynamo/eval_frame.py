@@ -350,7 +350,7 @@ class OptimizeContext(_TorchDynamoContext):
 
 def _will_skip(fn):
     code = getattr(getattr(fn, "forward", fn), "__code__", None)
-    if hasattr(code, "co_filename"):
+    if isinstance(code, types.CodeType):
         return skipfiles.check(code.co_filename)
     return False
 
