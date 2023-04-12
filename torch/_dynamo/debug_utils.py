@@ -14,9 +14,9 @@ from tempfile import TemporaryFile
 import torch
 import torch.fx as fx
 from torch._prims_common import is_float_dtype
-from .backends.registry import lookup_backend, register_debug_backend
 
-from .config_utils import config
+from . import config
+from .backends.registry import lookup_backend, register_debug_backend
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
@@ -233,10 +233,10 @@ def generate_config_string():
 
     return textwrap.dedent(
         f"""\
-import torch._dynamo
+import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config = torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
+torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
 torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
 torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
         """
