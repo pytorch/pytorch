@@ -146,7 +146,7 @@ inline at::Tensor construct_offsets(const at::Tensor& sizes) {
   }
   int64_t ntensors = sizes.size(0), orig_dim = sizes.size(1);
   auto offsets = at::empty({ntensors}, sizes.options());
-  int64_t *offsets_ptr = offsets.mutable_data_ptr<int64_t>();
+  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
   // nesting scalars has easy offsets
   if (orig_dim == 0) {
     std::iota(offsets_ptr, offsets_ptr + ntensors, 0);
