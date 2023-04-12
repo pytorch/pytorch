@@ -1274,6 +1274,7 @@ def emit_body(
                 body.append("c10::optional<at::Tensor> original_self;")
 
             all_forward_grad_cond = []
+            # todo(crcrpar): enable forward AD for foreach. Out-place don't have formulas now.
             if not is_inplace_foreach:
                 for derivative in fw_derivatives:
                     if derivative.required_original_self_value:
@@ -1679,6 +1680,7 @@ def emit_body(
             return f'_any_has_forward_grad_{"_".join(var_names)}'
 
     def emit_any_has_forward_grad() -> List[str]:
+        # todo(crcrpar): enable forward AD for foreach. Out-place don't have formulas now.
         if is_inplace_foreach:
             return []
         content: List[str] = []
@@ -1702,6 +1704,7 @@ def emit_body(
         ]
 
     def emit_fw_derivatives() -> List[str]:
+        # todo(crcrpar): enable forward AD for foreach. Out-place don't have formulas now.
         if is_inplace_foreach:
             return []
         content: List[str] = []
