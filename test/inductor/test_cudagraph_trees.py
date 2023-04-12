@@ -508,7 +508,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.curr_node()
             first_node = next(node._path_from_root)
             self.assertFalse(first_node.unaliased_in_all_paths[0])
-            self.assertTrue(first_node.persisted_tensor_outputs[0] is None)
+            self.assertTrue(first_node.cached_tensor_outputs[0] is None)
 
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")
@@ -570,7 +570,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(cdata(inp), cdata(out))
 
             node = self.curr_node()
-            self.assertEqual(node.persisted_tensor_outputs, [None])
+            self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
         def test_output_alias(self):
@@ -590,7 +590,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 del out_1, out_2
                 self.assertEqual(len(list(self.curr_node().path_live_weakrefs())), 0)
 
-            self.assertEqual(self.curr_node().persisted_tensor_outputs, [None, None])
+            self.assertEqual(self.curr_node().cached_tensor_outputs, [None, None])
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
@@ -640,7 +640,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(len(list(node.path_live_weakrefs())), 0)
 
             out = foo(torch.rand([2, 2], device="cuda"))
-            self.assertTrue(out is node.persisted_tensor_outputs[0])
+            self.assertTrue(out is node.cached_tensor_outputs[0])
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
             out_ref = out[0:]
