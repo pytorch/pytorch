@@ -578,7 +578,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ):
                 if not entry:
                     # no longer in any block
-                    if self.block_stack:
+                    # It is possible for NOPs to be in a block but not
+                    # be covered by an exception table entry.
+                    if self.block_stack and inst.opname != "NOP":
                         assert len(self.block_stack) == 1
                         self.block_stack.pop()
                 elif (

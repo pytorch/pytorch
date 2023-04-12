@@ -277,8 +277,25 @@ class ReenterWith:
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
+    # map from PUSH_EXC_INFO block target ID to original block target offset
+    prefix_block_target_offset_remap: List[int] = None
+    # map from new block target offsets to original block target offsets
     block_target_offset_remap: Dict[int, int] = None
     instructions: List[Instruction] = None
+
+
+def _filter_iter(l1, l2, cond):
+    it = iter(l2)
+    res = []
+    try:
+        cur = next(it)
+        for val in l1:
+            if cond(val, cur):
+                res.append(val)
+                cur = next(it)
+    except StopIteration:
+        pass
+    return res
 
 
 class ContinueExecutionCache:
@@ -300,11 +317,11 @@ class ContinueExecutionCache:
         code,
         lineno,
         offset: int,
-        setup_fn_target_offsets: List[int],
+        setup_fn_target_offsets: Tuple[int],
         nstack: int,
-        argnames: List[str],
-        setup_fns: List[ReenterWith],
-        null_idxes: List[int],
+        argnames: Tuple[str],
+        setup_fns: Tuple[ReenterWith],
+        null_idxes: Tuple[int],
     ):
         assert offset is not None
         assert not (
@@ -314,14 +331,21 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, lineno, offset, setup_fn_target_offsets, nstack, argnames, setup_fns, null_idxes
+                code,
+                lineno,
+                offset,
+                setup_fn_target_offsets,
+                nstack,
+                argnames,
+                setup_fns,
+                null_idxes,
             )
 
         meta = ResumeFunctionMetadata(code)
-        new_target_inst_remap = {}
+        if sys.version_info >= (3, 11):
+            meta.prefix_block_target_offset_remap = []
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
-            nonlocal new_target_inst_remap
             meta.instructions = copy.deepcopy(instructions)
 
             args = [f"___stack{i}" for i in range(nstack)]
@@ -358,7 +382,10 @@ class ContinueExecutionCache:
 
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
-            hook_target_offsets = {fn.stack_index: setup_fn_target_offsets[i] for i, fn in enumerate(setup_fns)}
+            hook_target_offsets = {
+                fn.stack_index: setup_fn_target_offsets[i]
+                for i, fn in enumerate(setup_fns)
+            }
             exn_tab_remap = {}
             null_idxes_i = 0
             for i in range(nstack):
@@ -375,8 +402,10 @@ class ContinueExecutionCache:
                     prefix.extend(hook_insts)
                     if sys.version_info >= (3, 11):
                         hook_target_offset = hook_target_offsets.pop(i)
-                        (old_hook_target,) = [i for i in instructions if i.offset == hook_target_offset]
-                        new_target_inst_remap[exn_target] = hook_target_offset
+                        (old_hook_target,) = [
+                            i for i in instructions if i.offset == hook_target_offset
+                        ]
+                        meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         exn_tab_remap[old_hook_target] = exn_target
 
             assert not hooks
@@ -398,18 +427,19 @@ class ContinueExecutionCache:
             if exn_tab_remap:
                 assert sys.version_info >= (3, 11)
                 for inst in instructions:
-                    if inst.exn_tab_entry and inst.exn_tab_entry.target in exn_tab_remap:
-                        inst.exn_tab_entry.target = exn_tab_remap[inst.exn_tab_entry.target]
+                    if (
+                        inst.exn_tab_entry
+                        and inst.exn_tab_entry.target in exn_tab_remap
+                    ):
+                        inst.exn_tab_entry.target = exn_tab_remap[
+                            inst.exn_tab_entry.target
+                        ]
 
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
 
         new_code = transform_code_object(code, update)
-        if new_target_inst_remap:
-            assert sys.version_info >= (3, 11)
-            meta.block_target_offset_remap = {}
-            for inst, old_offset in new_target_inst_remap.items():
-                meta.block_target_offset_remap[inst.offset] = old_offset
+        # breakpoint()
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 
@@ -422,7 +452,9 @@ class ContinueExecutionCache:
         ]
 
     @classmethod
-    def generate_based_on_original_code_object(cls, code, lineno, offset: int, setup_fn_target_offsets: List[int], *args):
+    def generate_based_on_original_code_object(
+        cls, code, lineno, offset: int, setup_fn_target_offsets: Tuple[int], *args
+    ):
         """
         This handles the case of generating a resume into code generated
         to resume something else.  We want to always generate starting
@@ -451,9 +483,65 @@ class ContinueExecutionCache:
             new_offset = new_target.offset
 
         transform_code_object(code, find_new_offset)
-        if meta.block_target_offset_remap:
-            setup_fn_target_offsets = tuple(meta.block_target_offset_remap[n] if n in meta.block_target_offset_remap else n for n in setup_fn_target_offsets)
-        return ContinueExecutionCache.lookup(meta.code, lineno, new_offset, setup_fn_target_offsets, *args)
+
+        if sys.version_info >= (3, 11):
+            if not meta.block_target_offset_remap:
+                meta.block_target_offset_remap = {}
+
+                def remap_block_offsets(
+                    instructions: List[Instruction], code_options: Dict[str, Any]
+                ):
+                    # old bytecode targets are after the old bytecode's RESUME 0
+                    resume_cnt = 0
+                    for resume_idx, inst in enumerate(instructions):
+                        if inst.opname == "RESUME" and inst.arg == 0:
+                            resume_cnt += 1
+                            if resume_cnt == 2:
+                                break
+                    else:
+                        raise RuntimeError(
+                            "second RESUME 0 not found in resume function"
+                        )
+                    resume_offset = inst.offset
+
+                    # offsets into old bytecode
+                    old_inst_offsets = sorted(
+                        n for n in setup_fn_target_offsets if n > resume_offset
+                    )
+                    targets = _filter_iter(
+                        instructions, old_inst_offsets, lambda inst, o: inst.offset == o
+                    )
+                    new_targets = _filter_iter(
+                        zip(reversed(instructions), reversed(meta.instructions)),
+                        targets,
+                        lambda v1, v2: v1[0] is v2,
+                    )
+                    for new, old in zip(new_targets, targets):
+                        meta.block_target_offset_remap[old.offset] = new[1].offset
+
+                    # offsets into prefix
+                    prefix_blocks = [
+                        i
+                        for i in instructions[:resume_idx]
+                        if i.opname == "PUSH_EXC_INFO"
+                    ]
+                    assert len(prefix_blocks) == len(
+                        meta.prefix_block_target_offset_remap
+                    )
+                    for inst, o in zip(
+                        prefix_blocks, reversed(meta.prefix_block_target_offset_remap)
+                    ):
+                        meta.block_target_offset_remap[inst.offset] = o
+
+                transform_code_object(code, remap_block_offsets)
+
+            # if offset is not in setup_fn_target_offsets, it is an error
+            setup_fn_target_offsets = tuple(
+                meta.block_target_offset_remap[n] for n in setup_fn_target_offsets
+            )
+        return ContinueExecutionCache.lookup(
+            meta.code, lineno, new_offset, setup_fn_target_offsets, *args
+        )
 
 
 """
