@@ -1542,6 +1542,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
+  inline const T* data_ptr_impl() const {
+    return data_ptr_impl_impl<const T>(
+        [this] { return static_cast<const T*>(storage_.data()); });
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
   inline T* mutable_data_ptr_impl() {
     return data_ptr_impl_impl<T>(
         [this] { return static_cast<T*>(storage_.mutable_data()); });
