@@ -1046,10 +1046,7 @@ class SubgraphTracer(fx.Tracer):
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
-            nn_module_stack = nn_module_stack.copy()
-            _, last_value = nn_module_stack.popitem()
-            nn_module_stack[rv.node.name] = last_value
-            rv.node.meta["nn_module_stack"] = nn_module_stack
+            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = (rv.node.name, target)
@@ -1059,7 +1056,7 @@ class SubgraphTracer(fx.Tracer):
             # For modules we store the class
             rv.node.meta["source_fn"] = (
                 rv.node.name,
-                rv.node.meta["nn_module_stack"][rv.node.name][1],
+                rv.node.meta["nn_module_stack"][target][1],
             )
 
         frame_summaries: List[traceback.FrameSummary] = []
