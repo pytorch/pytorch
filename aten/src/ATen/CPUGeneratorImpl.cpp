@@ -99,7 +99,7 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
  * See Note [Acquire lock when using random generators]
  */
 void CPUGeneratorImpl::set_offset(uint64_t offset) {
-  AT_ERROR("CPU Generator does not use offset");
+  TORCH_CHECK(false, "CPU Generator does not use offset");
 }
 
 /**
