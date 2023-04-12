@@ -626,7 +626,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               "index_select(): index and output must have the same size at `dim`th dimension, but got ",
               index.size(-1),
               " and ",
-              output.size(-1),
+              output.size(dim),
               ".");
 
   for (const auto i : irange(self.dim())) {
