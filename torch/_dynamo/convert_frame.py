@@ -2,6 +2,7 @@ import functools
 import itertools
 import logging
 import os
+import random
 import types
 import weakref
 from typing import Dict, Optional, Set
@@ -9,6 +10,7 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
@@ -95,15 +97,17 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 def wrap_convert_context(fn):
     """
     Context manager to:
-        1) Save/restore torch random state
-        2) Save/restore torch.is_grad_enabled() state
-        3) Monkey patch torch.fx.graph_module._forward_from_src
+        1) Save/restore torch.is_grad_enabled() state
+        2) Save/restore python random state
+        3) Save/restore torch random state
+        4) Monkey patch torch.fx.graph_module._forward_from_src
     """
 
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
-        rng_state = torch.random.get_rng_state()
+        py_rng_state = random.getstate()
+        torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
@@ -114,7 +118,8 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
-            torch.random.set_rng_state(rng_state)
+            random.setstate(py_rng_state)
+            torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
@@ -295,6 +300,17 @@ def convert_frame_assert(
         global initial_deterministic_algorithms_state
         initial_deterministic_algorithms_state = (
             torch.are_deterministic_algorithms_enabled()
+        )
+
+        signpost_event(
+            "dynamo",
+            "_convert_frame_assert._compile",
+            {
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size,
+            },
         )
 
         return _compile(
