@@ -195,6 +195,33 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
                 .set_fuser_method(fuse_conv_bn_relu)
                 .set_fused_module(convs.fused_conv_bn_relu))
         # TODO: we can add fusion for torch.relu as well
+        # 3.2 conv + bn (+ relu) fused module configs
+        # fused conv bn
+        conv_configs.append(
+            BackendPatternConfig(convs.fused_conv_bn)
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_qat_module(convs.bn_qat))
+
+        # fused conv bn relu
+        conv_configs.append(
+            BackendPatternConfig(convs.fused_conv_bn_relu)
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_qat_module(convs.bn_relu_qat))
+
+        # conv bn, qat fused module
+        conv_configs.append(
+            BackendPatternConfig(convs.bn_qat)
+                .set_observation_type(observation_type)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_root_module(convs.root)
+                .set_reference_quantized_module(convs.reference))
+        # conv bn relu, qat fused module
+        conv_configs.append(
+            BackendPatternConfig(convs.bn_relu_qat)
+                .set_observation_type(observation_type)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_root_module(convs.root)
+                .set_reference_quantized_module(convs.reference))
     return conv_configs
 
 def _get_binary_ops_configs() -> List[BackendPatternConfig]:
