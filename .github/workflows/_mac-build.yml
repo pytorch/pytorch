@@ -120,11 +120,10 @@ jobs:
               echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
             else
-              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
-              echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
               # The runner has access to the S3 bucket via IAM profile without the need
               # for any credential
-              echo "SCCACHE_S3_NO_CREDENTIALS=1" >> "${GITHUB_ENV}"
+              echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+              echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
             fi
 
             sudo chmod +x "${LOCAL_PATH}/sccache"
