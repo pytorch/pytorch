@@ -585,7 +585,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
         std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
-        [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input);
+        [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + native_mps::getMPSTypeString(input);
     auto input_mps_dtype = native_mps::getMPSDataType(input);
     CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
 
@@ -815,7 +815,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     if (grad_input_mask[1])
       gradWeightPlaceholder = native_mps::Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
     auto gradBiasPlaceholder = native_mps::Placeholder();
-    ;
+
     if (grad_input_mask[2])
       gradBiasPlaceholder = native_mps::Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
 
