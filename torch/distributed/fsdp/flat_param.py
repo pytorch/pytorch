@@ -579,9 +579,12 @@ class FlatParamHandle:
             and total_numel != total_numel_without_padding
         ):
             log.info(
-                f"FSDP FlatParameter address alignment created "
-                f"{total_numel - total_numel_without_padding} "
-                f"numel of padding ({total_numel} vs. {total_numel_without_padding})"
+                "FSDP FlatParameter address alignment created "
+                "%s "
+                "numel of padding (%s vs. %s)",
+                total_numel - total_numel_without_padding,
+                total_numel,
+                total_numel_without_padding,
             )
         # Pass `aligned_numel=0` since we already included padding tensors
         self.flat_param: FlatParameter = self.flatten_tensors_into_flat_param(
@@ -1487,7 +1490,9 @@ class FlatParamHandle:
         """
         Runs the reshard logic. This includes freeing the unsharded flat
         parameter if ``free_unsharded_flat_param`` and switching to using the
-        sharded flat parameter.
+        sharded flat parameter. Note that this also implicitly offloads
+        the sharded flat parameter (if CPU offload is enabled) by pointing
+        it to the ``_local_shard`` attribute which resides on CPU.
         """
         # Switch to the sharded `FlatParameter` before freeing to prevent
         # "use-after-free"-type bugs with external profiling tools, where for

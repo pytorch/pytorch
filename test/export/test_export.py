@@ -1,10 +1,15 @@
 # Owner(s): ["module: dynamo"]
 from torch.testing._internal.common_utils import run_tests, TestCase
 from functorch.experimental.control_flow import cond
-from torch._export import do_not_use_experimental_export
+from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export.trace import do_not_use_experimental_export
+from torch._export.constraints import constrain_as_size
+from torch.fx.experimental.proxy_tensor import make_fx
 import torch._dynamo as torchdynamo
+from torch._dynamo import config
 import torch
 import unittest
+
 
 class TestExport(TestCase):
     @unittest.skip("dynamo failure -> RuntimeError: Could not infer dtype of SymBool")
@@ -74,6 +79,60 @@ class TestExport(TestCase):
         # how to do buffer mutation
         # self.assertEqual(mutated_buffer.sum().item(), 30)
         self.assertEqual(output, mod(*inp))
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @config.patch(dynamic_shapes=True, capture_dynamic_output_shape_ops=True, specialize_int=True, capture_scalar_outputs=True)
+    def test_export_constraints(self):
+
+        def f(x):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.full((b, 1), 1)
+
+        inp = (torch.tensor([3]),)
+        ref = f(*inp)
+
+        gm, _ = torchdynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
+        res = gm(*inp)
+
+        self.assertTrue(torchdynamo.utils.same(ref, res))
+
+        gm = make_fx(f, tracing_mode="symbolic")(*inp)
+        res = gm(*inp)
+        self.assertTrue(torchdynamo.utils.same(ref, res))
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @config.patch(dynamic_shapes=True, capture_dynamic_output_shape_ops=True, specialize_int=True, capture_scalar_outputs=True)
+    def test_export_constraints_error(self):
+        def invalid_size(x):
+            b = x.item()
+            constrain_as_size(b, min=0, max=5)
+            return torch.full((b, 1), 1)
+
+        inp = (torch.tensor([3]),)
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Unable to set min size"):
+            _ = torchdynamo.export(invalid_size, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        def invalid_input(x):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.full((b, 1), 1)
+
+        inp = (torch.tensor([6]),)
+
+        with self.assertRaisesRegex(torch.utils._sympy.value_ranges.ValueRangeError, "Invalid value 6 for range"):
+            _ = torchdynamo.export(invalid_input, *inp, aten_graph=True, tracing_mode="symbolic")
+
+        def conflicting_constraints(x):
+            b = x.item()
+            constrain_as_size(b, min=2, max=3)
+            constrain_as_size(b, min=4, max=5)
+            return torch.full((b, 1), 1)
+
+        inp = (torch.tensor([3]),)
+
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid ranges"):
+            _ = torchdynamo.export(conflicting_constraints, *inp, aten_graph=True, tracing_mode="symbolic")
 
 if __name__ == '__main__':
     run_tests()
