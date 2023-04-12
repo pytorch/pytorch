@@ -39,7 +39,7 @@ def _get_act_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
             dtype=qdtype,
             quant_min=tensor_spec.quant_min,
             quant_max=tensor_spec.quant_max,
-            reduce_range=True,  # X86 backend use reduce_range=True
+            reduce_range=False,
         )
     else:
         # TODO: extend this helper function to support dynamic quantization
@@ -71,11 +71,10 @@ def _get_bias_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
 
 def get_default_x86_inductor_operator_spec():
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
-    # X86 backend use reduce_range=True
     act_tensor_spec = TensorSpec(
         dtype=torch.uint8,
         quant_min=0,
-        quant_max=127,
+        quant_max=255,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
         is_dynamic=False,
     )
