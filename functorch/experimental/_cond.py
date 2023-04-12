@@ -22,7 +22,7 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 from torch.utils._pytree import tree_flatten
-
+from torch._dynamo.exc import UserError, UserErrorType
 
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
@@ -56,12 +56,34 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
     flat_false_outs, _ = pytree.tree_flatten(false_outs)
-    assert(len(flat_true_outs) == len(flat_false_outs))
+    if len(flat_true_outs) != len(flat_false_outs):
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "cond: Branches must return with same length.\n"
+            "  {true_fn} returns {true_outs}\n"
+            "  {false_fn} returns {false_outs}\n".format(
+                true_fn=true_fn.__name__,
+                true_outs=flat_true_outs,
+                false_fn=false_fn.__name__,
+                false_outs=flat_false_outs
+            )
+        )
 
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        assert true_out.meta['tensor_meta'] == false_out.meta['tensor_meta']
+        if true_out.meta['tensor_meta'] != false_out.meta['tensor_meta']:
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                "cond: Branches must return each tensor with exact same metadata.\n"
+                "  {true_fn} returns {true_tensor_meta}\n"
+                "  {false_fn} returns {false_tensor_meta}\n".format(
+                    true_fn=true_fn.__name__,
+                    true_tensor_meta=true_out.meta['tensor_meta'],
+                    false_fn=false_fn.__name__,
+                    false_tensor_meta=false_out.meta['tensor_meta']
+                )
+            )
 
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,

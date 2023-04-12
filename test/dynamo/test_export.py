@@ -2455,6 +2455,92 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             gm, _ = torch._dynamo.export(f, *example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
+    def test_cond_raise_user_error_on_missing_args(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            return x.sin()
+
+        def f(x):
+            return cond(x.shape[0] > 10, true_fn, false_fn)
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "cond: Expected 4 arguments"
+        ):
+            torch._dynamo.export(f, *example_inputs)
+
+    def test_cond_raise_user_error_on_unsupported_pred(self):
+        def f_unsupported_pred(x):
+            pred = torch.nn.Module()
+            return cond(pred, lambda x: x.sin(), lambda x: x.cos(), [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "cond: Conditional statement type passed to cond must be",
+        ):
+            torch._dynamo.export(f_unsupported_pred, *example_inputs)
+
+    def test_cond_raise_user_error_on_non_list_operands(self):
+        def f_non_list_operands(x):
+            return cond(True, lambda x: x.sin(), lambda x: x.cos(), x)
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "cond: Operands must be passed as list"
+        ):
+            torch._dynamo.export(f_non_list_operands, *example_inputs)
+
+    def test_cond_raise_user_error_on_non_tensor_operands(self):
+        def f_non_tensor_operands(x):
+            a: float = 3.14
+            return cond(True, lambda x, a: x.sin(), lambda x, a: x.cos(), [x, a])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "cond: Operands must be a list of tensors"
+        ):
+            torch._dynamo.export(f_non_tensor_operands, *example_inputs)
+
+    def test_cond_raise_user_error_on_branch_signature_mismatch(self):
+        def true_fn(x, y):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f_branch_signature_mismatch(x, y):
+            return cond(True, true_fn, false_fn, [x, y])
+
+        example_inputs = (torch.rand(5), torch.rand(2))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "cond: Branch signature doesn't match with operands",
+        ):
+            torch._dynamo.export(f_branch_signature_mismatch, *example_inputs)
+
+    def test_cond_raise_user_error_on_branch_return_non_tensor(self):
+        def f_branch_return_non_tensor(x):
+            return cond(True, lambda x: 3.14, lambda x: 3.14, [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "cond: Branch must return a single tensor"
+        ):
+            torch._dynamo.export(f_branch_return_non_tensor, *example_inputs)
+
+    def test_cond_raise_user_error_on_branch_return_multiple_tenors(self):
+        def f_branch_return_multiple_tensors(x, y):
+            return cond(y, lambda x: (x, x), lambda x: (x, x), [x])
+
+        example_inputs = (torch.randn(4), torch.randn(2))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "cond: Branch must return a single tensor"
+        ):
+            torch._dynamo.export(f_branch_return_multiple_tensors, *example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

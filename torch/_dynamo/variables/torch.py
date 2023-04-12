@@ -912,9 +912,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 raise UserError(
                     UserErrorType.ANTI_PATTERN,
                     "cond: Expected 4 arguments but got {}.\n"
-                    "Usage: cond(pred, true_fn, false_fn, operands)".format(
-                        len(args)
-                    ),
+                    "Usage: cond(pred, true_fn, false_fn, operands)".format(len(args)),
                 )
             # predicate
             if type(args[0]) not in (TensorVariable, SymNodeVariable, ConstantVariable):
@@ -929,7 +927,9 @@ class TorchHigherOrderOperator(VariableTracker):
             if type(args[3]) is not ListVariable:
                 raise UserError(
                     UserErrorType.ANTI_PATTERN,
-                    "cond: Operands must be passed as list but got {}".format(args[3].python_type()),
+                    "cond: Operands must be passed as list but got {}".format(
+                        args[3].python_type()
+                    ),
                 )
             # branches
             assert isinstance(

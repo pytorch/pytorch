@@ -6,7 +6,7 @@ from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from torch.fx.experimental.proxy_tensor import make_fx
-
+from torch._dynamo.exc import UserError
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestControlFlow(TestCase):
@@ -378,96 +378,7 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_cond_raise_user_error_on_missing_args(self):
-        import torch._dynamo as torchdynamo
-
-        def true_fn(x):
-            return x.cos()
-
-        def false_fn(x):
-            return x.sin()
-
-        def f(x):
-            return cond(x.shape[0] > 10, true_fn, false_fn)
-
-        example_inputs = (torch.rand(5),)
-        with self.assertRaisesRegex(torchdynamo.exc.UserError, "cond: Expected 4 arguments"):
-            torchdynamo.export(f, *example_inputs)
-
-    def test_cond_raise_user_error_on_unsupported_pred(self):
-        import torch._dynamo as torchdynamo
-
-        def f_unsupported_pred(x):
-            pred = torch.nn.Module()
-            return cond(pred, lambda x: x.sin(), lambda x: x.cos(), [x])
-
-        example_inputs = (torch.rand(5),)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "cond: Conditional statement type passed to cond must be"
-        ):
-            torchdynamo.export(f_unsupported_pred, *example_inputs)
-
-    def test_cond_raise_user_error_on_non_list_operands(self):
-        import torch._dynamo as torchdynamo
-
-        def f_non_list_operands(x):
-            return cond(True, lambda x: x.sin(), lambda x: x.cos(), x)
-
-        example_inputs = (torch.rand(5),)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "cond: Operands must be passed as list"
-        ):
-            torchdynamo.export(f_non_list_operands, *example_inputs)
-
-    def test_cond_raise_user_error_on_non_tensor_operands(self):
-        import torch._dynamo as torchdynamo
-
-        def f_non_tensor_operands(x):
-            a: float = 3.14
-            return cond(True, lambda x, a: x.sin(), lambda x, a: x.cos(), [x, a])
-
-        example_inputs = (torch.rand(5),)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "cond: Operands must be a list of tensors"
-        ):
-            torchdynamo.export(f_non_tensor_operands, *example_inputs)
-
-    def test_cond_raise_user_error_on_branch_signature_mismatch(self):
-        import torch._dynamo as torchdynamo
-
-        def true_fn(x, y):
-            return x.sin()
-
-        def false_fn(x):
-            return x.cos()
-
-        def f_branch_signature_mismatch(x, y):
-            return cond(True, true_fn, false_fn, [x, y])
-
-        example_inputs = (torch.rand(5), torch.rand(2))
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "cond: Branch signature doesn't match with operands"
-        ):
-            torchdynamo.export(f_branch_signature_mismatch, *example_inputs)
-
-    def test_cond_raise_user_error_on_branch_return_non_tensor(self):
-        import torch._dynamo as torchdynamo
-
-        def f_branch_return_non_tensor(x):
-            return cond(True, lambda x: 3.14, lambda x: 3.14, [x])
-
-        example_inputs = (torch.rand(5),)
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError,
-            "cond: Branch must return a single tensor"
-        ):
-            torchdynamo.export(f_branch_return_non_tensor, *example_inputs)
-
-    def test_assert_on_mismatch_type_size(self):
+    def test_raise_user_error_on_mismatch_type_size(self):
         def true_fn(x):
             return x.sin()
 
@@ -478,11 +389,14 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            UserError,
+            "cond: Branches must return with same length."
+        ):
             make_fx(f)(x, torch.tensor(False))
 
 
-    def test_assert_on_mismatch_tensor_size(self):
+    def test_raise_user_error_on_mismatch_tensor_size(self):
         def true_fn(x):
             return x.sin()
 
@@ -493,7 +407,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            UserError,
+            "cond: Branches must return each tensor with exact same metadata."
+        ):
             make_fx(f)(x, torch.tensor(False))
 
     def test_cond_traced_not_nested_fake_tensor(self):
@@ -629,7 +546,7 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_assert_on_mismatch_type_size_fake_tensor(self):
+    def test_raise_user_error_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
             return x.sin()
 
@@ -640,11 +557,14 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            UserError,
+            "cond: Branches must return with same length."
+        ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
 
-    def test_assert_on_mismatch_tensor_size_fake_tensor(self):
+    def test_raise_user_error_on_mismatch_tensor_size_fake_tensor(self):
         def true_fn(x):
             return x.sin()
 
@@ -655,7 +575,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            UserError,
+            "cond: Branches must return each tensor with exact same metadata."
+        ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
     def check_map_graph(self, gm, key):
