@@ -318,7 +318,7 @@ struct RandTwoLeadingScalarsBatchRuleHelper<F, Func, typelist<T0, T1, T2, T...>>
   static Tensor apply(T0 scalar0, T1 scalar1, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_low_wrapper<F, Func, T0, T1, T...>),
                                 &rand_int_low_wrapper<F, Func, T0, T1, T...>,
-                                int64_t, int64_t, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
+                                T0, T1, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
   }
 };
 
