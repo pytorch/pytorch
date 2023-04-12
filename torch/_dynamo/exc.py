@@ -98,6 +98,10 @@ class UserError(Unsupported):
         self.error_type = error_type
 
 
+class IncorrectUsage(Exception):
+    pass
+
+
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
