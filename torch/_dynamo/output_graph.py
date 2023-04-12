@@ -54,8 +54,8 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
-    format_graph_code,
-    format_graph_tabular,
+    lazy_format_graph_code,
+    lazy_format_graph_tabular,
     nnmodule_doc_url_msg,
     nnmodule_has_hooks,
     same,
@@ -696,8 +696,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        graph_code_log.debug(format_graph_code(name, gm))
-        graph_tabular_log.debug(format_graph_tabular(name, gm))
+        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
+        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)

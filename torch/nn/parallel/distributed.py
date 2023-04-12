@@ -76,7 +76,7 @@ class _MixedPrecision:
     .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
         happens in ``param_dtype`` if specified or the original parameter dtype
         otherwise. For example, ``_MixedPrecision(param_dtype=torch.float16)``
-        would result in communication ocurring in fp16.
+        would result in communication occurring in fp16.
     """
 
     param_dtype: Optional[torch.dtype] = None
@@ -966,7 +966,7 @@ class DistributedDataParallel(Module, Joinable):
 
             # TODO (rohan-varma): this is a workaround that allows users to
             # disable the default behavior of DDP managed parameters with
-            # optimizer runing in backwards having their gradients all set to None.
+            # optimizer running in backwards having their gradients all set to None.
             # Currently, it is an "all or nothing behavior" where DDP will set
             # no grads to None or all of them, relaxing this behavior will be
             # done dependent on use cases.
@@ -1452,7 +1452,7 @@ class DistributedDataParallel(Module, Joinable):
                 work, self._divide_by_initial_world_size  # type: ignore[arg-type]
             )
 
-        # Calling _rebuild_buckets before forward compuation,
+        # Calling _rebuild_buckets before forward computation,
         # It may allocate new buckets before deallocating old buckets
         # inside _rebuild_buckets. To save peak memory usage,
         # call _rebuild_buckets before the peak memory usage increases
@@ -2193,9 +2193,9 @@ class DistributedDataParallel(Module, Joinable):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
-        for debugging and analysis. The loggind data includes DistributedDataParallel
+        for debugging and analysis. The logging data includes DistributedDataParallel
         constructor input parameters, some internal states of DistributedDataParallel
-        and performance metrics. Simply print the dictorinary and see what
+        and performance metrics. Simply print the dictionary and see what
         these metrics are.
         This is a prototype interface and subject to change in the future.
         """
