@@ -188,7 +188,7 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
         graph_module.recompile()
 
         export_output = self.export_fx_to_onnx(
-            graph_module, tuple(bound_args) + replaced_attrs
+            graph_module, (*bound_args, *replaced_attrs)
         )
 
         return export_output
