@@ -7,7 +7,6 @@ from ._pt2e.utils import (
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
-from ._pt2e.qat_utils import _fuse_conv_bn_qat
 
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.backend_config import BackendConfig
@@ -68,15 +67,10 @@ def prepare_pt2e_quantizer(
             current_scope = (bt[0].split(".")[-1], bt[1])
         node_name_to_scope[n.name] = current_scope
 
-    # Fuse Conv + BN
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
-    if is_qat:
-        _fuse_conv_bn_qat(model)
-    else:
-        # TODO: (maybe) rewrite this with subgraph_rewriter
-        _fuse_conv_bn_(model)
-
+    # TODO: (maybe) rewrite this with subgraph_rewriter
+    _fuse_conv_bn_(model)
     model = prepare(
         model,
         quantizer,

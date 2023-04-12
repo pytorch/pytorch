@@ -275,6 +275,7 @@ class QNNPackQuantizer(Quantizer):
         for node in reversed(model.graph.nodes):
             for op in ops:
                 if op == "conv2d":
+                    self._annotate_conv2d_bn(node, global_spec)
                     self._annotate_conv2d_relu(node, global_spec)
                     self._annotate_conv2d(node, global_spec)
                 elif op == "linear":
@@ -292,6 +293,35 @@ class QNNPackQuantizer(Quantizer):
                     self._annotate_adaptive_avg_pool2d(node, global_spec)
 
         return model
+
+    # Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+    def _annotate_conv2d_bn(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        if node.op != "call_function" or node.target != torch.ops.aten._native_batch_norm_legit.default:
+            return
+        bn_node = node
+        conv_node = bn_node.args[0]
+        assert isinstance(conv_node, Node)
+        if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
+            return
+        if _is_annotated([bn_node, conv_node]):
+            return
+
+        conv_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
+            "weight_index": 1,
+            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
+            "bias_index": 2,
+            "_annotated": True,
+        }
+        bn_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "_annotated": True,
+        }
 
     def _annotate_conv2d_relu(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
         if node.op != "call_function" or node.target not in [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]:

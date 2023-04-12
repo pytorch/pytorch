@@ -1,4 +1,5 @@
 import torch
+from .qat_utils import _fuse_conv_bn_qat
 from .quantizer import Quantizer
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (
@@ -93,6 +94,9 @@ def prepare(
 ) -> GraphModule:
     quantizer.annotate(model)
     quantizer.validate(model)
+
+    if is_qat:
+        _fuse_conv_bn_qat(model)
 
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
