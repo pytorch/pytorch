@@ -1207,7 +1207,8 @@ def wrap_to_fake_tensor_and_record(
 
                         dim2constraint[constraint.dim] = StrictMinMaxConstraint(
                             vr=constraint.constraint_range.vr
-                            & dim2constraint[constraint.dim].vr, warn_only=False
+                            & dim2constraint[constraint.dim].vr,
+                            warn_only=False,
                         )
                     else:
                         dim2constraint[constraint.dim] = constraint.constraint_range

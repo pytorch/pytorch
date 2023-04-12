@@ -615,7 +615,8 @@ class Constraint:
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
-            vr = self.constraint_range.vr & ValueRanges(lower=lower, upper=upper), warn_only=False
+            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
+            warn_only=False,
         )
         return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
 
