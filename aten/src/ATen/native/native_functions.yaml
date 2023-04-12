@@ -4381,7 +4381,7 @@
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.out(int high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: randint.out(SymInt high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
