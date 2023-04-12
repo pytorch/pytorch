@@ -359,11 +359,12 @@ def first_real_inst_idx(code):
     raise RuntimeError("RESUME instruction not found in code")
 
 
-# Given a installed_guard_subexpression, mutates frame_state with relevant changes.
-# Specifically, this impliments the automatic dynamic frame state changes by
-# reading out which guards failed, and if the right guard for triggering automatic dynamic
-# shape expansion failed, it takes all the installed_guard_subexpressions and mutates the frame_state with every dim that
-# would have failed a guard this frame.
+# Given an installed_guard_subexpression, mutates frame_state with relevant changes.
+# Specifically, this implements the automatic dynamic frame state changes by
+# reading out which guards failed, and if the right guard for triggering
+# automatic dynamic shape expansion failed, it takes all the
+# installed_guard_subexpressions and mutates the frame_state with every dim
+# that would have failed a guard this frame.
 def compute_dynamic_expansions(
     installed_guard_subexpression: "torch._dynamo.guards.InstalledGuardSubexpression",
     frame_state: Dict[str, Set[int]],

@@ -103,12 +103,15 @@ def strip_getattr_getitem(name):
 @dataclasses.dataclass
 class InstalledGuardSubexpression:
     """
-    A InstalledGuardSubexpression represents a code string and bookeeping information accumulated at guard creation time.
-    InstalledGuardSubexpressions are used to make up the check_fn we use for guards. A collection of InstalledGuardSubexpressions is kept on each
-    guard cache entry, and is passed into the subsequent eval_frame callback upon guard failure.
+    A InstalledGuardSubexpression represents a code string and bookkeeping
+    information accumulated at guard creation time.
+    InstalledGuardSubexpressions are used to make up the check_fn we use for
+    guards. A collection of InstalledGuardSubexpressions is kept on each guard
+    cache entry, and is passed into the subsequent eval_frame callback upon
+    guard failure.
 
-    Note: This object's uniqueness is dictated by the code str. For a given code str, all other parts
-    must be identical.
+    Note: This object's uniqueness is dictated by the code str. For a given
+    code str, all other parts must be identical.
     """
 
     sources: Optional[
