@@ -48,7 +48,6 @@ from torch.ao.quantization import (
     default_reuse_input_qconfig,
     default_symmetric_qnnpack_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
-    default_per_channel_symmetric_qnnpack_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float16_static_qconfig,
