@@ -113,9 +113,9 @@ jobs:
           environment-file: ${{ inputs.environment-file }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
-      - name: Install sccache (only for non-forked PRs)
+      - name: Install sccache (only for non-forked PRs, or pushes to trunk)
         uses: nick-fields/retry@v2.8.2
-        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
           max_attempts: 3
