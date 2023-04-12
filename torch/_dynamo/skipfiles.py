@@ -30,6 +30,7 @@ import unittest
 import weakref
 
 import torch
+import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
 
 
@@ -136,6 +137,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
@@ -199,7 +201,10 @@ def check(filename, allow_torch=False):
 
 # skip common third party libs
 for _name in (
+    "einops",
+    "einops_exts",
     "functorch",
+    "fx2trt_oss",
     "intel_extension_for_pytorch",
     "networkx",
     "numpy",
@@ -217,7 +222,6 @@ for _name in (
     "tqdm",
     "tree",
     "tvm",
-    "fx2trt_oss",
     "xarray",
 ):
     add(_name)
