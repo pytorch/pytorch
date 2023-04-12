@@ -29,9 +29,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
     name: macos-12-py3-arm64-mps

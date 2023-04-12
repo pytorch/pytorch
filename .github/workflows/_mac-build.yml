@@ -58,23 +58,12 @@ on:
         value: ${{ jobs.build.outputs.build-outcome }}
         description: The outcome of the build step. This is used to influence test filtering logic later on.
 
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID:
-        required: true
-        description: Access key for S3 bucket for macOS sccache.
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY:
-        required: true
-        description: Secret for S3 bucket for macOS sccache.
-
 jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner-type }}
     env:
-      # For sccache access (only on non-forked PRs)
-      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
       SCCACHE_USE_GHA: ${{ inputs.sccache-use-gha }}  # this is placed here instead of the sccache step to appease actionlint
     outputs:
