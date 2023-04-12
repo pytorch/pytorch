@@ -167,7 +167,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
 template <typename scalar_t>
-inline scalar_t div_floor_internal(scalar_t a, scalar_t b) {
+inline scalar_t div_floor_internal(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
   if (C10_UNLIKELY(b == 0)) {
     // Divide by zero: return standard IEEE result
     return a / b;
@@ -241,7 +241,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         iter.remove_operand(2);
         using vec_t = Vectorized<float>;
         cpu_kernel_vec(iter,
-          [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          [=](scalar_t a) -> scalar_t {
             return div_floor_internal(static_cast<float>(a), b);
           },
           [=](Vectorized<scalar_t> a) {
@@ -252,7 +252,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
       AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
         using vec_t = Vectorized<scalar_t>;
         cpu_kernel_vec(iter,
-          [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          [](scalar_t a, scalar_t b) -> scalar_t {
             return div_floor_internal(a, b);
           },
           [](vec_t a, vec_t b) -> vec_t {
