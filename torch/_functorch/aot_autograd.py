@@ -2334,7 +2334,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # Suppose we have a function like this that we want to compile:
         #
         # def f(x, y):
-        #     return torch.add(x, y.detach())
+        #     return torch.mul(x, y.detach())
         #
         # What gradients should we compute for x and y?
         # By default, AOTAutograd will compute a gradient for **every** input that requires gradients,
