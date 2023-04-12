@@ -396,11 +396,15 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
-# These operators mutate striding in place and output conj depending on input
-# that is not reflected in meta registration
+# Many of these operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration.
+# TODO: fix registrations, add all existing impls that are correct
 def unsupported_complex_op(op):
     if op.namespace not in ("aten", "prims"):
         return False
+    if op is aten._fft_c2c.default:
+        return False
+
     op_name = op.name()
     if "fft" in op_name:
         return True

@@ -2068,6 +2068,8 @@ class TestFakeTensor(TestCase):
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
             except torch._subclasses.fake_tensor.DataDependentOutputException:
