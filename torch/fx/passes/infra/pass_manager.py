@@ -280,7 +280,7 @@ class PassManager:
                     modified = modified or res.modified
 
                     if isinstance(module, GraphModule):
-                        logger.debug(f"Graph after pass '{fn_name}':", module.graph)
+                        logger.debug("Graph after pass '%s': %s", fn_name, module.graph)
                         module.recompile()
 
                     # Check graph invariants
