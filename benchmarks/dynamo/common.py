@@ -1334,7 +1334,11 @@ class BenchmarkRunner:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
-                    accuracy_status = "fail_to_run"
+                    accuracy_status = (
+                        "OOM"
+                        if isinstance(e, torch.cuda.OutOfMemoryError)
+                        else "fail_to_run"
+                    )
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
