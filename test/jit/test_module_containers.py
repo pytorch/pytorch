@@ -377,7 +377,8 @@ class TestModuleContainers(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "Unable to extract string literal index. "
                                                                "ModuleDict indexing is only supported with string literals. "
-                                                               "For example, 'i = \"a\"; self.layers[i](x)' will fail because i is not a literal.",
+                                                               "For example, 'i = \"a\"; self.layers\\[i\\]\\(x\\)' will fail "
+                                                               "because i is not a literal.",
                                                                "self.moduledict[idx]"):
             b = AnotherBadModule()
             torch.jit.script(b)

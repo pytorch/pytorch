@@ -316,16 +316,16 @@ Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c
           });
     } else if (isIntegralType(input_dtype, /*includeBool=*/true)) {
       AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, input_dtype, "random_from_to_range_calc", [&] {
-        if (std::is_same<scalar_t, bool>::value) {
-          to = static_cast<int64_t>(true);
+        if constexpr (std::is_same_v<scalar_t, int64_t>) {
+          to = std::numeric_limits<int64_t>::max();
         } else {
-          to = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
+          to = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
         }
       });
     } else {
       TORCH_CHECK(false, "random_mps_ handles only integral, floating-point and boolean types");
     }
-    templates::check_from_to_in_range(from, to, self.dtype());
+    templates::check_from_to_in_range(from, to - 1, self.dtype());
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
     // range = 2^64
@@ -340,6 +340,10 @@ Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c
 
 Tensor& random_mps_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
   return random_mps_(self, 0, to, gen);
+}
+
+Tensor& random_mps_(Tensor& self, c10::optional<Generator> gen) {
+  return random_mps_(self, 0, c10::nullopt, gen);
 }
 
 // Exponential distribution

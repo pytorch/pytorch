@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -73,24 +75,23 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
 // vectorization. The caller needs to make sure the src represents TRUE/FALSE
 // correctly.
 template <typename T>
-void flag_to_float(const T* src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
-  }
-}
-
-template <typename T, std::enable_if_t<std::is_same<T, bool>::value || std::is_same<T, uint8_t>::value, bool> = true>
-void flag_to_float(T src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = src ? 0xFFFFFFFF : 0;
-  }
+inline float flag_to_float_scalar(T src) {
+  float ret;
+  *(uint32_t*)(&ret) = src ? 0xFFFFFFFF : 0;
+  return ret;
 }
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+
+template <typename T>
+inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
+  __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
+  #pragma unroll
+  for (int64_t i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    dst_tmp[i] = flag_to_float_scalar(src[i]);
+  }
+  return at::vec::Vectorized<float>::loadu(dst_tmp);
+}
 
 inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
   at::vec::Vectorized<float> res_vec(0);

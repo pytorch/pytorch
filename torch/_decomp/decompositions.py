@@ -1136,11 +1136,17 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-@register_decomposition(aten._int_mm)
+@register_decomposition(aten.addmv)
 @out_wrapper()
 @pw_cast_for_opmath
-def _int_mm(self: Tensor, mat1: Tensor, mat2: Tensor):
-    return torch._int_mm(mat1, mat2)
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    out = alpha * torch.mv(mat1, vec)
+    if beta == 0:
+        return out
+    return out + beta * self
 
 
 @register_decomposition(aten.native_group_norm_backward)
@@ -1990,7 +1996,7 @@ def uniform(
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
     assert generator is None
-    return self.copy_((high - low) * torch.rand_like(self) + low)
+    return self.copy_(uniform(self, low, high))
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -3058,7 +3064,7 @@ def mv(self, vec):
     )
     utils.check(
         self.size(1) == vec.size(0),
-        lambda: f"size mismatch, got {self.size(0)}x{self.size(1)},{vec.size(0)}",
+        lambda: f"size mismatch, got input ({self.size(0)}x{self.size(1)}), vec ({vec.size(0)})",
     )
     return (self * vec).sum(dim=1)
 
@@ -3359,7 +3365,6 @@ register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
 register_inplace(aten.baddbmm_, aten.baddbmm)
-register_inplace(aten.cumprod_, aten.cumprod)
 register_inplace(aten.fill_, aten.fill)
 register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
