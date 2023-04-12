@@ -778,7 +778,9 @@ def _split_fused_adam(
     output = get_output(gm.graph)
     result: List[FusedOptimizerBlock] = []
     flatten_output_args, spec = tree_flatten((output.args, output.kwargs))
-    flatten_output_args_indices: DefaultDict[fx.Node, Set[int]] = collections.defaultdict(set)
+    flatten_output_args_indices: DefaultDict[
+        fx.Node, Set[int]
+    ] = collections.defaultdict(set)
     for idx, output_arg in enumerate(flatten_output_args):
         if isinstance(output_arg, fx.Node):
             flatten_output_args_indices[output_arg].add(idx)
