@@ -65,7 +65,9 @@ def get_disallowed_checksums(
         # Use bazel to get the list of external dependencies in XML format
         proc = subprocess.run(
             [binary, "query", "kind(http_archive, //external:*)", "--output=xml"],
-            capture_output=True, check=True, text=True,
+            capture_output=True,
+            check=True,
+            text=True,
         )
     except OSError:
         raise
@@ -163,15 +165,17 @@ def main() -> None:
             original=None,
             replacement=None,
             description=(
-                f"Failed due to {err.__class__.__name__}:\n{err}"
+                f"Failed due to {e.__class__.__name__}:\n{e}"
                 if not isinstance(e, subprocess.CalledProcessError)
-                else '\n'.join([
+                else "\n".join(
+                    [
                         f"COMMAND (exit code {e.returncode})\n",
                         f"{shlex.join(e.cmd)}\n\n",
                         f"STDERR\n{e.stderr.strip() or '(empty)'}\n\n",
                         f"STDOUT\n{e.stdout.strip() or '(empty)'}",
-                ]),
-            )
+                    ]
+                )
+            ),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
         exit(0)
