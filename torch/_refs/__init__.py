@@ -5449,6 +5449,11 @@ def deg2rad(self: TensorLikeType):
     return self * M_PI_180
 
 
+@register_decomposition(aten.count_nonzero)
+def count_nonzero(self, dim: Optional[DimsType] = None):
+    return (self != 0).sum(dim)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)

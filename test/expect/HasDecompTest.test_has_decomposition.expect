@@ -667,10 +667,6 @@ aten::copy_
 aten::copy_sparse_to_sparse
 aten::copy_sparse_to_sparse.out
 aten::copy_sparse_to_sparse_
-aten::count_nonzero
-aten::count_nonzero.dim_IntList
-aten::count_nonzero.dim_IntList_out
-aten::count_nonzero.out
 aten::crow_indices
 aten::crow_indices_copy
 aten::crow_indices_copy.out
