@@ -178,7 +178,18 @@ conv2d_template = TritonTemplate(
 )
 
 aten_convolution = ExternKernelChoice(
-    torch.convolution, "at::convolution", has_out_variant=False
+    torch.convolution,
+    "at::convolution",
+    (
+        "bias",
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ),
+    has_out_variant=False,
 )
 
 
@@ -362,25 +373,24 @@ def convolution(
             out_chan,
             in_chan,
         ):
-            choices.append(
-                conv2d_template.generate(
-                    (x, weight),
-                    layout,
-                    KERNEL_H=kernel_shape[0],
-                    KERNEL_W=kernel_shape[1],
-                    STRIDE_H=stride[0],
-                    STRIDE_W=stride[1],
-                    PADDING_H=padding[0],
-                    PADDING_W=padding[1],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
+            conv2d_template.maybe_append_choice(
+                choices,
+                (x, weight),
+                layout,
+                KERNEL_H=kernel_shape[0],
+                KERNEL_W=kernel_shape[1],
+                STRIDE_H=stride[0],
+                STRIDE_W=stride[1],
+                PADDING_H=padding[0],
+                PADDING_W=padding[1],
+                GROUPS=groups,
+                # TODO(jansel): try unroll for bigger kernels once fixed:
+                #               https://github.com/openai/triton/issues/1254
+                UNROLL=is_ones(kernel_shape),
+                ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+                **cfg.kwargs,
             )
 
     return autotune_select_algorithm("convolution", choices, args, layout)
