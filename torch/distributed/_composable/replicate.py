@@ -1,9 +1,10 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from torch.nn.parallel import DistributedDataParallel
+
 from .contract import _get_registry, contract
 
 
