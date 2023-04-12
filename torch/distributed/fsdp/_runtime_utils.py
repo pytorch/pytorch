@@ -598,7 +598,11 @@ def _root_pre_forward(
 
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
 
-        if state.mixed_precision.cast_root_forward_inputs:
+        should_cast_forward_inputs = all(
+            not handle._force_full_precision for handle in state._handles
+        )
+
+        if should_cast_forward_inputs and state.mixed_precision.cast_root_forward_inputs:
             args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
         return args, kwargs
 
