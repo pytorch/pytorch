@@ -189,7 +189,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   }
 
   uint64_t input_seed;
-  auto new_rng_state = new_state.data<uint8_t>();
+  auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state, seed_size);
   this->set_current_seed(input_seed);
   int64_t philox_offset = 0;
