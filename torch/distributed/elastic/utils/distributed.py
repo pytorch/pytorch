@@ -48,11 +48,10 @@ def create_c10d_store(
             port = get_free_port()
 
         log.info(
-            "Creating c10d store on %s:%s\n"
-            "  world_size  : %s\n"
-            "  is_server   : %s\n"
-            "  timeout(sec): %s\n",
-            server_addr, port, world_size, is_server, timeout
+            f"Creating c10d store on {server_addr}:{port}\n"
+            f"  world_size  : {world_size}\n"
+            f"  is_server   : {is_server}\n"
+            f"  timeout(sec): {timeout}\n"
         )
 
         try:

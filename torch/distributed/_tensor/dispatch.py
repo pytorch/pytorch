@@ -6,7 +6,6 @@ import torch
 
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     ArgsType,
     KwargsType,
@@ -15,12 +14,6 @@ from torch.distributed._tensor.op_schema import (
     OutputSpecType,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor.random import (
-    _get_rng_offset,
-    is_rng_supported_mesh,
-    set_post_op_offset,
-    set_pre_op_offset,
-)
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -237,20 +230,6 @@ def _operator_dispatch(
             redistribute_with_schema=needs_redistribute,
         )
 
-        aten = torch.ops.aten
-        random_ops = [
-            aten.native_dropout.default,
-            aten.normal_.default,
-            aten.uniform_.default,
-        ]
-        # before running local op computation, check if op is random op
-        # for random ops, set RNG offset
-        assert isinstance(mesh, DeviceMesh)
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            dtensor_arg = arg_list[0]
-            old_offset = _get_rng_offset(mesh)
-            set_pre_op_offset(dtensor_arg._spec)
-
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
@@ -264,10 +243,6 @@ def _operator_dispatch(
             # op runs on a submesh and return type is scalar value
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
-
-        # if op is a random op, adjust Philox RNG state to maintain synchronization
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            set_post_op_offset(dtensor_arg._spec, old_offset)
 
     if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping

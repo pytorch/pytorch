@@ -199,11 +199,7 @@ __device__ void countRadixUsingMask(
 
   // Scan over all the data. Upon a read, the warp will accumulate
   // counts per each digit in the radix using warp voting.
-#if !defined(USE_ROCM)
-  // Must be called outside of loop to ensure all threads participate
-  unsigned mask = WARP_BALLOT(threadIdx.x < sliceSize);
-#endif
-  for (index_t i = threadIdx.x; i < sliceSize;) {
+  for (index_t i = threadIdx.x; i < sliceSize; i += blockDim.x) {
     bitwise_t val =
         TopKTypeConfig<scalar_t>::convert(doLdg(&data[i * withinSliceStride]));
 
@@ -217,13 +213,9 @@ __device__ void countRadixUsingMask(
 #if defined(USE_ROCM)
       counts[j] += __popcll(WARP_BALLOT(vote));
 #else
-      counts[j] += __popc(WARP_BALLOT(vote, mask));
+      counts[j] += __popc(WARP_BALLOT(vote, ACTIVE_MASK()));
 #endif
     }
-    i += blockDim.x;
-#if !defined(USE_ROCM)
-    mask = WARP_BALLOT(i < sliceSize, mask);
-#endif
   }
 
   // Now, for each warp, sum values

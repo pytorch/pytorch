@@ -598,7 +598,6 @@ def mps_ops_modifier(ops):
         'linalg.matrix_rankhermitian': None,
         'linalg.pinv': None,
         'linalg.pinvhermitian': None,
-        'nonzero_static': None,
 
         # MPS: input sizes must be divisible by output sizes
         'nn.functional.adaptive_avg_pool1d': None,
@@ -1949,16 +1948,6 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
-
-    def test_batch_norm_backward(self):
-        inputs = torch.rand(1, 8, 4, 4, device='mps', requires_grad=True)
-        x = torch.nn.BatchNorm2d(8).to("mps")
-        y = torch.nn.BatchNorm2d(8).to("mps")
-        y.weight.requires_grad = False
-        y.bias.requires_grad = False
-        outputs = y(x(inputs))
-        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
-        outputs.sum().backward()
 
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4

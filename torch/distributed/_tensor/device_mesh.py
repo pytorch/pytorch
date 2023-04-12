@@ -149,11 +149,6 @@ class DeviceMesh(object):
                 # automatically set the current cuda device base on num of gpu devices available in each host
                 # NOTE: This device selection would only work for homogeneous hardware.
                 torch.cuda.set_device(get_rank() % torch.cuda.device_count())
-            # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-            # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-            # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-            # this attribute, so we will implement this logic once we figure out the answer.
-            self._seed = torch.cuda.initial_seed()
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"

@@ -650,10 +650,9 @@ def determine_local_world_size(nproc_per_node: str):
             raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
         log.info(
-            "Using nproc_per_node=%s,"
-            " setting to %s since the instance "
-            "has %s %s",
-            nproc_per_node, num_proc, os.cpu_count(), device_type
+            f"Using nproc_per_node={nproc_per_node},"
+            f" setting to {num_proc} since the instance "
+            f"has {os.cpu_count()} {device_type}"
         )
         return num_proc
 
@@ -693,13 +692,12 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
         log.warning(
-            "\n*****************************************\n"
-            "Setting OMP_NUM_THREADS environment variable for each process to be "
-            "%s in default, to avoid your system being overloaded, "
-            "please further tune the variable for optimal performance in "
-            "your application as needed. \n"
-            "*****************************************",
-            omp_num_threads
+            f"\n*****************************************\n"
+            f"Setting OMP_NUM_THREADS environment variable for each process to be "
+            f"{omp_num_threads} in default, to avoid your system being overloaded, "
+            f"please further tune the variable for optimal performance in "
+            f"your application as needed. \n"
+            f"*****************************************"
         )
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
@@ -775,13 +773,12 @@ def run(args):
         args.rdzv_endpoint = "localhost:29400"
         args.rdzv_id = str(uuid.uuid4())
         log.info(
-            "\n**************************************\n"
-            "Rendezvous info:\n"
-            "--rdzv-backend=%s "
-            "--rdzv-endpoint=%s "
-            "--rdzv-id=%s\n"
-            "**************************************\n",
-            args.rdzv_backend, args.rdzv_endpoint, args.rdzv_id
+            f"\n**************************************\n"
+            f"Rendezvous info:\n"
+            f"--rdzv-backend={args.rdzv_backend} "
+            f"--rdzv-endpoint={args.rdzv_endpoint} "
+            f"--rdzv-id={args.rdzv_id}\n"
+            f"**************************************\n"
         )
 
     config, cmd, cmd_args = config_from_args(args)

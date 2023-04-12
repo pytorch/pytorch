@@ -244,9 +244,8 @@ class Trainer:
             if trainer_has_less_inputs:
                 input_batches = batches[: len(batches) // 2]
                 gLogger.info(
-                    "Trainer reduced input patches from %s "
-                    "to %s to simulate uneven inputs.",
-                    len(batches), len(input_batches)
+                    f"""Trainer reduced input patches from {len(batches)}
+                    to {len(input_batches)} to simulate uneven inputs."""
                 )
             else:
                 input_batches = batches

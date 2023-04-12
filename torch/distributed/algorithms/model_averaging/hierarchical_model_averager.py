@@ -121,8 +121,8 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         logger.info("Model averaging hierarchy:")
         for period, group_size in period_group_size_dict.items():
             logger.info(
-                "\tEach group that has %s processes average parameters every %s iterations, "
-                "if no higher-level averaging.", group_size, period)
+                f"\tEach group that has {group_size} processes average parameters every {period} iterations, "
+                "if no higher-level averaging.")
             if group_size != overall_group_size:
                 self.period_process_group_dict[period], _ = dist.new_subgroups(
                     group_size=group_size, group=self.process_group)

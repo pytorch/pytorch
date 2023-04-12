@@ -164,27 +164,6 @@ class TestSaveLoad(PackageTestCase):
             package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject
         )
 
-    def test_pickle_long_name_with_protocol_4(self):
-        import package_a.long_name
-
-        container = []
-
-        # Indirectly grab the function to avoid pasting a 256 character
-        # function into the test
-        package_a.long_name.add_function(container)
-
-        buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
-            exporter.intern("**")
-            exporter.save_pickle("container", "container.pkl", container, pickle_protocol=4)
-
-        buffer.seek(0)
-        importer = PackageImporter(buffer)
-        unpickled_container = importer.load_pickle("container", "container.pkl")
-        self.assertIsNot(container, unpickled_container)
-        self.assertEqual(len(unpickled_container), 1)
-        self.assertEqual(container[0](), unpickled_container[0]())
-
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,
         "Tests that use temporary files are disabled in fbcode",

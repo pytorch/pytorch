@@ -184,7 +184,6 @@ case "$image" in
     ROCM_VERSION=5.3
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
-    TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.8
@@ -195,7 +194,6 @@ case "$image" in
     ROCM_VERSION=5.4.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
-    TRITON=yes
     ;;
   pytorch-linux-focal-py3.8-gcc7)
     ANACONDA_PYTHON_VERSION=3.8
@@ -250,7 +248,6 @@ case "$image" in
     if [[ "$image" == *rocm* ]]; then
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
-      TRITON=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2

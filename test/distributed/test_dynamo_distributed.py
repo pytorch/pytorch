@@ -596,43 +596,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 .run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
 
-    def test_fsdp_dup_tensors(self):
-        """
-        Tests that parameters and buffers are de-duplicated, meaning that they
-        each only passed once as a graph input.
-        """
-        class DuplicateModule(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self._param = torch.randn((3,), device="cuda")
-                self.register_buffer(
-                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
-                )
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                # Use `_param` and `_buf` each twice in this compiled forward
-                # to exercise if they are de-duplicated by TorchDynamo
-                z = self._add_buf(x)
-                z += self._mul_buf(self._buf)
-                z += self._param + self._param
-                return z
-
-            def _add_buf(self, z: torch.Tensor) -> torch.Tensor:
-                z += self._buf
-                return z
-
-            def _mul_buf(self, buf: torch.Tensor):
-                buf.mul_(2)
-                return buf + buf
-
-        model = DuplicateModule()
-        fsdp_model = FSDP(copy.deepcopy(model), use_orig_params=True)
-        fsdp_model = torch._dynamo.optimize("aot_eager")(fsdp_model)
-        inp = torch.randn((2, 3), device="cuda")
-        local_out = model(inp)
-        fsdp_out = fsdp_model(inp)
-        self.assertEqual(local_out, fsdp_out)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

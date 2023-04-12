@@ -45,36 +45,6 @@ jobs:
           repository: pytorch/test-infra
           path: test-infra
 
-      - name: Fetching PR base commit
-        id: fetch_base_head
-        if: steps.check_user.outputs.allowed == 'true'
-        working-directory: pytorch
-        run: |
-          git fetch --no-tags --prune --no-recurse-submodules --depth=$((${{ github.event.pull_request.commits }} + 1)) origin ${{ github.event.pull_request.head.sha }}
-          git checkout --force ${{ github.event.pull_request.head.sha }}
-
-          # Iterate until a common ancestor is found
-          base=""
-          counter=0
-          while [[ -z $base ]] && [[ $counter -lt 128 ]]
-          do
-            # Fetch more commits from the base branch's history with a depth of 10
-            git fetch --no-tags --prune --no-recurse-submodules --deepen=10 origin ${{ github.event.pull_request.base.sha }}
-
-            # Try to find the common ancestor commit (base commit) again
-            base=$(git rev-list "${{ github.event.pull_request.head.sha }}" ^"${{ github.event.pull_request.base.sha }}" | tail -1)
-            base=$(git rev-list "${base}"~1 2>/dev/null | head -1)
-
-            counter=$((counter + 1))
-          done
-
-          if [[ -z $base ]]; then
-            echo "Failed to find PR base commit"
-            exit 1
-          fi
-
-          echo "base=${base}" >> "${GITHUB_OUTPUT}"
-
       - name: Check for suppression by label
         id: check_label
         if: contains(github.event.pull_request.labels.*.name, 'suppress-api-compatibility-check')
@@ -94,7 +64,7 @@ jobs:
           # When suppressed by label or #suppress-api-compatibility-check tag in the commit message
           # the job will not fail and will output notices instead of warnings.
           ../test-infra/tools/stronghold/bin/check-api-compatibility \
-              --base-commit=${{ steps.fetch_base_head.outputs.base }} \
+              --base-commit=${{ github.event.pull_request.base.sha }} \
               --head-commit=${{ github.event.pull_request.head.sha }} \
               ${{ steps.check_label.outputs.suppression }}
 

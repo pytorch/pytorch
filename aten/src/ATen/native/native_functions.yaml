@@ -8661,15 +8661,6 @@
     MPS: nonzero_mps
   tags: [dynamic_output_shape, core]
 
-- func: nonzero_static.out(Tensor self, *, int size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: nonzero_static_out_cpu
-
-- func: nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU: nonzero_static_cpu
-
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
 

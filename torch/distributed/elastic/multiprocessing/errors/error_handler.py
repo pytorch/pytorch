@@ -92,15 +92,13 @@ class ErrorHandler:
         """
         if "message" not in rootcause_error:
             log.warning(
-                "child error file (%s) does not have field `message`. \n"
-                "cannot override error code: %s",
-                rootcause_error_file, error_code
+                f"child error file ({rootcause_error_file}) does not have field `message`. \n"
+                f"cannot override error code: {error_code}"
             )
         elif isinstance(rootcause_error["message"], str):
             log.warning(
-                "child error file (%s) has a new message format. \n"
-                "skipping error code override",
-                rootcause_error_file
+                f"child error file ({rootcause_error_file}) has a new message format. \n"
+                f"skipping error code override"
             )
         else:
             rootcause_error["message"]["errorCode"] = error_code
@@ -116,9 +114,8 @@ class ErrorHandler:
             if error_code:
                 self.override_error_code_in_rootcause_data(rootcause_error_file, rootcause_error, error_code)
             log.debug(
-                "child error file (%s) contents:\n"
-                "%s",
-                rootcause_error_file, json.dumps(rootcause_error, indent=2)
+                f"child error file ({rootcause_error_file}) contents:\n"
+                f"{json.dumps(rootcause_error, indent=2)}"
             )
 
         my_error_file = self._get_error_file_path()
@@ -148,16 +145,14 @@ class ErrorHandler:
                 try:
                     original = json.dumps(json.load(fp), indent=2)
                     log.warning(
-                        "%s already exists"
-                        " and will be overwritten."
-                        " Original contents:\n%s",
-                        my_error_file, original
+                        f"{my_error_file} already exists"
+                        f" and will be overwritten."
+                        f" Original contents:\n{original}"
                     )
                 except json.decoder.JSONDecodeError as err:
                     log.warning(
-                        "%s already exists"
-                        " and will be overwritten."
-                        " Unable to load original contents:\n",
-                        my_error_file
+                        f"{my_error_file} already exists"
+                        f" and will be overwritten."
+                        f" Unable to load original contents:\n"
                     )
             os.remove(my_error_file)
