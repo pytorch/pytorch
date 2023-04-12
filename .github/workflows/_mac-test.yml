@@ -108,7 +108,7 @@ jobs:
 
       - name: Setup miniconda (x86, py3.8)
         if: ${{ runner.arch == 'X64' }}
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
         with:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -116,7 +116,7 @@ jobs:
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -184,6 +184,12 @@ jobs:
             # Use binaries under conda environment
             export PATH="$CONDA_ENV/bin":$PATH
           fi
+
+          # DEBUG
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} which python3
+          echo "${PATH}"
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .ci/pytorch/macos-test.sh

@@ -92,7 +92,7 @@ jobs:
             brew link --force libomp
 
       - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -116,6 +116,12 @@ jobs:
             # Use binaries under conda environment
             export PATH="$CONDA_ENV/bin":$PATH
           fi
+
+          # DEBUG
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} which python3
+          echo "${PATH}"
 
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
