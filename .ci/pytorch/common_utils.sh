@@ -86,7 +86,7 @@ function get_bazel() {
   retry curl --location --output tools/bazel \
     https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py
   shasum --algorithm=1 --check \
-    <(echo d4369c3d293814d3188019c9f7527a948972d9f8 tools/bazel)
+    <(echo 'd4369c3d293814d3188019c9f7527a948972d9f8  tools/bazel')
   chmod u+x tools/bazel
 }
 
