@@ -116,7 +116,6 @@ class InstalledGuardSubexpression:
     ]  # Note: List of sources for tensor checks and shape_env
     code: str
     origin: str
-    static_boundary: bool 
     static_value: Optional[int]
 
     part_list: List["InstalledGuardSubexpression"] = None
@@ -497,7 +496,11 @@ class GuardBuilder(GuardBuilderBase):
         origin = guard.origin
         for shape_guard in guards:
             self._produce_guard_code(
-                guard, [shape_guard.expr], shape_env=True, sources=shape_guard.sources, static_boundary=shape_guard.static_boundary, static_value=shape_guard.static_value
+                guard,
+                [shape_guard.expr],
+                shape_env=True,
+                sources=shape_guard.sources,
+                static_value=shape_guard.static_value,
             )
 
     def TENSOR_MATCH(self, guard: Guard):
@@ -551,33 +554,47 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_sources.append(guard.origin)
                 self.tensor_check_examples.append(value)
 
-            # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
-            # strict subset of the old.
+            # Let’s go over the whole algorithm here.
+            # 1) At a very high level, we accumulate guards into InstalledGuardSubexpression objects,
+            # which have origin sources, a string code expression, and various other bookkeeping fields. For example,
+            # ShapeEnv, when asked to produce_guards, emits structures with a static_value if the guard was known to
+            # be narrowed down to a single static value, such as in the case of assume_static_by_default initial
+            # compile. This is written to the relevant InstalledGuardSubexpression.
             #
-            # The logic here is as follows:
+            # 2) We iterate over all InstalledGuardSubexpressions accumulated to produce the guard make_fn, which in
+            # turn is executed to compile the check_fn that gets installed on the frame cache entry. The generated
+            # code produces a set of `if` statements, where roughly each if looks like:
+            # ```
+            # if subexpression == False:
+            #      return False, __fail(subexpr_id)
+            # ```
             #
-            # Every mark_dynamic directive is a user-knows-best command, which can incur a raise at tracing
-            # time if we find guards that run counter to the user directive.
-            # If compiling a frame with explicit dynamic dims X could cause an exception, we MUST NOT skip compiling.
+            # At the same time, any guards with a static_value associated are written to the frame_state
+            # (a per frame bound object), with their SHAPE ENV SOURCE and value.
+            # Ex:
+            # {L[‘x’].size()[0] : 2}
             #
-            # If the frame is compiled with any marked dynamic indices, let's call that set of indices X.
-            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices,
-            # let's call that set Y.
+            # 3) In the above, the __fail() function, given a subexpression id, looks it up from the list of parts
+            # used to produce this check_fn. It then passes that information, through the frame interpreter in
+            # eval_frame.c, into our next frame interpretation callback.
             #
-            # When X is a strict subset of Y, the potential new raises introduced during compilation are a strict subset
-            # of the raises we
-            # could have encountered. The frame compiled under Y is safe to reuse with X.
-            # When X is not a strict subset of Y, the non-overlapping new elements of X may cause new raises, and the
-            # frame is no longer fit for reuse.
-            #
-            # This is the case because any newly introduced mark_dynamic directives have a chance of
-            # raising, failing compilation. Any existing mark_dynamic indices that we lost are safe to lose
-            # as all it means is that we have gotten rid of a user directive which could incur a raise at compile time.
-            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe
-            # to reuse
-            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
-            # compiled with that same
-            # tensor + more onerous user directives.
+            # 4) Within the frame interpretation callback, if any guard fails, and we are in the automatic_dynamic
+            # regime, we iterate over all subexpressions within this check_fn, and extract any that have changed.
+
+            # We do this by parsing out the sources from all valid subexpressions in the check_fn, and then
+            # evaluating their new value against the old value.
+
+            # If the value changed, we know that the rev was:a) In a dynamic dim marked as static
+            # b) a candidate for being expanded into automatic dynamic
+
+            # So, we do that in two steps. First, we mark it as ‘None’ for the source:{L[‘x’].size()[0] : None}
+
+            # This indicates that we’ve seen it already, and know it to be dynamic.
+
+            # Next, we extract the base name, and record the dynamic dim for it:
+
+            # {L[‘x’]: {0})5) When we go to apply our policy to the shape_env in this frame, we look up the tensor
+            # source’s name (L[‘x’]) and check if there is a policy decision to be made w/r/t automatic dynamic shapes.
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(value, is_tensor=True)
             if not static:
@@ -603,7 +620,6 @@ class GuardBuilder(GuardBuilderBase):
         provided_guarded_object=None,
         shape_env=False,
         sources=None,
-        static_boundary=False,
         static_value=None,
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
@@ -625,7 +641,7 @@ class GuardBuilder(GuardBuilderBase):
             if sources is None:
                 sources = [guard.origin]
             installed_guard_subexpression = InstalledGuardSubexpression(
-                sources, code, func_name, static_boundary, static_value
+                sources, code, func_name, static_value
             )
             if shape_env:
                 self.shape_env_code.append(installed_guard_subexpression)
@@ -744,7 +760,10 @@ class CheckFunctionManager:
         args = ",".join(largs)
 
         validation_installed_guard_subexpression = InstalledGuardSubexpression(
-            None, "___guarded_code.valid", "", static_boundary=False, static_value=None,
+            None,
+            "___guarded_code.valid",
+            "",
+            static_value=None,
         )
         installed_guard_subexpressions = []
         installed_guard_subexpressions.append(validation_installed_guard_subexpression)
@@ -776,7 +795,10 @@ class CheckFunctionManager:
             check_tensor_names = ", ".join(tensor_check_names)
             check_tensor_func_str = f"___check_tensors({check_tensor_names})"
             installed_guard_subexpression = InstalledGuardSubexpression(
-                tensor_check_sources, check_tensor_func_str, "TENSOR_MATCH", static_boundary=False, static_value=None
+                tensor_check_sources,
+                check_tensor_func_str,
+                "TENSOR_MATCH",
+                static_value=None,
             )
             check_tensor_verbose = tensor_guards.check_verbose
             installed_guard_subexpression.tensor_check_names = tensor_check_names
@@ -795,7 +817,7 @@ class CheckFunctionManager:
                     [source_a, source_b],
                     f"{source_a.name()} is {source_b.name()}",
                     "DuplicateInputs",
-                    static_boundary=False,
+                    static_value=None,
                 )
                 installed_guard_subexpressions.append(installed_guard_subexpression)
             else:
@@ -846,7 +868,12 @@ class CheckFunctionManager:
         # evaluation callback. This is where downstream systems that handle guard
         # failures hook in, like guard failure logging, or converting static shape
         # failures to dynamic shapes (if the config is set).
-        py_code = make_guard_fn(installed_guard_subexpressions, closure_vars, part_list, self.output_graph.frame_state)
+        py_code = make_guard_fn(
+            installed_guard_subexpressions,
+            closure_vars,
+            part_list,
+            self.output_graph.frame_state if self.output_graph else {},
+        )
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", py_code)
         out: Dict[str, Any] = dict()
@@ -892,7 +919,7 @@ def record_guard_failure(
         assert installed_guard_subexpression.tensor_check_names is not None
         reason = eval(
             f"___check_tensors_verbose({', '.join(installed_guard_subexpression.tensor_check_names)}, tensor_check_names={installed_guard_subexpression.tensor_check_names})",  # noqa: B950
-            f_locals,
+            installed_guard_subexpression.guard_scope,
         )
     guard_failures[code].append(reason)
     if guard_fail_fn:
@@ -917,7 +944,7 @@ def guard_error_hook(
     # column number of which subexpression failed.  But that would also
     # require us to have the TRUE code that was eval'ed, not a shoddy
     # reconstruction (like is done here)
-    print(make_guard_fn(guard_fn.installed_guard_subexpressions, {}, []))
+    print(make_guard_fn(guard_fn.installed_guard_subexpressions, {}, [], {}))
 
 
 set_guard_error_hook(guard_error_hook)
@@ -939,9 +966,12 @@ def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list, frame
         # Alternative impls:
         #  1) regex to strip L out of name (brittle)
         #  2) give every source a .local_name matching the heirarchy of .name, but without the L/G access.
-        make_fail_buf.writeline(
-            "installed_guard_subexpression.guard_scope = {'L': L} "
-        )
+        make_fail_buf.writeline("installed_guard_subexpression.guard_scope = {'L': L} ")
+        for key, value in closure_vars.items():
+            if callable(value):
+                make_fail_buf.writeline(
+                    f"installed_guard_subexpression.guard_scope['{key}'] = {key}"
+                )
         make_fail_buf.writeline("return installed_guard_subexpression")
 
     assert len(part_list) == 0
@@ -952,9 +982,11 @@ def make_guard_fn(installed_guard_subexpressions, closure_vars, part_list, frame
         unique_installed_guard_subexpressions
     ):
         installed_guard_subexpression.part_list = part_list
-        if installed_guard_subexpression.static_boundary:
+        if installed_guard_subexpression.static_value:
             for source in installed_guard_subexpression.sources:
-                frame_state[source.name()] = installed_guard_subexpression.static_value
+                name = source.name()
+                if name not in frame_state:
+                    frame_state[name] = installed_guard_subexpression.static_value
         part_list.append(installed_guard_subexpression)
         code_buf.writeline(f"if ({installed_guard_subexpression.code}) == False:")
         with code_buf.indent():

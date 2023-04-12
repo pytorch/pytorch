@@ -375,6 +375,7 @@ def compute_dynamic_expansions(
         return
 
     guard_scope = installed_guard_subexpression.guard_scope
+
     def is_dynamic_source_candidate(source):
         if isinstance(source, TensorPropertySource):
             prop = source.prop
@@ -396,17 +397,24 @@ def compute_dynamic_expansions(
         if not installed_guard_subexpression.sources:
             # Not all code has sources! Ex: __guarded_code.valid
             return
-        if not installed_guard_subexpression.static_boundary:
+        if not installed_guard_subexpression.static_value:
             return
         for source in installed_guard_subexpression.sources:
             if is_dynamic_source_candidate(source):
                 name = source.name()
                 if name in frame_state:
                     curr_value = frame_state[name]
-                    if curr_value is None: 
+                    if curr_value is None:
                         # Already dynamic
                         continue
-                    new_value = eval(name, guard_scope)
+                    try:
+                        new_value = eval(name, guard_scope)
+                    except:
+                        # Sadly, we need this try/catch here because eval after a failed guard is never 100% sound.
+                        # imagine if we fail a guard where a value at local named `a` went from Tensor to a Tuple.
+                        # evaling a guard like L['a'].size()[1] == 3 is nonsense, and will throw.
+                        # Until we have true trees to make guards as dependent on other guards, this stands.
+                        continue
                     if curr_value != new_value:
                         # Mark it dynamic
                         frame_state[name] = None
@@ -415,16 +423,7 @@ def compute_dynamic_expansions(
                         if base_name not in frame_state:
                             frame_state[base_name] = set()
                         frame_state[base_name].add(source.idx)
-                    
 
-    # Determine if this installed_guard_subexpression is a candidate for automatic dynamic
-    # marking. If the failed guard was not a shape_env size property guard,
-    # we do not proceed.
-    if not is_dynamic_installed_guard_subexpression_candidate(
-        installed_guard_subexpression
-    ):
-        # The guard was not a candidate for automatic dynamic marking.
-        return
     installed_guard_subexpressions = installed_guard_subexpression.part_list
     for installed_guard_subexpression in installed_guard_subexpressions:
         # Take the failed code part, and add it as a dynamic dim
@@ -439,7 +438,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         msg = "Compiling %s %s with cache_size %s."
         if installed_guard_subexpression is not None:
             torch._dynamo.guards.record_guard_failure(
-                hooks.guard_fail_fn, frame.f_locals, frame.f_code, installed_guard_subexpression
+                hooks.guard_fail_fn,
+                frame.f_locals,
+                frame.f_code,
+                installed_guard_subexpression,
             )
             msg += " Due to guard failure %s from guard %s and source %s"
             log.debug(
@@ -454,9 +456,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         else:
             log.debug(msg, frame.f_code.co_name, frame.f_code.co_filename, cache_size)
 
-        compute_dynamic_expansions(
-            installed_guard_subexpression, frame_state, frame
-        )
+        compute_dynamic_expansions(installed_guard_subexpression, frame_state, frame)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)

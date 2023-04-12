@@ -528,8 +528,7 @@ static void call_profiler_end_hook(PyObject* record) {
   Py_DECREF(args);
 }
 
-// Here, installed_guard_subexpression ownership exists outside the lookup - it always enters as NULL and exits as either NULL
-// or a value. We incref it before usage, and decref it after.
+// installed_guard_subexpression: owned reference
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
 static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index, PyObject** installed_guard_subexpression) {
@@ -545,9 +544,11 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
       PyErr_Fetch(&type, &value, &traceback);
       PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
       if (r == NULL) {
+        Py_XDECREF(result);
         return NULL;
       }
       Py_DECREF(r);
+      Py_XDECREF(result);
       PyErr_Restore(type, value, traceback);
     }
     return NULL;
@@ -575,8 +576,13 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   // NULL is valid here for fail_installed_guard_subexpression, but not for **installed_guard_subexpression, we ensure we never send a null to the
   // callback when we call_callback
   if (installed_guard_subexpression != NULL) {
+    // The contract stipulates that this is an owned ref, so we must increment it.
+    // It starts borrowed from result, but result gets decref, and while object liveness keeps it around, we
+    // want this to be sound and clean.
+    if (fail_installed_guard_subexpression != Py_None) {
+      Py_XINCREF(fail_installed_guard_subexpression);
+    }
     // assign **installed_guard_subexpression that was passed in from fail_installed_guard_subexpression
-    // We still have not incremented it
     *installed_guard_subexpression = fail_installed_guard_subexpression;
   }
   return lookup_result;
@@ -778,27 +784,31 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", name(frame));
     PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
     // installed_guard_subexpression starts at NULL, always. If we fail a guard, it is assigned.
+    // It is an owned ref, so it starts incremented come out of lookup, unless it is None.
     PyObject *installed_guard_subexpression = NULL;
     PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0, &installed_guard_subexpression);
-    // installed_guard_subexpression is either borrowed ref, or NULL here, so we make sure to incref it here
-    Py_XINCREF(installed_guard_subexpression);
-
     call_profiler_end_hook(hook_record);
     Py_XDECREF(hook_record);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
-      Py_XDECREF(installed_guard_subexpression);
+      if (installed_guard_subexpression != Py_None) {
+        Py_XDECREF(installed_guard_subexpression);
+      }
       return NULL;
     } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", name(frame));
-      Py_XDECREF(installed_guard_subexpression);
+      if (installed_guard_subexpression != Py_None) {
+        Py_XDECREF(installed_guard_subexpression);
+      }
       return eval_frame_default(tstate, frame, throw_flag);
     }
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
-    Py_XDECREF(installed_guard_subexpression);
+    if (installed_guard_subexpression != Py_None) {
+      Py_XDECREF(installed_guard_subexpression);
+    }
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
@@ -814,13 +824,13 @@ static PyObject* _custom_eval_frame(
   // installed_guard_subexpression starts at NULL, always. If we fail a guard, it is assigned.
   PyObject* installed_guard_subexpression = NULL;
   PyObject* maybe_cached_code = lookup(extra, frame, NULL, 0, &installed_guard_subexpression);
-  // installed_guard_subexpression is either borrowed ref, or NULL here, so we make sure to incref it here
-  Py_XINCREF(installed_guard_subexpression);
   call_profiler_end_hook(hook_record);
   Py_XDECREF(hook_record);
   if (maybe_cached_code == NULL) {
     // Python error
-    Py_XDECREF(installed_guard_subexpression);
+    if (installed_guard_subexpression != Py_None) {
+      Py_XDECREF(installed_guard_subexpression);
+    }
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -828,7 +838,9 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("cache hit %s", name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    Py_XDECREF(installed_guard_subexpression);
+    if (installed_guard_subexpression != Py_None) {
+      Py_XDECREF(installed_guard_subexpression);
+    }
     return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   // cache miss
