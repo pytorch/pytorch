@@ -1414,7 +1414,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def fn():
             condition_shape = (5, 5)
             dtypes = (torch.bool,)
@@ -2400,7 +2400,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # dynamo eval frame handler is active), as that will cause the
         # generator to become exhausted and trigger the throw_flag == TRUE
         # case.
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def f(x):
             generator_box.clear()
             return g(x)
