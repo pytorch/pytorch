@@ -70,6 +70,7 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -200,20 +201,38 @@ Tensor isinf_sparse_meta(const Tensor& self) {
   TORCH_CHECK_NOT_IMPLEMENTED(0, "nyi isinf for SparseMeta");
 }
 
+Tensor zeros_like_sparse(const Tensor& t) {
+  TORCH_INTERNAL_ASSERT(t.is_sparse());
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      t.sparse_dim(),
+      t.dense_dim(),
+      t.sizes(),
+      t._indices().clone(),
+      at::zeros({1}, t._values().options()).expand_as(t._values()),
+      t.options())._coalesced_(t.is_coalesced());
+}
+
 // Threshold_backward is not unary but it is the backward used for relu which is
 // unary
 Tensor threshold_backward_sparse(
     const Tensor& grad_output,
     const Tensor& self,
     const Scalar& threshold) {
-  auto self_v = [&self]() {
+  const auto grad = [&]() {
+    if (!grad_output._nnz() && grad_output._nnz() != self._nnz()) {
+      return zeros_like_sparse(self);
+    } else {
+      return grad_output;
+    }
+  }();
+  const auto self_v = [&self]() {
     if (self.is_coalesced()) {
       return self.values();
     } else {
       return self.coalesce().values();
     }
   }();
-  return coalesced_unary_ufunc(grad_output, [&](const Tensor& t) {
+  return coalesced_unary_ufunc(grad, [&](const Tensor& t) {
     return at::threshold_backward(t, self_v, threshold);
   });
 }
@@ -223,6 +242,13 @@ Tensor& threshold_backward_sparse_out(
     const Tensor& self,
     const Scalar& threshold,
     Tensor& grad_input) {
+  const auto grad = [&]() {
+    if (!grad_output._nnz() && grad_output._nnz() != self._nnz()) {
+      return zeros_like_sparse(self);
+    } else {
+      return grad_output;
+    }
+  }();
   auto self_v = [&self]() {
     if (self.is_coalesced()) {
       return self.values();
@@ -231,7 +257,7 @@ Tensor& threshold_backward_sparse_out(
     }
   }();
   return coalesced_unary_ufunc_out(
-      grad_output, grad_input, [&](const Tensor& t, Tensor& out) {
+      grad, grad_input, [&](const Tensor& t, Tensor& out) {
         return at::threshold_backward_outf(t, self_v, threshold, out);
       });
 }
