@@ -3059,7 +3059,10 @@ def cross_entropy(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
         if dim is not None:
             input = input.swapaxes(dim, 1)
-    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
+    output = torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
+    if reduction == 'none':
+        output = output.swapaxes(dim, 1)
+    return output
 
 
 def binary_cross_entropy(

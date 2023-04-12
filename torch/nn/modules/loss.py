@@ -1171,7 +1171,7 @@ class CrossEntropyLoss(_WeightedLoss):
     __constants__ = ['ignore_index', 'reduction', 'label_smoothing', 'dim']
     ignore_index: int
     label_smoothing: float
-    dim: int
+    dim: Optional[int]
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
                  reduce=None, reduction: str = 'mean', label_smoothing: float = 0.0, dim: Optional[int] = None) -> None:

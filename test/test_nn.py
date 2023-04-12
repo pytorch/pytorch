@@ -7108,17 +7108,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
-    @parametrize_test("reduction", ("none", "mean", "sum"))
-    def test_cross_entropy_dim_parameter(self, device, reduction):
-        loss = nn.CrossEntropyLoss(reduction=reduction)
-        input_1 = torch.randn(15, 10, 20, dtype=torch.float, device=device)
-        input_2 = input_1.swapaxes(2, 1)
-        target = torch.empty(15, 20, dtype=torch.long, device=device).random_(10)
-
-        loss_1 = loss(input_1, target)
-        loss_2 = loss(input_2, target, dim=2)
-        self.assertEqual(loss_1, loss_2, atol=1e-1, rtol=0)
-
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
@@ -11830,6 +11819,17 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
         if reduction != "none":
             self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
+
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_cross_entropy_dim_parameter(self, device, reduction):
+        loss = nn.CrossEntropyLoss(reduction=reduction)
+        input_1 = torch.randn(15, 10, 20, dtype=torch.float, device=device)
+        input_2 = input_1.swapaxes(2, 1)
+        target = torch.empty(15, 20, dtype=torch.long, device=device).random_(10)
+
+        loss_1 = loss(input_1, target)
+        loss_2 = loss(input_2, target, dim=2)
+        self.assertEqual(loss_1, loss_2, atol=1e-1, rtol=0)
 
     def test_smoothl1loss_backward_zero_beta(self, device):
         input = torch.randn(300, 256, requires_grad=True, device=device)
