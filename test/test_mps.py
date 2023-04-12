@@ -77,13 +77,13 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
-        'trace': [torch.float32],  # missing in place aten::index_fill_.int_Tensor
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
+        'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -426,7 +426,6 @@ def mps_ops_modifier(ops):
         'igamma': None,
         'igammac': None,
         'index_copy': None,
-        'index_fill': None,
         'index_reduce': None,
         'isin': None,
         'isneginf': None,
