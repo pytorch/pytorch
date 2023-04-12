@@ -2016,6 +2016,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented(
+                f"call torch._dynamo.skip() wrapped function {func.get_function()}"
+            )
+
     @staticmethod
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
