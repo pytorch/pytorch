@@ -1855,31 +1855,34 @@ def aot_wrapper_dedupe(
     # This is done via (respectively):
     #
     #   seen_args = {a: 0, b: 1, c: 2}
-    #   add_dupe_map = {  # how to get args from the deduped list
-    #       0: 0,
-    #       1: 1,
-    #       2: 0,
-    #       3: 2,
-    #   }
+    #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
+    #       (0, 0),
+    #       (1, 1),
+    #       (2, 0),
+    #       (3, 2),
+    #   ]
     #   keep_arg_mask = [True, True, False, True]
 
     seen_args = {}
     keep_arg_mask = []
-    add_dupe_map = {}
+    # Implicitly map duped arg position (list index) to de-duped arg position
+    add_dupe_map: List[int] = []
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
             keep_arg_mask.append(False)
-            add_dupe_map[i] = seen_args[t]
+            add_dupe_map.append(seen_args[t])
             continue
         keep_arg_mask.append(True)
         seen_args[t] = j
-        add_dupe_map[i] = j
+        add_dupe_map.append(j)
         j += 1
-
-    unique_args = j
+    num_unique_args = j
+    assert len(add_dupe_map) == duped_arg_len, (
+        f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+    )
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -1895,15 +1898,22 @@ def aot_wrapper_dedupe(
     updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask)
 
     tracing_context = TracingContext.get()
+    unique_arg_count = 0
     if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
-        for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            if dupe_arg_pos != kept_pos:
+        for dupe_arg_pos, kept_pos in enumerate(add_dupe_map):
+            is_dupe_arg = kept_pos < unique_arg_count
+            if is_dupe_arg:
                 dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
                 kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
                 tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
+            else:
+                unique_arg_count += 1
+        assert unique_arg_count == num_unique_args, (
+            f"Expects unique_arg_count to be {num_unique_args} but got {unique_arg_count}"
+        )
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
