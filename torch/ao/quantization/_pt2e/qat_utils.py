@@ -21,18 +21,6 @@ class _ConvBnPattern(nn.Module):
         x = self.bn(x)
         return x
 
-# TODO: delete
-# class _ConvReLUPattern(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.conv = nn.Conv2d(1, 1, 1)
-#         self.relu = nn.ReLU()
-#
-#     def forward(self, x):
-#         x = self.conv(x)
-#         x = self.relu(x)
-#         return x
-
 class _FusedQATConvBnPattern(nn.Module):
     def __init__(self):
         super().__init__()

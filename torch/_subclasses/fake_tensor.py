@@ -1088,7 +1088,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
-                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
+                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             incr = IncrementRecursionCount()
 
@@ -1160,6 +1160,9 @@ class FakeTensorMode(TorchDispatchMode):
         args, kwargs = self.validate_and_convert_non_fake_tensors(
             func, converter, args, kwargs
         )
+
+        # TODO(andrew): delete once https://github.com/pytorch/pytorch/pull/98769 is landed
+        flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
