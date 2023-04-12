@@ -39,12 +39,29 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
+        def all_in_parens(string):
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
         if (
             isinstance(string, CSEVariable)
             or re.match(r"^[a-z0-9_.]+$", string, re.I)
             or re.match(r"^\([^)]*\)$", string, re.I)
             or string == ""
         ):
+            return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
             return string
         return f"({string})"
 
@@ -97,11 +114,11 @@ class PythonPrinter(ExprPrinter):
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"math.floor({self.paren(self._print(expr.args[0]))})"
+        return f"math.floor({self._print(expr.args[0])})"
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        return f"math.ceil({self.paren(self._print(expr.args[0]))})"
+        return f"math.ceil({self._print(expr.args[0])})"
 
 
 class OpOverrides:
@@ -188,21 +205,6 @@ class DeferredLine(DeferredLineBase):
 
     def _new_line(self, line):
         return DeferredLine(self.name, line)
-
-
-class DeferredIndentedBuffer(IndentedBuffer):
-    def __init__(self, initial_indent=0):
-        super().__init__(initial_indent)
-
-    def writeline(self, name, line):
-        if name is None:
-            return super().writeline(line)
-        assert "buf" in name
-        return super().writeline(DeferredLine(name, line))
-
-    def writelines(self, name, lines):
-        for line in lines:
-            self.writeline(name, line)
 
 
 class BracesBuffer(IndentedBuffer):
@@ -487,15 +489,11 @@ class CSE:
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable],
         write=True,
-        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if append_broadcast:
-            assert isinstance(append_broadcast, str)
-            cache_key = expr + append_broadcast
         if cache_key not in self.cache:
             var = self.newvar()
             self.cache[cache_key] = var
@@ -504,17 +502,7 @@ class CSE:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if append_broadcast:
-                    var_suffix = "_load"
-                else:
-                    var_suffix = ""
-                buffer.writeline(
-                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
-                )
-                if append_broadcast:
-                    buffer.writeline(
-                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
-                    )
+                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
 
         return self.cache[cache_key]
 
@@ -551,7 +539,7 @@ class Kernel(CodeGen):
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = DeferredIndentedBuffer()
+        self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.current_node = None
@@ -667,6 +655,8 @@ class Kernel(CodeGen):
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
+        # adds the necessary kernel args for index expressions
+        # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)

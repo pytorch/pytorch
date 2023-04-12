@@ -1,6 +1,10 @@
+#include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/profiler/combined_traceback.h>
+
 namespace torch {
 namespace cuda {
 
@@ -32,10 +36,87 @@ Dict<IValue, IValue> new_dict() {
 c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
+
+std::vector<IValue> ivalue_symbolize(
+    std::vector<CapturedTraceback*>& to_symbolize) {
+  // we dedup repeated to_symbolize objects to prevent
+  // creating a bunch of duplicated frame objects
+  std::unordered_map<CapturedTraceback*, uint64_t> cached_frames;
+  std::vector<CapturedTraceback*> unique_frames;
+  for (const auto& sc : to_symbolize) {
+    auto it = cached_frames.find(sc);
+    if (it == cached_frames.end()) {
+      cached_frames.insert({sc, unique_frames.size()});
+      unique_frames.push_back(sc);
+    }
+  }
+  auto s = symbolize(unique_frames);
+
+  IValue line_s = "line";
+  IValue name_s = "name";
+  IValue filename_s = "filename";
+  std::vector<IValue> all_frames;
+  for (const auto& f : s.all_frames) {
+    auto d = new_dict();
+    d.insert(name_s, f.funcname);
+    d.insert(filename_s, f.filename);
+    d.insert(line_s, int64_t(f.lineno));
+    all_frames.emplace_back(std::move(d));
+  }
+
+  std::vector<IValue> py_unique_frames;
+  for (const auto& t : s.tracebacks) {
+    auto l = new_list();
+    for (const auto& e : t) {
+      l.push_back(all_frames.at(e));
+    }
+    py_unique_frames.push_back(std::move(l));
+  }
+
+  std::vector<IValue> result;
+  for (const auto& sc : to_symbolize) {
+    result.push_back(py_unique_frames.at(cached_frames.at(sc)));
+  }
+  return result;
+}
+
+std::shared_ptr<c10::GatheredContext> gather() {
+  return CapturedTraceback::gather(true, true, false);
+}
+
+std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
+  return CapturedTraceback::gather(true, true, true);
+}
+
+CapturedTraceback* getFromContext(
+    const std::shared_ptr<c10::GatheredContext>& x) {
+  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
+    return sc;
+  }
+  TORCH_CHECK(
+      false,
+      "attempting to gather stack context from the wrong StackContext type.");
+}
+
 } // namespace
-void _record_memory_history(bool enabled, int64_t alloc_trace_max_entries) {
+
+void _record_memory_history(
+    bool enabled,
+    bool record_context,
+    int64_t trace_alloc_max_entries,
+    bool trace_alloc_record_context,
+    bool record_cpp_context) {
+  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = nullptr;
+  if (record_context) {
+    if (record_cpp_context) {
+      recorder = gather_with_cpp;
+    } else {
+      recorder = gather;
+    }
+  }
+  at::globalContext().lazyInitCUDA();
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, nullptr, alloc_trace_max_entries, false);
+      enabled, recorder, trace_alloc_max_entries, trace_alloc_record_context);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -65,6 +146,9 @@ std::string _memory_snapshot_pickled() {
   IValue blocks_s = "blocks";
 
   auto empty_frames = new_list();
+
+  std::vector<CapturedTraceback*> frame_tracebacks;
+  std::vector<Dict<IValue, IValue>> frame_dict;
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
@@ -98,7 +182,8 @@ std::string _memory_snapshot_pickled() {
           history_entry.insert(addr_s, (int64_t)h.addr);
           history_entry.insert(real_size_s, (int64_t)h.real_size);
           if (h.context) {
-            history_entry.insert(frames_s, empty_frames);
+            frame_tracebacks.push_back(getFromContext(h.context));
+            frame_dict.push_back(history_entry);
           }
           history.push_back(std::move(history_entry));
         }
@@ -160,6 +245,11 @@ std::string _memory_snapshot_pickled() {
           TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
+      if (te.context_) {
+        auto sc = getFromContext(te.context_);
+        frame_tracebacks.push_back(sc);
+        frame_dict.push_back(trace_entry);
+      }
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);
@@ -168,6 +258,12 @@ std::string _memory_snapshot_pickled() {
   auto result = new_dict();
   result.insert("segments", segments);
   result.insert("device_traces", traces);
+
+  auto frames = ivalue_symbolize(frame_tracebacks);
+  for (auto i : c10::irange(frames.size())) {
+    frame_dict.at(i).insert(frames_s, frames.at(i));
+  }
+
   return write_pickle(result);
 }
 } // namespace cuda

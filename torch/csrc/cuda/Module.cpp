@@ -1,6 +1,13 @@
 #include <ATen/ATen.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/util/UniqueVoidPtr.h>
+#include <pybind11/pytypes.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
+
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
@@ -28,8 +35,7 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/profiler/unwind/unwind.h>
+#include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
@@ -97,12 +103,24 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   }
 
   torch::utils::cuda_lazy_init();
-  auto current_device = c10::cuda::current_device();
-  if (current_device != device) {
-    THCPModule_setDevice(device);
+  int current_device = c10::cuda::ExchangeDevice(device);
+
+  return THPUtils_packInt32(current_device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
+  int64_t device = THPUtils_unpackLong(arg);
+  if (device < 0) {
+    return THPUtils_packInt32(-1);
   }
 
-  return THPUtils_packInt32(static_cast<int>(current_device));
+  torch::utils::cuda_lazy_init();
+  int current_device = c10::cuda::MaybeExchangeDevice(device);
+
+  return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
 }
 
@@ -486,7 +504,7 @@ PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
-  if (at::cuda::detail::hasPrimaryContext(device_index)) {
+  if (c10::cuda::hasPrimaryContext(device_index)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -599,186 +617,14 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
 }
 
-struct Frame {
-  PyCodeObject* code;
-  int lasti;
-};
-
-static std::mutex to_free_frames_mutex;
-static std::vector<Frame> to_free_frames;
-
-struct StackContext : public c10::GatheredContext {
-  // Locking:
-  // We need to free PyCodeObjects when ~StackContext runs, but
-  // CUDACachingAllocator may hold its device lock when ~StackContext runs.
-
-  // Because the thread calling the allocator _may_ hold the GIL,
-  // attempting to lock the GIL in ~StackContext can deadlock:
-  // T0: GIL Lock -> Call Allocator    ->| Waiting Device Lock
-  // T1: Call Allocator -> Device Lock ->| Waiting GIL Lock
-  // Instead the destructor defers freeing stack frames by putting them in
-  // to_free_frames. We still need a lock to manage this vector, but
-  // we can ensure an overall lock ordering of GIL -> device_lock ->
-  // to_free_frames_mutex because ::gather is called outside of the device lock.
-  std::vector<Frame> frames;
-  std::vector<void*> cpp_frames;
-  std::vector<jit::StackEntry> script_frames;
-
-  ~StackContext() {
-    std::lock_guard lock(to_free_frames_mutex);
-    to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
+CapturedTraceback* getFromContext(
+    const std::shared_ptr<c10::GatheredContext>& x) {
+  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
+    return sc;
   }
-  static std::shared_ptr<StackContext> _gather(
-      bool python,
-      bool script,
-      bool cpp) {
-    auto r = std::make_shared<StackContext>();
-    if (python) {
-      py::gil_scoped_acquire acquire;
-      {
-        std::lock_guard lock(to_free_frames_mutex);
-        for (Frame f : to_free_frames) {
-          Py_XDECREF(f.code);
-        }
-        to_free_frames.clear();
-      }
-      PyFrameObject* f = PyEval_GetFrame();
-      Py_XINCREF(f);
-      while (f) {
-        r->frames.emplace_back(Frame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
-        auto f_back = PyFrame_GetBack(f);
-        Py_XDECREF(f);
-        f = f_back;
-      }
-    }
-    if (script) {
-      r->script_frames = torch::jit::currentCallstack();
-    }
-    if (cpp) {
-      r->cpp_frames = unwind::unwind();
-    }
-    return r;
-  }
-  static std::shared_ptr<c10::GatheredContext> gather() {
-    return _gather(true, true, false);
-  }
-  static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
-    return _gather(true, true, true);
-  }
-};
-
-void gatherFrames(
-    const std::vector<std::pair<StackContext*, py::dict>>& to_gather) {
-  py::str frames_s = "frames";
-  py::str filename_s = "filename";
-  py::str name_s = "name";
-  py::str line_s = "line";
-
-  std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
-  std::vector<void*> all_cpp_ips;
-  struct CPPFrame {
-    enum Kind { PYTHON, JIT, REPORT } kind;
-    py::object frame;
-  };
-  std::vector<CPPFrame> all_cpp_frames;
-
-  // dedup and collect any C++ frames that need symbols for
-  for (const auto& e : to_gather) {
-    for (void* f : e.first->cpp_frames) {
-      if (!ip_to_frame_offset.count(f)) {
-        ip_to_frame_offset[f] = all_cpp_ips.size();
-        all_cpp_ips.push_back(f);
-      }
-    }
-  }
-
-  // gather symbol names for C++ frames
-  if (all_cpp_ips.size() > 0) {
-    auto all_frames = unwind::symbolize(all_cpp_ips);
-    for (auto& f : all_frames) {
-      py::dict frame;
-      frame[filename_s] = f.filename;
-      frame[name_s] = f.funcname;
-      frame[line_s] = f.lineno;
-      CPPFrame::Kind kind = CPPFrame::REPORT;
-      if (f.funcname.find("PyEval_EvalFrame") != std::string::npos) {
-        kind = CPPFrame::PYTHON;
-      } else if (
-          f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
-          std::string::npos) {
-        kind = CPPFrame::JIT;
-      }
-      all_cpp_frames.emplace_back(CPPFrame{kind, frame});
-    }
-  }
-
-  std::unordered_map<StackContext*, py::list> cached_frames;
-  for (const auto& e : to_gather) {
-    auto sc = e.first;
-    auto it = cached_frames.find(sc);
-    if (it == cached_frames.end()) {
-      py::list frames;
-      auto py_it = sc->frames.begin();
-      auto py_end = sc->frames.end();
-
-      bool jit_appended = false;
-
-      auto append_python = [&](const Frame& f) {
-        py::dict frame;
-        frame[filename_s] =
-            py::reinterpret_borrow<py::object>(f.code->co_filename);
-        frame[name_s] = py::reinterpret_borrow<py::object>(f.code->co_name);
-        frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
-        frames.append(std::move(frame));
-      };
-
-      auto append_jit = [&]() {
-        if (jit_appended) {
-          return;
-        }
-        jit_appended = true;
-        for (const auto& f : sc->script_frames) {
-          py::dict frame;
-          frame[name_s] = f.filename;
-          auto flc = f.range.file_line_col();
-          if (flc) {
-            std::string filename;
-            size_t line;
-            size_t col;
-            std::tie(filename, line, col) = *flc;
-            frame[filename_s] = filename;
-            frame[line_s] = line;
-          } else {
-            frame[filename_s] = "??";
-            frame[line_s] = 0;
-          }
-          frames.append(std::move(frame));
-        }
-      };
-
-      for (void* f : sc->cpp_frames) {
-        const CPPFrame& wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
-        if (wf.kind == CPPFrame::PYTHON) {
-          if (py_it != py_end) {
-            append_python(*py_it++);
-          }
-        } else if (wf.kind == CPPFrame::JIT) {
-          append_jit();
-        }
-        frames.append(wf.frame);
-      }
-
-      // add frames if we otherwise haven't seen the C++ frame indicating where
-      // it should go
-      append_jit();
-
-      for (; py_it != py_end; ++py_it) {
-        append_python(*py_it);
-      }
-      it = cached_frames.insert({sc, frames}).first;
-    }
-    e.second[frames_s] = it->second;
-  }
+  TORCH_CHECK(
+      false,
+      "attempting to gather stack context from the wrong StackContext type.");
 }
 
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
@@ -810,7 +656,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
-  std::vector<std::pair<StackContext*, py::dict>> frames_to_gather;
+  std::vector<CapturedTraceback*> to_gather_frames;
+  std::vector<py::dict> to_gather_dest;
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
@@ -842,8 +689,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           history_entry[addr_s] = (int64_t)h.addr;
           history_entry[real_size_s] = h.real_size;
           if (h.context) {
-            auto sc = (StackContext*)h.context.get();
-            frames_to_gather.emplace_back(sc, history_entry);
+            auto sc = getFromContext(h.context);
+            to_gather_frames.emplace_back(sc);
+            to_gather_dest.emplace_back(history_entry);
           }
           history.append(std::move(history_entry));
         }
@@ -903,8 +751,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       py::dict trace_entry;
       if (te.context_) {
         // without further compression frames can get really large on dump
-        auto sc = (StackContext*)te.context_.get();
-        frames_to_gather.emplace_back(sc, trace_entry);
+        auto sc = getFromContext(te.context_);
+        to_gather_frames.emplace_back(sc);
+        to_gather_dest.emplace_back(trace_entry);
       }
       trace_entry[action_s] = action_to_str(te.action_);
       trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
@@ -920,7 +769,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["segments"] = segments;
   result["device_traces"] = traces;
 
-  gatherFrames(frames_to_gather);
+  py::str frames_s = "frames";
+  auto frames = py_symbolize(to_gather_frames);
+  for (auto i : c10::irange(frames.size())) {
+    to_gather_dest.at(i)[frames_s] = frames.at(i);
+  }
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
@@ -996,6 +849,14 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static std::shared_ptr<c10::GatheredContext> gather() {
+  return CapturedTraceback::gather(true, true, false);
+}
+
+static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
+  return CapturedTraceback::gather(true, true, true);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -1034,15 +895,12 @@ static void registerCudaDeviceProperties(PyObject* module) {
         }
         c10::cuda::CUDACachingAllocator::recordHistory(
             enabled,
-            record_context ? (record_context_cpp ? StackContext::gather_with_cpp
-                                                 : StackContext::gather)
+            record_context ? (record_context_cpp ? gather_with_cpp : gather)
                            : nullptr,
             alloc_trace_max_entries,
             alloc_trace_record_context);
       });
 }
-
-void no_op_delete(void* ptr){};
 
 // We choose to ignore certain blocks that are currently allocated
 // when we set the pool to its checkpoint. For those blocks, we need
@@ -1056,8 +914,8 @@ void removeStorageDeleterFns(
     auto allocated_pointer = definitely_stale_pointers.find(ptr);
     TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
     auto t = c10::cuda::CUDACachingAllocator::get();
-    bool succeeded = stale_storage->data_ptr().compare_exchange_deleter(
-        t->raw_deleter(), &no_op_delete);
+    bool succeeded = stale_storage->mutable_data_ptr().compare_exchange_deleter(
+        t->raw_deleter(), &c10::detail::deleteNothing);
 
     TORCH_CHECK(
         succeeded,
@@ -1066,12 +924,11 @@ void removeStorageDeleterFns(
 }
 
 void addStorageDeleterFns(
-    std::vector<at::Tensor>& tensors_to_add_deleters_to,
+    std::vector<c10::StorageImpl*>& storages_to_add_deleters_to,
     c10::cuda::CUDACachingAllocator::CheckpointDelta& delta) {
   std::unordered_map<void*, c10::StorageImpl*> storages;
-  for (auto& tensor : tensors_to_add_deleters_to) {
-    storages[tensor.storage().data_ptr().get()] =
-        tensor.storage().unsafeGetStorageImpl();
+  for (auto& storage : storages_to_add_deleters_to) {
+    storages[storage->data_ptr().get()] = storage;
   }
 
   for (auto& data_ptr : delta.dataptrs_allocd) {
@@ -1203,21 +1060,129 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
   });
 
+  m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto data_ptr = storage_impl->data_ptr().get();
+    bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
+        alloc->raw_deleter(), c10::detail::deleteNothing);
+    TORCH_CHECK("Expected standard deleter");
+    c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
+  });
+
+  m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto data_ptr = storage_impl->data_ptr().get();
+    return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
+  });
+
+  m.def(
+      "_map_Storage_Refs",
+      [](const py::sequence& outputs,
+         const py::list& outputs_persistent_storage,
+         py::list output_refs,
+         py::list output_data_ptrs) {
+        TORCH_CHECK(outputs.size() == outputs_persistent_storage.size());
+
+        for (size_t i = 0, end = outputs.size(); i < end; ++i) {
+          if (!outputs_persistent_storage[i].is_none() ||
+              outputs[i].is_none()) {
+            output_refs.append(py::none());
+            output_data_ptrs.append(py::none());
+            continue;
+          }
+
+          auto t = outputs[i].cast<at::Tensor>();
+          c10::StorageImpl* storage = t.storage().unsafeGetStorageImpl();
+          auto weak = c10::raw::intrusive_ptr::make_weak(storage);
+          output_refs.append(reinterpret_cast<size_t>(weak));
+          output_data_ptrs.append(
+              reinterpret_cast<size_t>(storage->data_ptr().get()));
+        }
+      });
+
+  m.def(
+      "_construct_Tensors_From_Storage_and_Metadata",
+      [](const py::list& storages,
+         const py::list& metadatas,
+         py::list& outputs) {
+        TORCH_CHECK(storages.size() == metadatas.size());
+        for (size_t i = 0, end = storages.size(); i < end; ++i) {
+          const auto& maybe_metadata = metadatas[i];
+
+          if (maybe_metadata.is_none()) {
+            outputs.append(py::none());
+            continue;
+          }
+
+          const py::dict& metadata = maybe_metadata.cast<py::dict>();
+          c10::Storage s;
+          if (storages[i].is_none()) {
+            s = c10::Storage(
+                c10::Storage::use_byte_size_t(),
+                metadata["nbytes"].cast<int64_t>(),
+                at::DataPtr(
+                    reinterpret_cast<void*>(
+                        metadata["data_ptr"].cast<size_t>()),
+                    metadata["device"].cast<c10::Device>()));
+          } else if (py::isinstance<py::int_>(storages[i])) {
+            s = outputs[storages[i].cast<int64_t>()]
+                    .cast<at::Tensor>()
+                    .storage();
+          } else {
+            s = storages[i].cast<c10::Storage>();
+          }
+
+          auto dtype_arg = metadata["dtype"].ptr();
+          auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
+
+          constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
+          at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+              std::move(s), cuda_dks, meta);
+
+          tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+              metadata["size"].cast<std::vector<int64_t>>(),
+              metadata["stride"].cast<std::vector<int64_t>>());
+          tensor.unsafeGetTensorImpl()->set_storage_offset(
+              metadata["storage_offset"].cast<int64_t>());
+          outputs.append(std::move(tensor));
+        }
+      });
+
+  m.def(
+      "_cuda_beginAllocateCurrentStreamToPool",
+      [](int device, at::cuda::MempoolId_t mempool_id) {
+        auto stream = at::cuda::getCurrentCUDAStream(device);
+        TORCH_CHECK(stream, "Expected stream capture to be under way");
+        c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(
+            device, stream, mempool_id);
+      });
+
+  m.def("_cuda_endAllocateCurrentStreamToPool", [](int device) {
+    auto stream = at::cuda::getCurrentCUDAStream(device);
+    TORCH_CHECK(stream, "Expected stream capture to be under way");
+    c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
+  });
+
+  m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
+    c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
+  });
+
   m.def(
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<at::Tensor> stale_tensors,
-         std::vector<at::Tensor> tensors_to_add_deleters_to = {}) {
-        // Could pass in Storage Pointers instead
+         std::vector<size_t> stale_storages_ptr,
+         std::vector<size_t> storages_to_add_deleters_to_ptr = {}) {
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
         std::vector<c10::StorageImpl*> ptrs;
-        for (const auto& ten : stale_tensors) {
-          auto ptr = ten.storage().unsafeGetStorageImpl();
+        for (size_t ptr_int : stale_storages_ptr) {
+          c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
           if (!ptr_set.count(ptr)) {
-            ptrs.push_back(ten.storage().unsafeGetStorageImpl());
-            ptr_set.insert(ten.storage().unsafeGetStorageImpl());
+            ptrs.push_back(ptr);
+            ptr_set.insert(ptr);
           }
         }
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
@@ -1247,8 +1212,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             " must be passed to set checkpoint");
 
         removeStorageDeleterFns(ptrs, freed_pointer_set);
+        std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
+          storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
+        }
 
-        addStorageDeleterFns(tensors_to_add_deleters_to, delta);
+        addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
 }
 
@@ -1391,6 +1360,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
     {"_cuda_exchangeDevice", THCPModule_exchangeDevice, METH_O, nullptr},
+    {"_cuda_maybeExchangeDevice",
+     THCPModule_maybeExchangeDevice,
+     METH_O,
+     nullptr},
     {"_cuda_getDevice", THCPModule_getDevice_wrap, METH_NOARGS, nullptr},
     {"_cuda_getDeviceCount",
      THCPModule_getDeviceCount_wrap,

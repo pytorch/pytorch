@@ -37,7 +37,8 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
+    AlwaysWarnTypedStorageRemoval)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -953,6 +954,7 @@ class TestTorchDeviceType(TestCase):
             t + 1
 
     # TODO: this test should be in test_nn.py
+    @skipIfTorchInductor("Please convert all Tensors to FakeTensors")
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
         out_channels = 128
@@ -2998,6 +3000,7 @@ else:
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
 
     # FIXME: move to data movement test suite
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/98175")
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
     def test_copy_transpose_math_view(self, device, dtype):
@@ -3653,67 +3656,50 @@ else:
 
     # FIXME: find a test suite for the masked scatter operator
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_masked_scatter(self, device, dtype):
         dt = dtype
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            for maskType in [torch.uint8, torch.bool]:
-                num_copy, num_dest = 3, 10
-                dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
-                dest2 = dest.clone()
-                dest_ones = dest.clone()
-                dest_ones_expected = dest.clone()
-                src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
-                src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
-                mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
+        num_copy, num_dest = 3, 10
+        dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
+        dest2 = dest.clone()
+        dest_ones = dest.clone()
+        dest_ones_expected = dest.clone()
+        src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
+        src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
+        mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=torch.bool, device=device)
 
-                if dt == torch.bool:
-                    # torch.bool is a special case and is being tested
-                    # in a separate test
-                    return
+        dest.masked_scatter_(mask, src)
+        j = 0
+        for i in range(num_dest):
+            if mask[i]:
+                dest2[i] = src[j]
+                dest_ones_expected[i] = src_ones[j]
+                j += 1
+        self.assertEqual(dest, dest2, atol=0, rtol=0)
 
-                dest.masked_scatter_(mask, src)
-                j = 0
-                for i in range(num_dest):
-                    if mask[i]:
-                        dest2[i] = src[j]
-                        dest_ones_expected[i] = src_ones[j]
-                        j += 1
-                self.assertEqual(dest, dest2, atol=0, rtol=0)
+        dest_ones.masked_scatter_(mask, src_ones)
+        self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
 
-                dest_ones.masked_scatter_(mask, src_ones)
-                self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
-
-                # Bound checking in CUDA is done inside a kernel
-                # in order to avoid synchronization, but this means
-                # we can not clear the failures. So there is no way
-                # to test it then recover.
-                if self.device_type != 'cuda':
-                    # make src smaller. this should fail
-                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
-                    with self.assertRaises(RuntimeError):
-                        dest.masked_scatter_(mask, src)
-
-                # empty tensor
-                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
-                mask = torch.ones_like(dest, dtype=maskType, device=device)
-                src = torch.empty((0,), dtype=dt, device=device)
-                dest.masked_scatter_(mask, src)
-
-                dest = torch.empty((5, 0, 5), dtype=dt, device=device)
-                mask = torch.ones((5, 1, 5), dtype=maskType, device=device)
-                src = torch.empty((0,), dtype=dt, device=device)
-                dest.masked_scatter_(mask, src)
-
+        # Bound checking in CUDA is done inside a kernel
+        # in order to avoid synchronization, but this means
+        # we can not clear the failures. So there is no way
+        # to test it then recover.
         if self.device_type != 'cuda':
-            self.assertEqual(len(w), 5)
-        else:
-            self.assertEqual(len(w), 4)
+            # make src smaller. this should fail
+            src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+            with self.assertRaises(RuntimeError):
+                dest.masked_scatter_(mask, src)
 
-        warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
-        for wi in w:
-            self.assertEqual(str(wi.message)[0:55], str(warn))
+        # empty tensor
+        dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+        mask = torch.ones_like(dest, dtype=torch.bool, device=device)
+        src = torch.empty((0,), dtype=dt, device=device)
+        dest.masked_scatter_(mask, src)
+
+        dest = torch.empty((5, 0, 5), dtype=dt, device=device)
+        mask = torch.ones((5, 1, 5), dtype=torch.bool, device=device)
+        src = torch.empty((0,), dtype=dt, device=device)
+        dest.masked_scatter_(mask, src)
 
     # FIXME: find a test suite for the masked scatter operator
     @skipIfMps
@@ -4056,6 +4042,9 @@ else:
         self.assertEqual((2, 0), w.index_select(0, ind_01).shape)
         ind_01_int32 = torch.tensor([0, 1], dtype=torch.int32, device=device)
         self.assertEqual((2, 0), w.index_select(0, ind_01_int32).shape)
+        s = torch.randn([], device=device)
+        ind_0 = torch.tensor([0], dtype=torch.int32, device=device)
+        self.assertEqual([], s.index_select(0, ind_0).shape)
         if device == 'cpu':
             w = torch.randn((0, 3), device=device)
             with self.assertRaisesRegex(RuntimeError, "self indexing axis dim should be positive"):
@@ -4063,6 +4052,8 @@ else:
             ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
             with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
                 torch.index_select(w, 1, ind_05)
+            with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+                torch.index_select(s, 0, ind_empty)
         self.assertRaises(RuntimeError, lambda: torch.ones([]).index_select(0, torch.Tensor([0, 0]).int()))
 
     # FIXME: find a test suite for the pdist operator
@@ -6119,16 +6110,27 @@ class TestTorch(TestCase):
         complexdouble = torch.ComplexDoubleStorage().element_size()
 
         self.assertEqual(byte, torch.ByteTensor().element_size())
+        self.assertEqual(byte, torch.ByteTensor().itemsize)
         self.assertEqual(char, torch.CharTensor().element_size())
+        self.assertEqual(char, torch.CharTensor().itemsize)
         self.assertEqual(short, torch.ShortTensor().element_size())
+        self.assertEqual(short, torch.ShortTensor().itemsize)
         self.assertEqual(int, torch.IntTensor().element_size())
+        self.assertEqual(int, torch.IntTensor().itemsize)
         self.assertEqual(long, torch.LongTensor().element_size())
+        self.assertEqual(long, torch.LongTensor().itemsize)
         self.assertEqual(float, torch.FloatTensor().element_size())
+        self.assertEqual(float, torch.FloatTensor().itemsize)
         self.assertEqual(double, torch.DoubleTensor().element_size())
+        self.assertEqual(double, torch.DoubleTensor().itemsize)
         self.assertEqual(bool, torch.BoolTensor().element_size())
+        self.assertEqual(bool, torch.BoolTensor().itemsize)
         self.assertEqual(bfloat16, torch.tensor([], dtype=torch.bfloat16).element_size())
+        self.assertEqual(bfloat16, torch.tensor([], dtype=torch.bfloat16).itemsize)
         self.assertEqual(complexfloat, torch.tensor([], dtype=torch.complex64).element_size())
+        self.assertEqual(complexfloat, torch.tensor([], dtype=torch.complex64).itemsize)
         self.assertEqual(complexdouble, torch.tensor([], dtype=torch.complex128).element_size())
+        self.assertEqual(complexdouble, torch.tensor([], dtype=torch.complex128).itemsize)
 
         self.assertGreater(byte, 0)
         self.assertGreater(char, 0)
@@ -6816,15 +6818,39 @@ class TestTorch(TestCase):
         # Check that each of the TypedStorage function calls produce a warning
         # if warnings are reset between each
         for f in funcs:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.resetwarnings()
-                f()
-                self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
-                warning = w[0].message
-                self.assertTrue(warning, DeprecationWarning)
-                self.assertTrue(re.search(
-                    '^TypedStorage is deprecated',
-                    str(warning)))
+            with AlwaysWarnTypedStorageRemoval(True):
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.resetwarnings()
+                    f()
+                    self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+                    warning = w[0].message
+                    self.assertTrue(warning, DeprecationWarning)
+                    self.assertTrue(re.search(
+                        '^TypedStorage is deprecated',
+                        str(warning)))
+
+        # Test that only the first warning is raised by default
+        torch.storage._reset_warn_typed_storage_removal()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            torch.FloatStorage()
+            torch.randn(10).storage()
+            self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+            warning = w[0].message
+            self.assertTrue(re.search(
+                '^TypedStorage is deprecated',
+                str(warning)))
+            # Check the line of code from the warning's stack
+            with open(w[0].filename, encoding="utf-8") as f:
+                code_line = f.readlines()[w[0].lineno - 1]
+            self.assertTrue(re.search(re.escape('torch.FloatStorage()'), code_line))
+
+        # Check that warnings are not emitted if it happened in the past
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            torch.FloatStorage()
+            torch.randn(10).storage()
+            self.assertEqual(len(w), 0, msg=str([str(a) for a in w]))
 
     def test_from_file(self):
         def assert_with_filename(filename):
@@ -7454,6 +7480,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         c = torch.randn(1, 0)
         self.assertEqual(2, c.ndim)
 
+    def test_nbytes(self):
+        a = torch.randn(1, 2, 3, dtype=torch.float64)
+        self.assertEqual(a.numel() * a.element_size(), a.nbytes)
+        b = torch.randn(())
+        self.assertEqual(b.numel() * b.element_size(), b.nbytes)
+        c = torch.randn(1, 0)
+        self.assertEqual(c.numel() * c.element_size(), c.nbytes)
+
     def test_fill_diagonal(self):
         a1 = torch.randn(7, 3)
         a2 = a1.clone()
@@ -7586,6 +7620,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
         self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/97414")
     def test_upsample_nearest2d_meta(self):
         # TODO: the out tests cannot be triggered by test_nn.py because
         # we don't actually do out= arguments for nn functions, so there

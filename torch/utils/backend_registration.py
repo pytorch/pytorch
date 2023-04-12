@@ -4,6 +4,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     rename_privateuse1_backend(backend_name) -> None
 
+    Note: support the custom device with privateuse1
     This is a registration API for external backends that would like to register their
     own device and C++ kernels out of tree.
 
@@ -16,6 +17,44 @@ def rename_privateuse1_backend(backend_name: str) -> None:
 
     Note: this API can only be called once per process. Attempting to change
     the external backend after it's already been set will result in an error.
+
+    Note(AMP): If you want to support AMP on your device, you can register a custom backend module.
+    The backend must register a custom backend module with `torch._register_device_module("foo", BackendModule)`.
+    BackendModule needs to have the following API's:
+
+    (1) get_amp_supported_dtype() -> List[torch.dtype]
+        get the supported dtypes on your `foo` device in AMP, maybe the `foo` device supports one more dtype.
+
+    (2) is_autocast_enabled() -> bool
+        check the AMP is enabled or not on your `foo` device.
+
+    (3) get_autocast_dtype() -> torch.dtype
+        get the supported dtype on your `foo` device in AMP, which is set by `set_autocast_dtype` or the
+        default dtype, and the default dtype is `torch.float16`.
+
+    (4) set_autocast_enabled(bool) -> None
+        enable the AMP or not on your `foo` device.
+
+    (5) set_autocast_dtype(dtype) -> None
+        set the supported dtype on your `foo` device in AMP, and the dtype be contained in the dtypes got
+        from `get_amp_supported_dtype`.
+
+    Note(random): If you want to support to set seed for your device, BackendModule needs to have the following API's:
+
+    (1) _is_in_bad_fork() -> bool
+        Return `True` if now it is in bad_fork, else return `False`.
+
+    (2) manual_seed_all(seed: int) -> None
+        Sets the seed for generating random numbers for your devices.
+
+    (3) device_count() -> int:
+        Returns the number of `foo`s available.
+
+    (4) get_rng_state(device: Union[int, str, torch.device] = 'foo') -> Tensor:
+        Returns a list of ByteTensor representing the random number states of all devices.
+
+    (5) set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
+        Sets the random number generator state of the specified `foo` device.
 
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example

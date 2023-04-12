@@ -386,6 +386,9 @@ class PackedSequenceTest(TestCase):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
         with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(0, 0), [])
+        with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
+            packed = rnn_utils.pack_padded_sequence(torch.randn([0, 1, 10]),
+                                                    torch.randn([11, 14, 14, 2]), True)
 
 
 if __name__ == '__main__':

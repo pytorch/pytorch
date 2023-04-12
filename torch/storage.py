@@ -30,6 +30,7 @@ class _StorageBase:
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
+    def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
 
     def size(self) -> int:
@@ -91,7 +92,7 @@ class _StorageBase:
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -362,14 +363,37 @@ def _isint(x):
     else:
         return isinstance(x, int)
 
+_always_warn_typed_storage_removal = False
+
+def _get_always_warn_typed_storage_removal():
+    return _always_warn_typed_storage_removal
+
+def _set_always_warn_typed_storage_removal(always_warn):
+    global _always_warn_typed_storage_removal
+    assert isinstance(always_warn, bool)
+    _always_warn_typed_storage_removal = always_warn
+
 def _warn_typed_storage_removal(stacklevel=2):
-    message = (
-        "TypedStorage is deprecated. It will be removed in the future and "
-        "UntypedStorage will be the only storage class. This should only matter "
-        "to you if you are using storages directly.  To access UntypedStorage "
-        "directly, use tensor.untyped_storage() instead of tensor.storage()"
-    )
-    warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
+    global _always_warn_typed_storage_removal
+
+    def is_first_time():
+        if not hasattr(_warn_typed_storage_removal, 'has_warned'):
+            return True
+        else:
+            return not _warn_typed_storage_removal.__dict__['has_warned']
+
+    if _get_always_warn_typed_storage_removal() or is_first_time():
+        message = (
+            "TypedStorage is deprecated. It will be removed in the future and "
+            "UntypedStorage will be the only storage class. This should only matter "
+            "to you if you are using storages directly.  To access UntypedStorage "
+            "directly, use tensor.untyped_storage() instead of tensor.storage()"
+        )
+        warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
+        _warn_typed_storage_removal.__dict__['has_warned'] = True
+
+def _reset_warn_typed_storage_removal():
+    _warn_typed_storage_removal.__dict__['has_warned'] = False
 
 class TypedStorage:
     is_sparse = False
@@ -702,7 +726,7 @@ class TypedStorage:
 
     def __iter__(self):
         _warn_typed_storage_removal()
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         _warn_typed_storage_removal()

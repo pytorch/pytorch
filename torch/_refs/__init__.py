@@ -195,6 +195,8 @@ __all__ = [
     "amax",
     "amin",
     "any",
+    "cumsum",
+    "cumprod",
     "mean",
     "std",
     "std_mean",
@@ -346,7 +348,7 @@ def _broadcast_shapes(*_shapes):
 def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     # Computes common shape
     common_shape = _broadcast_shapes(
-        *map(lambda t: t.shape if isinstance(t, TensorLike) else None, args)
+        *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
     def __maybe_broadcast(x, shape):
@@ -3583,7 +3585,15 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
     dims = tuple(d for d in dims if a.shape[d] == 1)
-    return prims.squeeze(a, dims) if dims else prims.view_of(a)
+    if len(dims) == 0:
+        return prims.view_of(a)
+    if len(dims) == 1:
+        return prims.squeeze(a, dims)
+    dims_list = list(dims)
+    dims_list = sorted(dims_list, reverse=True)
+    for i in dims_list:
+        a = squeeze(a, i)
+    return a
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
@@ -3972,12 +3982,12 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     )
 
 
-@register_decomposition(aten.cumsum)
-def cumsum(
+def _cumsumprod_common(
+    func,
+    init,
     a: TensorLikeType,
     dim: int,
     *,
-    keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
@@ -3986,14 +3996,36 @@ def cumsum(
     ndim = a.ndim
     dim = utils.canonicalize_dim(ndim, dim)
     if ndim == 0:
-        return sum(a.unsqueeze(0), dim=0, keepdim=keepdim, dtype=dtype, out=out)
+        return func(a.unsqueeze(0), dim=0, dtype=dtype, out=out)
     a = a.unsqueeze(dim + 1)
     rg = torch.arange(a.shape[dim], device=a.device)
     mask = rg.unsqueeze(1) <= rg
     for _ in range(ndim - dim - 1):
         mask = mask.unsqueeze(-1)
-    masked_a = utils.mask_tensor(mask, a)
-    return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
+    masked_a = torch.where(mask, a, init)
+    return func(masked_a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumsum)
+def cumsum(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=sum, init=0, a=a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumprod)
+def cumprod(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=prod, init=1, a=a, dim=dim, dtype=dtype, out=out)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -4243,7 +4275,7 @@ def new_ones(
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: Union[int, float, bool],
+    fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
@@ -4278,8 +4310,6 @@ def empty_like(
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
-
-    strides: Tuple[int, ...]
 
     if memory_format != torch.preserve_format:
         return torch.empty(
@@ -4366,7 +4396,7 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = (xstep > 0) - (xstep < 0)
+        sgn = bool(xstep > 0) - bool(xstep < 0)
         length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
@@ -4562,7 +4592,7 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
-    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+    if isinstance(tensors[0], (list, tuple)):
         assert len(tensors) == 1
         tensors = tuple(tensors[0])
 
@@ -5388,7 +5418,15 @@ def log_normal(self, mean=1, std=2, generator=None):
 def normal(self, mean=0, std=1, generator=None):
     assert generator is None
     utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
-    return std * torch.randn_like(self) + mean
+    normal_samples = prims.normal(
+        self.shape,
+        mean=0.0,
+        std=1.0,
+        dtype=self.dtype,
+        device=self.device,
+        requires_grad=False,
+    )
+    return std * normal_samples + mean
 
 
 # inplace
@@ -5418,6 +5456,7 @@ copysign_ = _make_inplace(copysign)
 cos_ = _make_inplace(cos)
 cosh_ = _make_inplace(cosh)
 cumsum_ = _make_inplace(cumsum)
+cumprod_ = _make_inplace(cumprod)
 digamma_ = _make_inplace(digamma)
 div_ = _make_inplace(div)
 eq_ = _make_inplace(eq)

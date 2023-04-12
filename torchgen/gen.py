@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     Sequence,
     Set,
@@ -19,7 +20,6 @@ from typing import (
 )
 
 import yaml
-from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -1452,7 +1452,7 @@ def get_native_function_declarations(
         ns_helper = NamespaceHelper(
             namespace_str=namespace,
             entity_name="",
-            max_level=3,
+            max_level=4,
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
