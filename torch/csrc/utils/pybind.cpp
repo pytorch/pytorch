@@ -79,6 +79,36 @@ py::handle type_caster<c10::SymFloat>::cast(
   }
 }
 
+bool type_caster<c10::SymBool>::load(py::handle src, bool) {
+  if (torch::is_symbool(src)) {
+    value = c10::SymBool(static_cast<c10::SymNode>(
+        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
+    return true;
+  }
+
+  auto raw_obj = src.ptr();
+  if (THPUtils_checkBool(raw_obj)) {
+    value = c10::SymBool{THPUtils_unpackBool(raw_obj)};
+    return true;
+  }
+  return false;
+}
+
+py::handle type_caster<c10::SymBool>::cast(
+    c10::SymBool si,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  if (si.is_symbolic()) {
+    // TODO: generalize this to work with C++ backed class
+    auto* py_node =
+        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
+    TORCH_INTERNAL_ASSERT(py_node);
+    return torch::get_symbool_class()(py_node->getPyObj()).release();
+  } else {
+    return py::cast(si.as_bool_unchecked()).release();
+  }
+}
+
 bool type_caster<c10::Scalar>::load(py::handle src, bool) {
   TORCH_INTERNAL_ASSERT(
       0, "pybind11 loading for c10::Scalar NYI (file a bug if you need it)");
@@ -105,6 +135,9 @@ py::handle type_caster<c10::Scalar>::cast(
       return py::cast(scalar.toDouble()).release();
     }
   } else if (scalar.isBoolean()) {
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymBool()).release();
+    }
     return py::cast(scalar.toBool()).release();
   } else if (scalar.isComplex()) {
     return py::cast(scalar.toComplexDouble()).release();
