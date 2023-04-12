@@ -4,7 +4,7 @@ from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
-from . import config
+from .config_utils import config
 
 from .utils import counters, format_bytecode
 
@@ -82,6 +82,7 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
+    CONSTRAIN_VIOLATION = auto()
 
 
 class UserError(Unsupported):
@@ -95,6 +96,10 @@ class UserError(Unsupported):
         """
         super().__init__(msg)
         self.error_type = error_type
+
+
+class IncorrectUsage(Exception):
+    pass
 
 
 def unimplemented(msg: str):
