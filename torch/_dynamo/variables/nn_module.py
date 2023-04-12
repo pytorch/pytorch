@@ -9,7 +9,7 @@ import torch.nn
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
-from ..exc import RestartAnalysis, unimplemented
+from ..exc import RestartAnalysis, unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -605,6 +605,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if type(value) is torch.jit._script.RecursiveScriptModule:
+            raise Unsupported(
+                "ScriptModules aren't supported in UnspecializedNNModuleVariable"
+                " becuase their .forward function isn't a static member of their type"
+            )
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
@@ -647,13 +652,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        # TODO mlazos: only support __call__ for lazy modules
-        # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
-            name = "__call__"
-        else:
-            name = "forward"
-
+        name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
