@@ -1206,7 +1206,7 @@ def emit_body(
                     for foreach_arg, ref_arg in inplace_foreacharg2refarg.items():
                         if arg == ref_arg.name:
                             args[i] = foreach_arg.name + (
-                                "[i]" if hasattr(foreach_arg.type, "elem") else ""
+                                "[i]" if isinstance(foreach_arg.type, ListType) else ""
                             )
                 else:
                     if arg == list_like_arg:
@@ -1309,7 +1309,7 @@ def emit_body(
                     if refarg.name == name or (
                         refarg.name in name and "scalar_type" in name
                     ):
-                        is_foreacharg_list_type = hasattr(_foreacharg.type, "elem")
+                        is_foreacharg_list_type = isinstance(_foreacharg.type, ListType)
                         foreacharg = _foreacharg
                         break
             type = arg.nctype.type
