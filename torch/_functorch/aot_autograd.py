@@ -2368,7 +2368,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # We can do this by manually detach'ing y before sending it through the `CompiledFunction`.
         #
         # Note that this solution is not bulletproof.
-        # It's possible to construct a case where eager may or may have have tried to autograd through y,
+        # It's possible to construct a case where eager may or may not have have tried to autograd through y,
         # depending on the actual grad_outputs that were passed in during the backward.
         # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
         # allowing autograd to re-use the graph.

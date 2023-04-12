@@ -913,6 +913,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             fake_d_pred = torch.matmul(b, e.detach())
             d_loss = fake_d_pred.mean()
             d_loss.backward()
+
         a_ref = torch.randn(2, 2, requires_grad=True)
         b_ref = torch.randn(2, 2, requires_grad=True)
         out_ref = f(a_ref, b_ref)
