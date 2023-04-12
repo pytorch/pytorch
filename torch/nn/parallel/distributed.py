@@ -76,7 +76,7 @@ class _MixedPrecision:
     .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
         happens in ``param_dtype`` if specified or the original parameter dtype
         otherwise. For example, ``_MixedPrecision(param_dtype=torch.float16)``
-        would result in communication ocurring in fp16.
+        would result in communication occurring in fp16.
     """
 
     param_dtype: Optional[torch.dtype] = None
@@ -760,7 +760,7 @@ class DistributedDataParallel(Module, Joinable):
         self.gradient_as_bucket_view = gradient_as_bucket_view
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
-            logger.warning(f"Received mixed precision config {self.mixed_precision}")
+            logger.warning("Received mixed precision config %s", self.mixed_precision)
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -936,9 +936,7 @@ class DistributedDataParallel(Module, Joinable):
         # https://github.com/pytorch/pytorch/issues/90052.
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
-        if any(
-            hasattr(p, '_in_backward_optimizers') for p in self._module_parameters
-        ):
+        if any(hasattr(p, '_in_backward_optimizers') for p in self._module_parameters):
             # Remove hooks that apply_optim_in_backward had registered because
             # DDP customizes how optimizer is overlapped with backward due to
             # the allreduce.
@@ -964,7 +962,7 @@ class DistributedDataParallel(Module, Joinable):
                 ),
             )
 
-            self.reducer._set_optimizer_in_backward()
+            self.reducer._set_optimizer_in_backward()  # type: ignore[attr-defined]
 
     def _fire_reducer_autograd_hook(self, idx, *unused):
         """
@@ -1438,7 +1436,7 @@ class DistributedDataParallel(Module, Joinable):
                 work, self._divide_by_initial_world_size  # type: ignore[arg-type]
             )
 
-        # Calling _rebuild_buckets before forward compuation,
+        # Calling _rebuild_buckets before forward computation,
         # It may allocate new buckets before deallocating old buckets
         # inside _rebuild_buckets. To save peak memory usage,
         # call _rebuild_buckets before the peak memory usage increases
@@ -2182,9 +2180,9 @@ class DistributedDataParallel(Module, Joinable):
         r"""
         This interface can be called after DistributedDataParallel() is
         constructed. It returns a dictionary of logging data. It could help
-        for debugging and analysis. The loggind data includes DistributedDataParallel
+        for debugging and analysis. The logging data includes DistributedDataParallel
         constructor input parameters, some internal states of DistributedDataParallel
-        and performance metrics. Simply print the dictorinary and see what
+        and performance metrics. Simply print the dictionary and see what
         these metrics are.
         This is a prototype interface and subject to change in the future.
         """
