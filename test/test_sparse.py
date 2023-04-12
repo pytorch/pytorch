@@ -1582,7 +1582,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
-            gradcheck(fn, (S, D1, D2), masked=True)
+            gradcheck(fn, (S, D1, D2))
 
         test_shape(7, 8, 9, 20, False, None)
         test_shape(7, 8, 9, 20, True, None)
@@ -1607,7 +1607,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual(torch.sparse.mm(S, D), torch.mm(S_dense, D))
 
             def fn(S, D):
-                return torch.sparse.mm(S.sparse_mask(S), D)
+                return torch.sparse.mm(S, D)
             gradcheck(fn, (S, D))
 
         test_shape(7, 8, 9, 20, False)
@@ -1805,7 +1805,6 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(S_sum.item(), D_sum.item())
 
                 def fn(S):
-                    S = S.sparse_mask(S)
                     return torch.sparse.sum(S)
                 gradcheck(fn, (S.clone().requires_grad_(True),))
             else:
@@ -1815,7 +1814,14 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
+                    # TODO: move inside torch.sparse.sum
                     if res.layout != torch.strided:
+                        # Makes sure that all incoming grads get projected onto SEs of res.
+                        # Equivalently, makes sure that res is parametrized by it's SEs.
+                        # sparse.sum backward does not do it by default, so it needs an
+                        # extra help. Also, and this is important, because of that it
+                        # might not handle arbitrary grads, i.e. the grads with the sparsity
+                        # pattern differn from that of the result.
                         res = res.sparse_mask(res)
                     return res.to_dense(masked_grad=False)
                 gradcheck(fn, (S.clone().requires_grad_(True),))
@@ -3553,9 +3559,16 @@ class TestSparse(TestSparseBase):
         out = func(t, 0)
         self.assertEqual(out, torch.zeros_like(t))
 
+        def f(t):
+            res = func(t, 0)
+            # NOTE: res = res.sparse_mask(res) is not needed!
+            # This can only imply that sparse.softmax backward
+            # already does the projection.
+            return res.to_dense(masked_grad=False)
+
         # gradient
         t = t.requires_grad_()
-        gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True)
+        gradcheck(f, (t,))
 
 
     @dtypes(torch.double, torch.float)
@@ -3639,16 +3652,16 @@ class TestSparse(TestSparseBase):
 
                 # check autograd support on sparse matmul
                 def fn(D1, D2):
-                    return torch.sparse.mm(D1, D2).to_dense()
+                    return torch.sparse.mm(D1, D2).to_dense(masked_grad=False)
 
                 if a.is_cuda:
                     # For cuda, `nondet_tol` is set with `1e-5`
                     # This is because cuSparse sometimes returns approximate zero values like `~e-323`
                     # TODO: Check this cuSparse issue.
                     # This happens when you do chain multiplication `torch.sparse.mm` operations
-                    gradcheck(fn, (a, b), nondet_tol=1e-5, masked=True)
+                    gradcheck(fn, (a, b), nondet_tol=1e-5)
                 else:
-                    gradcheck(fn, (a, b), masked=True)
+                    gradcheck(fn, (a, b))
                 grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
