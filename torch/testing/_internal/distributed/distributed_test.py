@@ -628,7 +628,7 @@ class DistributedTest:
 
         def _verify_buffers_equal(self, m1, m2):
             # verify buffers across models
-            m1_buf_dict = {k: v for k, v in m1.module.named_buffers()}
+            m1_buf_dict = dict(m1.module.named_buffers())
             for name, buf in m2.module.named_buffers():
                 self.assertEqual(buf, m1_buf_dict[name])
 
@@ -4905,6 +4905,33 @@ class DistributedTest:
                 weight_decay=sgd_weight_decay,
             )
 
+        @skip_if_lt_x_gpu(2)
+        def test_get_data_parallel_params(self):
+            torch.cuda.set_device(self.rank)
+            model = TwoLinLayerNet().cuda()
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank]
+            )
+            dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(
+                model, named_params=True
+            )
+            for name, _ in dp_params:
+                self.assertNotEqual(f"module.{params_to_ignore[0]}", name)
+
+            # test named_params=False, just check if returns the expected
+            # no of parameters.
+            num_ddp_params = len(list(model.parameters())) - 1
+            count = 0
+            dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(model, named_params=False)
+            for _ in dp_params:
+                count += 1
+            self.assertEqual(count, num_ddp_params)
+
         def _test_ddp_apply_optim_in_backward(
             self,
             optim_cls,
@@ -6218,6 +6245,26 @@ class DistributedTest:
                 offset=bs_offset,
             )
 
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_half(self):
+            group, group_id, rank = self._init_global_test()
+
+            model = copy.deepcopy(BN_NET)
+            model = model.half()
+            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+            model = nn.parallel.DistributedDataParallel(model.cuda(rank), device_ids=[rank])
+            inp = torch.randn(2, 2, dtype=torch.float16, device=torch.device(rank))
+            # Check that forward/backward do not error with dtype mismatch
+            out = model(inp)
+            self.assertEqual(out.dtype, torch.float16)
+            out.sum().backward()
+            for param in model.parameters():
+                self.assertEqual(param.grad.dtype, torch.float16)
+
         def _test_ddp_logging_data(self, is_gpu):
             rank = dist.get_rank()
             model_DDP = copy.deepcopy(DDP_NET)
@@ -6252,7 +6299,7 @@ class DistributedTest:
                 self._model_step_with_zero_grad(model_DDP)
 
                 # Verify DDP logging data is sampled as expected
-                # If it has ran more than 10 iteratons and this is
+                # If it has ran more than 10 iterations and this is
                 # the sampled iteration for measuring run time stats,
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
@@ -7101,7 +7148,7 @@ class DistributedTest:
             rank = self.rank
             sync_interval = test_case.sync_interval
             torch.cuda.set_device(rank)
-            # Ensure all outsanding GPU work is comlete so this test runs independently.
+            # Ensure all outstanding GPU work is completed so this test runs independently.
             dist.barrier()
             # Bucket_cap_mb is intentionally low to test allreduce scheduling when
             # there are many buckets.
@@ -8287,7 +8334,7 @@ class DistributedTest:
                     dist.get_backend(group_to_use) == dist.Backend.NCCL
                     and not is_detail_dbg_mode
                 ):
-                    expected_err = "Caught collective operation timeout"
+                    expected_err = "caught collective operation timeout"
                     ctx = self.assertRaisesRegex(RuntimeError, expected_err)
                 else:
                     expected_err = None
@@ -8656,7 +8703,7 @@ class DistributedTest:
             # Kick off some allreduce work on all ranks
             for _ in range(10):
                 dist.all_reduce(torch.cat(tensors))
-            # Run monitored barrier and ensure it passees
+            # Run monitored barrier and ensure it passes
             timeout = timedelta(seconds=2)
             dist.monitored_barrier(timeout=timeout)
             # Check monitored_barrier success with wait_all_ranks=True
@@ -8740,7 +8787,7 @@ class DistributedTest:
                 if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     err_regex = "Timed out waiting"
                 else:
-                    err_regex = "Caught collective operation timeout"
+                    err_regex = "caught collective operation timeout"
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
             else:
@@ -9545,6 +9592,59 @@ class DistributedTest:
                 self._verify_buffers_equal(model_ddp, model_ddp_no_hook)
                 loss_hook.backward()
                 loss_no_hook.backward()
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_remove_autograd_hooks(self):
+
+            class SimulateError(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, input):
+                    return input
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    raise RuntimeError()
+
+            class MyModel(nn.Module):
+                def __init__(self, device):
+                    super(MyModel, self).__init__()
+                    self.error = True
+                    self.fc1 = nn.Linear(10, 10).cuda(device)
+
+                def forward(self, inp):
+                    if self.error:
+                        return self.fc1(SimulateError.apply(inp))
+                    else:
+                        return self.fc1(inp)
+
+
+            # Run with error to trigger backward pass that marks fc1 as being marked
+            # ready. If we don't remove autograd hooks before running below it would
+            # fail on the old autograd hook.
+            model = MyModel(self.rank)
+            input = torch.rand(10, 10, requires_grad=True).cuda(self.rank)
+            model_ddp1 = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+
+            with self.assertRaises(RuntimeError):
+                model_ddp1(input).sum().backward()
+
+            # Remove autograd hooks on old instance.
+            model_ddp1._remove_autograd_hooks()
+
+            # Try another DDP instance without error now.
+            model.error = False
+            model_ddp2 = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+            )
+            model_ddp2(input).sum().backward()
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(

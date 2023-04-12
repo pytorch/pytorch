@@ -157,6 +157,8 @@ struct CUDAValueSelectionIntersectionKernel {
   }
 };
 
+using OptTensor = c10::optional<Tensor>;
+
 void mul_sparse_sparse_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
@@ -170,10 +172,11 @@ void mul_sparse_sparse_out_cuda_kernel(
 void sparse_mask_intersection_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
-    const Tensor& y) {
+    const Tensor& y,
+    const OptTensor& x_hash_opt = c10::nullopt) {
   using CUDAValueRhsProjKernel = CUDAValueSelectionIntersectionKernel<RhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueRhsProjKernel>(
-      result, x, y
+      result, x, y, x_hash_opt
   );
 }
 

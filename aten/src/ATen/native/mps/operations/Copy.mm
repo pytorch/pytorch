@@ -35,7 +35,7 @@ size_t compute_strided_size(const at::Tensor& t) {
 }
 
 bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == t.numel();
+  return compute_strided_size(t) == static_cast<size_t>(t.numel());
 }
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
@@ -47,11 +47,7 @@ void copy_cast_mps(at::Tensor& dst,
                    bool non_blocking = true) {
   using namespace mps;
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  using CachedGraph = MPSUnaryCachedGraph;
 
   MPSStream* stream = getCurrentMPSStream();
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
@@ -130,10 +126,10 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   size_t dst_tensor_nbytes = dst.nbytes();
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    void* host_dst = dst.storage().data();
+    const void* host_dst = dst.storage().data();
     void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
     NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
     // 4 bytes alignment required on macos for blits.
@@ -188,12 +184,12 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   auto src_byte_offset = src.storage_offset() * src.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst);
   const size_t size_to_copy = src.nbytes();
-  const void* host_src = static_cast<char*>(src.storage().data()) + src_byte_offset;
+  const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 
   @autoreleasepool {
-    MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
     NSUInteger sourceOffset = 0;
 

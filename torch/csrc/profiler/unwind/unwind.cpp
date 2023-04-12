@@ -1,7 +1,8 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !defined(__x86_64__)
+#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
+    !__has_include("ext/stdio_filebuf.h")
 namespace torch {
 namespace unwind {
 std::vector<void*> unwind() {
@@ -293,7 +294,13 @@ std::vector<void*> unwind() {
   return frames;
 }
 
-std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+#ifdef FBCODE_CAFFE2
+// in CUDA binaries, we have to use the internal symbolizer because
+// addr2line seems to hang.
+__attribute__((weak))
+#endif
+std::vector<Frame>
+symbolize(const std::vector<void*>& frames) {
   // we need to make sure we don't write more than 64k bytes to
   // a pipe before reading the results. Otherwise the buffer may
   // get filled and block before we read the results.

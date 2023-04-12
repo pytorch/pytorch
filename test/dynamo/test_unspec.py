@@ -10,7 +10,7 @@ import torch._dynamo.testing
 from torch._dynamo.testing import same
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True, specialize_int=False)
+@torch._dynamo.config.patch(dynamic_shapes=True)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -115,6 +115,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_compiled_random_calls_are_random(self):
+        # For compiled functions with random calls,
+        # it should return different values for every iteration.
+        # https://github.com/pytorch/pytorch/issues/95425
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return (x + 1) * random.uniform(0, 1)
+
+        res = []
+        for _ in range(5):
+            res.append(fn(torch.ones(2)))
+        for i in range(1, 5):
+            self.assertFalse(same(res[i - 1], res[i]))
+
     def test_random_call_with_while_loop(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=3)
@@ -198,6 +212,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
+
+    def test_shape_graph_break(self):
+        from torch._dynamo.comptime import comptime
+
+        def fn(x):
+            x_shape = x.size()
+            comptime.graph_break()
+            return x + torch.randn(x_shape)
+
+        x = torch.randn(20)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn(x)
 
 
 if __name__ == "__main__":

@@ -81,10 +81,15 @@ jobs:
       # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
       # used
       - name: Install macOS homebrew dependencies
-        run: |
-          # Install dependencies
-          brew install libomp
-          brew link --force libomp
+        uses: nick-fields/retry@v2.8.2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            # Install dependencies
+            brew install libomp
+            brew link --force libomp
 
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
@@ -93,34 +98,34 @@ jobs:
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
-      - name: Install PyTorch
+      - name: Install PyTorch and run MPS tests
+        id: test
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
           PY_VERS: 3.9
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           set -ex
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
 
-      - name: Run MPS tests
-        id: test
-        env:
-          ENV_NAME: conda-test-env-${{ github.run_id }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-        shell: arch -arch arm64 bash {0}
-        run: |
-          # shellcheck disable=SC1090
-          set -ex
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 
