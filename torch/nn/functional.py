@@ -429,7 +429,10 @@ def fractional_max_pool2d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
+    r"""
+    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+
+    Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -523,7 +526,10 @@ def fractional_max_pool3d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
+    r"""
+    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+
+    Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -1064,7 +1070,10 @@ def lp_pool1d(
 def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool1d(input, output_size, return_indices=False)
+
+    Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
@@ -1103,7 +1112,10 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool2d(input, output_size, return_indices=False)
+
+    Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
@@ -1144,7 +1156,10 @@ def adaptive_max_pool3d_with_indices(
     input: Tensor, output_size: BroadcastingList3[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 3D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool3d(input, output_size, return_indices=False)
+
+    Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool3d` for details and output shape.
@@ -3677,12 +3692,12 @@ Examples::
 )
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
@@ -3752,17 +3767,17 @@ if upsample.__doc__:
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False, round_with_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
@@ -3779,7 +3794,8 @@ def interpolate(  # noqa: F811
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(
+
+def interpolate(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
     scale_factor: Optional[List[float]] = None,
@@ -3952,7 +3968,7 @@ def interpolate(
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
         assert scale_factors is not None
-        d = 0.5 if round_with_scale_factor in (None, True) else 0.0
+        d = 0.5 if round_with_scale_factor is None or round_with_scale_factor is True else 0.0
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             # we perform round (i.e. floor(0.5 + x)) to match opencv, scipy, scikit-image output size
@@ -4976,7 +4992,7 @@ Shape legend:
 
 Examples::
 
-    >>> # Optionally use the context manager to ensure one of the fused kerenels is run
+    >>> # Optionally use the context manager to ensure one of the fused kernels is run
     >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
@@ -5118,7 +5134,7 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
             Default: `True`
             Note: `needs_weight` defaults to `True`, but should be set to `False`
-            For best performance when attention weights are not nedeeded.
+            For best performance when attention weights are not needed.
             *Setting needs_weights to `True`
             leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all

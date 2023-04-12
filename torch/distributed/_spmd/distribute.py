@@ -1,34 +1,27 @@
-from dataclasses import dataclass
-from enum import Enum, auto
-from functools import partial
-from typing import Dict, List, Optional, Sequence, Set, Tuple, cast
 import logging
+from dataclasses import dataclass
+from enum import auto, Enum
+from functools import partial
+from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
 import torch.nn as nn
 from torch._functorch.aot_autograd import aot_module, make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._spmd.comm_tensor import _get_tracer
-from torch.distributed._spmd.log_utils import get_logger
 from torch.distributed._spmd.aot_function_patch import patched_aot_function
+from torch.distributed._spmd.comm_tensor import _get_tracer
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.graph_utils import OP
+from torch.distributed._spmd.log_utils import get_logger
 from torch.distributed._spmd.experimental_ops import *  # noqa: F401, F403
-from torch.distributed._tensor import (
-    DeviceMesh,
-    DTensor,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
-    operator_dispatch,
-)
-from torch.distributed._tensor.redistribute import (
-    _redistribute_with_local_tensor,
+    _operator_dispatch,
 )
 from torch.distributed._tensor.placement_types import _Partial, Placement
+from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
     maybe_disable_fake_tensor_mode,
@@ -75,9 +68,7 @@ def _dispatch_with_local_tensors(
     specs: Optional[
         Dict[
             torch.Tensor,
-            Tuple[
-                torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]
-            ],
+            Tuple[torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]],
         ]
     ] = None,
 ) -> object:
@@ -129,10 +120,36 @@ def _update_specs_for_redistribute(args, target_schema, redistribute):
     return specs, unflattened_args
 
 
+# When no tensor redistribution is required, we only need to update non-tensor args
+# of the node according to op_schema and avoid building a GraphModule just for the
+# node.
+def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> None:
+    flat_args, args_tree_spec = tree_flatten(node.args)
+    flat_args_schema, _ = tree_flatten(op_schema.args_schema)
+
+    def is_sym_int_or_int(arg: Union[int, torch.fx.Node]) -> bool:
+        if isinstance(arg, torch.fx.Node):
+            return arg.target in [
+                torch.ops.aten.sym_size,
+                torch.ops.aten.sym_numel,
+                torch.ops.aten.sym_stride,
+            ]
+        return isinstance(arg, int)
+
+    assert len(flat_args) == len(flat_args_schema)
+    for i, (arg, arg_schema) in enumerate(zip(flat_args, flat_args_schema)):
+        if is_sym_int_or_int(arg) and isinstance(arg_schema, int):
+            flat_args[i] = arg_schema
+
+    args = tree_unflatten(flat_args, args_tree_spec)
+    for idx, arg in enumerate(args):
+        node.update_arg(idx, arg)
+    return None
+
+
 def _get_dtensor_dispatch_graph(
-    node: fx.Node,
-    node_to_obj: Dict[fx.Node, object],
-) -> fx.GraphModule:
+    node: fx.Node, node_to_obj: Dict[fx.Node, object], force_make_fx: bool = False
+) -> Optional[fx.GraphModule]:
     def _remap_arg(arg: object) -> object:
         if isinstance(arg, torch.fx.Node):
             obj = node_to_obj[arg]
@@ -144,16 +161,23 @@ def _get_dtensor_dispatch_graph(
         else:
             return arg
 
-    # Args should be a list of objects post remapping.
-    args = tree_map(_remap_arg, node.args)
-    # kwargs in this set of tests are all constants
-    kwargs = cast(Dict[str, object], node.kwargs)
-
-    op_overload = cast(torch._ops.OpOverload, node.target)
-
-    # run dispatch once to get the real DTensor output.
     with torch.no_grad():
-        out = operator_dispatch(
+        # Args should be a list of objects post remapping.
+        args = tree_map(_remap_arg, node.args)
+        # kwargs in this set of tests are all constants
+        kwargs = cast(Dict[str, object], node.kwargs)
+
+        op_overload = cast(torch._ops.OpOverload, node.target)
+
+        if node.target == torch.ops.aten.view.default:
+            # HACK: this is a hack to get around with the fact that some
+            # view operations on a "global" tensor is invalid usage
+            # but somehow the view operation on the batch input might hit it
+            # so we convert the view op to reshape before calling DTensor
+            op_overload = torch.ops.aten.reshape.default
+
+        # run dispatch once to get the real DTensor output.
+        out, op_schema, output_sharding = _operator_dispatch(
             op_overload,
             args,
             kwargs,  # kwargs in this set of tests are all constants
@@ -161,32 +185,47 @@ def _get_dtensor_dispatch_graph(
         )
         node_to_obj[node] = out
 
-    op_schema = DTensor._propagator.prepare_op_schema(op_overload, args, kwargs)
-    # get DTensor specs for inputs and outputs
-    output_sharding = DTensor._propagator.propagate_op_sharding(
-        op_overload,
-        op_schema,
-    )
+        assert output_sharding.schema_suggestions is not None
+        target_schema = output_sharding.schema_suggestions[0]
+        redistribute = target_schema is not op_schema
 
-    assert output_sharding.schema_suggestions is not None
-    target_schema = output_sharding.schema_suggestions[0]
-    redistribute = target_schema is not op_schema
+        # If no redistribution is needed, we don't need to replace
+        # the original node.
+        if not redistribute:
+            _update_node_from_op_schema(node, target_schema)
+            return None
 
-    # TODO: this is broken when kwargs contains tensors
-    # or if a non-tensor kwarg was modified by the sharding propagation
-    # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
-    updated_args_spec, unflattened_args = _update_specs_for_redistribute(
-        args, target_schema, redistribute
-    )
+        # TODO: this is broken when kwargs contains tensors
+        # or if a non-tensor kwarg was modified by the sharding propagation
+        # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
+        updated_args_spec, unflattened_args = _update_specs_for_redistribute(
+            args, target_schema, redistribute
+        )
 
-    dispatch = partial(
-        _dispatch_with_local_tensors,
-        op_overload,
-        kwargs=kwargs,
-        specs=updated_args_spec,
-    )
+        dispatch = partial(
+            _dispatch_with_local_tensors,
+            op_overload,
+            kwargs=kwargs,
+            specs=updated_args_spec,
+        )
 
-    return make_fx(dispatch)(unflattened_args)
+        gm = make_fx(dispatch, _allow_non_fake_inputs=False)(unflattened_args)
+        # FIXME(@wanchaol, @mrshenli): the above seems to accidentally captured
+        # DeviceMesh tensor ops when handling inplace operators? The ``_to_copy`` is
+        # not connected to graph output. So, using DCE to get rid of it, but this
+        # doesn't look correct.
+        #
+        # The following operators appear in the captured graph, where the dtype is
+        # torch.int64.
+        #
+        # get_attr       _tensor_constant0  _tensor_constant0         ()
+        # call_function  transpose          aten.transpose.int        (_tensor_constant0, -1, 0)
+        # call_function  view               aten.view.default         (transpose, [-1, 2])
+        # call_function  view_1             aten.view.default         (view, [2])
+        # call_function  _to_copy           aten._to_copy.default     (view_1,)
+        gm.graph.eliminate_dead_code()
+
+        return gm
 
 
 def _build_dummy_add_graph(
@@ -208,9 +247,7 @@ def _build_dummy_add_graph(
     traced_add = make_fx(dummy_add)(grad, zero)
 
     placeholders = [n for n in traced_add.graph.nodes if n.op == OP.PLACEHOLDER]
-    call_functions = [
-        n for n in traced_add.graph.nodes if n.op == OP.CALL_FUNCTION
-    ]
+    call_functions = [n for n in traced_add.graph.nodes if n.op == OP.CALL_FUNCTION]
     assert len(placeholders) == 2
     assert len(call_functions) == 1
     node_to_obj[placeholders[0]] = dt
@@ -219,10 +256,9 @@ def _build_dummy_add_graph(
     )
 
     traced_dispatch = _get_dtensor_dispatch_graph(
-        call_functions[0], node_to_obj
+        call_functions[0], node_to_obj, force_make_fx=True
     )
-
-    traced_dispatch.graph.lint()
+    assert traced_dispatch is not None
 
     # TODO(anj): This depends on the call function node -> actual DTensor output
     # mapping that we want to avoid for SPMD expansion
@@ -264,7 +300,6 @@ def _convert_output(
 
         # remove add node and replace it with wait node
         add[0].replace_all_uses_with(wait[0])
-        traced_dispatch.graph.lint()
         traced_dispatch.graph.eliminate_dead_code()
         # also update the actual DTensor corresponding to the node
         # TODO(anj): We require mapping of the final DTensor output to the wait
@@ -286,9 +321,7 @@ def _convert_output(
                 # inner graph (in _build_dummy_add_graph). Just add it to the final
                 # output node so that we can report the final output specs correctly.
                 # TODO(anj): We are depending on the concrete DTensor output of the dummy add.
-                node_to_obj[value_remap[dtn.args[0][0]]] = node_to_obj[
-                    dtn.args[0][0]
-                ]
+                node_to_obj[value_remap[dtn.args[0][0]]] = node_to_obj[dtn.args[0][0]]
 
             else:
                 if dtn.op == OP.GET_ATTR:
@@ -298,9 +331,7 @@ def _convert_output(
                         getattr(traced_dispatch, dtn.target),
                     )
                 with gm.graph.inserting_before(node):
-                    value_remap[dtn] = gm.graph.node_copy(
-                        dtn, lambda n: value_remap[n]
-                    )
+                    value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
     if has_partial:
         gm.graph.erase_node(node)
         return gm.graph.output(new_args)
@@ -312,7 +343,6 @@ def _rebuild_graph(
     gm: fx.GraphModule,
     node_replacements: Dict[torch.fx.Node, torch.fx.GraphModule],
 ) -> None:
-
     # replace nodes in local traced graph with DTensor's dispatch graph
     for node in gm.graph.nodes:
         if node not in node_replacements:
@@ -332,7 +362,6 @@ def _rebuild_graph(
         # insert DT's dispatch graph to traced local graph.
         with gm.graph.inserting_before(node):
             for dtn in traced_dispatch.graph.nodes:
-
                 if dtn.op == OP.PLACEHOLDER:
                     # do nothing, ignore placeholders, as it has already
                     # been prepared in value_remap
@@ -369,11 +398,31 @@ def _rebuild_graph(
                     new_node = value_remap[output]
                     node.replace_all_uses_with(new_node)
                 else:
-                    value_remap[dtn] = gm.graph.node_copy(
-                        dtn, lambda n: value_remap[n]
-                    )
+                    value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
+                    if all(
+                        [
+                            isinstance(n.target, torch._ops.OpOverload)
+                            and n.target._schema.name.startswith(
+                                ("aten::_foreach", "aten::_fused_adam")
+                            )
+                            for n in [dtn, node]
+                        ]
+                    ):
+                        # FIXME(@mrshenli): This is a temporary solution enable
+                        # foreach ops. The problem is that foreach ops returns
+                        # List[Tensor], but make_fx will flatten that before
+                        # passing those tensors to output node, which will
+                        # introduce additional getitem nodes. These redundant
+                        # getitem nodes breaks graph correctness as we cannot do
+                        # getitem(getitem(foreach_out, 0), 0). This temporary
+                        # solution skips getitem nodes in DTensor expanded
+                        # subgraphs.
+                        node.replace_all_uses_with(value_remap[dtn])
+                        break
+            # explicitly erase node instead of relying on DCE, as DCE does not
+            # remove inplace copy_ correctly.
+            gm.graph.erase_node(node)
 
-    gm.graph.lint()
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
@@ -428,15 +477,15 @@ def _convert_to_distributed(
     output_schemas: Dict[str, Schema] = {}
     for i, node in enumerate(gm.graph.nodes):
         assert logger is not None
-        logger.info(f"node{i}: op={node.op} target={node.target}")
+        logger.info("node%s: op=%s target=%s", i, node.op, node.target)
         if node.op == OP.PLACEHOLDER:
             assert i < len(
                 inps
-            ), f"got more placeholer nodes ({i + 1}) than inputs ({len(inps)})"
+            ), f"got more placeholder nodes ({i + 1}) than inputs ({len(inps)})"
 
             # our example inputs are local shards. Create DTensors from them.
             node_to_obj[node] = DTensor.from_local(
-                inps[i],
+                inps[i].clone(),  # use clone to avoid modifications from inplace ops
                 schemas[i].mesh,
                 schemas[i].placements,
                 # prevent running this collective in backwards pass
@@ -444,16 +493,22 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            if not node.target._schema.name[-1] == "_":
-                node_replacements[node] = _get_dtensor_dispatch_graph(
-                    node, node_to_obj
+            if node.target == torch.ops.aten.scalar_tensor.default:
+                node_to_obj[node] = DTensor.from_local(
+                    torch.ops.aten.scalar_tensor(
+                        node.args[0],
+                        dtype=node.kwargs["dtype"],
+                        device=node.kwargs["device"],
+                    ),
+                    schemas[0].mesh,
+                    [Replicate()],
+                    # prevent running this collective in backwards pass
+                    run_check=False,
                 )
             else:
-                # FIXME(@mrshenli, @wanchaol): this prevents DTensor to insert
-                # allreduce for partial DTensor objects.
-                # FIXME: assuming it's inplace on the first arugment
-                node_to_obj[node] = node_to_obj[node.args[0]]
-                logger.info(f"Skipping expanding inplace operator {node.target.name()}")
+                replacement = _get_dtensor_dispatch_graph(node, node_to_obj)
+                if replacement is not None:
+                    node_replacements[node] = replacement
         elif node.op == OP.OUTPUT:
             if not _allow_partial:
                 # Returns an expanded dummy add node that ensures
@@ -487,11 +542,14 @@ def _convert_to_distributed(
                     return arg
 
             args = tree_map(_remap_arg, node.args)
-            assert (
-                len(args) >= 2
-            ), f"Expected number of args for call function to be at least 2, found {len(args)}"
-            # TODO(anj): Why do we assume this is only 2?
-            node_to_obj[node] = node.target(args[0], args[1])
+            if node.target == torch.ops.aten.sym_numel:
+                node_to_obj[node] = args[0].numel()
+            else:
+                assert (
+                    len(args) >= 2
+                ), f"Expected number of args for call function to be at least 2, found {len(args)} {node}"
+                # TODO(anj): Why do we assume this is only 2?
+                node_to_obj[node] = node.target(args[0], args[1])
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
 
@@ -532,7 +590,6 @@ class _SPMD:
         gm: fx.GraphModule,
         inps: List[torch.Tensor],
     ) -> fx.GraphModule:
-
         with maybe_disable_fake_tensor_mode():
             return self._compile(training_phase, gm, original_inputs[0])
 
@@ -562,17 +619,13 @@ class _SPMD:
                 "Got {placeholder_node.op}"
             )
 
-            known_schema = self._known_specs_by_node_name.get(
-                placeholder_node.name
-            )
+            known_schema = self._known_specs_by_node_name.get(placeholder_node.name)
 
             if known_schema is not None:
                 schemas.append(known_schema)
             elif not isinstance(inp, torch.Tensor):
                 schemas.append(
-                    Schema(
-                        mesh=self._param_schema.mesh, placements=[Replicate()]
-                    )
+                    Schema(mesh=self._param_schema.mesh, placements=[Replicate()])
                 )
             else:
                 if self._is_param(inp):
@@ -606,7 +659,6 @@ def distribute(
     *args: Tuple[object],
     **kwargs: Dict[str, object],
 ) -> nn.Module:
-
     flat_args, _ = tree_flatten(args)
     flat_kwargs, _ = tree_flatten(kwargs)
     input_set: Set[object] = set(flat_args + flat_kwargs)

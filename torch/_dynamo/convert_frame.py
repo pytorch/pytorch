@@ -9,6 +9,7 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -51,6 +52,7 @@ from .utils import (
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 
 
 class Tracker:
@@ -78,6 +80,7 @@ output_codes = Tracker()
 
 
 initial_grad_state = None
+initial_deterministic_algorithms_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -174,8 +177,11 @@ def has_tensor_in_frame(frame):
             return True
 
     log.debug(
-        f"skipping because no torch.* {frame.f_code.co_name} \
-            {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+        "skipping because no torch.* %s \
+            %s %s",
+        frame.f_code.co_name,
+        frame.f_code.co_filename,
+        frame.f_code.co_firstlineno,
     )
 
     return False
@@ -199,6 +205,7 @@ def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
     export: bool = False,
+    export_constraints=None,
 ):
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
@@ -206,6 +213,21 @@ def convert_frame_assert(
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
         code = frame.f_code
+
+        if code in input_codes and (
+            recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
+        ):
+            message = (
+                f"Recompiling function {code.co_name} in {code.co_filename}",
+                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+            )
+
+            if recompiles_log.isEnabledFor(logging.DEBUG):
+                recompiles_log.debug(message)
+
+            if config.error_on_recompile:
+                raise exc.RecompileError(message)
+
         input_codes.add(code)
         if code in output_codes:
             return None
@@ -253,10 +275,14 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                + f"   function: {format_func_info(code)}\n"
-                + f"   reasons:  {format_guard_failures(code)}\n"
-                + f"to diagnose recompilation issues, see {troubleshooting_url}."
+                "torch._dynamo hit config.cache_size_limit (%s)\n"
+                "   function: %s\n"
+                "   reasons:  %s\n"
+                "to diagnose recompilation issues, see %s.",
+                config.cache_size_limit,
+                format_func_info(code),
+                format_guard_failures(code),
+                troubleshooting_url,
             )
             unimplemented("cache_size_limit reached")
 
@@ -266,6 +292,11 @@ def convert_frame_assert(
         global initial_grad_state
         initial_grad_state = torch.is_grad_enabled()
 
+        global initial_deterministic_algorithms_state
+        initial_deterministic_algorithms_state = (
+            torch.are_deterministic_algorithms_enabled()
+        )
+
         return _compile(
             frame.f_code,
             frame.f_globals,
@@ -274,6 +305,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
+            export_constraints,
             hooks,
             frame,
         )
@@ -291,6 +323,7 @@ def _compile(
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
+    export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
@@ -312,6 +345,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            export_constraints,
             mutated_closure_cell_contents,
         )
         with tracing(tracer.output.tracing_context):
@@ -337,8 +371,12 @@ def _compile(
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
                 log.debug(
-                    f"Skipping frame {e} {code.co_name} \
-                    {code.co_filename} {code.co_firstlineno}"
+                    "Skipping frame %s %s \
+                    %s %s",
+                    e,
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
                 )
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
@@ -381,7 +419,12 @@ def _compile(
         if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
             guard_str += "\n".join(
-                [f" - {str(guard)}" for guard in sorted(output.guards)]
+                [
+                    f"  {code}"
+                    for guard in sorted(output.guards)
+                    if guard.code_list is not None
+                    for code in guard.code_list
+                ]
             )
             guards_log.debug(guard_str)
 
@@ -394,11 +437,13 @@ def _compile(
         TorchRuntimeError,
         BackendCompilerFailed,
         AssertionError,
+        ConstraintViolationError,
     ) as e:
         exception_handler(e, code, frame)
         raise
     except Exception as e:
         exception_handler(e, code, frame)
+        # TODO: Why???  Why not raise the original exception as is
         raise InternalTorchDynamoError() from e
 
 
