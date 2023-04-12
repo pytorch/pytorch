@@ -1341,7 +1341,7 @@ def emit_body(
                 else:
                     var_ = var + ("[i]" if is_foreacharg_list_type else "")
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
-                remove_underscore_before_replace |= True and "self" not in var
+                remove_underscore_before_replace = True and "self" not in var
             elif (
                 type == BaseCType(tensorListT)
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
@@ -1349,7 +1349,7 @@ def emit_body(
             ):
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
-                remove_underscore_before_replace |= True
+                remove_underscore_before_replace = True
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(symIntArrayRefT):
