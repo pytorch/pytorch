@@ -29,7 +29,12 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.testing import (
+    rand_strided,
+    requires_static_shapes,
+    same,
+    skipIfPy311,
+)
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_MACOS
@@ -46,6 +51,9 @@ lib.impl("foo", torch.sin, "CPU")
 requires_cuda = functools.partial(
     unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
 )
+
+
+_GLOBAL_CPU_TENSOR = torch.randn(3)
 
 
 def is_fx_tracing_test() -> bool:
@@ -894,6 +902,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
 
+    # See https://github.com/pytorch/pytorch/issues/97745
+    def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
+        def f(a, b):
+            c = torch.ones(2, 2)
+            d = torch.ones(2, 2)
+            e = torch.matmul(a, c)
+            g_loss = torch.abs(e - d).mean()
+            g_loss.backward()
+            fake_d_pred = torch.matmul(b, e.detach())
+            d_loss = fake_d_pred.mean()
+            d_loss.backward()
+        a_ref = torch.randn(2, 2, requires_grad=True)
+        b_ref = torch.randn(2, 2, requires_grad=True)
+        out_ref = f(a_ref, b_ref)
+
+        a_test = a_ref.clone().detach().requires_grad_(True)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+        out_test = torch.compile(f, backend="aot_eager")(a_test, b_test)
+
+        self.assertEqual(out_ref, out_test)
+        print(a_ref.grad)
+        print(a_test.grad)
+        self.assertEqual(a_ref.grad, a_test.grad)
+        self.assertEqual(b_ref.grad, b_test.grad)
+
     def test_embedding_backward_broadcasting_decomp(self):
         def f(grad_output, indices):
             num_weights = 10
@@ -1021,6 +1054,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
+    @skipIfPy311
     @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1308,6 +1342,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn3()
         self.assertTrue(same(ref, res))
 
+    @skipIfPy311
     def test_with_on_graph_break_inst(self):
         def reversible(x):
             print("Hello world")  # Cause graph break so inline fails
@@ -1332,6 +1367,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    @skipIfPy311
     def test_with_on_graph_break_nested(self):
         def reversible(x):
             torch._dynamo.graph_break()  # Cause graph break so inline fails
@@ -1359,6 +1395,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     # https://github.com/pytorch/torchdynamo/issues/1446
+    @skipIfPy311
     def test_grad_mode_carrying_correct_state_after_graph_break(self):
         def fn(x):
             with torch.no_grad():
@@ -1405,7 +1442,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def fn():
             condition_shape = (5, 5)
             dtypes = (torch.bool,)
@@ -2337,6 +2374,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
+    @skipIfPy311
     def test_exception_in_dynamo_handling(self):
         hit_handler = False
 
@@ -2390,7 +2428,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # dynamo eval frame handler is active), as that will cause the
         # generator to become exhausted and trigger the throw_flag == TRUE
         # case.
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def f(x):
             generator_box.clear()
             return g(x)
@@ -2891,6 +2929,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
 
         f(torch.zeros(4), float, np.float16)
+
+    def test_dedup_global(self):
+        @torch.compile()
+        def f():
+            return _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR
+
+        self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
 
 if __name__ == "__main__":
