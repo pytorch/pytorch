@@ -445,6 +445,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if tx.output.side_effects.is_attribute_mutation(self):
+            try:
+                result = tx.output.side_effects.load_attr(self, name)
+                return variables.ConstantVariable(
+                    not isinstance(result, variables.DeletedVariable)
+                ).add_options(self, result)
+            except KeyError:
+                pass
         if not self.source:
             unimplemented("hasattr no source")
         options = VariableTracker.propagate(self)

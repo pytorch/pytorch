@@ -189,7 +189,7 @@ class KeywordArg(PatternExpr):
 
 class CallFunction(PatternExpr):
     """
-    Matches a call_function node in the FX graps: `fns[i](*args, **kwargs)`
+    Matches a call_function node in the FX graphs: `fns[i](*args, **kwargs)`
     """
 
     def __init__(self, fns, *args, _users=1, **kwargs):
@@ -787,7 +787,7 @@ def cat_addmm(match, inputs, dim):
 def cat_tuned_op(match, inputs, dim, *, op, shape_of):
     """
     Memory planning to remove cat.  We can't use the stock memory
-    planner since autotuning matmauls needs to know the output layout.
+    planner since autotuning matmuls needs to know the output layout.
     """
     if len(inputs) == 1:
         return op(*inputs[0])
