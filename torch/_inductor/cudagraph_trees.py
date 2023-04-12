@@ -752,8 +752,6 @@ class CUDAGraphNode:
 
         # Output Storage Alias information, can be:
         # - A new, unaliased storage, or the output is None
-        # - An alias of a persistent static input, in which case a storage will be set in the corresponding index
-        # of output_persistent_storage
         # - An alias of an output of a prior graph
         # - An alias of an output already created in the reconstructed outputs
         self.output_storage_alias: OutputList[OutputAliasInfo] = []
@@ -869,7 +867,7 @@ class CUDAGraphNode:
                 continue
 
             storage = self.prepare_alias_info_for_tensor_construction(
-                i, storage_info, metadata
+                storage_info, metadata
             )
 
             if isinstance(storage, UntypedStorage) or storage is None:
@@ -886,7 +884,7 @@ class CUDAGraphNode:
         return outputs
 
     def prepare_alias_info_for_tensor_construction(
-        self, out_index: int, out_alias_info: OutputAliasInfo, metadata: Dict[str, Any]
+        self, out_alias_info: OutputAliasInfo, metadata: Dict[str, Any]
     ) -> List[Union[UntypedStorage, None, int]]:
         if metadata is None or out_alias_info is UnaliasedStorage:
             return None
@@ -903,12 +901,10 @@ class CUDAGraphNode:
         self,
     ) -> List[Union[UntypedStorage, None, int]]:
         output_storages = []
-        for i, (output_storage_alias, metadata) in enumerate(
-            zip(self.output_storage_alias, self.outputs_metadata)
-        ):
+        for (output_storage_alias, metadata) in zip(self.output_storage_alias, self.outputs_metadata):
             output_storages.append(
                 self.prepare_alias_info_for_tensor_construction(
-                    i, output_storage_alias, metadata
+                    output_storage_alias, metadata
                 )
             )
 
