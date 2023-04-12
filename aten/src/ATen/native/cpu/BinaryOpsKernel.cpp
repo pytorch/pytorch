@@ -166,6 +166,49 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
 // For reference, see CPython's implementation:
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
+template <typename scalar_t>
+inline scalar_t div_floor_internal(scalar_t a, scalar_t b) {
+  if (C10_UNLIKELY(b == 0)) {
+    // Divide by zero: return standard IEEE result
+    return a / b;
+  }
+
+  auto mod = std::fmod(a, b);
+  auto div = (a - mod) / b;
+  if ((mod != 0) && (b < 0) != (mod < 0)) {
+    div -= scalar_t(1);
+  }
+
+  scalar_t floordiv;
+  if (div != 0) {
+    floordiv = std::floor(div);
+    if (div - floordiv > scalar_t(0.5)) {
+      floordiv += scalar_t(1.0);
+    }
+  } else {
+    floordiv = c10::copysign(scalar_t(0), a / b);
+  }
+  return floordiv;
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> div_floor_internal(const Vectorized<scalar_t>& a, const Vectorized<scalar_t>& b) {
+  using vec_t = Vectorized<scalar_t>;
+  auto mod = a.fmod(b);
+  auto div = (a - mod) / b;
+  const auto zero = vec_t(0);
+  auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+  const auto one = vec_t(1);
+  div = vec_t::blendv(div, div - one, mask);
+  auto floordiv = div.floor();
+  mask = (div - floordiv) > vec_t(0.5);
+  floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+  const auto basic_div = a / b;
+  floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
+  floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
+  return floordiv;
+};
+
 void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -198,93 +241,25 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         iter.remove_operand(2);
         using vec_t = Vectorized<float>;
         cpu_kernel_vec(iter,
-          [=](scalar_t aa) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-            float a = static_cast<float>(aa);
-            if (C10_UNLIKELY(b == 0)) {
-              // Divide by zero: return standard IEEE result
-              return a / b;
-            }
-
-            auto mod = std::fmod(a, b);
-            auto div = (a - mod) / b;
-            if ((mod != 0) && (b < 0) != (mod < 0)) {
-              div -= scalar_t(1);
-            }
-
-            scalar_t floordiv;
-            if (div != 0) {
-              floordiv = std::floor(div);
-              if (div - floordiv > scalar_t(0.5)) {
-                floordiv += scalar_t(1.0);
-              }
-            } else {
-              floordiv = c10::copysign(scalar_t(0), a / b);
-            }
-            return floordiv;
+          [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            return div_floor_internal(static_cast<float>(a), b);
           },
           [=](Vectorized<scalar_t> a) {
-            return binary_op_scalar(a, b, [](const Vectorized<float>& x, const Vectorized<float>& y) {
-              auto mod = x.fmod(y);
-              auto div = (x - mod) / y;
-              const auto zero = vec_t(0);
-              auto mask = (mod != zero) & ((y < zero) ^ (mod < zero));
-              const auto one = vec_t(1);
-              div = vec_t::blendv(div, div - one, mask);
-              auto floordiv = div.floor();
-              mask = (div - floordiv) > vec_t(0.5);
-              floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-              const auto basic_div = x / y;
-              floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
-              floordiv = vec_t::blendv(floordiv, basic_div, y == zero);
-              return floordiv;
-            });
+            return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_internal(x, y); });
           });
       });
-      return;
-    }
-    // See NOTE: [Floor Division in Python]
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
-      using vec_t = Vectorized<scalar_t>;
-      cpu_kernel_vec(iter,
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
+        using vec_t = Vectorized<scalar_t>;
+        cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-            if (C10_UNLIKELY(b == 0)) {
-              // Divide by zero: return standard IEEE result
-              return a / b;
-            }
-
-            auto mod = std::fmod(a, b);
-            auto div = (a - mod) / b;
-            if ((mod != 0) && (b < 0) != (mod < 0)) {
-              div -= scalar_t(1);
-            }
-
-            scalar_t floordiv;
-            if (div != 0) {
-              floordiv = std::floor(div);
-              if (div - floordiv > scalar_t(0.5)) {
-                floordiv += scalar_t(1.0);
-              }
-            } else {
-              floordiv = c10::copysign(scalar_t(0), a / b);
-            }
-            return floordiv;
+            return div_floor_internal(a, b);
           },
           [](vec_t a, vec_t b) -> vec_t {
-            auto mod = a.fmod(b);
-            auto div = (a - mod) / b;
-            const auto zero = vec_t(0);
-            auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
-            const auto one = vec_t(1);
-            div = vec_t::blendv(div, div - one, mask);
-            auto floordiv = div.floor();
-            mask = (div - floordiv) > vec_t(0.5);
-            floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-            const auto basic_div = a / b;
-            floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
-            floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
-            return floordiv;
+            return div_floor_internal(a, b);
           });
-    });
+      });
+    }
   }
 }
 
