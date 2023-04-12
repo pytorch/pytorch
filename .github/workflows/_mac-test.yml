@@ -129,8 +129,7 @@ jobs:
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
-      # TODO: Move this to a setup-mac action
-      - name: Install misc macOS dependencies
+      - name: Install macOS homebrew dependencies
         uses: nick-fields/retry@v2.8.2
         with:
           timeout_minutes: 5
