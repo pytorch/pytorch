@@ -10,8 +10,9 @@ from typing import Dict, List
 import torch
 from torch import sym_float, sym_int
 
-from .. import config, variables
+from .. import variables
 from ..allowed_functions import is_allowed
+from ..config_utils import config
 from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
@@ -785,6 +786,14 @@ class BuiltinVariable(VariableTracker):
                 )
             )
         )
+
+    def call_callable(self, tx, arg):
+        from .functions import BaseUserFunctionVariable
+
+        if isinstance(
+            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+        ):
+            return variables.ConstantVariable(True).add_options(arg)
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):

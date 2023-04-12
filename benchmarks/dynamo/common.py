@@ -1382,23 +1382,8 @@ class BenchmarkRunner:
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.empty_cache()
                 t0 = time.perf_counter()
-                if mode == "eager":
-                    for _ in range(niters):
-                        fn(model, example_inputs)
-                else:
+                for _ in range(niters):
                     fn(model, example_inputs)
-                    fn(model, example_inputs)
-                    fn(model, example_inputs)
-
-                    import cProfile
-
-                    prof = cProfile.Profile()
-                    prof.enable()
-                    for _ in range(niters):
-                        fn(model, example_inputs)
-                    prof.disable()
-                    prof.dump_stats("cudagraph_output.prof")
-
                 t1 = time.perf_counter()
                 latency = t1 - t0
                 if current_device == "cuda":
@@ -1408,7 +1393,7 @@ class BenchmarkRunner:
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
             except Exception:
-                log.exception(f"Backend {mode} failed in warmup()")
+                log.exception("Backend %s failed in warmup()", mode)
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
