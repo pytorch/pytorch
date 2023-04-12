@@ -571,7 +571,8 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             backend_config = get_qnnpack_backend_config()
             m_fx = prepare_fx(m_copy, qconfig_mapping, example_inputs, backend_config=backend_config)
             after_prepare_result_fx = m_fx(*example_inputs)
-            m_fx = convert_to_reference_fx(m_fx, backend_config=backend_config)
+            from torch.ao.quantization.quantize_fx import _convert_to_reference_decomposed_fx
+            m_fx = _convert_to_reference_decomposed_fx(m_fx, backend_config=backend_config)
 
             after_quant_result_fx = m_fx(*example_inputs)
 
@@ -584,5 +585,5 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             self.assertEqual(compute_sqnr(after_prepare_result, after_prepare_result_fx), torch.tensor(float("inf")))
             # there are slight differences after convert due to different implementations
             # of quant/dequant
-            self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
-            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
+            self.assertEqual(after_quant_result, after_quant_result_fx)
+            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) == torch.tensor(float("inf")))
