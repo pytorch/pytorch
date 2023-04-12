@@ -1654,7 +1654,7 @@ class TritonScheduling:
                 )
 
         if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug(f"Schedule:\n {node_schedule}")
+            schedule_log.debug("Schedule:\n %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod

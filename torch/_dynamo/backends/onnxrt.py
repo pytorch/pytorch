@@ -87,7 +87,7 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
         for name, value in zip(input_names, args):
             if name not in active_inputs:
                 log.warning(
-                    f"input {name} skipped as not found in onnx inference session"
+                    "input %s skipped as not found in onnx inference session", name
                 )
                 continue
             dev = value.device

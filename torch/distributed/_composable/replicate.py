@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Tuple, Optional
 
 import torch
 import torch.nn as nn
@@ -34,7 +34,7 @@ def _can_compose(module: nn.Module) -> bool:
 
 class _ReplicateState:
     def __init__(self) -> None:
-        self.module = None
+        self.module: Optional[nn.Module] = None
         self.has_initialized: bool = False
         self._param_list: nn.ParameterList = nn.ParameterList()
         self.kwargs: dict = {}
@@ -62,9 +62,9 @@ class _ReplicateState:
         # tagged as replicate().
         if replicate_state is not None:
             if hasattr(replicate_state, "_params_collected"):
-                if replicate.state(module)._params_collected:
+                if replicate_state._params_collected:
                     return
-                replicate.state(module)._params_collected = True
+                replicate_state._params_collected = True
 
         self._param_list.extend(
             param for param in module.parameters(recurse=False) if param.requires_grad
@@ -78,7 +78,7 @@ class _ReplicateState:
 
         self.has_initialized = True
 
-        self._recursive_collect_params(self.module)
+        self._recursive_collect_params(self.module)  # type: ignore[arg-type]
 
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
 
