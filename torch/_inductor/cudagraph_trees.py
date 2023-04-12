@@ -248,7 +248,7 @@ torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 def reset_cudagraph_trees():
     "Clear all cudagraph trees"
-    # see remove_all_persisted_tensors below for why this is necessary
+    # see remove_all_cached_tensors below for why this is necessary
     container_dict = get_obj(local, "tree_manager_containers")
     locks_dict = get_obj(local, "tree_manager_locks")
     for device, lock in locks_dict.items():
@@ -257,7 +257,7 @@ def reset_cudagraph_trees():
             if not container or not container.tree_manager:
                 continue
 
-            container.tree_manager.remove_all_persisted_tensors()
+            container.tree_manager.remove_all_cached_tensors()
 
     container_dict.clear()
 
@@ -762,16 +762,16 @@ class CUDAGraphNode:
         self.output_storage_alias: OutputList[OutputAliasInfo] = []
 
         # is the output Storage unaliased in subsequent outputs, of all subsequent paths
-        # if it is, we persist the output tensor and adjust storage liveness tracking to also
+        # if it is, we cached the output tensor and adjust storage liveness tracking to also
         # check if the output tensor does not have an additional python reference.
         # If a descendent node discovers it has an alias of a prior output, then the output
-        # will no longer be persisted in the ancestor.
+        # will no longer be cached in the ancestor.
         # The large majority of tensors are unaliased, and preserving aliased output tensors would add
         # significant additional complexity with marginal gains
-        # The persisted tensor outputs are added on the first execution, and cleared whenever we need
+        # The cached tensor outputs are added on the first execution, and cleared whenever we need
         # to do subsequent recording
         self.unaliased_in_all_paths: OutputList[bool] = []
-        self.persisted_tensor_outputs: OutputList[Optional[Tensor]] = []
+        self.cached_tensor_outputs: OutputList[Optional[Tensor]] = []
 
         # if an output aliases a static, persistent input then the Storage of the
         # persistent output will be set here
@@ -843,11 +843,11 @@ class CUDAGraphNode:
     def reconstruct_outputs(self):
         "Reconstruct output tensors according to their saved metadata and alias information"
 
-        # Persistent tensors will not yet be set on the first execution
+        # Cached tensors will not yet be set on the first execution
         # They are also cleared in checkpointing, so if we checkpoint this node
-        # and then execute it again we will need to repopulate persistent tensors
-        if not self.persisted_tensor_outputs:
-            self._initialize_persistent_tensors()
+        # and then execute it again we will need to repopulate cached tensors
+        if not self.cached_tensor_outputs:
+            self._initialize_cached_tensors()
 
         outputs = []
 
@@ -858,10 +858,10 @@ class CUDAGraphNode:
                 outputs.append(None)
                 continue
 
-            persisted_t = self.persisted_tensor_outputs[i]
-            if persisted_t is not None:
+            cached_t = self.cached_tensor_outputs[i]
+            if cached_t is not None:
                 # No need to update weakrefs, already correctly initialized
-                outputs.append(persisted_t)
+                outputs.append(cached_t)
                 continue
 
             storage = self.prepare_alias_info_for_tensor_construction(
@@ -1048,26 +1048,26 @@ class CUDAGraphNode:
             check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex):
-        "Remove a graph output from the unaliased, persistent tensors in an ancestor node"
+        "Remove a graph output from the unaliased, cached tensors in an ancestor node"
         depth, output_index = index
         node = list(self._path_from_root)[depth]
         node.unaliased_in_all_paths[output_index] = False
         self.path_weakrefs[depth][output_index].remove_extra_reference()
 
-    def _initialize_persistent_tensors(self):
+    def _initialize_cached_tensors(self):
         # we should not be clearing output_weakrefs, and they should be set in the first
         # record run
         assert len(self.outputs_weakrefs) == len(self.outputs_metadata)
 
-        for i, (storage_info, metadata, make_persistent) in enumerate(
+        for i, (storage_info, metadata, make_cached) in enumerate(
             zip(
                 self.output_storage_alias,
                 self.outputs_metadata,
                 self.unaliased_in_all_paths,
             )
         ):
-            if not make_persistent:
-                self.persisted_tensor_outputs.append(None)
+            if not make_cached:
+                self.cached_tensor_outputs.append(None)
                 continue
 
             assert storage_info is UnaliasedStorage
@@ -1083,10 +1083,10 @@ class CUDAGraphNode:
             check = functools.partial(check_refcount, i=i)
 
             self.outputs_weakrefs[i] = StorageWeakRefWrapper(out, extra_ref_check=check)
-            self.persisted_tensor_outputs.append(out)
+            self.cached_tensor_outputs.append(out)
 
     def get_output_refcount(self, index):
-        return sys.getrefcount(self.persisted_tensor_outputs[index])
+        return sys.getrefcount(self.cached_tensor_outputs[index])
 
     @property
     def parent(self):
@@ -1248,15 +1248,15 @@ class CUDAGraphNode:
             if is_live(out):
                 yield out
 
-    def remove_node_persisted_tensors(self):
-        self.persisted_tensor_outputs.clear()
+    def remove_node_cached_tensors(self):
+        self.cached_tensor_outputs.clear()
         for i, unaliased in enumerate(self.unaliased_in_all_paths):
             if unaliased:
                 self.outputs_weakrefs[i].remove_extra_reference()
 
-    def remove_path_persisted_tensors(self):
+    def remove_path_cached_tensors(self):
         for node in self._path_from_root:
-            node.remove_node_persisted_tensors()
+            node.remove_node_cached_tensors()
 
     def path_live_weakrefs_and_stacktraces(
         self,
@@ -1621,9 +1621,9 @@ class CUDAGraphTreeManager:
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
 
-    def remove_all_persisted_tensors(self):
+    def remove_all_cached_tensors(self):
         """
-        Remove all persisted tensors in all nodes. Because persisted tensors can hold gradients which in turn
+        Remove all cached tensors in all nodes. Because cached tensors can hold gradients which in turn
         might reference a backward which invokes a CUDA Graph Node, we have to manually clear them on shutdown
         to avoid a refernece cycle.
         """
@@ -1635,7 +1635,7 @@ class CUDAGraphTreeManager:
             node = nodes.pop()
             for children in node.children.values():
                 nodes.extend(children)
-            node.remove_node_persisted_tensors()
+            node.remove_node_cached_tensors()
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         torch.cuda.synchronize()
@@ -1829,9 +1829,9 @@ class CUDAGraphTreeManager:
         # currently we deallocate on instead of allowing stale recordings
         stale_storages = []
 
-        # remove persisted tensors, otherwise they would prevent memory from being
+        # remove cached tensors, otherwise they would prevent memory from being
         # reclaimed in subsequent recordings
-        self.current_node.remove_path_persisted_tensors()
+        self.current_node.remove_path_cached_tensors()
         live_storages_wrappers = list(self.current_node.path_live_weakrefs())
 
         live_storages_weak_refs = [t() for t in live_storages_wrappers]
