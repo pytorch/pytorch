@@ -8,7 +8,8 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
-from .. import config, variables
+from .. import variables
+from ..config_utils import config
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
