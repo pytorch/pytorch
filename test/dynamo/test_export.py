@@ -2147,6 +2147,47 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
+        x = torch.ones(6, 4, 4)
+        with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
+            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_range_constraint(self):
+        x = torch.ones(6, 4, 4)
+        constraints = [
+            4 < dynamic_dim(x, 0),
+            dynamic_dim(x, 0) <= 6,
+        ]
+
+        def foo(x):
+            if x.shape[0] > 3:  # ok
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(
+            foo,
+            x,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        def bar(x):
+            if x.shape[0] > 5:  # error
+                return x.sin()
+            return x.cos()
+
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(
+                bar,
+                x,
+                constraints=constraints,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    @config.patch(dynamic_shapes=True)
     def test_list_contains(self):
         def func(x):
             assert x.size(-1) in [4, 5, 6], "bad"
