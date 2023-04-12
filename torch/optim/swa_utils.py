@@ -14,17 +14,22 @@ from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 def get_ema_multi_avg_fn(decay):
     @torch.no_grad()
-    def ema_update(ema_model_tuple, current_model_tuple, _):
-        torch._foreach_lerp_(ema_model_tuple, current_model_tuple, decay)
+    def ema_update(ema_model_list, current_model_list, _):
+        # foreach lerp only handles float and complex
+        if torch.is_floating_point(ema_model_list[0]) or torch.is_complex(ema_model_list[0]):
+            torch._foreach_lerp_(ema_model_list, current_model_list, 1 - decay)
+        else:
+            for p_ema, p_model in zip(ema_model_list, current_model_list):
+                p_ema.copy_(p_ema * decay + p_model * (1 - decay))
 
     return ema_update
 
 
 def get_swa_multi_avg_fn():
     @torch.no_grad()
-    def swa_update(ema_model_tuple, current_model_tuple, num_averaged):
-        diffs = torch._foreach_sub(current_model_tuple, ema_model_tuple)
-        torch._foreach_addcdiv_(ema_model_tuple, diffs, [num_averaged + 1] * len(ema_model_tuple))
+    def swa_update(ema_model_list, current_model_list, num_averaged):
+        diffs = torch._foreach_sub(current_model_list, ema_model_list)
+        torch._foreach_addcdiv_(ema_model_list, diffs, [num_averaged + 1] * len(ema_model_list))
 
     return swa_update
 
@@ -80,16 +85,14 @@ class AveragedModel(Module):
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 
-    You can also use custom averaging functions with `avg_fn` parameter.
+    You can also use custom averaging functions with the `avg_fn` or `multi_avg_fn` parameters.
     If no averaging function is provided, the default is to compute
-    equally-weighted average of the weights.
+    equally-weighted average of the weights (SWA).
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
-        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged: (
-        ...                 0.1 * averaged_model_parameter + 0.9 * model_parameter)
-        >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg, use_buffers=True)
+        >>> swa_model = torch.optim.swa_utils.AveragedModel(model, torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
 
     .. note::
         When using SWA with models containing Batch Normalization you may
@@ -131,8 +134,6 @@ class AveragedModel(Module):
             self.module = self.module.to(device)
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
-        if avg_fn is None and multi_avg_fn is None:
-            multi_avg_fn = get_swa_multi_avg_fn()
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
@@ -154,19 +155,20 @@ class AveragedModel(Module):
         for p_swa, p_model in zip(self_param, model_param):
             device = p_swa.device
             p_model_ = p_model.detach().to(device)
-            model_param_detached.append(p_model_)
             self_param_detached.append(p_swa.detach())
+            model_param_detached.append(p_model_)
             if self.n_averaged == 0:
                 p_swa.detach().copy_(p_model_)
-        if self.n_averaged > 0 and self.avg_fn is not None:
-            for p_swa, p_model in zip(self_param_detached, model_param_detached):
-                p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model,
-                                                 self.n_averaged.to(device)))
-        elif self.n_averaged > 0 and self.multi_avg_fn is not None:
-            grouped_self = _group_tensors_by_device_and_dtype([self_param_detached])
-            grouped_model = _group_tensors_by_device_and_dtype([model_param_detached])
-            for device, dtype in grouped_self.keys():
-                self.multi_avg_fn(grouped_self[(device, dtype)][0], grouped_model[(device, dtype)][0], self.n_averaged.to(device))
+
+        if self.n_averaged > 0:
+            if self.multi_avg_fn is not None or self.avg_fn is None:
+                multi_avg_fn = self.multi_avg_fn or get_swa_multi_avg_fn()
+                grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])
+                for ((device, _), [self_params, model_params]) in grouped_tensors.items():
+                    multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
+            else:
+                for p_swa, p_model in zip(self_param_detached, model_param_detached):
+                    p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model, self.n_averaged.to(device)))
 
         if not self.use_buffers:
             # If not apply running averages to the buffers,
