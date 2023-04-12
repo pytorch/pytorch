@@ -50,6 +50,7 @@ RESERVED_NS = {
     "pytorch",
 }
 
+
 def custom_op(schema: str, *, ns: str) -> typing.Callable:
     r"""Creates a new CustomOp object.
 
@@ -119,9 +120,7 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
         ophandle = find_ophandle_or_throw(ns, function_schema.name)
-        result = CustomOp(
-            lib, ns, function_schema.name, ophandle, _private_access=True
-        )
+        result = CustomOp(lib, ns, function_schema.name, ophandle, _private_access=True)
 
         result.__name__ = func.__name__
         result.__module__ = func.__module__
@@ -275,14 +274,16 @@ def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):
 
 
 def validate_namespace(ns: str) -> None:
-    if '.' in ns:
+    if "." in ns:
         raise ValueError(
             f'custom_op(..., ns="{ns}"): expected ns to not contain any . (and be a '
-            f'valid variable name)')
+            f"valid variable name)"
+        )
     if ns in RESERVED_NS:
         raise ValueError(
             f"custom_op(..., ns='{ns}'): '{ns}' is a reserved namespace, "
-            f"please choose something else. ")
+            f"please choose something else. "
+        )
 
 
 def validate_schema(schema: FunctionSchema) -> None:
