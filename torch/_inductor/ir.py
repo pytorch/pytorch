@@ -4311,7 +4311,7 @@ class AllGatherIntoTensor(OutOfPlaceCollectiveKernel):
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
             f"{output_name}_work = dist.all_gather_into_tensor({output_name}, "
-            "{input_names[0]}, group={output_name}_pg, async_op=True)"
+            f"{input_names[0]}, group={output_name}_pg, async_op=True)"
         )
 
 
