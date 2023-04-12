@@ -1,9 +1,15 @@
+import logging
+import os
+import tempfile
 from enum import Enum
 from typing import Dict, List, Set, Tuple, Union
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+
+logger: logging.Logger = logging.getLogger("IterGraphModule")
 
 
 class OP(str, Enum):
@@ -166,3 +172,16 @@ def rebuild_graph(gm: fx.GraphModule, remove_dead_code: bool = True) -> None:
     if remove_dead_code:
         gm.graph.eliminate_dead_code()
     gm.recompile()
+
+
+def dump_graphs_to_files(graphs: Dict[str, fx.GraphModule], folder: str = "") -> str:
+    if not folder:
+        folder = tempfile.mkdtemp()
+
+    for prefix, gm in graphs.items():
+        with open(os.path.join(folder, f"{prefix}.graph"), "w") as fp:
+            fp.write(str(gm))
+
+    logger.warning("Dump graphs to %s", folder)
+
+    return folder
