@@ -8,6 +8,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
     skipIfNoX86,
+    skipIfNoDynamoSupport,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import (
@@ -600,7 +601,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
             self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
 
-@skipIfNoQNNPACK
+@skipIfNoDynamoSupport
 class TestX86InductorQuantizePT2EModels(QuantizationTestCase):
     @skipIfNoX86
     @xfailIfPython311
