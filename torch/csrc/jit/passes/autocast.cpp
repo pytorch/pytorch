@@ -24,13 +24,11 @@ bool autocast_enabled = true;
 struct AutocastContext {
   bool gpu_enabled = false;
   bool cpu_enabled = false;
-  bool xla_enabled = false;
   c10::ScalarType gpu_scalar_type = c10::ScalarType::Undefined;
   c10::ScalarType cpu_scalar_type = c10::ScalarType::Undefined;
-  c10::ScalarType xla_scalar_type = c10::ScalarType::Undefined;
 
   operator bool() const {
-    return gpu_enabled || cpu_enabled || xla_enabled;
+    return gpu_enabled || cpu_enabled;
   }
 };
 
@@ -45,8 +43,7 @@ bool isAutocastNode(Value* value) {
   return class_name.has_value() &&
       (*class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast" ||
        *class_name == "__torch__.torch.cpu.amp.autocast_mode.autocast" ||
-       *class_name == "__torch__.torch.amp.autocast_mode.autocast" ||
-       *class_name == "__torch__.torch.xla.amp.autocast_mode.autocast");
+       *class_name == "__torch__.torch.amp.autocast_mode.autocast");
 }
 
 // If we have an autocast instance, return it
@@ -117,9 +114,6 @@ c10::optional<AutocastScope> parseAutocast(
     } else if (device == "cpu") {
       scope.context.cpu_enabled = enabled.value();
       scope.context.cpu_scalar_type = dtype;
-    } else if (device == "xla") {
-      scope.context.xla_enabled = enabled.value();
-      scope.context.xla_scalar_type = dtype;
     } else {
       TORCH_INTERNAL_ASSERT(
           false, "unrecognized device for autocast pass: ", device);
@@ -176,8 +170,7 @@ void castTensorInputs(
           cast_op,
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
-           graph->insertConstant(IValue(context.cpu_enabled)),
-           graph->insertConstant(IValue(context.xla_enabled))});
+           graph->insertConstant(IValue(context.cpu_enabled))});
       node->replaceInputWith(input, new_input);
     } else if (cast_op == aten::_autocast_to_reduced_precision) {
       const auto new_input = graph->insert(
@@ -185,10 +178,8 @@ void castTensorInputs(
           {input,
            graph->insertConstant(IValue(context.gpu_enabled)),
            graph->insertConstant(IValue(context.cpu_enabled)),
-           graph->insertConstant(IValue(context.xla_enabled)),
            graph->insertConstant(IValue(context.gpu_scalar_type)),
-           graph->insertConstant(IValue(context.cpu_scalar_type)),
-           graph->insertConstant(IValue(context.xla_scalar_type))});
+           graph->insertConstant(IValue(context.cpu_scalar_type))});
       node->replaceInputWith(input, new_input);
     } else {
       TORCH_INTERNAL_ASSERT(
@@ -369,10 +360,6 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         updateAutocastEnabledCheck(node, current_state().cpu_enabled);
         break;
 
-      case aten::is_autocast_xla_enabled:
-        updateAutocastEnabledCheck(node, current_state().xla_enabled);
-        break;
-
       // CastPolicy::fp16 (cast all inputs to float16)
       case aten::_convolution:
       case aten::conv1d:
@@ -537,10 +524,8 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
     AutocastContext init = {
         at::autocast::is_enabled(),
         at::autocast::is_cpu_enabled(),
-        at::autocast::is_xla_enabled(),
         at::autocast::get_autocast_gpu_dtype(),
-        at::autocast::get_autocast_cpu_dtype(),
-        at::autocast::get_autocast_xla_dtype()};
+        at::autocast::get_autocast_cpu_dtype()};
     handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);

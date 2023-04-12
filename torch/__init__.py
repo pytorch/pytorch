@@ -1364,7 +1364,6 @@ def _assert(condition, message):
 # side effect of adding to the imported module's members for other users.
 from torch import cuda as cuda
 from torch import cpu as cpu
-from torch import xla as xla
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,

@@ -394,12 +394,10 @@ static inline Tensor to_impl(
 
 // If input tensor is fp32, cast it to fp16, otherwise leave it alone.
 // (this is intended to be used internally by the JIT autocast implementation)
-Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled, bool xla_enabled,
-                                      ScalarType cuda_dtype, ScalarType cpu_dtype, ScalarType xla_dtype) {
+Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) {
   if (self.dtype() == at::ScalarType::Float &&
       ((self.device().is_cuda() && cuda_enabled) ||
-      (self.device().is_cpu() && cpu_enabled) ||
-      (self.device().is_xla() && xla_enabled))
+      (self.device().is_cpu() && cpu_enabled))
       ) {
     at::ScalarType target = at::ScalarType::Undefined;
     if (self.device().is_cuda()) {
@@ -419,11 +417,10 @@ Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, boo
 
 // If input tensor is fp16, cast it to fp32, otherwise leave it alone.
 // (this is intended to be used internally by the JIT autocast implementation)
-Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled, bool xla_enabled) {
+Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled) {
   if ((self.dtype() == at::ScalarType::Half || self.dtype() == at::ScalarType::BFloat16) &&
       ((self.device().is_cuda() && cuda_enabled) ||
-      (self.device().is_cpu() && cpu_enabled) ||
-      (self.device().is_xla() && xla_enabled))
+      (self.device().is_cpu() && cpu_enabled))
       ) {
     return to_impl(
         self, at::ScalarType::Float, c10::nullopt, c10::nullopt, c10::nullopt, false, false, c10::nullopt);
