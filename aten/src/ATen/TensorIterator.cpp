@@ -22,7 +22,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/ssize.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -838,12 +837,6 @@ void TensorIteratorBase::unsafe_replace_operand(int arg, void* data) {
   operands_[arg].data = data;
 }
 
-void TensorIteratorBase::unsafe_replace_input(int arg, const void* data) {
-  // We know this is an input, so we can safely cast away constness as
-  // we will not mutate it anyways.
-  input_operand(arg).data = const_cast<void*>(data);
-}
-
 void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
   TORCH_INTERNAL_ASSERT(dim < ndim() && size >= 1);
   shape_[dim] = size;
@@ -1632,27 +1625,6 @@ void TensorIterator::set_output_raw_strided(int64_t output_idx, IntArrayRef size
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
     namedinference::propagate_names(op.tensor_base(), names);
   }
-}
-
-const OperandInfo& TensorIteratorBase::input_operand(int arg) const {
-  return input_operand(*this, arg);
-}
-
-OperandInfo& TensorIteratorBase::input_operand(int arg) {
-  return input_operand(*this, arg);
-}
-
-template <typename Self, typename OperandInfo>
-OperandInfo& TensorIteratorBase::input_operand(Self& self, int arg) {
-  TORCH_INTERNAL_ASSERT(arg >= 0);
-  TORCH_INTERNAL_ASSERT(arg < self.ninputs());
-  int operand_idx = self.num_outputs_ + arg;
-  using c10::ssize;
-  TORCH_INTERNAL_ASSERT(operand_idx < ssize(self.operands_));
-  OperandInfo& operand = self.operands_[operand_idx];
-  TORCH_INTERNAL_ASSERT(!operand.is_output);
-  TORCH_INTERNAL_ASSERT(!operand.is_read_write);
-  return operand;
 }
 
 // Not actually used by anything (TensorIterator subclass calls

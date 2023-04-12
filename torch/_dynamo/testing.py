@@ -11,14 +11,13 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
     is_generator,
     transform_code_object,
 )
-from .config_utils import config
 from .guards import CheckFunctionManager, GuardedCode
 from .utils import same
 
