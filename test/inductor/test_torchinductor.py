@@ -228,16 +228,12 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x, copy_to_cuda=False):
+def clone_preserve_strides(x):
     if not isinstance(x, torch.Tensor):
         return x
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
     ).clone()
-
-    if copy_to_cuda:
-        buffer.to(device="cuda")
-
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
 
     return out
@@ -429,10 +425,16 @@ def check_model_cuda(
     if hasattr(model, "to"):
         model = model.to("cuda")
 
+    def copy_fn(x):
+        # preserve strides of the input on the device
+        if not isinstance(x, torch.Tensor):
+            return x
+        return torch.empty_strided(
+            x.size(), x.stride(), device="cuda", dtype=x.dtype
+        ).copy_(x)
+
     if copy_to_cuda:
-        example_inputs = [
-            clone_preserve_strides(x, copy_to_cuda=True) for x in example_inputs
-        ]
+        example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     check_model(
         self,
@@ -453,18 +455,9 @@ def check_model_cuda(
         def downcast_fn(x):
             if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
-
-            buffer = (
-                torch.as_strided(
-                    x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-                )
-                .to(torch.half)
-                .clone()
-                .to(device="cuda")
-            )
-            out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-
-            return out
+            return torch.empty_strided(
+                x.size(), x.stride(), device="cuda", dtype=torch.half
+            ).copy_(x)
 
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
@@ -4512,23 +4505,6 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(10, 1024), torch.randn(10, 512)])
-
-    def test_as_strided_scatter_on_input_tensor_with_storage_offset(self):
-        def fn(input, src):
-            return aten.as_strided_scatter(
-                input,
-                src,
-                size=input.size(),
-                stride=input.stride(),
-                storage_offset=1,
-            )
-
-        inp = torch.randn(4, 1)
-        # as_strided_scatter in prim is only making a clone of input
-        # and doesn't copy from src, clone src to itself for testing
-        src = inp[1].clone()
-        # should not have any error with storage_offset
-        self.common(fn, [inp[1], src])
 
     def test_select_scatter(self):
         def fn(x, a, b):
