@@ -1382,8 +1382,23 @@ class BenchmarkRunner:
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.empty_cache()
                 t0 = time.perf_counter()
-                for _ in range(niters):
+                if mode == "eager":
+                    for _ in range(niters):
+                        fn(model, example_inputs)
+                else:
                     fn(model, example_inputs)
+                    fn(model, example_inputs)
+                    fn(model, example_inputs)
+
+                    import cProfile
+
+                    prof = cProfile.Profile()
+                    prof.enable()
+                    for _ in range(niters):
+                        fn(model, example_inputs)
+                    prof.disable()
+                    prof.dump_stats("cudagraph_output.prof")
+
                 t1 = time.perf_counter()
                 latency = t1 - t0
                 if current_device == "cuda":
