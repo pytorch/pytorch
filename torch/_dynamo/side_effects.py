@@ -188,6 +188,11 @@ class SideEffects:
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
 
+    def has_pending_mutation(self, item):
+        return self.is_attribute_mutation(item) and bool(
+            self.store_attr_mutations[item.mutable_local]
+        )
+
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
             return True
