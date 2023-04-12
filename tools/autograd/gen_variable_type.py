@@ -985,6 +985,9 @@ def emit_body(
 
     inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
     if is_inplace_foreach and info is not None:
+        # TODO(crcrpar): Ideally we should guarantee that `f`'s arity matches `info.func`'s.
+        # Currently `_foreach_add_` and `_foreach_sub_` with `Scalar` and `ScalarList` lack `alpha`.
+        # I don't know why these don't have `alpha`. It'll need changes in ATen.
         for foreach_arg, ref_arg in zip(
             f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
         ):
