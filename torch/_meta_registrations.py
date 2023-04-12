@@ -88,6 +88,27 @@ def meta_take(self, index, *, out=None):
     return result
 
 
+@register_meta(
+    [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
+)
+@out_wrapper("values", "indices")
+def cummaxmin(self, dim):
+    values = torch.empty(self.shape, device=self.device, dtype=self.dtype)
+    indices = torch.empty(self.shape, device=self.device, dtype=torch.int64)
+    if self.numel() != 0 and self.ndim != 0:
+        # Checks that dim is within bounds
+        maybe_wrap_dim(dim, self.ndim)
+    return values, indices
+
+
+@register_meta([aten.logcumsumexp.default, aten.logcumsumexp.out])
+@out_wrapper()
+def logcumsumexp(self, dim):
+    # Checks that dim is within bounds
+    maybe_wrap_dim(dim, self.ndim)
+    return torch.empty_like(self).contiguous()
+
+
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
@@ -707,16 +728,6 @@ if torch._C.has_mkldnn:
         "mkldnn", "IMPL", "Meta"
     )
 
-    def pick_mkldnn_conv_memory_format(input_tensor, weight):
-        if weight.is_mkldnn:
-            return torch.channels_last
-        if is_channels_last(input_tensor) or is_channels_last(weight):
-            return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
-
     @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
     def meta_mkldnn_convolution_default(
         input_tensor,
@@ -738,54 +749,11 @@ if torch._C.has_mkldnn:
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
-    @register_meta(torch.ops.mkldnn._convolution_pointwise.binary)
-    def meta_mkldnn_convolution_binary(
-        input_tensor,
-        other,
-        weight,
-        bias,
-        padding,
-        stride,
-        dilation,
-        groups,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        out = input_tensor.new_empty(other.size())
-        out = out.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
-        return out
-
-    @register_meta(torch.ops.mkldnn._convolution_pointwise_.binary)
-    def meta_mkldnn_convolution_binary_inplace(
-        input_tensor,
-        other,
-        weight,
-        bias,
-        padding,
-        stride,
-        dilation,
-        groups,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        return other
-
     @register_meta(torch.ops.mkldnn._linear_pointwise.default)
     def meta_linear_pointwise_default(
         input_tensor, weight, bias, attr, scalars, algorithm
     ):
         return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[0]))
-
-    @register_meta(torch.ops.mkldnn._linear_pointwise.binary)
-    def meta_linear_pointwise_binary(input_tensor, other, weight, bias, attr):
-        out = input_tensor.new_empty(other.size())
-        return out
 
     if torch._C.has_mkl:
         _meta_lib_dont_use_me_use_register_meta_for_mkl = torch.library.Library(
@@ -1087,6 +1055,11 @@ def vdot(self, other):
 
     dot_check(self, other)
     return self.new_empty(())
+
+
+@register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
+def nonzero_static(self, *, size: int, fill_value: int = -1):
+    return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
 # Leaving this function around because a python implementation
@@ -2062,20 +2035,6 @@ def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
 
 
-@register_meta(
-    [
-        aten.randint_like.default,
-        aten.randint_like.low_dtype,
-        aten.randn_like.default,
-        aten.rand_like.default,
-        aten.full_like.default,
-        aten.ones_like.default,
-    ]
-)
-def meta_like(self, *args, **kwargs):
-    return aten.empty_like.default(self, **kwargs)
-
-
 # zeros_like is special cased to work for sparse
 @register_meta(aten.zeros_like.default)
 def zeros_like(
@@ -2109,7 +2068,7 @@ def zeros_like(
 
         res._coalesced_(True)
         return res
-    return aten.empty_like.default(
+    res = aten.empty_like.default(
         self,
         dtype=dtype,
         layout=layout,
@@ -2117,6 +2076,9 @@ def zeros_like(
         pin_memory=pin_memory,
         memory_format=memory_format,
     )
+    # device can be not "meta"
+    res.fill_(0)
+    return res
 
 
 @register_meta(aten.select.int)
