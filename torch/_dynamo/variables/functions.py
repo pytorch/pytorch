@@ -95,9 +95,12 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return tx.inline_user_function_return(
-            self, list(self.self_args()) + list(args), kwargs
-        )
+        try:
+            return tx.inline_user_function_return(
+                self, list(self.self_args()) + list(args), kwargs
+            )
+        except Exception:
+            raise
 
     def num_parameters(self):
         return len(inspect.signature(self.get_function()).parameters)
@@ -429,7 +432,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
-
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())

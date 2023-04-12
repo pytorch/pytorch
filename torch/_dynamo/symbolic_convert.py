@@ -42,7 +42,13 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .config_utils import config
-from .exc import BackendCompilerFailed, unimplemented, Unsupported
+from .exc import (
+    BackendCompilerFailed,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -2035,15 +2041,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
-            log.warning(
-                "%s %s %s %s %s",
-                func.get_filename(),
-                func.get_function(),
-                args,
-                kwargs,
-                e,
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                "{}.\n  func = {}, args = {} kwargs = {}".format(
+                    e, func.get_code(), args, kwargs
+                ),
             )
-            unimplemented("arg mismatch inlining")
 
         for v in itertools.chain(sub_locals.values(), closure_cells.values()):
             if not isinstance(v, VariableTracker):
