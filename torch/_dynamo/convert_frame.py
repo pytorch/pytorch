@@ -10,14 +10,16 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
-from . import config, exc
+from . import exc
 from .allowed_functions import is_allowed
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
+from .config_utils import config
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -299,6 +301,17 @@ def convert_frame_assert(
         global initial_deterministic_algorithms_state
         initial_deterministic_algorithms_state = (
             torch.are_deterministic_algorithms_enabled()
+        )
+
+        signpost_event(
+            "dynamo",
+            "_convert_frame_assert._compile",
+            {
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size,
+            },
         )
 
         return _compile(
