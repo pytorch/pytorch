@@ -449,6 +449,7 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
+        # FIXME(@mrshenli): type might overlap with fqns
         for typ_or_fqn, override in module_override.items():
             for name, submodule in mod.named_modules():
                 if (
@@ -558,9 +559,10 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a dictionary maps
-            from target :class:`nn.Module` types to :class:`Override` objects.
-            The :class:`Override` objects provide :class:`nn.Module` replacements
+        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a
+            dictionary maps from target :class:`nn.Module` types or
+            fully-qualified names to :class:`Override` objects. The
+            :class:`Override` objects provide :class:`nn.Module` replacements
             during tracing and a graph transformation function after tracing.
             (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
