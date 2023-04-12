@@ -5,6 +5,8 @@
 
 namespace at {
 
+namespace {
+
 // Verifies the requested type is the same as the Tensor's type.
 void check_type(const TensorBase& tensor, ScalarType type, std::string_view type_name) {
   TORCH_CHECK(
@@ -13,6 +15,8 @@ void check_type(const TensorBase& tensor, ScalarType type, std::string_view type
           && toUnderlying(tensor.scalar_type()) == type),
       "expected scalar type ", type_name, " but found ", tensor.scalar_type());
 }
+
+} // namespace
 
 #define DEFINE_CAST(T, name)                                         \
    template <>                                                       \
