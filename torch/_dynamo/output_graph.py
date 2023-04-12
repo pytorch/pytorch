@@ -147,8 +147,9 @@ class FakeRootModule(torch.nn.Module):
                 self, k
             ), "Name conflict between optimizers and nnmodules"
             setattr(self, k, v)
+
         # extra structure for train_step_compiler to iterate optimizers pre-trace
-        setattr(self, "_optimizers", optimizers)
+        self._optimizers = optimizers
 
     def __repr__(self):
         return "FakeRootModule(...)"
@@ -737,6 +738,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
+        # populate optimizers meta for train_step compiler, OK if empty
+        gm.meta["optimizers"] = root._optimizers
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
