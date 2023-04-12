@@ -145,6 +145,8 @@ jobs:
     needs: macos-12-py3-arm64-build
     with:
       build-environment: macos-12-py3-arm64
+      # Same as the build job
+      python-version: 3.9.12
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
       arch: arm64
     secrets:
