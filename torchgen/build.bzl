@@ -13,10 +13,12 @@ def define_targets(rules):
         name = "gen",
         srcs = [":torchgen"],
         visibility = ["//visibility:public"],
+        deps = [":torchgen"],
     )
 
     rules.py_binary(
         name = "gen_executorch",
         srcs = [":torchgen"],
         visibility = ["//visibility:public"],
+        deps = [":torchgen"],
     )
