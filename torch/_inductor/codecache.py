@@ -74,38 +74,68 @@ def cache_dir():
     return cache_dir
 
 
+@functools.lru_cache(None)
+def cubin_cache_dir():
+    cubin_dir = os.path.join(cache_dir(), "cubin")
+    os.makedirs(cubin_dir, exist_ok=True)
+    return cubin_dir
+
+
 class PersistentCache:
     def __init__(self):
-        self.local_cache_path = os.path.join(cache_dir(), "local_cache")
-        self.global_cache_path = config.global_cache_path
+        if not torch.cuda.is_available():
+            return
 
-        if torch.cuda.is_available():
-            self.dinfo = torch.cuda.get_device_properties(
+        try:
+            import triton
+
+            triton_version = triton.__version__
+        except ModuleNotFoundError:
+            triton_version = None
+
+        self.system = {
+            "device": torch.cuda.get_device_properties(
                 torch.cuda.current_device()
-            ).name
-            self.vinfo = torch.version.cuda
+            ).name,
+            "version": {
+                "cuda": torch.version.cuda,
+                "triton": triton_version,
+            },
+        }
+        self.system["hash"] = hashlib.sha256(
+            json.dumps(self.system, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+        self.local_cache_path = os.path.join(cache_dir(), "cache")
+        self.global_cache_path = (
+            os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
+            if config.global_cache_dir is not None
+            else None
+        )
 
     def get_local_cache(self):
         if not os.path.isfile(self.local_cache_path):
             return {}
-        with open(self.local_cache_path, "r") as local_cache_file:
-            local_cache = json.load(local_cache_file)
-        return local_cache
+        with open(self.local_cache_path, "r") as local_cache_fp:
+            local_cache = json.load(local_cache_fp)
+        if local_cache["system"]["hash"] != self.system["hash"]:
+            os.remove(self.local_cache_path)
+            return {}
+        return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
-        write_atomic(self.local_cache_path, json.dumps(local_cache, indent=4))
+        write_atomic(
+            self.local_cache_path,
+            json.dumps({"system": self.system, "cache": local_cache}, indent=4),
+        )
 
     @functools.lru_cache(None)
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
             return {}
-        with open(self.global_cache_path, "r") as global_cache_file:
-            global_cache = json.load(global_cache_file)
-        if self.dinfo not in global_cache:
-            global_cache[self.dinfo] = {}
-        if self.vinfo not in global_cache[self.dinfo]:
-            global_cache[self.dinfo][self.vinfo] = {}
-        return global_cache[self.dinfo][self.vinfo]
+        with open(self.global_cache_path, "r") as global_cache_fp:
+            global_cache = json.load(global_cache_fp)
+        return global_cache["cache"]
 
     def lookup(
         self,
@@ -126,7 +156,7 @@ class PersistentCache:
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
-        gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
+        gc_log = partial(global_cache_log, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -423,7 +453,7 @@ def pick_vec_isa():
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determin the vectroization length automatically
+    # If the simdlen is None, it indicates determin the vectorization length automatically
     if config.cpp.simdlen is None:
         assert _valid_vec_isa_list
         return _valid_vec_isa_list[0]
@@ -447,8 +477,11 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
-def optimization_flags():
+def optimization_flags(cuda=False):
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if cuda:
+        return base_flags
+
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         # Also, `-march=native` is unrecognized option on M1
@@ -463,30 +496,37 @@ def use_custom_generated_macros():
 
 
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
 ):
+    macros = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
+        or cuda
         or config.cpp.enable_kernel_profile
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
-        lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = vec_isa.build_macro()
-        if macros:
-            macros = f"-D{macros}"
+        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        lpaths = cpp_extension.library_paths(cuda) + [
+            sysconfig.get_config_var("LIBDIR")
+        ]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
+        if cuda:
+            libs += ["c10_cuda", "cuda", "torch_cuda"]
+        else:
+            libs += ["gomp"]
+            macros = vec_isa.build_macro()
+            if macros:
+                macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
         lpaths = []
-        macros = ""
         if sys.platform == "darwin":
             # GNU OpenMP generally is not available on MacOS
             # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
@@ -517,22 +557,46 @@ def cpp_compile_command(
     shared=True,
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
+    cuda=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa
+        include_pytorch, vec_isa, cuda
     )
 
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {cpp_compiler()} {input} {get_shared(shared)}
+            {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            {optimization_flags()}
+            {optimization_flags(cuda)}
             {use_custom_generated_macros()}
-            -o{output}
+            -o {output}
         """,
     ).strip()
+
+
+class CudaKernelParamCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(cls, key, params, cubin):
+        from filelock import FileLock
+
+        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
+        params["cubin_path"] = cubin_path
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            cls.cache[key] = params
+            with open(cubin_path, "wb") as f:
+                f.write(cubin)
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
 
 
 class AotCodeCache:
@@ -540,15 +604,15 @@ class AotCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def compile(cls, source_code):
-        from .codegen.wrapper import CppWrapperCodeGen
-
+    def compile(cls, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
-        picked_vec_isa = pick_vec_isa()
+        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         key, input_path = write(
             source_code,
             "cpp",
-            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+            code_hash(
+                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
+            ),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -556,21 +620,13 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = (
-                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
-                    if config.aot_codegen_output_prefix
-                    else f"{input_path[:-3]}.so"
-                )
-
-                output_header = f"{output_so[:-3]}.h"
-                with open(output_header, "w") as header_file:
-                    header_file.writelines("#include <torch/torch.h>\n\n")
-                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
-
-                log.info(f"AOT-Inductor compiles code into: {output_so}")
+                output_so = f"{input_path[:-4]}.so"
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
-                        input=input_path, output=output_so, vec_isa=picked_vec_isa
+                        input=input_path,
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
                     ).split(" ")
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
@@ -578,6 +634,7 @@ class AotCodeCache:
                         raise exc.CppCompileError(cmd, e.output) from e
 
                 cls.cache[key] = output_so
+
         return cls.cache[key]
 
 
@@ -642,6 +699,10 @@ class PyCodeCache:
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
+        return cls.load_by_key_path(key, path, linemap)
+
+    @classmethod
+    def load_by_key_path(cls, key, path, linemap=()):
         if key not in cls.cache:
             with open(path) as f:
                 try:
@@ -656,7 +717,8 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
-                cls.linemaps[path] = linemap
+                # unzip into separate lines/nodes lists
+                cls.linemaps[path] = list(zip(*linemap))
 
         return cls.cache[key]
 
@@ -666,11 +728,11 @@ class PyCodeCache:
         if path not in cls.linemaps:
             return None
         # [(starting_line, <fx node>), ...]
-        linemap = cls.linemaps[path]
-        p = bisect_right(linemap, lineno, key=lambda x: x[0])
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
         if p == 0:
             return None
-        _, entry = linemap[p - 1]
+        entry = nodes[p - 1]
         if not entry:
             return None
 

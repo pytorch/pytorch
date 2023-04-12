@@ -12,9 +12,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# Name for generated .h and .so files
-aot_codegen_output_prefix = None
-
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -37,7 +34,7 @@ inplace_buffers = True
 benchmark_harness = True
 
 # fuse pointwise into templates
-epilogue_fusion = False
+epilogue_fusion = True
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -60,8 +57,11 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
+# We will disable creating subprocess for autotuning if this is False
+autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
 # control store vs recompute heuristic
-# For fanouts, rematearialization can lead to exponential blowup. So, have
+# For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
@@ -75,9 +75,6 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# do bench to decide best layout, currently only for aten.conv
-tune_layout = False
-
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -87,7 +84,18 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# Add extra comments to output code (causes compile cache misses)
 comment_origin = False
+
+# Convert 1x1 convs into matmuls
+conv_1x1_as_mm = False
+
+# Enable split reductions for better utilization when the dimension
+# being reduced over is large (by splitting it)
+split_reductions = True
+
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -97,7 +105,8 @@ def is_fbcode():
 
 
 # warnings intended for PyTorch developers, disable for point releases
-developer_warnings = is_fbcode() or "+" in torch.__version__
+is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
+developer_warnings = is_fbcode() or is_nightly_or_source
 
 
 def decide_compile_threads():
@@ -123,13 +132,11 @@ def decide_compile_threads():
 
 compile_threads = decide_compile_threads()
 
-# autotuning global cache path
+# gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
-
-    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
+    global_cache_dir = "fb/cache"
 else:
-    global_cache_path = None
+    global_cache_dir = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -151,11 +158,17 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
+disable_cpp_codegen = is_fbcode()
+
 
 # config specific to codegen/cpp.pp
 class cpp:
     # set to torch.get_num_threads()
     threads = -1
+
+    # Do not generate loops when the condition doesn't hold, like:
+    # for(long i0=4096; i0<4096; i0+=1)
+    no_redundant_loops = True
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
@@ -189,7 +202,11 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = False
 
-    debug_cudagraph_trees = True
+    # assertions not on the fast path, steady state
+    slow_path_cudagraph_asserts = False
+
+    # assertions on the fast path
+    fast_path_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -218,7 +235,7 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = False
+    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -230,9 +247,15 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
-    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # hint to Triton when arguments are divisible by 16
+    divisible_by_16 = True
+
+    # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+
+    # Store the generated cubin files for cpp wrapper code to load
+    store_cubin = False
 
 
 # create a directory containing lots of debug information
@@ -241,7 +264,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = True
+    debug_log = False
 
     # Save python logger call >=logging.INFO
     info_log = False

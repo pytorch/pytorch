@@ -28,7 +28,7 @@
 #endif
 
 namespace at::native {
-
+namespace mps {
 static bool dispatchIndexKernel(TensorIteratorBase& iter,
                                 IntArrayRef index_size,
                                 IntArrayRef index_stride,
@@ -174,22 +174,6 @@ static void validateInputData(const TensorIteratorBase& iter,
   }
 }
 
-void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  using namespace mps;
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
-  }
-}
-
-void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
-  using namespace mps;
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
-  }
-}
-
 static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, const Tensor& mask) {
   NoNamesGuard guard;
 
@@ -212,6 +196,21 @@ static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, co
 
   return result;
 }
+
+void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
+  }
+}
+
+void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
+  }
+}
+} // namespace mps
 
 static Tensor nonzero_fallback(const Tensor& self) {
   TORCH_WARN_ONCE("MPS: nonzero op is supported natively starting from macOS 13.0. ",
@@ -398,12 +397,12 @@ Tensor nonzero_mps(const Tensor& self) {
 Tensor masked_select_mps(const Tensor& self, const Tensor& mask) {
   namedinference::compute_broadcast_outnames(self, mask);
   Tensor result = at::empty({0}, self.options());
-  return masked_select_out_mps_impl(result, self, mask);
+  return mps::masked_select_out_mps_impl(result, self, mask);
 }
 
 Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, Tensor& result) {
   namedinference::compute_broadcast_outnames(self, mask);
-  return masked_select_out_mps_impl(result, self, mask);
+  return mps::masked_select_out_mps_impl(result, self, mask);
 }
 
 Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
@@ -609,17 +608,42 @@ Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
 Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& index, Tensor& output) {
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
+  auto num_indices = index.numel();
   dim = maybe_wrap_dim(dim, self.dim());
+
   // Checks
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK(!(self.dim() == 0 && num_indices != 1),
+              "index_select(): Index to scalar can have only 1 value, got ",
+              num_indices,
+              " value(s)");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
               "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  TORCH_CHECK(output.dim() == 0 || index.size(-1) == output.size(dim),
+              "index_select(): index and output must have the same size at `dim`th dimension, but got ",
+              index.size(-1),
+              " and ",
+              output.size(dim),
+              ".");
+
+  for (const auto i : irange(self.dim())) {
+    if (i == dim)
+      continue;
+    TORCH_CHECK(self.size(i) == output.size(i),
+                "index_select(): self and output must have the same dimensions except for `dim`th dimension, but got ",
+                self.size(i),
+                " and ",
+                output.size(i),
+                " at dimension ",
+                i,
+                ".");
+  }
 
   // Empty index
-  if (index.numel() == 0) {
+  if (num_indices == 0) {
     return output;
   }
 
@@ -954,6 +978,6 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   return at::index_put_out(self, *std::get<1>(mask_self_expanded), final_indices, source.resize_(indices[0].numel()));
 }
 
-REGISTER_DISPATCH(index_stub, &index_kernel_mps);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel_mps);
+REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps);
+REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps);
 } // namespace at::native

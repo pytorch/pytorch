@@ -32,8 +32,8 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 import builtins
 
 __all__ = [
-    'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_default_device',
+    'typename', 'is_tensor', 'is_storage',
+    'set_default_tensor_type', 'set_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
@@ -49,7 +49,7 @@ __all__ = [
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap'
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
 ]
 
 ################################################################################
@@ -691,6 +691,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
+        * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -731,6 +733,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
+        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -1364,6 +1367,7 @@ def _assert(condition, message):
 # side effect of adding to the imported module's members for other users.
 from torch import cuda as cuda
 from torch import cpu as cpu
+from torch import mps as mps
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -1493,11 +1497,11 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode in ("reduce-overhead", "max-autotune"):
+        elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
+                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
             )
 
     def apply_options(self, options: Optional[Dict[str, Any]]):
@@ -1587,10 +1591,13 @@ def compile(model: Optional[Callable] = None, *,
     import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
+    if torch.backends.mps.is_available():
+        backend = "aot_eager"
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 

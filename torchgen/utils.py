@@ -16,6 +16,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     NoReturn,
     Optional,
     Sequence,
@@ -24,8 +25,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
-from typing_extensions import Literal  # Python 3.8+
 
 from torchgen.code_template import CodeTemplate
 
@@ -110,8 +109,7 @@ def mapMaybe(func: Callable[[T], Optional[S]], xs: Iterable[T]) -> Iterator[S]:
 # Map over function that returns sequences and cat them all together
 def concatMap(func: Callable[[T], Sequence[S]], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
-        for r in func(x):
-            yield r
+        yield from func(x)
 
 
 # Conveniently add error context to exceptions raised.  Lets us
