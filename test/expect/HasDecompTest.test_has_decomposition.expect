@@ -694,8 +694,6 @@ aten::cummax
 aten::cummax.out
 aten::cummin
 aten::cummin.out
-aten::cumprod
-aten::cumprod.out
 aten::deg2rad
 aten::deg2rad.out
 aten::deg2rad_
@@ -965,6 +963,8 @@ aten::nll_loss2d_forward
 aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
+aten::nonzero_static
+aten::nonzero_static.out
 aten::normal_functional
 aten::ones.names
 aten::ones.names_out

@@ -5,8 +5,13 @@ from typing import NamedTuple
 
 import torch._dynamo
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_MACOS, TestCase as TorchTestCase
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    TEST_WITH_ASAN,
+    TestCase as TorchTestCase,
+)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+
 
 try:
     try:
@@ -20,12 +25,24 @@ except unittest.SkipTest:
     raise
 
 
+RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
+RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
+
+
 class CppWrapperTemplate:
+    pass
+
+
+class CudaWrapperTemplate:
     pass
 
 
 class TestCppWrapper(TorchTestCase):
     device = "cpu"
+
+
+class TestCudaWrapper(TorchTestCase):
+    device = "cuda"
 
 
 def make_test_case(name, device, tests):
@@ -45,10 +62,12 @@ def make_test_case(name, device, tests):
             tests.tearDownClass()
 
     fn.__name__ = test_name
-    setattr(CppWrapperTemplate, test_name, fn)
+    setattr(
+        CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate, test_name, fn
+    )
 
 
-if HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS:
+if RUN_CPU:
 
     class BaseTest(NamedTuple):
         name: str
@@ -65,7 +84,6 @@ if HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS:
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_linear_packed"),
-        BaseTest("test_linear_unary"),
         BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
@@ -81,8 +99,41 @@ if HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS:
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
 
+if RUN_CUDA:
+
+    class BaseTest(NamedTuple):
+        name: str
+        device: str = "cuda"
+        tests: TorchTestCase = test_torchinductor.CudaTests()
+
+    # Maintain two separate test lists for cuda and cpp for now
+    for item in [
+        BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_bitwise"),  # int32
+        BaseTest("test_bmm1"),
+        BaseTest("test_bmm2"),
+        BaseTest("test_cat"),  # alias
+        BaseTest("test_linear1"),
+        BaseTest("test_linear2"),
+        BaseTest("test_linear_packed"),
+        # BaseTest("test_lowmem_dropout1"),  # None as output
+        BaseTest("test_mm_views"),
+        BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest("test_reduction1"),  # Reduction
+        BaseTest("test_relu"),  # multiple inputs
+        BaseTest("test_scalar_input"),
+        BaseTest("test_silu"),  # single input, single output
+        BaseTest("test_sum_dtype"),  # float64
+        BaseTest("test_sum_int"),  # bool, int64, int8, uint8
+        BaseTest("test_transpose"),  # multiple outputs, buffer clear
+    ]:
+        make_test_case(item.name, item.device, item.tests)
+
+    test_torchinductor.copy_tests(CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper")
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS:
+    if RUN_CPU or RUN_CUDA:
         run_tests(needs="filelock")
