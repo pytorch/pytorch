@@ -281,6 +281,9 @@ test_failures = {
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
+if TEST_WITH_ROCM:
+    # aten.miopen_batch_norm is not registered for lowering
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(CommonTemplate)
 
@@ -334,5 +337,5 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if (HAS_CPU or HAS_CUDA):
         run_tests(needs="filelock")
