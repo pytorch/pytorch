@@ -1,5 +1,6 @@
 import builtins
 import collections
+import enum
 import importlib
 import itertools
 import logging
@@ -24,7 +25,8 @@ from torch._guards import (
 )
 from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
-from . import config, convert_frame, mutation_guard
+from . import convert_frame, mutation_guard
+from .config_utils import config
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
@@ -178,7 +180,7 @@ class GuardBuilder(GuardBuilderBase):
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
-                    log.warning(f"invalid var name: {guard}")
+                    log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
         return name
@@ -597,7 +599,11 @@ class GuardBuilder(GuardBuilderBase):
             weakref.ref(type(guarded_object)) if guarded_object is not None else None
         )
         obj_ref = None
-        if hasattr(guarded_object.__class__, "__weakref__"):
+        # Not necessary to have weakref for Enum type, but there is a bug that
+        # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
+            guarded_object, enum.Enum
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
