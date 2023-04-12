@@ -922,8 +922,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         out_test = torch.compile(f, backend="aot_eager")(a_test, b_test)
 
         self.assertEqual(out_ref, out_test)
-        print(a_ref.grad)
-        print(a_test.grad)
         self.assertEqual(a_ref.grad, a_test.grad)
         self.assertEqual(b_ref.grad, b_test.grad)
 
