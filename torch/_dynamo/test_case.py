@@ -12,7 +12,8 @@ from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
 
-from . import config, reset, utils
+from . import reset, utils
+from .config_utils import config
 
 
 def run_tests(needs=()):
@@ -23,7 +24,7 @@ def run_tests(needs=()):
         or IS_WINDOWS
         or TEST_WITH_CROSSREF
         or TEST_WITH_ROCM
-        or sys.version_info >= (3, 11)
+        or sys.version_info >= (3, 12)
     ):
         return  # skip testing
 

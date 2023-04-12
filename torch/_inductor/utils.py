@@ -371,7 +371,20 @@ def has_incompatible_cudagraph_ops(gm):
         "fbgemm.jagged_to_padded_dense.default",
     }
     if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update({"aten.index_put.default", "aten.index_put_.default"})
+        forbidden_set.update(
+            {
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
@@ -622,12 +635,12 @@ def run_and_get_code(fn, *args, **kwargs):
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
         torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
+        result = fn(*args, **kwargs)
+    return result, source_codes
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
+    _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"
@@ -721,7 +734,7 @@ def get_kernel_category(kernel_mod):
     - reduction
     - persistent_reduction
 
-    Currently we simply decide the cateory depending on what decorator is imported
+    Currently we simply decide the category depending on what decorator is imported
     by the kernel.
     """
     choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]

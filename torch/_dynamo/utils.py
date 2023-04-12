@@ -27,7 +27,7 @@ from typing import Any, Dict, Tuple, Union
 
 import torch._logging
 from torch._guards import detect_fake_mode  # noqa: F401
-from . import config
+from .config_utils import config
 
 try:
     import numpy as np
@@ -49,6 +49,8 @@ from torch.utils._pytree import tree_map
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
+nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
+nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 
 log = logging.getLogger(__name__)
 
@@ -268,7 +270,6 @@ def setup_compile_debug():
             inductor=logging.DEBUG,
             output_code=True,  # this is off by default
         )
-
         return add_file_handler()
 
     return contextlib.ExitStack()
@@ -313,14 +314,14 @@ def write_record_to_file(filename, exec_record):
     try:
         if os.path.exists(filename):
             log.warning(
-                f"Unable to write execution record {filename}; file already exists."
+                "Unable to write execution record %s; file already exists.", filename
             )
         else:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error(f"Unable to write execution record {filename}", exc_info=1)
+        log.error("Unable to write execution record %s", filename, exc_info=1)
 
 
 def count_calls(g: fx.Graph):
@@ -558,7 +559,7 @@ def clone_input(x):
 
 
 def clone_inputs(example_inputs):
-    if isinstance(example_inputs, dict):
+    if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
             assert isinstance(value, torch.Tensor)
@@ -898,7 +899,7 @@ def same(
                     relax_numpy_equality=relax_numpy_equality,
                 )
             ):
-                log.error(f"Accuracy failed for key name {k}")
+                log.error("Accuracy failed for key name %s", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -912,7 +913,7 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             if ref.dtype != res.dtype:
-                log.error(f"dtype mismatch {ref.dtype}, {res.dtype}")
+                log.error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
@@ -935,7 +936,7 @@ def same(
                 return True
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
-                log.warning(f"Similarity score={score.cpu().detach().item()}")
+                log.warning("Similarity score=%s", score.cpu().detach().item())
             return score >= 0.99
         else:
             if not exact_dtype:
@@ -965,22 +966,27 @@ def same(
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log.error(
-                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
+                        res_error,
+                        ref_error,
+                        res.size(),
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test
 
-            log.error(f"Accuracy failed: allclose not within tol={tol}")
+            log.error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
         r = ref == res
         if not r:
-            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+            log.error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(
+                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
+            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality and not (
@@ -989,7 +995,7 @@ def same(
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error(f"Accuracy failed (numpy): {ref} != {res}")
+            log.error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1164,7 +1170,13 @@ def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
     """
-    from .exc import TorchRuntimeError, unimplemented, Unsupported
+    from .exc import (
+        TorchRuntimeError,
+        unimplemented,
+        Unsupported,
+        UserError,
+        UserErrorType,
+    )
 
     op = node.op
 
@@ -1225,6 +1237,8 @@ def get_fake_value(node, tx):
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
             unimplemented("guard on data-dependent symbolic int/float")
+        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError() from e
 
 
@@ -1411,9 +1425,29 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-def format_graph_code(name, gm):
-    return _format_graph_code(
-        name, gm.forward.__code__.co_filename, gm.print_readable(print_output=False)
+class LazyString:
+    def __init__(self, func, *args, **kwargs):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return self.func(*self.args, **self.kwargs)
+
+
+def lazy_format_graph_code(name, gm, maybe_id=None):
+    def format_name():
+        if maybe_id is not None:
+            return f"{name} {maybe_id}"
+        else:
+            return name
+
+    return LazyString(
+        lambda: _format_graph_code(
+            f"===== {format_name()} =====\n",
+            gm.forward.__code__.co_filename,
+            gm.print_readable(print_output=False),
+        )
     )
 
 
@@ -1421,21 +1455,68 @@ def _format_graph_code(name, filename, graph_str):
     return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
 
 
-def format_graph_tabular(fn_name, gm):
-    try:
-        from tabulate import tabulate  # TODO: Check that this is installed
-    except ImportError:
-        return (
-            "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-            + format_graph_code(fn_name, gm)
-        )
+def lazy_format_graph_tabular(fn_name, gm):
+    def inner():
+        try:
+            from tabulate import tabulate  # TODO: Check that this is installed
+        except ImportError:
+            return (
+                "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+                + format_graph_code(fn_name, gm)
+            )
 
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes]
-    graph_str = tabulate(
-        node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
-    )
-    return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+        node_specs = [
+            [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
+        ]
+        graph_str = tabulate(
+            node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+        )
+        return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+    return LazyString(inner)
 
 
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
+
+
+def nnmodule_has_hooks(
+    mod,
+    check_forward_hooks=False,
+    check_backward_hooks=False,
+    check_state_dict_hooks=False,
+):
+    """
+    Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
+    hooks executed during module.__call__, and state_dict hooks which are executed separately.
+    """
+    hook_dicts_to_check = []
+    check_all_hooks = (
+        not check_forward_hooks
+        and not check_backward_hooks
+        and not check_state_dict_hooks
+    )
+    if check_forward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_forward_pre_hooks",
+                "_forward_hooks",
+            ]
+        )
+    if check_backward_hooks or check_all_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+            ]
+        )
+    if check_state_dict_hooks:
+        hook_dicts_to_check.extend(
+            [
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+        )
+    return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))

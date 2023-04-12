@@ -271,6 +271,7 @@ class DebugAutotuner(CachingAutotuner):
     def __init__(self, *args, regex_filter="", **kwargs):
         self.regex_filter = regex_filter
         super().__init__(*args, **kwargs)
+        self.cached = None
 
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
@@ -280,17 +281,20 @@ class DebugAutotuner(CachingAutotuner):
         super().run(*args, grid=grid, stream=stream)
         (launcher,) = self.launchers
 
-        ms = self.bench(launcher, *args, grid=grid)[0]
-        num_in_out_ptrs = len(
-            [
-                arg_name
-                for arg_name in self.fn.arg_names
-                if arg_name.startswith("in_out_ptr")
-            ]
-        )
-        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
-        gb_per_s = num_gb / (ms / 1e3)
-
+        if self.cached is None:
+            ms = self.bench(launcher, *args, grid=grid)[0]
+            num_in_out_ptrs = len(
+                [
+                    arg_name
+                    for arg_name in self.fn.arg_names
+                    if arg_name.startswith("in_out_ptr")
+                ]
+            )
+            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+            gb_per_s = num_gb / (ms / 1e3)
+            self.cached = (ms, num_gb, gb_per_s, kernel_name)
+        else:
+            ms, num_gb, gb_per_s, kernel_name = self.cached
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
         print(
             create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
@@ -484,7 +488,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -511,7 +515,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
+def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
@@ -592,7 +596,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), num_stages=1
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(
@@ -644,6 +648,10 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
+
+    for c in configs:
+        # we don't need RBLOCK for persistent reduction
+        c.kwargs.pop("RBLOCK")
 
     return cached_autotune(
         configs,
