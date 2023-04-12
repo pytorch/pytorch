@@ -103,8 +103,41 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
         >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
 
     """
-    return CustomOp._define(schema, ns=ns)
 
+    def inner(func):
+        if not inspect.isfunction(func):
+            raise ValueError(
+                f"custom_op(...)(func): Expected `func` to be a Python "
+                f"function, got: {type(func)}"
+            )
+
+        validate_namespace(ns)
+        schema_str = f"{func.__name__}{schema}"
+        function_schema = FunctionSchema.parse(schema_str)
+        validate_schema(function_schema)
+
+        lib = library.Library(ns, "FRAGMENT")
+        lib.define(schema_str)
+        ophandle = find_ophandle_or_throw(ns, function_schema.name)
+        result = CustomOp(
+            lib, ns, function_schema.name, ophandle, _private_access=True
+        )
+
+        result.__name__ = func.__name__
+        result.__module__ = func.__module__
+        result.__doc__ = func.__doc__
+
+        # NYI: autograd not supported
+        # In the near future we will either directly use the
+        # autograd_not_implemented kernels or make those the default fallback
+        # for the Autograd and ADInplaceOrView keys. Both of those are a bit tricky.
+        library.impl(lib, result._opname, "Autograd")(
+            get_autograd_not_implemented_kernel(weakref.proxy(result))
+        )
+
+        return result
+
+    return inner
 
 
 class CustomOp:
@@ -121,8 +154,8 @@ class CustomOp:
         super(CustomOp, self).__init__()
         if not _private_access:
             raise RuntimeError(
-                "The CustomOp constructor is private. Please use "
-                "custom_op to create a CustomOp object"
+                "The CustomOp constructor is private and we do not guarantee "
+                "BC for it. Please use custom_op(...) to create a CustomOp object"
             )
         name = f"{cpp_ns}::{str(operator_name.name)}"
         self._lib: library.Library = lib
@@ -135,43 +168,6 @@ class CustomOp:
 
     def __repr__(self):
         raise RuntimeError("Please don't call this")
-
-    @staticmethod
-    def _define(schema: str, *, ns: str) -> typing.Callable:
-        def inner(func):
-            if not inspect.isfunction(func):
-                raise ValueError(
-                    f"custom_op(...)(func): Expected `func` to be a Python "
-                    f"function, got: {type(func)}"
-                )
-
-            validate_namespace(ns)
-            schema_str = f"{func.__name__}{schema}"
-            function_schema = FunctionSchema.parse(schema_str)
-            validate_schema(function_schema)
-
-            lib = library.Library(ns, "FRAGMENT")
-            lib.define(schema_str)
-            ophandle = find_ophandle_or_throw(ns, function_schema.name)
-            result = CustomOp(
-                lib, ns, function_schema.name, ophandle, _private_access=True
-            )
-
-            result.__name__ = func.__name__
-            result.__module__ = func.__module__
-            result.__doc__ = func.__doc__
-
-            # NYI: autograd not supported
-            # In the near future we will either directly use the
-            # autograd_not_implemented kernels or make those the default fallback
-            # for the Autograd and ADInplaceOrView keys. Both of those are a bit tricky.
-            library.impl(lib, result._opname, "Autograd")(
-                get_autograd_not_implemented_kernel(weakref.proxy(result))
-            )
-
-            return result
-
-        return inner
 
     def __call__(self, *args, **kwargs):
         # Bypass torch.ops.* and directly do OperatorHandle::callBoxed.
