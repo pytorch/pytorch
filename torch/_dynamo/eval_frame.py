@@ -44,8 +44,7 @@ else:
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
-from . import convert_frame, skipfiles, utils
-from .config_utils import config
+from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
