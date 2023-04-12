@@ -3,7 +3,6 @@
 
 import unittest
 
-import torch
 from torch.onnx._internal import _beartype
 from torch.testing._internal import common_utils
 
