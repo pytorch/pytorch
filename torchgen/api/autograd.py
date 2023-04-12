@@ -338,7 +338,7 @@ def gen_foreach_derivativeinfo(
 ) -> Tuple[Optional[DifferentiabilityInfo], bool]:
     """Generate DifferentiabilityInfo for out-place foreach function, return the existing one for in-place.
 
-    The second return value indicates the info is exact match or not.
+    The second return value indicates whether the info is generated in this function.
     """
     ref_diff_info: Optional[DifferentiabilityInfo] = None
     for function_schema in functional_info_by_signature:
