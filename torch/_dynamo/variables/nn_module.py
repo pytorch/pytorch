@@ -9,7 +9,7 @@ import torch.nn
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
-from ..exc import RestartAnalysis, unimplemented
+from ..exc import RestartAnalysis, unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -264,8 +264,10 @@ class NNModuleVariable(VariableTracker):
                     assert len(kwargs) == 0
                     if hasattr(mod, "_initialize_hook"):
                         input = [
-                            get_fake_value(x.node, tx)
-                            for x in proxy_args_kwargs(args, {})[0]
+                            type(arg)([get_fake_value(x.node, tx) for x in arg])
+                            if isinstance(arg, (list, tuple))
+                            else get_fake_value(arg.node, tx)
+                            for arg in proxy_args_kwargs(args, {})[0]
                         ]
                         mod._infer_parameters(mod, input)
                     fn = mod.__call__
@@ -602,6 +604,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if type(value) is torch.jit._script.RecursiveScriptModule:
+            raise Unsupported(
+                "ScriptModules aren't supported in UnspecializedNNModuleVariable"
+                " becuase their .forward function isn't a static member of their type"
+            )
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
