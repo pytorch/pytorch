@@ -2332,7 +2332,7 @@ class ShapeEnv:
         if not self._suppress_guards_tls():
             tb = traceback.extract_stack()[:-1]
             stack = ''.join(traceback.format_list(tb))
-            guard = ShapeGuard(expr, stack)
+            guard = ShapeGuard(g, stack)
             self.guards.append(guard)
             if self.log.isEnabledFor(logging.INFO):
                 for frame in reversed(tb):
