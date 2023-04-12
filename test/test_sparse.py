@@ -2008,13 +2008,19 @@ class TestSparse(TestSparseBase):
 
         shape = (5, 5)
         sparse_dims = len(shape)
-        nnzs = (0, 5, 25)
+        nnzs = (0, 5, 15, 25)
+
+        lhs_data = torch.arange(25, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
+        rhs_data = lhs_data.clone()
 
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
-                lhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, lhs_is_coalesced)
+                lhs = lhs_data.clone()
+                lhs._values()[nnz:].fill_(0)
                 lhs.requires_grad_(True)
-                rhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, rhs_is_coalesced)
+
+                rhs = rhs_data.clone()
+                rhs._values()[:-nnz].fill_(0)
                 # setting masked = True is required because of the broken backward of to_dense().
                 # See https://github.com/pytorch/pytorch/issues/95550.
                 gradcheck(lambda x, y: x.sparse_mask(y).to_dense(), (lhs, rhs), masked=True, check_sparse_nnz=True)

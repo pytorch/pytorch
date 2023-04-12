@@ -23,7 +23,6 @@ from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
-    config,
     exc,
     logging as torchdynamo_logging,
     side_effects,
@@ -42,6 +41,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -2014,6 +2014,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+            )
+
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented(
+                f"call torch._dynamo.skip() wrapped function {func.get_function()}"
             )
 
     @staticmethod
