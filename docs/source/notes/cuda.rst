@@ -54,6 +54,16 @@ Below you can find a small example showcasing this::
         f = torch.randn(2).cuda(cuda2)
         # d.device, e.device, and f.device are all device(type='cuda', index=2)
 
+.. note::
+
+    Starting in CUDA 12.0, the behavior of `cudaSetDevice`_ slightly changed resulting
+    in immediate context creation on the device. Subsequently, a call to
+    ``torch.cuda.set_device(d)`` will immediately create the CUDA context on the
+    device ``d`` if it was not created previously. This eager behavior could potentially
+    lead to GPU memory pollution. In PyTorch 2.1.0a0+git69eef5a and newer this issue was
+    addressed to avoid unnecessary context creation. Please report a GitHub issue if there
+    is any device misbehavior or memory pollution.
+
 .. _tf32_on_ampere:
 
 TensorFloat-32(TF32) on Ampere devices
@@ -750,6 +760,9 @@ If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 
 .. _nvmlDeviceGetCount_v2:
     https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html#group__nvmlDeviceQueries_1ga93623b195bff04bbe3490ca33c8a42d
+
+.. _cudaSetDevice:
+    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html#group__CUDART__DEVICE_1g159587909ffa0791bbe4b40187a4c6bb
 
 .. _cuda-graph-semantics:
 

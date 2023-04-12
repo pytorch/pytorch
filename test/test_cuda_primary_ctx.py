@@ -128,6 +128,8 @@ class TestCudaPrimaryCtx(TestCase):
         with torch.cuda.device('cuda:1'):
             x = torch.randn(1, device='cuda')
 
+        self.assertTrue(x.device == torch.device('cuda', 1))
+
         # Current device must remain 0
         self.assertTrue(torch.cuda.current_device() == 0)
 
@@ -154,6 +156,27 @@ class TestCudaPrimaryCtx(TestCase):
         self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
 
         y = torch.randn(1, device='cuda')
+
+        # Now the device 0 should have context
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+        self.assertTrue(y.device == torch.device('cuda', 0))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_stream_creation(self):
+        with torch.cuda.device('cuda:1'):
+            x = torch.cuda.Stream()
+
+        self.assertTrue(x.device == torch.device('cuda', 1))
+
+        # Current device must remain 0
+        self.assertTrue(torch.cuda.current_device() == 0)
+
+        # We should still have only created context on 'cuda:1'
+        self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
+        self.assertTrue(torch._C._cuda_hasPrimaryContext(1))
+
+        y = torch.cuda.Stream()
 
         # Now the device 0 should have context
         self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
