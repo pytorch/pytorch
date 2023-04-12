@@ -33,7 +33,6 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/scalar_tensor.h>
-#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <thrust/device_ptr.h>
@@ -541,11 +540,6 @@ __global__ void _sparse_sum_backward_cuda_kernel(
 Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
   TORCH_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
   TORCH_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
-
-  // Short circuit if grad is either zero or empty
-  if ((grad_.layout() != kStrided && !grad_._nnz()) || !grad_.numel()) {
-    return at::zeros_like(input_);
-  }
 
   auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
