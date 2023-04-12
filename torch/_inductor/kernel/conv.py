@@ -178,7 +178,18 @@ conv2d_template = TritonTemplate(
 )
 
 aten_convolution = ExternKernelChoice(
-    torch.convolution, "at::convolution", has_out_variant=False
+    torch.convolution,
+    "at::convolution",
+    (
+        "bias",
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ),
+    has_out_variant=False,
 )
 
 
