@@ -761,7 +761,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     context->setTimeout(options->timeout);
     try {
       context->connectFullMesh(store, options->devices[i]);
-    } catch (const std::runtime_error &e) {
+    } catch (const std::runtime_error& e) {
       auto err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.
       auto msg = c10::str("Gloo connectFullMesh failed with ", err);
