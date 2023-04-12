@@ -3,6 +3,8 @@
 
 #include "caffe2/sgd/fp32_momentum_sgd_op.h"
 
+#include <c10/cuda/CUDADeviceAssertion.h>
+
 namespace caffe2 {
 namespace {
 

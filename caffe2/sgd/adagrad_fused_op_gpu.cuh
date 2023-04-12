@@ -4,6 +4,7 @@
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
 #include <curand_kernel.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"

@@ -2,6 +2,7 @@
 #include "caffe2/core/context_gpu.h"
 
 #include "caffe2/sgd/fp16_momentum_sgd_op.h"
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 namespace caffe2 {
 namespace {
