@@ -88,7 +88,7 @@ def get_module_partitions(
             for arg in node.args:
                 if isinstance(arg, Node) and arg not in nodes:
                     input_nodes.add(arg)
-            
+
             if node.op == "get_attr":
                 params.add(node.target)
 
