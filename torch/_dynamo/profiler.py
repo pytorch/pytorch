@@ -4,7 +4,7 @@ from typing import Any, List
 
 import torch
 
-from . import config
+from .config_utils import config
 from .utils import print_once
 
 
@@ -128,6 +128,8 @@ class Profiler:
 
         unique_graphs = Profiler.unique_graphs
         Profiler.unique_graphs = 0
+        # we counted one extra op that is part of the profiler setup code
+        total_ops -= 1
 
         return ProfileResult(
             captured=ProfileMetrics(
