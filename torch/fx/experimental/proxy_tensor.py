@@ -698,15 +698,23 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=True,
-                allow_non_fake_inputs=_allow_non_fake_inputs)
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=True,
+                    allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=_allow_non_fake_inputs,
-                shape_env=shape_env)
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                shape_env = ShapeEnv()
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=False,
+                    allow_non_fake_inputs=_allow_non_fake_inputs,
+                    shape_env=shape_env)
+            else:
+                shape_env = fake_tensor_mode.shape_env
+                assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
+
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
