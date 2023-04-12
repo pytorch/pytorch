@@ -3,7 +3,7 @@ from .quantizer import Quantizer
 
 import copy
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Set, Dict
+from typing import List, NamedTuple, Optional, Set, Dict, Callable
 from torch.ao.quantization.observer import (
     PlaceholderObserver,
     HistogramObserver,
@@ -71,7 +71,7 @@ SpecAndOperators = NamedTuple(
 
 
 def supported_symmetric_quantized_operators() -> List[str]:
-    supported_operators = ["conv2d", "linear", "add", "maxpool2d"]
+    supported_operators = ["conv2d", "linear", "add", "maxpool2d", "hardtanh", "mean", "adaptive_avgpool2d"]
     return copy.deepcopy(supported_operators)
 
 def get_supported_symmetric_quantized_spec_and_operators() -> List[SpecAndOperators]:
@@ -284,6 +284,12 @@ class QNNPackQuantizer(Quantizer):
                 elif op == "add":
                     self._annotate_add_relu(node, global_spec)
                     self._annotate_add(node, global_spec)
+                elif op == "hardtanh":
+                    self._annotate_hardtanh(node, global_spec)
+                elif op == "mean":
+                    self._annotate_mean(node, global_spec)
+                elif op == "adaptive_avgpool2d":
+                    self._annotate_adaptive_avg_pool2d(node, global_spec)
 
         return model
 
@@ -392,6 +398,30 @@ class QNNPackQuantizer(Quantizer):
             "input_output_share_observers": True,
             "_annotated": True,
         }
+
+    def _annotate_input_out_obs_sharing_op(self, op: Callable, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        io_obs_sharing_node = node
+        if io_obs_sharing_node.op != "call_function" or io_obs_sharing_node.target != op:
+            return
+        if _is_annotated([io_obs_sharing_node]):
+            return
+
+        io_obs_sharing_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "input_output_share_observers": True,
+            "_annotated": True,
+        }
+
+    def _annotate_hardtanh(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        self._annotate_input_out_obs_sharing_op(torch.ops.aten.hardtanh.default, node, operator_spec)
+
+    def _annotate_mean(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        self._annotate_input_out_obs_sharing_op(torch.ops.aten.mean.default, node, operator_spec)
+        self._annotate_input_out_obs_sharing_op(torch.ops.aten.mean.dim, node, operator_spec)
+
+    def _annotate_adaptive_avg_pool2d(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        self._annotate_input_out_obs_sharing_op(torch.ops.aten.adaptive_avg_pool2d.default, node, operator_spec)
 
     def _annotate_add_relu(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
         if node.op != "call_function" or node.target not in [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]:

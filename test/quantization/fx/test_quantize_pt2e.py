@@ -2,7 +2,6 @@
 import torch
 import torch.nn as nn
 import torch._dynamo as torchdynamo
-from torch.testing._internal.common_utils import xfailIfPython311
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
@@ -39,7 +38,6 @@ from torch._inductor.compile_fx import compile_fx
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
-    @xfailIfPython311
     def test_qconfig_none(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -88,7 +86,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             self.checkGraphModuleNodes(
                 m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
 
-    @xfailIfPython311
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -136,7 +133,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
-    @xfailIfPython311
     def test_simple_quantizer(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -195,7 +191,6 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
 
-    @xfailIfPython311
     def test_qnnpack_quantizer_conv(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -239,7 +234,69 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
 
-    @xfailIfPython311
+    def test_qnnpack_quantizer_obs_sharing_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.hardtanh = torch.nn.Hardtanh()
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.adaptive_avg_pool2d(x)
+                x = self.hardtanh(x)
+                x = torch.mean(x)
+                return x
+
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        operator_spec = qq.get_default_per_channel_symmetric_qnnpack_operator_spec()
+        quantizer.set_global(operator_spec)
+        m = M().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        # program capture
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+            tracing_mode="real",
+        )
+
+        m = prepare_pt2e_quantizer(m, quantizer)
+        print("after prepare:", m)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        print("m:", m)
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+        }
+        node_list = [
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel),
+            ns.call_function(torch.ops.aten.convolution.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.aten.mean.dim),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.aten.hardtanh.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.aten.mean.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
+
     def test_rearrange_weight_observer_for_decomposed_linear(self):
         """
         Check whether weight observer is correctly rearranged for decomposed linear.
@@ -301,7 +358,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
-    @xfailIfPython311
     def test_transposed_conv_bn_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -347,7 +403,6 @@ class TestQuantizePT2E(QuantizationTestCase):
 @skipIfNoQNNPACK
 class TestQuantizePT2EX86Inductor(QuantizationTestCase):
     @skipIfNoX86
-    @xfailIfPython311
     def test_inductor_backend_config_conv(self):
         class M(torch.nn.Module):
             def __init__(self, use_relu: bool = False, inplace_relu: bool = False):
@@ -433,7 +488,6 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
-    @xfailIfPython311
     def test_resnet18(self):
         import torchvision
         with override_quantized_engine("qnnpack"):
@@ -483,7 +537,6 @@ class TestQuantizePT2EModels(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
-    @xfailIfPython311
     def test_resnet18_with_quantizer_api(self):
         import torchvision
         with override_quantized_engine("qnnpack"):
