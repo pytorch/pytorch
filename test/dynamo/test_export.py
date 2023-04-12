@@ -2432,15 +2432,21 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(5, 4, 6)
         y = torch.randn(6, 4, 7)
 
-        constraint = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
+        constraint = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(y, 0)]
 
         gm, guard = torch._dynamo.export(
             f, x, y, aten_graph=True, tracing_mode="symbolic", constraints=constraint
         )
 
-        gm(torch.randn(3, 4, 5), torch.randn(6, 4, 7))
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten._assert_async.msg:
+                count += 1
 
-
+        # Each dynamic dimension has two asserts
+        self.assertEqual(count, 6)
+        test_inps = (torch.randn(3, 4, 5), torch.randn(6, 4, 7))
+        self.assertEqual(gm(*test_inps), f(*test_inps))
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

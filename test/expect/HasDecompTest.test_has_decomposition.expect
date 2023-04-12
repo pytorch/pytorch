@@ -854,7 +854,6 @@ aten::lstm_mps_backward
 aten::lstm_mps_backward.out
 aten::lu_unpack
 aten::lu_unpack.out
-aten::make_dep_token
 aten::masked_scatter
 aten::masked_scatter.out
 aten::masked_scatter_
