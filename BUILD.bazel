@@ -1891,3 +1891,8 @@ genrule(
     ],
     cmd = "python3 tools/download_mnist.py -d $(RULEDIR)/mnist",
 )
+
+py_binary(
+    name = "print-python-version",
+    srcs = ["print-python-version.py"],
+)

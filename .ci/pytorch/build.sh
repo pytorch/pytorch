@@ -189,6 +189,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   get_bazel
   install_sccache_nvcc_for_bazel
 
+  tools/bazel run //:print-python-version
+
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
   BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"

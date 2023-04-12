@@ -773,6 +773,8 @@ test_bazel() {
 
   get_bazel
 
+  python --version
+
   if [[ "$CUDA_VERSION" == "cpu" ]]; then
     # Test //c10/... without Google flags and logging libraries. The
     # :all_tests target in the subsequent Bazel invocation tests
