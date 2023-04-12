@@ -614,7 +614,6 @@ meta_function_expected_failures = {
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.logcumsumexp : {f64, bf16, f32, c64, c128},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
@@ -680,8 +679,6 @@ meta_function_skips = {
     torch.take_along_dim : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.vstack : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.aminmax : {i8, i64, u8, f64, b8, f32, i32, i16},
-    torch.cummax : {bf16, i8, i64, u8, f64, b8, f32, i32, i16},
-    torch.cummin : {bf16, i8, i64, u8, f64, b8, f32, i32, i16},
     torch.diff : {b8},
     torch.equal : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cdist : {f64, f32},
@@ -721,7 +718,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
-    torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
@@ -746,8 +742,6 @@ meta_function_device_skips['cpu'] = {
 }
 
 meta_function_device_skips['cuda'] = {
-    torch.cummax: {f16},
-    torch.cummin: {f16},
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
     torch.linalg.matrix_power: {f32, f64},
@@ -864,8 +858,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.logcumsumexp.default : {bf16, f32, f64, c64, c128},
-    aten.logcumsumexp.out : {bf16, f32, f64, c64, c128},
     aten.max_pool3d_with_indices.default : {f32, f64},
     aten.max_unpool2d.default : {f32, f64},
     aten.max_unpool3d.default : {f32, f64},
@@ -892,8 +884,6 @@ meta_dispatch_skips = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
-    aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.linalg_lu_solve.default: {c32, c64, c128},
     aten.linalg_lu_solve.out: {c32, c64, c128},
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
@@ -906,11 +896,13 @@ meta_dispatch_skips = {
 meta_dispatch_early_skips = set({
     torch.Tensor.float_power_,
     # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumprod_,
     torch.Tensor.cumsum_,
 })
 
 meta_inplace_skips = set({
     # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumprod_,
     torch.Tensor.cumsum_,
 })
 
@@ -942,8 +934,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
-    aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
-    aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
     aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
     aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
@@ -978,8 +968,6 @@ meta_dispatch_device_skips['cuda'] = {
     aten.softmax.int : {c32, c64},
     aten.softmax.int : {c32, c64},
 
-    aten.cummax.default: {f16},
-    aten.cummin.default: {f16},
     # ROCm stuff; technically this should be expected failure but it's
     # not worth it; these should get unified anyway
     aten.miopen_batch_norm.default: {f32},
@@ -1106,6 +1094,28 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
+
+            # Special test for functions taking "device" kwarg
+            # The crossref tests that replacing the device with "meta" works
+            # This part makes sure that *_like functions work well with a "meta"
+            # Tensor and their original device argument.
+            if "device" in kwargs and "_like" in op.name:
+                with torch.random.fork_rng():
+                    torch.manual_seed(123)
+                    ref = func(*args, **kwargs)
+
+                # *_like functions take a Tensor as first argument
+                assert isinstance(args[0], torch.Tensor)
+                with torch.random.fork_rng():
+                    torch.manual_seed(123)
+                    args[0] = args[0].to(device="meta")
+                    meta = func(*args, **kwargs)
+
+                # empty_like is not deterministic
+                if op.name != "empty_like":
+                    self.assertEqual(ref, meta)
+
+
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
