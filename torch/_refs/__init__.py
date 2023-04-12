@@ -3243,7 +3243,14 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while sympy.Mod(accum, length) != 0:
+
+        def mod(x, y):
+            try:
+                return sympy.simplify(x % y != 0)
+            except RecursionError:
+                return sympy.Ne(sympy.Mod(x, y), 0)
+
+        while mod(accum, length):
             end = end + 1
             accum = accum * a_.shape[end]
         if end != idx:
