@@ -595,37 +595,37 @@ import {brushX} from "https://cdn.skypack.dev/d3-brush@3";
 
 let alloc_data = $PLOT_DATA
 
-function process_alloc_data(fraction_of_memory_reported=1) {
+function process_alloc_data(max_entries) {
     let current = []
     let current_data = []
     let data = []
     let max_size = 0
 
     let total_mem = 0
+    let total_summarized_mem = 0
     let timestep = 0
 
     let max_at_time = []
-    function advance(n, max) {
+
+
+    let summarized_mem = {elem: 'summarized', timesteps: [], offsets: [total_mem], size: [], color: 0}
+    let summarized_elems = {}
+
+    function advance(n) {
+        summarized_mem.timesteps.push(timestep)
+        summarized_mem.offsets.push(total_mem)
+        summarized_mem.size.push(total_summarized_mem)
         timestep += n
         for (let i = 0; i < n; i++) {
-            max_at_time.push(max)
+            max_at_time.push(total_mem + total_summarized_mem)
         }
     }
 
-    let mini_points = []
+    let sizes = alloc_data.elements_size.map((x, i) => [x, i]).sort(([x, xi], [y, yi]) => y - x)
 
-    let sizes = alloc_data.elements_size.map(x => x).sort((x, y) => y - x)
-    let total_size = sizes.reduce((x, y) => x + y)
-    const memory_threshold = fraction_of_memory_reported * total_size
-    let total_seen = 0
-    let memory_threshold_size = 0
-
-    for (const [i, size] of sizes.entries()) {
-        total_seen += size
-        if (total_seen > memory_threshold) {
-            memory_threshold_size = size
-            break
-        }
+    let draw_elem = {}
+    for (const [s, e] of sizes.slice(0, max_entries)) {
+        draw_elem[e] = true
     }
 
     function add_allocation(elem) {
@@ -642,23 +642,37 @@ function process_alloc_data(fraction_of_memory_reported=1) {
     }
 
     for (const elem of alloc_data.initially_allocated) {
-        add_allocation(elem)
+        if (elem in draw_elem) {
+            add_allocation(elem)
+        } else {
+            total_summarized_mem += alloc_data.elements_size[elem]
+            summarized_elems[elem] = true
+        }
     }
 
     for (const action of alloc_data.actions) {
         const elem = action
-        const idx = current.findIndex(x => x === elem)
         const size = alloc_data.elements_size[elem]
-        if (size < memory_threshold_size) {
+        if ( !(elem in draw_elem)) {
+            if (elem in summarized_elems) {
+                advance(1)
+                total_summarized_mem -= size
+                summarized_elems[elem] = null
+            } else {
+                total_summarized_mem += size
+                summarized_elems[elem] = true
+                advance(1)
+            }
             continue
         }
+        const idx = current.findLastIndex(x => x === elem)
         // first time we see an action we add it
         // second time we remove it
         if (idx == -1) {
             add_allocation(elem)
-            advance(1, total_mem)
+            advance(1)
         } else {
-            advance(1, total_mem)
+            advance(1)
             const removed = current_data[idx]
             removed.timesteps.push(timestep)
             removed.offsets.push(removed.offsets.at(-1))
@@ -673,21 +687,24 @@ function process_alloc_data(fraction_of_memory_reported=1) {
                     e.timesteps.push(timestep + 3)
                     e.offsets.push(e.offsets.at(-1) - size)
                 }
-                advance(3, total_mem)
+                advance(3)
             }
             total_mem -= size
         }
-        max_size = Math.max(total_mem, max_size)
+        max_size = Math.max(total_mem + total_summarized_mem, max_size)
     }
 
     for (const elem of current_data) {
         elem.timesteps.push(timestep)
         elem.offsets.push(elem.offsets.at(-1))
     }
+    data.push(summarized_mem)
+
     return {
         max_size: max_size,
         allocations_over_time: data,
         max_at_time: max_at_time,
+        summarized_mem: summarized_mem,
         context_for_id:  (elem) => {
             let strings = []
             let id = alloc_data.elements_info[elem]
@@ -706,8 +723,9 @@ function MemoryPlot(svg, data, left_pad, colors=schemeTableau10) {
         const size = d.size
         const xs = d.timesteps.map(t => xscale(t))
         const bottom = d.offsets.map(t => yscale(t))
-        const top = d.offsets.map(t => yscale(t + size))
-
+        const m = Array.isArray(size) ? ((t, i) => yscale(t + size[i]))
+                                      :  (t => yscale(t + size))
+        const top = d.offsets.map(m)
         const p0 = xs.map((x, i) => `${x},${bottom[i]}`)
         const p1 = xs.map((x, i) => `${x},${top[i]}`).reverse()
 
@@ -797,7 +815,13 @@ function ContextViewer(text, data) {
                 text.text("")
             } else {
                 const dd = d.datum()
-                text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`)
+                if (dd.elem === 'summarized') {
+                    text.html(
+                        "Small tensors that were not plotted to cutdown on render time.\n" +
+                        "Use detail slider to see smaller allocations.")
+                } else {
+                    text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`)
+                }
                 d.attr('stroke', 'black').attr('stroke-width', 1).attr('vector-effect', 'non-scaling-stroke')
             }
             current_selected = d
@@ -874,22 +898,42 @@ function Legend(svg, categories) {
     return {}
 }
 
-let left_pad = 70
-let width = 1024
-let height = 768
-let data = process_alloc_data()
-let body = d3.select("body")
 
-let plot_svg = body.append("svg").attr('width', width).attr('height', height).attr('display', 'block')
-let plot = MemoryPlot(plot_svg, data, left_pad)
+function create(max_entries) {
+    let left_pad = 70
+    let width = 1024
+    let height = 768
+    let data = process_alloc_data(max_entries)
+    let body = d3.select("body")
+    body.selectAll('svg').remove()
+    body.selectAll('div').remove()
 
-if (alloc_data.categories !== null) {
-    Legend(plot_svg.append('g'), alloc_data.categories)
+    if (alloc_data.elements_info.length > max_entries) {
+         let d = body.append('div')
+         d.append('input')
+         .attr("type", "range")
+         .attr('min', 0)
+         .attr('max', alloc_data.elements_info.length)
+         .attr("value", max_entries)
+         .on('change', function() {
+            create(this.value)
+         })
+         d.append('label').text('Detail')
+    }
+
+    let plot_svg = body.append("svg").attr('width', width).attr('height', height).attr('display', 'block')
+    let plot = MemoryPlot(plot_svg, data, left_pad)
+
+    if (alloc_data.categories !== null) {
+        Legend(plot_svg.append('g'), alloc_data.categories)
+    }
+
+    MiniMap(body.append("svg").attr('width', width).attr('height', 80).attr('display', 'block'), plot, data, left_pad)
+    let delegate = ContextViewer(body.append("div").append("pre").text('none'), data)
+    plot.set_delegate(delegate)
 }
 
-MiniMap(body.append("svg").attr('width', width).attr('height', 80).attr('display', 'block'), plot, data, left_pad)
-let delegate = ContextViewer(body.append("div").append("pre").text('none'), data)
-plot.set_delegate(delegate)
+create(15000)
 
 </script>
 </body>
