@@ -1119,6 +1119,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: bitwise_not_out
+    MPS: bitwise_not_out_mps
   tags: pointwise
 
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -7713,6 +7714,7 @@
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
+    MPS: bitwise_and_out_mps
   tags: pointwise
 
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -7777,6 +7779,7 @@
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
+    MPS: bitwise_or_out_mps
   tags: pointwise
 
 - func: bitwise_or.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -7839,6 +7842,7 @@
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
+    MPS: bitwise_xor_out_mps
   tags: pointwise
 
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
