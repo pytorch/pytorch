@@ -27,10 +27,11 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides, pattern_matcher
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
+from .fx_passes.post_grad import post_grad_passes
 from .graph import GraphLowering
 from .mkldnn import convert_outplace_to_inplace
 from .utils import (
@@ -201,7 +202,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        pattern_matcher.post_grad_passes(gm)
+        post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):

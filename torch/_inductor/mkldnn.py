@@ -93,11 +93,10 @@ def check_binary_op_kwargs_is_default(node):
     return True
 
 
-class ConvUnary2d(nn.Conv2d):
+class PackedConv2d(nn.Conv2d):
     def __init__(
         self,
         conv: nn.Module,
-        unary: Optional[nn.Module],
         input_size: Optional[list],
     ):
         super().__init__(
@@ -113,17 +112,10 @@ class ConvUnary2d(nn.Conv2d):
             conv.weight.device,
             conv.weight.dtype,
         )
-        self._update_module_params(conv, unary, input_size)
+        self._update_module_params(conv, input_size)
 
-    def _update_module_params(self, conv, unary, input_size):
+    def _update_module_params(self, conv, input_size):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr = "none"
-        self.scalars = []
-        self.algorithm = ""
-        if unary is not None:
-            self.attr, self.scalars, self.algorithm = unary_modules_map[
-                unary.__class__
-            ](unary)
         self.weight = torch.nn.Parameter(
             torch._C._nn.mkldnn_reorder_conv2d_weight(
                 self.weight.to_mkldnn(),
@@ -150,9 +142,9 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                self.attr,
-                self.scalars,
-                self.algorithm,
+                "none",
+                [],
+                "",
             )
         return torch.ops.mkldnn._convolution_pointwise(
             input,
@@ -162,9 +154,9 @@ class ConvUnary2d(nn.Conv2d):
             self.stride,
             self.dilation,
             self.groups,
-            self.attr,
-            self.scalars,
-            self.algorithm,
+            "none",
+            [],
+            "",
         )
 
     def forward(self, input):
@@ -454,9 +446,8 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
 
 def packed_conv_eval(conv: nn.Module, input_size: Optional[list]):
     assert not (conv.training), "Fusion only for eval!"
-    return ConvUnary2d(
+    return PackedConv2d(
         conv,
-        None,
         input_size,
     )
 
@@ -466,17 +457,6 @@ def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: Optional[l
     return ConvTransposeUnary2d(
         conv_transpose,
         None,
-        input_size,
-    )
-
-
-def fused_conv_unary_eval(
-    conv: nn.Module, unary: nn.Module, input_size: Optional[list]
-):
-    assert not (conv.training), "Fusion only for eval!"
-    return ConvUnary2d(
-        conv,
-        unary,
         input_size,
     )
 
@@ -833,7 +813,6 @@ def pack_module(gm: torch.fx.GraphModule):
 
 
 computation_op_unary_op_fusion_map = {
-    nn.Conv2d: fused_conv_unary_eval,
     nn.Linear: fused_linear_unary_eval,
     ConvBinary2d: fused_conv_binary_unary_eval,
     nn.ConvTranspose2d: fused_conv_transpose_unary_eval,
