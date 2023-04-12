@@ -12,7 +12,7 @@ import torch.utils._pytree as pytree
 """
 There are various APIs for defining custom-operator-like things in PyTorch:
 - [user-facing] autograd.Function (Python)
-- [user-facing] CustomOp (Python)
+- [user-facing] custom_op (Python)
 - [for power users] torch.library (Python)
 - [for power users] TORCH_LIBRARY (C++)
 
@@ -29,7 +29,7 @@ comprehensive than autograd.Function, which only supports implementing gradient
 computation and vmap rules.
 """
 
-__all__ = ["CustomOp"]
+__all__ = ["custom_op", "CustomOp"]
 
 
 SUPPORTED_DEVICE_TYPES = ("cpu", "cuda")
@@ -50,6 +50,62 @@ RESERVED_NS = {
     "pytorch",
 }
 
+def custom_op(schema: str, *, ns: str) -> typing.Callable:
+    r"""Creates a new CustomOp object.
+
+    In PyTorch, defining an op (short for "operator") is a two step-process:
+    - we need to define (create) the op
+    - we need to implement behavior for how the operator interacts with
+      various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
+
+    This entrypoint defines the CustomOp object (the first step);
+    you must then perform the second step by calling various methods on
+    the CustomOp object.
+
+    This API is used as a decorator (see examples).
+
+    Arguments:
+        schema (str): The schema of the CustomOp.
+        ns (str): The namespace of the CustomOp. PyTorch operators need a
+            namespace; a given operator may only be created once. If you
+            are writing a Python library, we recommend the namespace to be
+            the name of your top-level module.
+
+    Example::
+        >>> import numpy as np
+        >>>
+        >>> # Step 1: define the CustomOp.
+        >>> # We need to provide the decorator a "prototype function"
+        >>> # (a function with Python ellipses as the body).
+        >>> @custom_op('(Tensor x) -> Tensor')
+        >>> def numpy_sin(x):
+        >>>     ...
+        >>>
+        >>> # numpy_sin is now an instance of class CustomOp
+        >>> print(type(numpy_sin))
+        >>>
+        >>> # Step 2: Register an implementation for various PyTorch subsystems
+        >>>
+        >>> # Register an implementation for CPU tensors
+        >>> @numpy_sin.impl('cpu'):
+        >>> def numpy_sin_impl_cpu(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> # Register an implementation for CUDA tensors
+        >>> @numpy_sin.impl('cuda'):
+        >>> def numpy_sin_impl_cuda(x):
+        >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
+        >>>
+        >>> x = torch.randn(3)
+        >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
+        >>>
+        >>> x_cuda = x.cuda()
+        >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
+
+    """
+    return CustomOp._define(schema, ns=ns)
+
+
 
 class CustomOp:
     r"""Class for custom operators in PyTorch.
@@ -58,7 +114,7 @@ class CustomOp:
     just like regular PyTorch operators (e.g. torch.sin, torch.mm) when it
     comes to various PyTorch subsystems (like torch.compile).
 
-    To construct a `CustomOp`, use :meth:`CustomOp.define`.
+    To construct a `CustomOp`, use `custom_op`.
     """
 
     def __init__(self, lib, cpp_ns, operator_name, ophandle, *, _private_access=False):
@@ -66,7 +122,7 @@ class CustomOp:
         if not _private_access:
             raise RuntimeError(
                 "The CustomOp constructor is private. Please use "
-                "CustomOp.define to create a CustomOp object"
+                "custom_op to create a CustomOp object"
             )
         name = f"{cpp_ns}::{str(operator_name.name)}"
         self._lib: library.Library = lib
@@ -75,65 +131,17 @@ class CustomOp:
         self._opname: str = str(operator_name)
         # this is _opname but with namespace. e.g. "custom::foo"
         self._namespaced_opname: str = name
+        self.__name__ = None  # mypy requires this
 
     def __repr__(self):
         raise RuntimeError("Please don't call this")
 
     @staticmethod
-    def define(schema: str, *, ns: str) -> typing.Callable:
-        r"""Creates a new CustomOp object.
-
-        In PyTorch, defining an op (short for "operator") is a two step-process:
-        - we need to define (create) the op
-        - we need to implement behavior for how the operator interacts with
-          various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
-
-        This entrypoint defines the CustomOp object (the first step);
-        you must then perform the second step by calling various methods on
-        the CustomOp object.
-
-        This API is used as a decorator (see examples).
-
-        Arguments:
-            schema (str): The schema of the CustomOp.
-
-        Example::
-            >>> import numpy as np
-            >>>
-            >>> # Step 1: define the CustomOp.
-            >>> # We need to provide the decorator a "prototype function"
-            >>> # (a function with Python ellipses as the body).
-            >>> @CustomOp.define('(Tensor x) -> Tensor')
-            >>> def numpy_sin(x):
-            >>>     ...
-            >>>
-            >>> # numpy_sin is now an instance of class CustomOp
-            >>> print(type(numpy_sin))
-            >>>
-            >>> # Step 2: Register an implementation for various PyTorch subsystems
-            >>>
-            >>> # Register an implementation for CPU tensors
-            >>> @numpy_sin.impl('cpu'):
-            >>> def numpy_sin_impl_cpu(x):
-            >>>     return torch.from_numpy(np.sin(x.numpy()))
-            >>>
-            >>> # Register an implementation for CUDA tensors
-            >>> @numpy_sin.impl('cuda'):
-            >>> def numpy_sin_impl_cuda(x):
-            >>>     return torch.from_numpy(np.sin(x.cpu().numpy())).to(x.device)
-            >>>
-            >>> x = torch.randn(3)
-            >>> numpy_sin(x)  # calls numpy_sin_impl_cpu
-            >>>
-            >>> x_cuda = x.cuda()
-            >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
-
-        """
-
+    def _define(schema: str, *, ns: str) -> typing.Callable:
         def inner(func):
             if not inspect.isfunction(func):
                 raise ValueError(
-                    f"CustomOp.define(...)(func): Expected `func` to be a Python "
+                    f"custom_op(...)(func): Expected `func` to be a Python "
                     f"function, got: {type(func)}"
                 )
 
@@ -189,9 +197,12 @@ class CustomOp:
 
         Examples::
             >>> import numpy as np
-            >>> numpy_sin = CustomOp.define('custom::numpy_sin')
             >>>
-            >>> # Register an implementation for CPU and CUDA Tensors
+            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
+            >>> def numpy_sin(x):
+            >>>     ...
+            >>>
+            >>> # Register an implementation for CPU Tensors
             >>> @numpy_sin.impl('cpu'):
             >>> def numpy_sin_impl_cpu(x):
             >>>     return torch.from_numpy(np.sin(x.numpy()))
@@ -234,7 +245,10 @@ class CustomOp:
 
         Examples::
             >>> import numpy as np
-            >>> custom_sum = CustomOp.define('custom::sum(Tensor tensor, int dim)')
+            >>>
+            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
+            >>> def numpy_sin(x):
+            >>>     ...
             >>>
             >>> @custom_sum.impl_meta():
             >>> def custom_sum(tensor, dim):
@@ -265,12 +279,14 @@ def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):
 
 
 def validate_namespace(ns: str) -> None:
-    if ns not in RESERVED_NS:
-        return
-    raise ValueError(
-        f"CustomOp.define(schema, ns={ns}): {ns} is a reserved namespace, "
-        f"please choose something else. "
-    )
+    if '.' in ns:
+        raise ValueError(
+            f'custom_op(..., ns="{ns}"): expected ns to not contain any . (and be a '
+            f'valid variable name)')
+    if ns in RESERVED_NS:
+        raise ValueError(
+            f"custom_op(..., ns='{ns}'): '{ns}' is a reserved namespace, "
+            f"please choose something else. ")
 
 
 def validate_schema(schema: FunctionSchema) -> None:
@@ -278,7 +294,7 @@ def validate_schema(schema: FunctionSchema) -> None:
     # the ADInplaceOrView key
     if schema.kind() != SchemaKind.functional:
         raise NotImplementedError(
-            f"NYI: CustomOp.define does not support non-functional function schema. Got: {schema}"
+            f"NYI: custom_op does not support non-functional function schema. Got: {schema}"
         )
 
     rets = schema.returns
@@ -287,18 +303,18 @@ def validate_schema(schema: FunctionSchema) -> None:
     )
     if is_non_mutating_view:
         raise NotImplementedError(
-            f"NYI: CustomOp.define does not support view functions. Got: {schema}"
+            f"NYI: custom_op does not support view functions. Got: {schema}"
         )
 
     # Requires us to have handling for factory functions
     if not schema.arguments.has_tensor_arg():
         raise NotImplementedError(
-            f"NYI: CustomOp.define does not support function schema with no Tensor inputs. Got: {schema}"
+            f"NYI: custom_op does not support function schema with no Tensor inputs. Got: {schema}"
         )
     # Just seems weird so banning for now
     if not schema.returns:
         raise NotImplementedError(
-            f"NYI: CustomOp.define does not support function schema with no outputs. Got: {schema}"
+            f"NYI: custom_op does not support function schema with no outputs. Got: {schema}"
         )
 
 

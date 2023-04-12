@@ -4,7 +4,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 import numpy as np
-from torch._custom_op import CustomOp
+from torch._custom_op import custom_op
 from torch.testing._internal.autograd_function_db import (
     sample_inputs_numpy_cube,
     sample_inputs_numpy_mul,
@@ -21,7 +21,7 @@ from torch.testing._internal.autograd_function_db import (
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
-@CustomOp.define('(Tensor x) -> (Tensor, Tensor)', ns='_torch_testing')
+@custom_op('(Tensor x) -> (Tensor, Tensor)', ns='_torch_testing')
 def numpy_cube(x):
     ...
 
@@ -36,7 +36,7 @@ def numpy_cube_impl(x):
 def numpy_cube_meta(x):
     return x.clone(), x.clone()
 
-@CustomOp.define('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
+@custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
 def numpy_mul(x, y):
     ...
 
@@ -49,7 +49,7 @@ def numpy_mul_impl(x, y):
 def numpy_mul_meta(x, y):
     return (x * y).contiguous()
 
-@CustomOp.define('(Tensor x, int dim) -> (Tensor, Tensor, Tensor)', ns='_torch_testing')
+@custom_op('(Tensor x, int dim) -> (Tensor, Tensor, Tensor)', ns='_torch_testing')
 def numpy_sort(x, dim):
     ...
 
@@ -71,7 +71,7 @@ def numpy_sort_impl(x, dim):
 def numpy_sort_meta(x, dim):
     return x, x.long(), x.long()
 
-@CustomOp.define('(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor', ns='_torch_testing')
+@custom_op('(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor', ns='_torch_testing')
 def numpy_take(x, ind, ind_inv, dim):
     ...
 

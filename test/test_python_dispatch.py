@@ -15,7 +15,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
-from torch._custom_op import CustomOp
+from torch._custom_op import custom_op, CustomOp
 from torch.fx.experimental.proxy_tensor import make_fx
 
 import logging
@@ -369,7 +369,7 @@ class TestCustomOp(TestCase):
         # function schmea validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, 'Invalid function schema: foo'):
-            @CustomOp.define('(', ns='_torch_testing')
+            @custom_op('(', ns='_torch_testing')
             def foo(x):
                 ...
 
@@ -378,15 +378,15 @@ class TestCustomOp(TestCase):
             ...
 
         with self.assertRaisesRegex(NotImplementedError, 'does not support non-functional'):
-            CustomOp.define('(Tensor(a!) x) -> Tensor(a)', ns='_torch_testing')(foo)
+            custom_op('(Tensor(a!) x) -> Tensor(a)', ns='_torch_testing')(foo)
         with self.assertRaisesRegex(NotImplementedError, 'does not support view functions'):
-            CustomOp.define('(Tensor(a) x) -> Tensor(a)', ns='_torch_testing')(foo)
+            custom_op('(Tensor(a) x) -> Tensor(a)', ns='_torch_testing')(foo)
         with self.assertRaisesRegex(NotImplementedError, 'no Tensor inputs'):
-            CustomOp.define('() -> Tensor', ns='_torch_testing')(foo)
+            custom_op('() -> Tensor', ns='_torch_testing')(foo)
         with self.assertRaisesRegex(NotImplementedError, 'no Tensor inputs'):
-            CustomOp.define('(int[] shape) -> Tensor', ns='_torch_testing')(foo)
+            custom_op('(int[] shape) -> Tensor', ns='_torch_testing')(foo)
         with self.assertRaisesRegex(NotImplementedError, 'no outputs'):
-            CustomOp.define('(Tensor x) -> ()', ns='_torch_testing')(foo)
+            custom_op('(Tensor x) -> ()', ns='_torch_testing')(foo)
 
     def test_custom_op_behaves_like_function(self):
         from torch.testing._internal.custom_op_db import numpy_mul
@@ -421,15 +421,15 @@ class TestCustomOp(TestCase):
             ...
 
         for schema in schemas:
-            custom_op = CustomOp.define(schema, ns='_torch_testing')(foo)
-            del custom_op
+            op = custom_op(schema, ns='_torch_testing')(foo)
+            del op
 
     def test_reserved_ns(self):
         from torch._custom_op import RESERVED_NS
 
         for ns in RESERVED_NS:
             with self.assertRaisesRegex(ValueError, 'is a reserved namespace'):
-                @CustomOp.define('(Tensor x) -> Tensor', ns=ns)
+                @custom_op('(Tensor x) -> Tensor', ns=ns)
                 def foo(*args, **kwargs):
                     ...
 
@@ -438,7 +438,7 @@ class TestCustomOp(TestCase):
             CustomOp(None, None, None, None)
 
     def test_lifetime_is_tied_to_object(self):
-        @CustomOp.define('foo(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('foo(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
@@ -449,21 +449,21 @@ class TestCustomOp(TestCase):
 
         # We can't define an op multiple times,
         with self.assertRaisesRegex(RuntimeError, 'multiple times'):
-            @CustomOp.define('foo(Tensor x) -> Tensor', ns='_torch_testing')
+            @custom_op('foo(Tensor x) -> Tensor', ns='_torch_testing')
             def foo(x):
                 ...
 
         # Unless we delete the original op.
         del foo
 
-        @CustomOp.define('foo(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('foo(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
         del foo
 
     def test_autograd_notimplemented(self):
-        @CustomOp.define('(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
@@ -472,7 +472,7 @@ class TestCustomOp(TestCase):
             foo(x)
         del foo
 
-        @CustomOp.define('(Tensor[] xs) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor[] xs) -> Tensor', ns='_torch_testing')
         def foo(xs):
             ...
 
@@ -482,7 +482,7 @@ class TestCustomOp(TestCase):
             foo([y, x])
         del foo
 
-        @CustomOp.define('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
@@ -493,7 +493,7 @@ class TestCustomOp(TestCase):
         del foo
 
     def test_impl_cpu(self):
-        @CustomOp.define('(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
         def bar(x):
             ...
 
@@ -508,7 +508,7 @@ class TestCustomOp(TestCase):
         del bar
 
     def test_impl_invalid_devices(self):
-        @CustomOp.define('(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
@@ -531,7 +531,7 @@ class TestCustomOp(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_separate(self):
-        @CustomOp.define('(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
@@ -554,25 +554,25 @@ class TestCustomOp(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_multiple(self):
-        @CustomOp.define('(Tensor x) -> Tensor', ns='_torch_testing')
-        def foo(x):
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
+        def baz(x):
             ...
 
-        @foo.impl(['cpu', 'cuda'])
-        def foo_cuda(x):
+        @baz.impl(['cpu', 'cuda'])
+        def baz_cuda(x):
             return x.cos()
 
         x = torch.randn(3)
-        result = foo(x)
-        self.assertEqual(result, foo_cpu(x))
+        result = baz(x)
+        self.assertEqual(result, baz_cpu(x))
 
         x_cuda = x.cuda()
-        result = foo(x_cuda)
-        self.assertEqual(result, foo_cuda(x_cuda))
-        del foo
+        result = baz(x_cuda)
+        self.assertEqual(result, baz_cuda(x_cuda))
+        del baz
 
     def test_impl_meta(self):
-        @CustomOp.define('(Tensor x, int dim) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x, int dim) -> Tensor', ns='_torch_testing')
         def foo(x, dim):
             ...
 
@@ -590,7 +590,7 @@ class TestCustomOp(TestCase):
     def test_basic_make_fx(self):
         # More serious tests are in our CustomOp opinfo db,
         # this one is just a sanity check.
-        @CustomOp.define('(Tensor x) -> Tensor', ns='_torch_testing')
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
