@@ -33,6 +33,11 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 class TestJit(JitCommonTestCase):
     exact_dtype = True
 
+    @staticmethod
+    def _has_fake_function(op):
+        # TODO: find better way to standardize on op registration itself..
+        return op.name in ["resize_", 'resize_as_']
+
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
     #   and runtimes (eager, traced, scripted).
@@ -58,8 +63,7 @@ class TestJit(JitCommonTestCase):
         if isinstance(func, torch._ops.OpOverload):
             self.skipTest("variant consistency doesn't work on torch.ops")
 
-        # TODO: find better way to standardize on op registration itself..
-        has_fake_function = op.name in ["resize_", 'resize_as_']
+        has_fake_function = TestJit._has_fake_function(op)
 
         if has_fake_function:
             variants = {'method': getattr(torch.Tensor, op.name)}
@@ -128,9 +132,6 @@ class TestJit(JitCommonTestCase):
             # Check traced forward, grad, and grad grad
             # TODO: fix tracing here
             supports_tracing = op.supports_tracing and not has_fake_function
-            if op.assert_jit_shape_analysis:
-                self.assertTrue(supports_tracing)
-
             if supports_tracing:
                 traced_fn = create_traced_fn(self, variant)
                 check_against_reference(self,
@@ -150,25 +151,6 @@ class TestJit(JitCommonTestCase):
                 if support_script and op.name != "rsub":
                     check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
                                            func_type=func_type, aten_name=op.aten_name)
-
-                # TODO: use script graph as well
-                checked_shape_analysis = False
-                if supports_tracing:
-                    out = variant(get_sample(), *sample.args, **sample.kwargs)
-
-                    # right now, tuple of outputs and tensor output supported
-                    # TODO: list of tensor outputs
-                    tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
-
-                    if isinstance(out, torch.Tensor) or tuple_of_tensors:
-                        if tuple_of_tensors:
-                            sizes = [elem.size() for elem in out]
-                        else:
-                            sizes = out.size()
-                        self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
-                        checked_shape_analysis = True
-                if op.assert_jit_shape_analysis:
-                    self.assertTrue(checked_shape_analysis)
 
             # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample
             if dtype is torch.float32:
@@ -292,6 +274,34 @@ class TestJit(JitCommonTestCase):
                 inp = (clone_input_helper(sample.input),) + sample_args_kwargs
                 graph = traced.graph_for(*inp)
                 FileCheck().check(op_name).check_not(variant_name).run(graph)
+
+
+    @ops(dtypes=OpDTypes.supported, allowed_dtypes=(torch.float,))
+    def test_shape_analysis_jit(self, device, dtype, op):
+        has_fake_function = TestJit._has_fake_function(op)
+
+        supports_tracing = op.supports_tracing and not has_fake_function
+        if op.assert_jit_shape_analysis:
+            self.assertTrue(supports_tracing)
+
+        # TODO: use script graph as well
+        checked_shape_analysis = False
+        if supports_tracing:
+            out = variant(get_sample(), *sample.args, **sample.kwargs)
+
+            # right now, tuple of outputs and tensor output supported
+            # TODO: list of tensor outputs
+            tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+
+            if isinstance(out, torch.Tensor) or tuple_of_tensors:
+                if tuple_of_tensors:
+                    sizes = [elem.size() for elem in out]
+                else:
+                    sizes = out.size()
+                self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
+                checked_shape_analysis = True
+        if op.assert_jit_shape_analysis:
+            self.assertTrue(checked_shape_analysis)
 
 
 instantiate_device_type_tests(TestJit, globals())
