@@ -112,8 +112,24 @@ jobs:
           command: |
             set -ex
 
+            DOWNLOAD_SCCACHE=0
+            SCCACHE_VERSION="0.4.1"
             LOCAL_PATH="/usr/local/bin"
-            sudo curl --retry 3 --retry-all-errors "https://s3.amazonaws.com/ossci-macos/sccache/sccache-v0.4.1-${RUNNER_ARCH}" --output "${LOCAL_PATH}/sccache"
+
+            if [ ! -f "${LOCAL_PATH}/sccache" ]; then
+              DOWNLOAD_SCCACHE=1
+            else
+              LOCAL_VERSION=$("${LOCAL_PATH}/sccache" --version | cut -d" " -f2)
+
+              if [ "${LOCAL_VERSION}" != "${SCCACHE_VERSION}" ]; then
+                DOWNLOAD_SCCACHE=1
+              fi
+            fi
+
+            if [ "${DOWNLOAD_SCCACHE}" == "1" ]; then
+              sudo curl --retry 3 --retry-all-errors "https://s3.amazonaws.com/ossci-macos/sccache/sccache-v0.4.1-${RUNNER_ARCH}" --output "${LOCAL_PATH}/sccache"
+              sudo chmod +x "${LOCAL_PATH}/sccache"
+            fi
 
             if [[ "${SCCACHE_USE_GHA}" == "true" ]]; then
               echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
@@ -126,7 +142,6 @@ jobs:
               echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
             fi
 
-            sudo chmod +x "${LOCAL_PATH}/sccache"
             # This is needed so that later build script could find sccache (which sccache)
             echo "${LOCAL_PATH}" >> $GITHUB_PATH
 
