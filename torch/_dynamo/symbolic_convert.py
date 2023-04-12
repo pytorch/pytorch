@@ -23,6 +23,7 @@ from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
+    config,
     exc,
     logging as torchdynamo_logging,
     side_effects,
@@ -41,7 +42,6 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -2027,7 +2027,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_function(), "_torchdynamo_disable", False
         ):
             unimplemented(
-                f"call torch._dynamo.skip() wrapped function {func.get_function()}"
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
     @staticmethod
