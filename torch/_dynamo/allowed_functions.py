@@ -13,7 +13,7 @@ from typing import Dict, Optional, Set
 import torch
 from torch.fx._symbolic_trace import is_fx_tracing
 
-from . import config
+from .config_utils import config
 from .external_utils import is_compiling
 from .utils import HAS_NUMPY, is_safe_constant, np
 

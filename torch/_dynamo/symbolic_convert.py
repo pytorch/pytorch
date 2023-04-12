@@ -23,7 +23,6 @@ from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
-    config,
     exc,
     logging as torchdynamo_logging,
     side_effects,
@@ -42,6 +41,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -784,11 +784,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if package is not None:
             if spec is not None and package != spec.parent:
                 log.warning(
-                    "__package__ != __spec__.parent "
-                    f"({package!r} != {spec.parent!r})",
-                    ImportWarning,
+                    "__package__ != __spec__.parent (%r != %r)",
+                    package,
+                    spec.parent,
                     stacklevel=3,
-                )  # type: ignore[call-arg]
+                )
             return package
         elif spec is not None:
             return spec.parent
