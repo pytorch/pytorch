@@ -542,7 +542,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // If we use the work to do barrier, we should block here
     at::cuda::OptionalCUDAGuard gpuGuard;
     for (auto& device : devices_) {
-      gpuGuard.set_index(device);
+      gpuGuard.set_index(device.index());
       AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
