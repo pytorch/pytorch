@@ -30,7 +30,12 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.testing import (
+    rand_strided,
+    requires_static_shapes,
+    same,
+    skipIfPy311,
+)
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_MACOS
@@ -1036,6 +1041,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
+    @skipIfPy311
     @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1323,6 +1329,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn3()
         self.assertTrue(same(ref, res))
 
+    @skipIfPy311
     def test_with_on_graph_break_inst(self):
         def reversible(x):
             print("Hello world")  # Cause graph break so inline fails
@@ -1347,6 +1354,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    @skipIfPy311
     def test_with_on_graph_break_nested(self):
         def reversible(x):
             torch._dynamo.graph_break()  # Cause graph break so inline fails
@@ -1374,6 +1382,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     # https://github.com/pytorch/torchdynamo/issues/1446
+    @skipIfPy311
     def test_grad_mode_carrying_correct_state_after_graph_break(self):
         def fn(x):
             with torch.no_grad():
@@ -2352,6 +2361,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
+    @skipIfPy311
     def test_exception_in_dynamo_handling(self):
         hit_handler = False
 
@@ -2589,6 +2599,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
+    def test_inplace_unsqueeze_input(self):
+        def backend(gm, example_inputs):
+            self.assertEqual(example_inputs[0].size(), torch.Size([3, 4]))
+            return gm
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            x.unsqueeze_(0)
+            return x + 1
+
+        inputs = [torch.randn(3, 4)]
+        self.assertEqual(fn(*inputs).size(), torch.Size([1, 3, 4]))
+        self.assertEqual(inputs[0].size(), torch.Size([1, 3, 4]))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
@@ -2684,6 +2708,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         ra = compiled_fn(t1, t2, 6)
         self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
+
+    def test_build_map_unpack_with_call(self):
+        def forward_with_cond_scale(x, t, cond_scale, self_cond, other1, other2):
+            return x.sin() + t + cond_scale + self_cond + other1 + other2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            d1 = dict(other1=5)
+            d2 = dict(other2=4)
+            text_cond = {**d1, **d2}
+            return forward_with_cond_scale(x, 1, cond_scale=2, self_cond=3, **text_cond)
+
+        self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
 
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
