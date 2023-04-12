@@ -35,13 +35,6 @@ on:
         default: 270
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
-        required: true
-        description: access key id for test stats upload
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
-        required: true
-        description: secret acess key for test stats upload
 
 jobs:
   # This needs to be run right before the test starts so that it can gather the
