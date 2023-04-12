@@ -196,6 +196,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
                           (self_alignment == 2 &&
                            mat1_alignment == 2 &&
                            mat2_alignment == 2);
+      alignment_ok = true;
 
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
