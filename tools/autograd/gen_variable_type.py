@@ -677,7 +677,8 @@ SET_HISTORY_FOR_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 if (!grad_fns.empty()) {
     auto differentiable_outputs = ${differentiable_outputs};
-    for (const auto& i : c10::irange(differentiable_outputs.size())) {
+    TORCH_INTERNAL_ASSERT(differentiable_outputs.size() == grad_fns.size());
+    for (const auto& i : c10::irange(grad_fns.size())) {
         if (grad_fns[i] != nullptr) {
             ${fn}_history(differentiable_outputs[i], grad_fns[i]);
         }
