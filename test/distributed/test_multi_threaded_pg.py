@@ -144,21 +144,6 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(output, torch.ones(3, 3) * res_num)
 
-    def test_all_to_all(self):
-        rank = self.rank
-        world_size = self.world_size
-        input_tensor_list = [
-            torch.ones(3, 3) * x
-            for x in range(rank * world_size, (rank + 1) * world_size)
-        ]
-        output_tensor_list = [torch.empty_like(tensor) for tensor in input_tensor_list]
-        dist.all_to_all(output_tensor_list, input_tensor_list)
-        expected_tensor_list = [
-            torch.ones(3, 3) * x
-            for x in range(rank, world_size * world_size, world_size)
-        ]
-        self.assertEqual(expected_tensor_list, output_tensor_list)
-
     def test_all_reduce_ops(self):
         tensor = torch.tensor([dist.get_rank() + 1])
         dist.all_reduce(tensor, op=ReduceOp.PRODUCT)

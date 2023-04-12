@@ -503,7 +503,7 @@ def _init_param_handles_from_module(
                 for buffer_name in buffer_names
             ]
         _move_states_to_device(params, buffers, device_from_device_id)
-        if state.compute_device is None:  # only need to set once
+        if not hasattr(state, "compute_device"):  # only need to set once
             state.compute_device = _get_compute_device(
                 fully_sharded_module,
                 state._ignored_params,

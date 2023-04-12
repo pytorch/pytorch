@@ -60,7 +60,7 @@ class _FSDPState(_State):
         self._fully_sharded_module_to_handles: Dict[
             nn.Module, flat_param_file.FlatParamHandle
         ] = {}
-        self.compute_device: Optional[torch.device] = None
+        self.compute_device = torch.device("cuda", torch.cuda.current_device())
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
