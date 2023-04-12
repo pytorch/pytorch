@@ -579,9 +579,12 @@ class FlatParamHandle:
             and total_numel != total_numel_without_padding
         ):
             log.info(
-                f"FSDP FlatParameter address alignment created "
-                f"{total_numel - total_numel_without_padding} "
-                f"numel of padding ({total_numel} vs. {total_numel_without_padding})"
+                "FSDP FlatParameter address alignment created "
+                "%s "
+                "numel of padding (%s vs. %s)",
+                total_numel - total_numel_without_padding,
+                total_numel,
+                total_numel_without_padding,
             )
         # Pass `aligned_numel=0` since we already included padding tensors
         self.flat_param: FlatParameter = self.flatten_tensors_into_flat_param(
