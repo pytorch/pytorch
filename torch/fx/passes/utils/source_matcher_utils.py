@@ -7,7 +7,7 @@ import logging
 import os
 
 
-__all__ = ['get_module_partitions', 'check_subgraphs_connected']
+__all__ = ['get_source_partitions', 'check_subgraphs_connected']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger():
@@ -60,7 +60,7 @@ def get_source_partitions(
             leaf module type (ex. torch.nn.Linear).
 
     Returns:
-        Dictionary mapping sources that were given to a list of ModulePartitions
+        Dictionary mapping sources that were given to a list of SourcePartitions
         that correspond to the list of nodes that were decomposed from the given
         source.
     """
