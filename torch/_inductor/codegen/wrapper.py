@@ -200,6 +200,7 @@ class WrapperCodeGen(CodeGen):
         self.ending = ""
         self.comment = "#"
         self.namespace = ""
+        self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
 
@@ -326,9 +327,10 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
-    def generate_extern_kernel_out(
-        self, output_view, codegen_reference, args, kernel, cpp_kernel
-    ):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+        self.writeline(f"{output_name} = {kernel}({', '.join(args)})")
+
+    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
             args.append(f"out={output_view.codegen_reference()}")
         else:
@@ -339,7 +341,6 @@ class WrapperCodeGen(CodeGen):
         self,
         name,
         kernel,
-        cpp_kernel,
         codegen_args,
         cpp_op_schema,
         cpp_kernel_key,
@@ -586,6 +587,9 @@ class WrapperCodeGen(CodeGen):
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
+    def val_to_str(self, s):
+        return repr(s)
+
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
         device = buffer.get_device()
@@ -708,6 +712,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.ending = ";"
         self.comment = "//"
         self.namespace = "at::"
+        self.none_str = "at::Tensor()"
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -740,14 +745,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     @cache_on_self
     def get_output_refs(self):
-        from ..ir import NoneAsConstantBuffer
-
-        return [
-            "at::Tensor()"
-            if isinstance(x, NoneAsConstantBuffer)
-            else x.codegen_reference()
-            for x in V.graph.graph_outputs
-        ]
+        return [x.codegen_reference() for x in V.graph.graph_outputs]
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
@@ -873,9 +871,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
 
-    def generate_extern_kernel_out(
-        self, output_view, codegen_reference, args, kernel, cpp_kernel
-    ):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+        self.writeline(f"auto {output_name} = {kernel}({', '.join(args)});")
+
+    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
             output_as_strided = f"{output_view.codegen_reference()}"
             output_name = f"{output_view.get_name()}_as_strided"
@@ -884,7 +883,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, output_name)
         else:
             args.insert(0, f"{codegen_reference}")
-        self.writeline(f"{cpp_kernel}({', '.join(args)});")
+        self.writeline(f"{kernel}({', '.join(args)});")
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .cpp import cexpr
@@ -927,7 +926,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self,
         name,
         kernel,
-        cpp_kernel,
         codegen_args,
         cpp_op_schema,
         cpp_kernel_key,
@@ -939,7 +937,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     static auto op_{cpp_kernel_key} =
     c10::Dispatcher::singleton()
         .findSchemaOrThrow(
-            \"{cpp_kernel}\",
+            \"{kernel}\",
             \"{cpp_kernel_overload_name}\")
         .typed<{cpp_op_schema}>();
             """
@@ -949,6 +947,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
+
+    def val_to_str(self, s):
+        if s is None:
+            return self.none_str
+        elif isinstance(s, bool):
+            return "true" if s else "false"
+        elif isinstance(s, str):
+            return f'"{s}"'
+        elif isinstance(s, (List, Tuple)):
+            return self.codegen_shape_tuple(s)
+        else:
+            return repr(s)
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):
