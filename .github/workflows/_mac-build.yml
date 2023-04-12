@@ -113,25 +113,31 @@ jobs:
           environment-file: ${{ inputs.environment-file }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+      - name: Install sccache (only for non-forked PRs)
         uses: nick-fields/retry@v2.8.2
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           timeout_minutes: 5
           max_attempts: 3
           retry_wait_seconds: 90
           command: |
+            set -ex
+
+            LOCAL_PATH="/usr/local/bin"
+            sudo curl --retry 3 --retry-all-errors "https://s3.amazonaws.com/ossci-macos/sccache/sccache-v0.4.1-${RUNNER_ARCH}" --output "${LOCAL_PATH}/sccache"
+
             if [[ "${SCCACHE_USE_GHA}" == "true" ]]; then
-              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v0.4.0-pre.7 --output /usr/local/bin/sccache
               echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
               echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
             else
-              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
               echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
               echo "SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${GITHUB_ENV}"
             fi
-            sudo chmod +x /usr/local/bin/sccache
+
+            sudo chmod +x "${LOCAL_PATH}/sccache"
+            # This is needed so that later build script could find sccache (which sccache)
+            echo "${LOCAL_PATH}" >> $GITHUB_PATH
 
       - name: Get workflow job id
         id: get-job-id
