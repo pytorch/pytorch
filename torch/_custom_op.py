@@ -1,7 +1,8 @@
+import inspect
+import typing
 import weakref
-from typing import Callable, Tuple
 
-from torchgen.model import FunctionSchema, SchemaKind
+from torchgen.model import FunctionSchema, OperatorName, SchemaKind
 
 import torch
 import torch._C as _C
@@ -22,10 +23,13 @@ that are necessary for a custom operator to work with torch.compile (i.e.,
 autograd, meta, functionalization).
 
 CustomOp is positioned as being safer and easier to use than
-torch.library/TORCH_LIBRARY, which require deep understanding of PyTorch internals,
-as well as being more comprehensive than autograd.Function, which only supports
-implementing gradient computation and vmap rules.
+torch.library/TORCH_LIBRARY, which require deep understanding of PyTorch internals.
+In additional, it supports torch.compile better than and is in general more
+comprehensive than autograd.Function, which only supports implementing gradient
+computation and vmap rules.
 """
+
+__all__ = ["CustomOp"]
 
 
 SUPPORTED_DEVICE_TYPES = ("cpu", "cuda")
@@ -35,10 +39,10 @@ DEVICE_TYPE_TO_KEY = {
     "cuda": "CUDA",
 }
 
-
 # We will not let users register CustomOps with anything that could look like
 # PyTorch internals to avoid confusion.
 RESERVED_NS = {
+    "prim",
     "prims",
     "aten",
     "at",
@@ -57,29 +61,26 @@ class CustomOp:
     To construct a `CustomOp`, use :meth:`CustomOp.define`.
     """
 
-    def __init__(self, lib, ns, schema, *, _private_access=False):
+    def __init__(self, lib, cpp_ns, operator_name, ophandle, *, _private_access=False):
+        super(CustomOp, self).__init__()
         if not _private_access:
             raise RuntimeError(
                 "The CustomOp constructor is private. Please use "
                 "CustomOp.define to create a CustomOp object"
             )
-        name = f"{ns}::{str(schema.name.name)}"
-        overload_name = (
-            "" if schema.name.overload_name is None else schema.name.overload_name
-        )
-
+        name = f"{cpp_ns}::{str(operator_name.name)}"
         self._lib: library.Library = lib
-        self._ns: str = ns
-        self._schema: FunctionSchema = schema
-        self._ophandle: _C._DispatchOperatorHandle = _C._dispatch_find_schema_or_throw(
-            name, overload_name
-        )
-        # Has the overload name, e.g. "foo.out" Computable from the schema but
-        # we cache here for convenience.
-        self._opname: str = str(schema.name)
+        self._ophandle: _C._DispatchOperatorHandle = ophandle
+        # Has the name of the op, e.g. "foo". We cache here for convenience.
+        self._opname: str = str(operator_name)
+        # this is _opname but with namespace. e.g. "custom::foo"
+        self._namespaced_opname: str = name
+
+    def __repr__(self):
+        raise RuntimeError("Please don't call this")
 
     @staticmethod
-    def define(namespaced_schema: str) -> "CustomOp":
+    def define(schema: str, *, ns: str) -> typing.Callable:
         r"""Creates a new CustomOp object.
 
         In PyTorch, defining an op (short for "operator") is a two step-process:
@@ -91,14 +92,23 @@ class CustomOp:
         you must then perform the second step by calling various methods on
         the CustomOp object.
 
+        This API is used as a decorator (see examples).
+
         Arguments:
-            namespaced_schema (str): The schema of the CustomOp.
+            schema (str): The schema of the CustomOp.
 
         Example::
             >>> import numpy as np
             >>>
-            >>> # Step 1: define the CustomOp
-            >>> numpy_sin = CustomOp.define('custom::numpy_sin')
+            >>> # Step 1: define the CustomOp.
+            >>> # We need to provide the decorator a "prototype function"
+            >>> # (a function with Python ellipses as the body).
+            >>> @CustomOp.define('(Tensor x) -> Tensor')
+            >>> def numpy_sin(x):
+            >>>     ...
+            >>>
+            >>> # numpy_sin is now an instance of class CustomOp
+            >>> print(type(numpy_sin))
             >>>
             >>> # Step 2: Register an implementation for various PyTorch subsystems
             >>>
@@ -119,21 +129,41 @@ class CustomOp:
             >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
 
         """
-        ns, schema_str, schema = process_namespaced_schema_str(namespaced_schema)
 
-        lib = library.Library(ns, "FRAGMENT")
-        lib.define(schema_str)
-        result = CustomOp(lib, ns, schema, _private_access=True)
+        def inner(func):
+            if not inspect.isfunction(func):
+                raise ValueError(
+                    f"CustomOp.define(...)(func): Expected `func` to be a Python "
+                    f"function, got: {type(func)}"
+                )
 
-        # NYI: autograd not supported
-        # In the near future we will either directly use the
-        # autograd_not_implemented kernels or make those the default fallback
-        # for the Autograd and ADInplaceOrView keys. Both of those are a bit tricky.
-        library.impl(lib, result._opname, "Autograd")(
-            get_autograd_not_implemented_kernel(weakref.proxy(result))
-        )
+            validate_namespace(ns)
+            schema_str = f"{func.__name__}{schema}"
+            function_schema = FunctionSchema.parse(schema_str)
+            validate_schema(function_schema)
 
-        return result
+            lib = library.Library(ns, "FRAGMENT")
+            lib.define(schema_str)
+            ophandle = find_ophandle_or_throw(ns, function_schema.name)
+            result = CustomOp(
+                lib, ns, function_schema.name, ophandle, _private_access=True
+            )
+
+            result.__name__ = func.__name__
+            result.__module__ = func.__module__
+            result.__doc__ = func.__doc__
+
+            # NYI: autograd not supported
+            # In the near future we will either directly use the
+            # autograd_not_implemented kernels or make those the default fallback
+            # for the Autograd and ADInplaceOrView keys. Both of those are a bit tricky.
+            library.impl(lib, result._opname, "Autograd")(
+                get_autograd_not_implemented_kernel(weakref.proxy(result))
+            )
+
+            return result
+
+        return inner
 
     def __call__(self, *args, **kwargs):
         # Bypass torch.ops.* and directly do OperatorHandle::callBoxed.
@@ -142,7 +172,9 @@ class CustomOp:
         result = _C._dispatch_call_boxed(self._ophandle, *args, **kwargs)
         return result
 
-    def impl(self, device_type: str) -> Callable:
+    def impl(
+        self, device_types: typing.Union[str, typing.Iterable[str]]
+    ) -> typing.Callable:
         r"""Register an implementation for a device type for this CustomOp object.
 
         If the CustomOp is passed multiple Tensor inputs with different device
@@ -153,13 +185,13 @@ class CustomOp:
         This API is used as a decorator (see examples).
 
         Arguments:
-            device_type (str): the device type to register the function for.
+            device_types (str or Iterable[str]): the device type(s) to register the function for.
 
         Examples::
             >>> import numpy as np
             >>> numpy_sin = CustomOp.define('custom::numpy_sin')
             >>>
-            >>> # Register an implementation for CPU Tensors
+            >>> # Register an implementation for CPU and CUDA Tensors
             >>> @numpy_sin.impl('cpu'):
             >>> def numpy_sin_impl_cpu(x):
             >>>     return torch.from_numpy(np.sin(x.numpy()))
@@ -176,16 +208,20 @@ class CustomOp:
             >>> numpy_sin(x)  # calls numpy_sin_impl_cuda
 
         """
+        if isinstance(device_types, str):
+            device_types = [device_types]
+        for device_type in device_types:
+            validate_device_type(device_type)
 
         def inner(f):
-            validate_device_type(device_type)
-            dispatch_key = DEVICE_TYPE_TO_KEY[device_type]
-            library.impl(self._lib, self._opname, dispatch_key)(f)
+            for device_type in set(device_types):
+                dispatch_key = DEVICE_TYPE_TO_KEY[device_type]
+                library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
 
         return inner
 
-    def impl_meta(self) -> Callable:
+    def impl_meta(self) -> typing.Callable:
         r"""Register a meta implementation for this CustomOp object.
 
         The meta implementation is a shape propagation rule that gets invoked
@@ -219,19 +255,25 @@ class CustomOp:
         return inner
 
 
-def process_namespaced_schema_str(
-    namespaced_schema: str,
-) -> Tuple[str, str, FunctionSchema]:
-    ns, schema_str = parse_namespace(namespaced_schema)
-    schema = FunctionSchema.parse(schema_str)
+def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):
+    overload_name = (
+        "" if operator_name.overload_name is None else operator_name.overload_name
+    )
+    return _C._dispatch_find_schema_or_throw(
+        f"{cpp_ns}::{str(operator_name.name)}", overload_name
+    )
 
-    if ns in RESERVED_NS:
-        raise ValueError(
-            f"{ns} is a reserved namespace, please choose something else. "
-            f"Found when trying to create a new CustomOp with schema "
-            f"{namespaced_schema}"
-        )
 
+def validate_namespace(ns: str) -> None:
+    if ns not in RESERVED_NS:
+        return
+    raise ValueError(
+        f"CustomOp.define(schema, ns={ns}): {ns} is a reserved namespace, "
+        f"please choose something else. "
+    )
+
+
+def validate_schema(schema: FunctionSchema) -> None:
     # Coming in the future. Requires us to have correct logic for
     # the ADInplaceOrView key
     if schema.kind() != SchemaKind.functional:
@@ -258,10 +300,9 @@ def process_namespaced_schema_str(
         raise NotImplementedError(
             f"NYI: CustomOp.define does not support function schema with no outputs. Got: {schema}"
         )
-    return ns, schema_str, schema
 
 
-def parse_namespace(namespaced_entity: str) -> Tuple[str, str]:
+def parse_namespace(namespaced_entity: str) -> typing.Tuple[str, str]:
     names = namespaced_entity.split("::", 1)
     if len(names) != 2:
         raise ValueError(f"Expected there to be a namespace in {namespaced_entity}.")
@@ -271,12 +312,12 @@ def parse_namespace(namespaced_entity: str) -> Tuple[str, str]:
 def validate_device_type(device_type: str) -> None:
     if device_type not in SUPPORTED_DEVICE_TYPES:
         raise ValueError(
-            f"CustomOp.impl(device_type={device_type}): we only support device_type "
+            f"CustomOp.impl(device_types=[{device_type}, ...]): we only support device_type "
             f"in {SUPPORTED_DEVICE_TYPES}."
         )
 
 
-def get_autograd_not_implemented_kernel(custom_op) -> Callable:
+def get_autograd_not_implemented_kernel(custom_op) -> typing.Callable:
     def autograd_not_implemented(*args, **kwargs) -> None:
         if pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)

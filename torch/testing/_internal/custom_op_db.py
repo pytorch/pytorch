@@ -21,7 +21,9 @@ from torch.testing._internal.autograd_function_db import (
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
-numpy_cube = CustomOp.define('_torch_testing::numpy_cube(Tensor x) -> (Tensor, Tensor)')
+@CustomOp.define('(Tensor x) -> (Tensor, Tensor)', ns='_torch_testing')
+def numpy_cube(x):
+    ...
 
 @numpy_cube.impl('cpu')
 @numpy_cube.impl('cuda')
@@ -34,7 +36,9 @@ def numpy_cube_impl(x):
 def numpy_cube_meta(x):
     return x.clone(), x.clone()
 
-numpy_mul = CustomOp.define('_torch_testing::numpy_mul(Tensor x, Tensor y) -> Tensor')
+@CustomOp.define('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
+def numpy_mul(x, y):
+    ...
 
 @numpy_mul.impl('cpu')
 @numpy_mul.impl('cuda')
@@ -43,9 +47,11 @@ def numpy_mul_impl(x, y):
 
 @numpy_mul.impl_meta()
 def numpy_mul_meta(x, y):
-    return x * y
+    return (x * y).contiguous()
 
-numpy_sort = CustomOp.define('_torch_testing::numpy_sort(Tensor x, int dim) -> (Tensor, Tensor, Tensor)')
+@CustomOp.define('(Tensor x, int dim) -> (Tensor, Tensor, Tensor)', ns='_torch_testing')
+def numpy_sort(x, dim):
+    ...
 
 @numpy_sort.impl('cpu')
 @numpy_sort.impl('cuda')
@@ -65,7 +71,9 @@ def numpy_sort_impl(x, dim):
 def numpy_sort_meta(x, dim):
     return x, x.long(), x.long()
 
-numpy_take = CustomOp.define('_torch_testing::numpy_take(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor')
+@CustomOp.define('(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor', ns='_torch_testing')
+def numpy_take(x, ind, ind_inv, dim):
+    ...
 
 @numpy_take.impl('cpu')
 @numpy_take.impl('cuda')
@@ -79,31 +87,37 @@ def numpy_take_impl(x, ind, ind_inv, dim):
 def numpy_take_meta(x, ind, ind_inv, dim):
     return x
 
+# CustomOp isn't deepcopy-able, so we wrap in a function that is.
+def wrap_for_opinfo(op):
+    def inner(*args, **kwargs):
+        return op(*args, **kwargs)
+    return inner
+
 custom_op_db = [
     OpInfo(
         'NumpyCubeCustomOp',
-        op=numpy_cube,
+        op=wrap_for_opinfo(numpy_cube),
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyMulCustomOp',
-        op=numpy_mul,
+        op=wrap_for_opinfo(numpy_mul),
         sample_inputs_func=sample_inputs_numpy_mul,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpySortCustomOp',
-        op=numpy_sort,
+        op=wrap_for_opinfo(numpy_sort),
         sample_inputs_func=sample_inputs_numpy_sort,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyTakeCustomOp',
-        op=numpy_take,
+        op=wrap_for_opinfo(numpy_take),
         sample_inputs_func=sample_inputs_numpy_take,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
