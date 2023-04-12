@@ -4684,7 +4684,8 @@ The gradient is estimated by estimating each partial derivative of :math:`g` ind
 accurate if :math:`g` is in :math:`C^3` (it has at least 3 continuous derivatives), and the estimation can be
 improved by providing closer samples. Mathematically, the value at each interior point of a partial derivative
 is estimated using `Taylor’s theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
-Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring it to the left and rirespectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
+Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring
+it to the left and right respectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
 
 .. math::
     \begin{aligned}
