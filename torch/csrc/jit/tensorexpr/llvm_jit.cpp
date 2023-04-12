@@ -114,7 +114,11 @@ static void registerIntrinsics(
   using namespace llvm::orc;
 
   auto entry = [&](const char* name, auto ptr) -> SymbolMap::value_type {
+#if LLVM_VERSION_MAJOR >= 17
+    return {Mangle(name), {ExecutorAddr(toAddress(ptr)), JITSymbolFlags::None}};
+#else
     return {Mangle(name), {toAddress(ptr), JITSymbolFlags::None}};
+#endif
   };
 
   SymbolMap symbols;
