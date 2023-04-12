@@ -5,7 +5,7 @@
 import logging
 
 from torch import nn
-from torch.ao.pruning.sparsifier import utils
+from torch.ao.pruning.pruner import utils
 from torch.nn.utils import parametrize
 
 import torch
@@ -118,7 +118,7 @@ class TestFakeSparsity(TestCase):
                          model_load.seq[1].parametrizations['weight'].original)
 
         # Check the masks are not preserved in the state_dict
-        # We store the state_dicts in the sparsifier, not in the model itself.
+        # We store the state_dicts in the pruner, not in the model itself.
         # TODO: Need to find a clean way of exporting the parametrized model
         self.assertNotEqual(model_save.linear.parametrizations['weight'][0].mask,
                             model_load.linear.parametrizations['weight'][0].mask)
