@@ -37,6 +37,10 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   engine_.reset_state(seed);
 }
 
+void MPSGeneratorImpl::set_offset(uint64_t offset) {
+  AT_ERROR("MPS Generator does not use offset");
+}
+
 uint64_t MPSGeneratorImpl::current_seed() const {
   return data_.seed;
 }

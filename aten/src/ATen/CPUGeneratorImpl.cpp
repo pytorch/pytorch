@@ -95,6 +95,14 @@ void CPUGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 /**
+ * Manually seeds the engine with the seed input
+ * See Note [Acquire lock when using random generators]
+ */
+void CPUGeneratorImpl::set_offset(uint64_t offset) {
+  AT_ERROR("CPU Generator does not use offset");
+}
+
+/**
  * Gets the current seed of CPUGeneratorImpl.
  */
 uint64_t CPUGeneratorImpl::current_seed() const {

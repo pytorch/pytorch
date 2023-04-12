@@ -15,6 +15,7 @@ struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   // CPUGeneratorImpl methods
   std::shared_ptr<CPUGeneratorImpl> clone() const;
   void set_current_seed(uint64_t seed) override;
+  void set_offset(uint64_t offset) override;
   uint64_t current_seed() const override;
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;

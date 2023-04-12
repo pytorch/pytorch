@@ -93,6 +93,7 @@ struct TORCH_API Generator {
   }
 
   void set_current_seed(uint64_t seed) { impl_->set_current_seed(seed); }
+  void set_offset(uint64_t offset) { impl_->set_offset(offset); }
 
   uint64_t current_seed() const { return impl_->current_seed(); }
 

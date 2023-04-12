@@ -1111,5 +1111,5 @@ __all__ = [
     'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power_draw',
     'clock_rate', 'nccl', 'nvtx', 'profiler', 'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated',
     'reset_max_memory_cached', 'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction',
-    'set_rng_state', 'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams',
-    'synchronize', 'utilization']
+    'set_rng_state', 'set_rng_state_all', 'set_rng_state_offset', 'set_stream', 'set_sync_debug_mode', 'sparse',
+    'stream', 'streams', 'synchronize', 'utilization']
