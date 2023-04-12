@@ -135,7 +135,7 @@ case "$image" in
     ONNX=yes
     ;;
   pytorch-linux-focal-py3-clang7-android-ndk-r19c)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=7
     LLVMDEV=yes
     PROTOBUF=yes
