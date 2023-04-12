@@ -17,24 +17,56 @@ from ..pattern_matcher import (
 if torch._C.has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
-
     _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
     _linear_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
+    _conv_transpose_args = (
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+    )
     _computation_user_1 = [
         CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=1),
         CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=1),
+        CallFunction(
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=1,
+        ),
     ]
     _computation_user_2 = [
         CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=2),
         CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=2),
+        CallFunction(
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=2,
+        ),
     ]
     _computation_user_3 = [
         CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=3),
         CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=3),
+        CallFunction(
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=3,
+        ),
     ]
     _computation_user_4 = [
         CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=4),
         CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=4),
+        CallFunction(
+            mkldnn._convolution_transpose_pointwise.default,
+            *_conv_transpose_args,
+            _users=4,
+        ),
     ]
 
     def _gelu_fusion_1(computation_call):
@@ -251,11 +283,13 @@ if torch._C.has_mkldnn:
         computation_ops = [
             mkldnn._convolution_pointwise.default,
             mkldnn._linear_pointwise.default,
+            mkldnn._convolution_transpose_pointwise.default,
         ]
 
         for unary_attr, patterns in replacement_unary_fusion_patterns.items():
             _register_unary_fusion_lowering(patterns[0], unary_attr, computation_ops[0])
             _register_unary_fusion_lowering(patterns[1], unary_attr, computation_ops[1])
+            _register_unary_fusion_lowering(patterns[2], unary_attr, computation_ops[2])
 
         _leaky_relu_patterns = [
             _leaky_relu_fusion(user) for user in _computation_user_3

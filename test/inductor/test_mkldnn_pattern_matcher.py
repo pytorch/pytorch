@@ -162,6 +162,47 @@ class TestPaternMatcher(TestCase):
                     )
                     counters.clear()
 
+    def test_conv_transpose2d_unary(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv_transpose2d = torch.nn.ConvTranspose2d(
+                    3, 16, 3, stride=2, padding=1
+                )
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.conv_transpose2d(x)
+                return self.unary_fn(x)
+
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            unary_list,
+            test_memory_format,
+        )
+
+        for unary_fn, memory_format in options:
+            x_shape = (1, 3, 28, 28)
+            mod = M(unary_fn).eval()
+
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            with torch.no_grad():
+                expected = mod(v)
+                actual = torch.compile(mod)(v)
+                torch.testing.assert_close(actual, expected)
+                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    unary_list[unary_fn],
+                )
+                counters.clear()
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch._C.has_mkldnn:
