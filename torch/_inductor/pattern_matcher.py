@@ -689,6 +689,7 @@ def training_graph(fn, args):
         lambda g, i: make_boxed_func(g),
         partition_fn=record_joint_graph,
         decompositions=select_decomp_table(),
+        enable_log=False,
     )(*args)
 
     # remove in/out specs

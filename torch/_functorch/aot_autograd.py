@@ -876,6 +876,7 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
+    enable_log: bool = True
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -1282,7 +1283,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     assert copy_count == copy_count2
 
-    aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+    if aot_config.enable_log:
+        aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -2305,7 +2307,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             "Graph partitioning without functionalization is not sound, we may introduce errors"
         )
 
-    aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
+    if aot_config.enable_log:
+        aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2322,8 +2325,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
-        aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
+        if aot_config.enable_log:
+            aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+            aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -2774,6 +2778,7 @@ def aot_function(
     *,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
+    enable_log=True,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -2846,6 +2851,7 @@ def aot_function(
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
         aot_autograd_arg_pos_to_source=None,
+        enable_log=enable_log,
     )
     cached_res = None
 
