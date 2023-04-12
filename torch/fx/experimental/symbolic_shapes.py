@@ -29,7 +29,7 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 
 InputList = List
 DimList = List
@@ -265,10 +265,12 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        assert min <= a <= max
+        if not (min <= a <= max):
+            raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
         return
     if isinstance(a.node.expr, sympy.Integer):
-        assert min <= int(a.node.expr) <= max
+        if not (min <= int(a.node.expr) <= max):
+            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
     # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
@@ -1737,7 +1739,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1903,7 +1905,7 @@ class ShapeEnv:
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
                             record_constraint_violation(lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
+                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
                                 "constrain_range manually, or we forgot to update this error message? "
