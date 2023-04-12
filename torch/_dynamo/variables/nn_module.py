@@ -264,10 +264,8 @@ class NNModuleVariable(VariableTracker):
                     assert len(kwargs) == 0
                     if hasattr(mod, "_initialize_hook"):
                         input = [
-                            type(arg)([get_fake_value(x.node, tx) for x in arg])
-                            if isinstance(arg, (list, tuple))
-                            else get_fake_value(arg.node, tx)
-                            for arg in proxy_args_kwargs(args, {})[0]
+                            get_fake_value(x.node, tx)
+                            for x in proxy_args_kwargs(args, {})[0]
                         ]
                         mod._infer_parameters(mod, input)
                     fn = mod.__call__

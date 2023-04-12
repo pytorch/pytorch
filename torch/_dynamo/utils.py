@@ -27,7 +27,7 @@ from typing import Any, Dict, Tuple, Union
 
 import torch._logging
 from torch._guards import detect_fake_mode  # noqa: F401
-from .config_utils import config
+from . import config
 
 try:
     import numpy as np
