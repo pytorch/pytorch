@@ -13,7 +13,6 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/TensorSubclassLikeUtils.h>
-#include <c10/core/SymInt.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
