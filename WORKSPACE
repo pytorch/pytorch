@@ -30,6 +30,13 @@ load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
 rules_cc_toolchains()
 
 http_archive(
+    name = "rules_python",
+    sha256 = "a644da969b6824cc87f8fe7b18101a8a6c57da5db39caa6566ec6109f37d2141",
+    strip_prefix = "rules_python-0.20.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.20.0/rules_python-0.20.0.tar.gz",
+)
+
+http_archive(
     name = "bazel_skylib",
     urls = [
         "https://github.com/bazelbuild/bazel-skylib/releases/download/1.0.2/bazel-skylib-1.0.2.tar.gz",
