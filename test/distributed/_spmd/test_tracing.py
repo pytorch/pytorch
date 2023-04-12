@@ -684,6 +684,47 @@ class TraceTrainStepTest(DTensorTestBase):
         self.assertEqual(id(gm), id(train_step.__dict__[COMPILED_OBJECT_KEY].gm))
         self.assertEqual(graph_optimization.call_count, 1)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_buffer(self):
+        class BufferModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+                self.register_buffer("dummy_buffer", torch.ones(10, 10))
+
+            def forward(self, x):
+                # N.B.: setting requires_grad in forward, as deepcopy does not
+                # work for requires_grad=True buffers.
+                self.dummy_buffer.requires_grad = True
+                return torch.matmul(self.fc(x), self.dummy_buffer)
+
+        class AssertOptimizer(torch.optim.Optimizer):
+            def __init__(self, params, lr):
+                super().__init__(params, dict(lr=lr))
+
+            def step(self):
+                assert len(self.param_groups[0]["params"]) == 2
+                with torch.no_grad():
+                    for p in self.param_groups[0]["params"]:
+                        p += p.grad
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        torch.manual_seed(0)
+        mod = BufferModule().cuda(self.rank)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        opt = AssertOptimizer(mod.parameters(), lr=0.01)
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+        ddp_opt = AssertOptimizer(ddp_mod.parameters(), lr=0.01)
+
+        self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
+        self.assertEqual(mod.dummy_buffer, ddp_mod.module.dummy_buffer)
+
 
 class CoverageTest(DTensorTestBase):
     @property
