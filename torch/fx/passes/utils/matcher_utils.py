@@ -97,7 +97,7 @@ class SubgraphMatcher:
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
     def _match_attributes(self, pn: Node, gn: Node) -> bool:
-        # Attributes matching is compilcated. Right now we only support matching constant tensor
+        # Attributes matching is complicated. Right now we only support matching constant tensor
         assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
         assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
         pn_value = getattr(pn.graph.owning_module, pn.target)
@@ -191,7 +191,7 @@ class SubgraphMatcher:
         if pn in match.nodes_map:
             return match.nodes_map[pn] == gn
 
-        # TODO: use a more efficienty way to check if gn is matched before: two-way dict
+        # TODO: use a more efficient way to check if gn is matched before: two-way dict
         if gn in match.nodes_map.values():
             return False
 
@@ -221,8 +221,7 @@ class SubgraphMatcher:
                 elif isinstance(a1, (list, tuple)) and isinstance(a2, (list, tuple)):
                     matched = _match_args(a1, a2)
                 else:
-                    if not self.ignore_literals:
-                        matched = self._match_literals(a1, a2, match)
+                    matched = self.ignore_literals or self._match_literals(a1, a2, match)
 
                 if not matched:
                     return False
