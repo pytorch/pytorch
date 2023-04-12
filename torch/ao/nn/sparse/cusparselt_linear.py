@@ -22,12 +22,13 @@ class cuSPARSELtLinear(nn.Linear):
         # no need to clone data ptr since we prune and compress when initializing, so we can discard
         # but bias needs to be copied so other bias can be GC
         cusparselt.bias.data = torch.clone(mod.bias.data)
+        print(mod.weight.data.shape)
         num_bytes = mod.weight.data.nelement() * mod.weight.data.element_size()
         # print("num byte = ", num_bytes)
-        compressed_size = num_bytes // 16 * 9
+        compressed_size = num_bytes // 16 * (9 if mod.weight.dtype == torch.float16 else 10)
         # print("compresseds", compressed_size)
-        cusparselt.weight.data = torch.empty((compressed_size // 2, ), 
-                                        dtype=cusparselt.bias.dtype,
+        cusparselt.weight.data = torch.empty((compressed_size // mod.weight.data.element_size(), ), 
+                                        dtype=mod.weight.data.dtype, 
                                         device=cusparselt.bias.device)
 
         # print(temp.nelement()*temp.element_size())

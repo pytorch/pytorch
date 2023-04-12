@@ -36,8 +36,6 @@ The following source file implements a sparse linear operator using cusparseLt
 struct CusparseLtLinear : torch::CustomClassHolder {
   // define constants
   constexpr static auto order        = CUSPARSE_ORDER_ROW;
-  constexpr static auto type         = CUDA_R_16F;
-  constexpr static auto compute_type = CUSPARSE_COMPUTE_16F;
 
   // this tensor is magic, will segfault when removed ? 
   at::Tensor weight_compressed;
@@ -46,7 +44,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
-  void* dBias; 
+  void* dBias;  
   float alpha{1.0};
   float beta{0.0};
   unsigned alignment{16};
@@ -60,6 +58,8 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 
   cusparseLtPruneAlg_t pruning_algo;
   cusparseOperation_t opA{CUSPARSE_OPERATION_NON_TRANSPOSE};
+  cudaDataType type = CUDA_R_16F;
+  cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
   at::Tensor masked_mm(const at::Tensor& input);
   int64_t get_alg_id();
@@ -96,9 +96,20 @@ struct CusparseLtLinear : torch::CustomClassHolder {
         return;
     }
 
-    // matrix descriptor initilization
+    // handle initilization
     //--------------------------------------------------------------------------
     CHECK_CUSPARSE( cusparseLtInit(&handle) )
+
+    std::cout << weight_compressed.dtype() << std::endl;
+
+    if (weight_compressed.dtype() == torch::kInt8) {
+      std::cout << "int" << std::endl;
+      type = CUDA_R_8I;
+      compute_type = CUSPARSE_COMPUTE_32I;
+    }
+    else {
+      std::cout << "here" << std::endl;
+    }
   };
 
 };
@@ -107,6 +118,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   // SETTING UP VALUES 
   // m & k are for weight I think, k & n are for input
   //--------------------------------------------------------------------------
+  auto num_weight_bytes = weight.numel() * weight.element_size();
   int64_t m = weight.size(0);
   int64_t k = weight.size(1);
 
@@ -116,6 +128,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   num_A_rows     = (isA_transposed) ? k : m;
   auto     num_A_cols     = (isA_transposed) ? m : k;
   auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
+
   
   CHECK_CUDA( cudaMalloc((void**)&d_valid, sizeof(*d_valid)) )
 
@@ -153,21 +166,21 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
       d_valid,
       stream) )
 
-  // int is_valid;
-  // cudaDeviceSynchronize();
-  // CHECK_CUDA(
-  //   cudaMemcpyAsync(
-  //     &is_valid,
-  //     d_valid,
-  //     sizeof(is_valid),
-  //     cudaMemcpyDeviceToHost,
-  //     stream) )
+  int is_valid;
+  cudaDeviceSynchronize();
+  CHECK_CUDA(
+    cudaMemcpyAsync(
+      &is_valid,
+      d_valid,
+      sizeof(is_valid),
+      cudaMemcpyDeviceToHost,
+      stream) )
 
-  // CHECK_CUDA( cudaStreamSynchronize(stream) )
+  CHECK_CUDA( cudaStreamSynchronize(stream) )
 
-  // TORCH_CHECK(is_valid == 0, "!!!! The matrix has been pruned in a wrong way. "
-  //             "cusparseLtMatmul will not provide correct results");
-  
+  TORCH_CHECK(is_valid == 0, "!!!! The matrix has been pruned in a wrong way. "
+              "cusparseLtMatmul will not provide correct results");
+ 
   // compress weight
   //--------------------------------------------------------------------------
   size_t compressed_size, compressed_buffer_size;
@@ -183,7 +196,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   // CHECK_CUDA( cudaMalloc((void**)&dA_compressed, compressed_size) )
   CHECK_CUDA( cudaMalloc((void**)&dA_compressedBuffer, compressed_buffer_size) )
 
-  // std::cout << "SIZE BYTES "<< num_weight_bytes<< "  " << compressed_size <<"  "<<  (float)num_weight_bytes / (float)compressed_size << std::endl;
+  std::cout << "SIZE BYTES "<< num_weight_bytes<< "  " << compressed_size <<"  "<<  (float)num_weight_bytes / (float)compressed_size << std::endl;
 
   CHECK_CUSPARSE(
     cusparseLtSpMMACompress2(
@@ -299,7 +312,6 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       &batch_strideC,
       sizeof(batch_strideC)) )
 
-
   // matmul, algorithm selection, and plan initialization
   //--------------------------------------------------------------------------
   CHECK_CUSPARSE(
@@ -315,7 +327,7 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       compute_type) )
 
   // SET BIAS POINTER
-  //--------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
   CHECK_CUSPARSE(
     cusparseLtMatmulDescSetAttribute(
       &handle,
@@ -358,7 +370,7 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
         &beta,
         res.data_ptr(),
         res.data_ptr(),
-        nullptr,
+        d_workspace,
         streams,
         num_streams) )
     CHECK_CUSPARSE(
@@ -369,6 +381,12 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
         &alg_id,
         sizeof(alg_id)) )
   }
+  // else {
+  //   CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(
+  //                                          &handle, &alg_sel,
+  //                                          CUSPARSELT_MATMUL_ALG_CONFIG_ID,
+  //                                          &alg_id, sizeof(alg_id)))
+  // }
 
   CHECK_CUSPARSE(
     cusparseLtMatmul(
@@ -383,6 +401,11 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       d_workspace,
       streams,
       num_streams) )
+
+  
+  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&activation_descriptor) )
+  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&matC) )
+  // CHECK_CUSPARSE( cusparseLtMatmulPlanDestroy(&plan) )
 
   return res;
 
