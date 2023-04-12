@@ -575,7 +575,6 @@ std::shared_ptr<${op}> grad_fn;
 DECLARE_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 std::vector<std::shared_ptr<${op}>> grad_fns;
-std::vector<bool> requires_grad_fns;
 """
 )
 
