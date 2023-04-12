@@ -1052,12 +1052,15 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["nn_module_stack"] = nn_module_stack
 
         if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = target
+            rv.node.meta["source_fn"] = (rv.node.name, target)
         elif kind == "call_module":
             if self.parent is not None:
                 unimplemented("Invoking an nn.Module inside HigherOrderOperator")
             # For modules we store the class
-            rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][rv.node.name][1]
+            rv.node.meta["source_fn"] = (
+                rv.node.name,
+                rv.node.meta["nn_module_stack"][rv.node.name][1],
+            )
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

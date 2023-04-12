@@ -9,10 +9,10 @@ import torch
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch.fx.passes.utils.module_matcher_utils import get_module_partitions, check_subgraphs_connected
+from torch.fx.passes.utils.source_matcher_utils import get_source_partitions, check_subgraphs_connected
 from torch.testing._internal.jit_utils import JitTestCase
 
-class TestModuleMatcher(JitTestCase):
+class TestSourceMatcher(JitTestCase):
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_linear_relu_linear(self):
         class M(torch.nn.Module):
@@ -33,7 +33,7 @@ class TestModuleMatcher(JitTestCase):
         gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
-        module_partitions = get_module_partitions(gm.graph, [torch.nn.Linear, torch.nn.ReLU])
+        module_partitions = get_source_partitions(gm.graph, [torch.nn.Linear, torch.nn.ReLU])
 
         self.assertEqual(len(module_partitions), 2)
         self.assertEqual(len(module_partitions[torch.nn.Linear]), 3)
@@ -72,7 +72,7 @@ class TestModuleMatcher(JitTestCase):
         gm, _ = torch._dynamo.export(M(torch.ones(1, 16, 256, 256)), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
-        module_partitions = get_module_partitions(gm.graph, [torch.nn.Conv2d, torch.nn.ReLU, torch.nn.MaxPool2d])
+        module_partitions = get_source_partitions(gm.graph, [torch.nn.Conv2d, torch.nn.ReLU, torch.nn.MaxPool2d])
 
         self.assertEqual(len(module_partitions), 3)
         self.assertEqual(len(module_partitions[torch.nn.Conv2d]), 3)
@@ -114,32 +114,23 @@ class TestModuleMatcher(JitTestCase):
         gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
-        module_partitions = get_module_partitions(gm.graph, [FunctionalConv2d])
+        module_partitions = get_source_partitions(gm.graph, [torch.nn.functional.conv2d])
 
         self.assertEqual(len(module_partitions), 1)
-        self.assertEqual(len(module_partitions[FunctionalConv2d]), 2)
+        self.assertEqual(len(module_partitions[torch.nn.functional.conv2d]), 2)
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_functional_linear_relu_linear(self):
-        class FunctionalLinear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, weight, bias):
-                return torch.nn.functional.linear(x, weight, bias)
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear1 = FunctionalLinear()
-                self.linear2 = FunctionalLinear()
 
             def forward(self, x, weight, bias):
-                x = self.linear1(x, weight, bias)
-                x = self.linear1(x, weight, bias)
+                x = torch.nn.functional.linear(x, weight, bias)
+                x = torch.nn.functional.linear(x, weight, bias)
                 x = torch.nn.functional.relu(x)
-                x = self.linear2(x, weight, bias)
-                x = self.linear2(x, weight, bias)
+                x = torch.nn.functional.linear(x, weight, bias)
+                x = torch.nn.functional.linear(x, weight, bias)
                 x = torch.nn.functional.relu(x)
                 return x
 
@@ -147,7 +138,8 @@ class TestModuleMatcher(JitTestCase):
         gm, _ = torch._dynamo.export(M(), *inputs, aten_graph=True)
         gm.graph.eliminate_dead_code()
 
-        module_partitions = get_module_partitions(gm.graph, [FunctionalLinear])
+        module_partitions = get_source_partitions(gm.graph, [torch.nn.functional.linear, torch.nn.functional.relu])
 
-        self.assertEqual(len(module_partitions), 1)
-        self.assertEqual(len(module_partitions[FunctionalLinear]), 4)
+        self.assertEqual(len(module_partitions), 2)
+        self.assertEqual(len(module_partitions[torch.nn.functional.linear]), 4)
+        self.assertEqual(len(module_partitions[torch.nn.functional.relu]), 2)

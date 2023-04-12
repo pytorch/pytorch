@@ -29,12 +29,12 @@ logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class ModulePartition():
+class SourcePartition():
     # Nodes in a particular partition
     nodes: List[Node]
 
-    # Module type
-    module_type: Type
+    # The source these nodes decomposed from
+    source: Any
 
     # Nodes in the graph that are needed as inputs to the partition
     input_nodes: List[Node] = field(default_factory=list)
@@ -48,39 +48,41 @@ class ModulePartition():
 
 
 @compatibility(is_backward_compatible=False)
-def get_module_partitions(
+def get_source_partitions(
     graph: Graph,
-    wanted_module_types: List[Type]
-) -> Dict[Type, List[ModulePartition]]:
+    wanted_sources: List[Any]
+) -> Dict[Any, List[SourcePartition]]:
     """
     Args:
         graph: The graph we want to partition
-        wanted_module_types: List of module types of nodes that we want to find
-            in the graph. Note that these types have to the types of a leaf
-            module
+        wanted_sources: List of sources of nodes that were decomposed from this
+            source. This can be a function (ex. torch.nn.functional.linear) or a
+            leaf module type (ex. torch.nn.Linear).
 
     Returns:
-        Dictionary mapping type of module (ex. torch.nn.modules.linear.Linear)
-        to a list of ModulePartitions that correspond to the list of nodes that
-        were flattened from a module of that type
+        Dictionary mapping sources that were given to a list of ModulePartitions
+        that correspond to the list of nodes that were decomposed from the given
+        source.
     """
     modules: Dict[Type, Dict[str, List[Node]]] = {}
 
     for node in graph.nodes:
-        if (nn_module_stack := node.meta.get("nn_module_stack", None)) is None:
-            continue
+        # The metadata source_fn should contain a tuple of a unique name for the
+        # source, and the source function if the node is decomposed from a
+        # function, or the type of module if the node is decomposed from a leaf
+        # module
 
-        # First value in the nn_module_stack contains the leaf module trace
-        module_call, (_, module_type) = list(nn_module_stack.items())[0]
+        if (source_fn := node.meta.get("source_fn", None)) is None:
+           continue
+        
+        if source_fn[1] not in wanted_sources:
+           continue
 
-        if module_type not in wanted_module_types:
-            continue
-
-        diff_modules = modules.setdefault(module_type, {})
-        partition = diff_modules.setdefault(module_call, [])
+        diff_modules = modules.setdefault(source_fn[1], {})
+        partition = diff_modules.setdefault(source_fn[0], [])
         partition.append(node)
 
-    def make_partition(nodes: List[Node], module_type: Type) -> ModulePartition:
+    def make_partition(nodes: List[Node], module_type: Type) -> SourcePartition:
         input_nodes = set()
         output_nodes = set()
         params = set()
@@ -96,9 +98,9 @@ def get_module_partitions(
                 if user not in nodes:
                     output_nodes.add(node)
 
-        return ModulePartition(nodes, module_type, list(input_nodes), list(output_nodes), list(params))
+        return SourcePartition(nodes, module_type, list(input_nodes), list(output_nodes), list(params))
 
-    ret: Dict[Type[Any], List[ModulePartition]] = {}
+    ret: Dict[Type[Any], List[SourcePartition]] = {}
     for k, v in modules.items():
         ret[k] = [make_partition(partition, k) for partition in v.values()]
 
@@ -106,7 +108,7 @@ def get_module_partitions(
 
 
 @compatibility(is_backward_compatible=False)
-def check_subgraphs_connected(subgraph1: ModulePartition, subgraph2: ModulePartition) -> bool:
+def check_subgraphs_connected(subgraph1: SourcePartition, subgraph2: SourcePartition) -> bool:
     """
     Given two subgraphs A and B (in the form of a list of nodes), checks if
     A has nodes connecting to at least one node in B -- aka there exists a node
