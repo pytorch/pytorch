@@ -279,7 +279,7 @@ struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
 };
 
 template <typename F, F Func, typename... T>
-Tensor rand_int_wrapper(SymIntArrayRef shape, int64_t high, T... extra_args) {
+Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
   return Func(high, shape, std::forward<T>(extra_args)...);
 }
 
