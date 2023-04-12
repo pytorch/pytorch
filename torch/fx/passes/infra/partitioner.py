@@ -207,7 +207,7 @@ class CapabilityBasedPartitioner:
 
         logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logger.debug(f"partition #{id}", [node.name for node in partition.nodes])
+            logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
 
         return list(partitions_by_id.values())
 
