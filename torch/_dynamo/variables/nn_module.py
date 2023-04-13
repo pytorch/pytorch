@@ -311,6 +311,29 @@ class NNModuleVariable(VariableTracker):
                     kwargs,
                 )
 
+    @staticmethod
+    def _should_inline(module, name):
+        if (
+            name in ["forward"]
+            or name == "_conv_forward"
+            and type(module)
+            in [
+                torch.nn.modules.conv.Conv1d,
+                torch.nn.modules.conv.Conv2d,
+                torch.nn.modules.conv.Conv3d,
+            ]
+            or name == "_output_padding"
+            and type(module)
+            in [
+                torch.nn.modules.conv.ConvTranspose1d,
+                torch.nn.modules.conv.ConvTranspose2d,
+                torch.nn.modules.conv.ConvTranspose3d,
+            ]
+        ):
+            return True
+        else:
+            return False
+
     def call_method(
         self,
         tx,
@@ -326,25 +349,20 @@ class NNModuleVariable(VariableTracker):
         module = tx.output.get_submodule(key)
 
         if name == "__call__":
-            # TODO(whc)  do we really need this special case?
             return self.call_function(tx, args, kwargs)
-        elif name == "forward":
-            # TODO(whc)
-            # This is the old special case moved to a new place.  (copy from call_function below)
-            # Old behavior: we'd route "forward" meth call to 'call_function', which inlined forward.
-            # New behavior: since call_function now hits '__call__', forward would fall through to 'wrap_proxy' below,
-            # instead of being inlined.  What should we do about this?
-            #   1) all methods get inlined now at the bottom of this call_method, instead of put into the graph as calls
-            #   2) we maintain this special case just for forward
+        elif self._should_inline(module, name):
+            # This is used for users explicitly call another forward in a forward function:
+            #
+            # def forward(x):
+            #       return self.layer.forward(x)
+            #
             assert self.source, (
                 "Must provide a valid source in order to inline, "
                 "since inlined function may have default args which must be guarded."
             )
-            fn = module.forward.__func__
+            fn = getattr(module, name).__func__
             assert istype(fn, types.FunctionType)
-            options["source"] = AttrSource(
-                AttrSource(self.source, "forward"), "__func__"
-            )
+            options["source"] = AttrSource(AttrSource(self.source, name), "__func__")
             args = [self] + args
 
             return tx.inline_user_function_return(
