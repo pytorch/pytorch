@@ -143,7 +143,6 @@ class TestCuda(TestCase):
         for device, expected in expected_each_device.items():
             stats = torch.cuda.memory_stats(device)
             for k, v in expected.items():
-                print(k, v, stats[k])
                 self.assertEqual(v, stats[k])
 
     @staticmethod

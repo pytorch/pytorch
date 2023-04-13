@@ -1035,6 +1035,8 @@ def segment_plot(data: Any, device=None):
     }
 
     for seg in data['segments']:
+        if seg['device'] != device:
+            continue
         for k in segments.keys():
             sk = segment_names.get(k, k)
             segments[k].append(preproc.get(k, lambda x: x)(seg[sk]))

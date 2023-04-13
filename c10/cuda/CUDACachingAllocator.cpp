@@ -328,26 +328,29 @@ memory needed by the program. As more is requested, we add more physical memory
 to the segment. This can work at the granularity of GPU pages which are 2MiB
 currently.
 
-If we end up out of memory, we can unmap all the memory in our segmenet
+If we end up out of memory, we can unmap all the memory in our segment
 corresponding to empty physical pages, and return it to CUDA for use at another
 address in the segment or in a segment for a different stream.
 
-A current limitation of CUDA's API is that physical memory cannot be split up
-after it is mapped, and the cost to map/unmap memory is proportional the number
-of physical memory chunks that were allocated (mapping 10 separately allocated
-2MiB pages takes 10x time compared to mapping one 20MiB physical allocation of
-10 pages).  Changing memory mappings also appears to involve at least some
-synchronous actions with the GPU and so should be considered an expensive
-operation. To limit overhead, we use 2MiB pages for our small pool and 20MiB
-pages for our large pool. Initially allocation using expandable_blocks will be
-slower than cudaMalloc, though still in the milliseconds range for mapping the
-entire memory.
+A current limitation of CUDA's API is that physical memory
+(CUmemGenericAllocationHandle) cannot be split up after it is mapped even if the
+handle holds multiple GPU pages. The cost to map/unmap memory is proportional to
+the number of physical memory chunks that were allocated (mapping 10 separately
+allocated 2MiB pages takes 10x time compared to mapping one 20MiB physical
+allocation of 10 pages).  Changing memory mappings also appears to involve at
+least some synchronous actions with the GPU and so should be considered an
+expensive operation. To limit overhead, we use 2MiB pages for our small pool and
+20MiB pages for our large pool. Initially allocation using expandable_blocks
+will be slower than cudaMalloc, though still in the milliseconds range for
+mapping the entire memory.
 
 When mapping new memory to expand the segment, we look for the lowest address at
 which we can fit a new allocation by adding new pages. Normally this will be at
 the end of the block. But if have previously unmapped blocks earlier in the
 segment during an OOM, it will first try to fill in those gaps to keep the
-segment as a single block.
+segment as a single block. By allocating at the lowest address we encourage
+the split up parts of the block to merge into a single block again, reducing
+fragmentation potential.
 
 Allocation of blocks in the segment uses the same best-fit heuristics of the
 rest of the allocator.
@@ -376,10 +379,14 @@ struct ExpandableSegment {
       : device_(device),
         stream_(stream),
         max_handles_(0),
+        // 2MB for small pool, 20MB for large pool
         segment_size_(size),
         peers_(peers) {
     cudaDeviceProp prop;
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
+    // we allocate enough address space for 1 1/8 the total memory on the GPU.
+    // This allows for some cases where we have to unmap pages earlier in the
+    // segment to put them at the end.
     max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
     C10_CUDA_DRIVER_CHECK(cuMemAddressReserve(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
@@ -2079,6 +2086,12 @@ class DeviceCachingAllocator {
   }
 
   void addPeerAccess(int dev_to_access) {
+    if (std::find(
+            devices_with_peer_access_.begin(),
+            devices_with_peer_access_.end(),
+            dev_to_access) != devices_with_peer_access_.end()) {
+      return;
+    }
     devices_with_peer_access_.push_back(dev_to_access);
     for (auto& es : expandable_segments_) {
       es->addPeer(dev_to_access);
@@ -2145,13 +2158,13 @@ class DeviceCachingAllocator {
       size_t size) {
     Block key(device, stream, 0);
 
-    auto allocateable = [](Block* b) {
+    auto allocatable = [](Block* b) {
       return b && !b->allocated && b->event_count == 0 &&
           b->stream_uses.empty();
     };
     auto has_available_address_space = [&](Block* b) {
       size_t bytes = 0;
-      while (bytes < size && allocateable(b)) {
+      while (bytes < size && allocatable(b)) {
         bytes += b->size;
         b = b->next;
       }
@@ -2164,7 +2177,7 @@ class DeviceCachingAllocator {
       // we found the lowest address of an unmapped segment
       // but there might be a free segment we can also use
       // right before it
-      if (allocateable(c->prev)) {
+      if (allocatable(c->prev)) {
         c = c->prev;
       }
       if (has_available_address_space(c)) {
@@ -2241,7 +2254,6 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  // TODO: handle mapping and splitting
   Block* try_allocate_expandable_block(
       int device,
       cudaStream_t stream,
@@ -2465,7 +2477,7 @@ class DeviceCachingAllocator {
         // if we are allocated to the part of the block that is expandable
         // for the purposes of "best fit" we consider its size to be the size it
         // can expand to, not the size it currently is. This means that we
-        // someimtes have to search for blocks with bigger 'size' before
+        // sometimes have to search for blocks with bigger 'size' before
         // choosing this segment.
         auto expandable_size = [](Block* b) {
           return b->size + (b->next && !b->next->mapped ? b->next->size : 0);
