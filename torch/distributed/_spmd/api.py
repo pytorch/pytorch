@@ -36,6 +36,7 @@ from torch.distributed._spmd.distribute import (
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
+from torch.distributed._tensor.device_mesh import set_global_device_mesh
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
@@ -197,6 +198,7 @@ def _dtensor_expand(
     flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
 
     mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
+    set_global_device_mesh(mesh)
     shard_schema: Schema = Schema(mesh=mesh, placements=[Shard(0)])
     # FIXME: allow other sharding schemas
     replicate_schema: Schema = Schema(mesh=mesh, placements=[Replicate()])

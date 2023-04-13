@@ -10,6 +10,7 @@ from torch.distributed._tensor.api import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.device_mesh import get_global_device_mesh
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
 from torch.distributed._tensor.ops.utils import normalize_dim, register_prop_rule
@@ -63,6 +64,18 @@ def no_shard_prop_rule(op_schema: OpSchema) -> OutputSharding:
     return OutputSharding(None)
 
 
+def factory_rule(op_schema: OpSchema) -> OutputSharding:
+    mesh = get_global_device_mesh()
+    return OutputSharding(
+        output_spec=DTensorSpec(
+            mesh=mesh,
+            # Treat factory output tensor as replicated, assuming those are not
+            # parameters or activations that require grads.
+            placements=[Replicate()] * mesh.ndim,
+        )
+    )
+
+
 def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
     # this op would benefit from backward sharding propagation!
     # Since we cannot do that yet, just return replicated
@@ -108,11 +121,18 @@ new_factory_ops = [
     aten.new_zeros.default,
 ]
 
+factory_ops = [
+    aten.full.default,
+]
+
 for op in default_prop_ops:
     register_prop_rule(op)(default_prop_rule)
 
 for op in create_like_ops:
     register_prop_rule(op)(prop_create_like)
+
+for op in factory_ops:
+    register_prop_rule(op)(factory_rule)
 
 for op in new_factory_ops:
     register_prop_rule(op)(new_factory_rule)

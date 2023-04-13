@@ -146,6 +146,15 @@ def _operator_dispatch(
 
     output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
 
+    output_spec = output_sharding.output_spec
+    if mesh is None and output_spec is not None:
+        # import here to avoid circular dependency
+        from torch.distributed._tensor.ops.tensor_ops import factory_ops
+
+        assert op_call in factory_ops, f"{op_call}: not in DTensor's factory op list"
+        assert isinstance(output_spec, DTensorSpec) and output_spec.mesh is not None
+        mesh = output_spec.mesh
+
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
         return (
@@ -245,7 +254,7 @@ def _operator_dispatch(
         ]
         # before running local op computation, check if op is random op
         # for random ops, set RNG offset
-        assert isinstance(mesh, DeviceMesh)
+        assert isinstance(mesh, DeviceMesh), f"Expect DeviceMesh but got {mesh}"
         if op_call in random_ops and is_rng_supported_mesh(mesh):
             dtensor_arg = arg_list[0]
             old_offset = _get_rng_offset(mesh)
