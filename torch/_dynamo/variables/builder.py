@@ -7,7 +7,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
 import torch
 
