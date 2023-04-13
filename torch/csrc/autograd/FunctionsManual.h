@@ -407,6 +407,7 @@ at::Tensor max_pool_double_backward(
     const at::Tensor& grad,
     const at::Tensor& indices,
     int dim);
+at::Tensor error_for_max_pool2d_double_backward();
 at::Tensor glu_double_backward(
     const at::Tensor& grad,
     const at::Tensor& grad_output,

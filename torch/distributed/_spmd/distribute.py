@@ -169,6 +169,13 @@ def _get_dtensor_dispatch_graph(
 
         op_overload = cast(torch._ops.OpOverload, node.target)
 
+        if node.target == torch.ops.aten.view.default:
+            # HACK: this is a hack to get around with the fact that some
+            # view operations on a "global" tensor is invalid usage
+            # but somehow the view operation on the batch input might hit it
+            # so we convert the view op to reshape before calling DTensor
+            op_overload = torch.ops.aten.reshape.default
+
         # run dispatch once to get the real DTensor output.
         out, op_schema, output_sharding = _operator_dispatch(
             op_overload,
