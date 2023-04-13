@@ -635,12 +635,12 @@ def run_and_get_code(fn, *args, **kwargs):
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
         torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
+        result = fn(*args, **kwargs)
+    return result, source_codes
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
+    _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"

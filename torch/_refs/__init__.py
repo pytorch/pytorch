@@ -195,6 +195,8 @@ __all__ = [
     "amax",
     "amin",
     "any",
+    "cumsum",
+    "cumprod",
     "mean",
     "std",
     "std_mean",
@@ -3980,12 +3982,12 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     )
 
 
-@register_decomposition(aten.cumsum)
-def cumsum(
+def _cumsumprod_common(
+    func,
+    init,
     a: TensorLikeType,
     dim: int,
     *,
-    keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
@@ -3994,14 +3996,36 @@ def cumsum(
     ndim = a.ndim
     dim = utils.canonicalize_dim(ndim, dim)
     if ndim == 0:
-        return sum(a.unsqueeze(0), dim=0, keepdim=keepdim, dtype=dtype, out=out)
+        return func(a.unsqueeze(0), dim=0, dtype=dtype, out=out)
     a = a.unsqueeze(dim + 1)
     rg = torch.arange(a.shape[dim], device=a.device)
     mask = rg.unsqueeze(1) <= rg
     for _ in range(ndim - dim - 1):
         mask = mask.unsqueeze(-1)
-    masked_a = utils.mask_tensor(mask, a)
-    return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
+    masked_a = torch.where(mask, a, init)
+    return func(masked_a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumsum)
+def cumsum(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=sum, init=0, a=a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumprod)
+def cumprod(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=prod, init=1, a=a, dim=dim, dtype=dtype, out=out)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -5432,6 +5456,7 @@ copysign_ = _make_inplace(copysign)
 cos_ = _make_inplace(cos)
 cosh_ = _make_inplace(cosh)
 cumsum_ = _make_inplace(cumsum)
+cumprod_ = _make_inplace(cumprod)
 digamma_ = _make_inplace(digamma)
 div_ = _make_inplace(div)
 eq_ = _make_inplace(eq)
