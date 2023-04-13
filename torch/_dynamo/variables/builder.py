@@ -7,7 +7,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
 import torch
 
@@ -116,7 +116,10 @@ class _missing:
 @dataclasses.dataclass
 class GraphArg:
     source: Source
-    example: Any
+    # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
+    # thing to do.  Probably should have example (which stores an int) and
+    # fake_example
+    example: Union[torch.Tensor, torch.SymInt]
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
@@ -136,19 +139,6 @@ class GraphArg:
 
     def load(self, tx):
         return self.source.reconstruct(tx)
-
-    def get_examples(self):
-        return [self.example]
-
-    def get_fake_examples(self):
-        if self.fake_tensor is not None:
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
-            return [self.fake_tensor]
-
-    def __len__(self):
-        return 1
 
     def erase(self):
         self.example = None
