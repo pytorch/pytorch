@@ -657,6 +657,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
 
+    @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
