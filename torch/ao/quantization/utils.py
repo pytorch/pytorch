@@ -603,7 +603,7 @@ def get_fqn_to_example_inputs(
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
           "sub.linear1": (tensor4,), ...}
 
-    Used to make quantizing submodules easier now that FX Graph Mode Quantization requries
+    Used to make quantizing submodules easier now that FX Graph Mode Quantization requires
     example inputs.
 
     Also works for keyword arguments with default values, we would flatten keyword
