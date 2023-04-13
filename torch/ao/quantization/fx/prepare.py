@@ -115,6 +115,8 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
+_DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
+
 # note: the following default target dtype info dicts are temporary,
 # should be moved to the new programmable API class soon
 _DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO = {
@@ -497,8 +499,11 @@ def _get_arg_target_dtype_as_output(
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
         output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
     else:
-        output_act_obs_or_fq_ctr = \
-            arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+        if "target_dtype_info" in arg.meta:
+            output_act_obs_or_fq_ctr = \
+                arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+        else:
+            output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
     output_act_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
     # TODO: should support is_dynamic here as well
     return output_act_dtype
