@@ -1171,7 +1171,7 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         flat_param = self.flat_param
-        if self._force_full_precision:
+        if self._force_full_precision and self._uses_param_mixed_precision:
             # When parameter mixed precision is enabled, we use a different
             # tensor as the all-gather destination to preserve the invariant
             # that  `_full_param_padded` is in the low precision
@@ -1401,7 +1401,8 @@ class FlatParamHandle:
         """
 
         def cast_grad_to_param_dtype_if_needed(flat_param):
-            if self._keep_low_precision_grads:
+            # TODO (rohan-varma): test for full precision with keep_low_precision_grads
+            if not self._force_full_precision and self._keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
                 if flat_param.grad.dtype != self._fwd_bwd_param_dtype:
                     flat_param.grad.data = flat_param.grad.to(self._fwd_bwd_param_dtype)
@@ -2336,8 +2337,12 @@ class FlatParamHandle:
     @property
     def _force_full_precision(self) -> bool:
         return (
+            self._uses_param_mixed_precision or self._uses_reduce_mixed_precision
+        ) and (
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
-            and self._uses_param_mixed_precision
+            or
+            # Also disable mixed precision in model eval mode
+            not self._fully_sharded_module.training
         )
 
 
