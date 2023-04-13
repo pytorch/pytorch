@@ -50,12 +50,12 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
       if (tensor.requires_grad() && tensor._base().is_leaf()) {
-        TORCH_INTERNAL_ASSERT(false,
+        AT_ERROR(
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
       }
     }
     if (tensor.requires_grad() && tensor.is_leaf()) {
-      TORCH_INTERNAL_ASSERT(false,
+      AT_ERROR(
           "a leaf Variable that requires grad is being used in an in-place operation.");
     }
   }

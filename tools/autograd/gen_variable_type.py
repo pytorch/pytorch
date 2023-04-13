@@ -1712,8 +1712,6 @@ def emit_body(
     def emit_check_inplace() -> List[str]:
         if not inplace:
             return []
-        if is_inplace_foreach:
-            return ["check_inplace(self, _any_requires_grad);"]
         return [
             f"check_inplace({arg.name}, _any_requires_grad);"
             for arg in differentiable_outputs
