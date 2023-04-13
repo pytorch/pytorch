@@ -558,7 +558,9 @@ class BuiltinVariable(VariableTracker):
             except TypeError as exc:
                 if not has_constant_handler:
                     log.warning(
-                        f"incorrect arg count {handler} {exc} and no constant handler"
+                        "incorrect arg count %s %s and no constant handler",
+                        handler,
+                        exc,
                     )
                 handler = None
 
@@ -783,6 +785,14 @@ class BuiltinVariable(VariableTracker):
                 )
             )
         )
+
+    def call_callable(self, tx, arg):
+        from .functions import BaseUserFunctionVariable
+
+        if isinstance(
+            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+        ):
+            return variables.ConstantVariable(True).add_options(arg)
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
