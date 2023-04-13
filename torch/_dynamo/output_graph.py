@@ -773,22 +773,22 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def fake_example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
-            example = arg.get_fake_examples()
-            if example is not None:
-                result.extend(example)
+            if arg.fake_tensor:
+                result.append(arg.fake_tensor)
             else:
                 # Fallback, in case fake_tensor was not set
                 # Particularly for graph args that are not tensors
-                result.extend(arg.get_examples())
+                result.append(arg.example)
         return result
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
-            result.extend(arg.get_examples())
+            result.append(arg.example)
         return result
 
     def remove_unused_graphargs(self) -> None:
+        # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
@@ -796,16 +796,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 elif node.op == "call_function" and node.target is operator.getitem:
                     self.remove_node(node)
 
-        expanded_graphargs = []
         for arg in self.graphargs:
-            expanded_graphargs.extend([arg] * len(arg))
             arg.uses = 0
 
-        for node, arg in zip(self.graph.nodes, expanded_graphargs):
+        for node, arg in zip(self.graph.nodes, self.graphargs):
             assert node.op == "placeholder"
             arg.uses += len(node.users)
 
-        for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
+        for node, arg in list(zip(self.graph.nodes, self.graphargs)):
             if arg.uses == 0:
                 log.debug("REMOVE UNUSED GRAPHARG %s", arg.source.name())
                 if "example_value" in node.meta:
