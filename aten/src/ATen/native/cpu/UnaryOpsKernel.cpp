@@ -514,22 +514,24 @@ static void frexp_kernel(TensorIteratorBase& iter) {
 
 static void ndtri_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "ndtri_cpu", [&]() {
         cpu_kernel(iter, [](scalar_t x) { return calc_ndtri(x); });
       });
 }
 
 static void log_ndtr_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "log_ndtr_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "log_ndtr_cpu", [&]() {
         cpu_kernel(iter, [](scalar_t x) { return calc_log_ndtr(x); });
       });
 }
 
 static void i0e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "i0e_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "i0e_cpu", [&]() {
         cpu_kernel_vec(
             iter,
             [](scalar_t x) { return calc_i0e(x); },
@@ -539,29 +541,32 @@ static void i0e_kernel(TensorIteratorBase& iter) {
 
 static void i1_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t x) { return calc_i1(x); });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "i1_cpu", [&]() {
+        cpu_kernel(iter, [](scalar_t x) { return calc_i1(x); });
   });
 }
 
 static void i1e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t x) { return calc_i1e(x); });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "i1e_cpu", [&]() {
+        cpu_kernel(iter, [](scalar_t x) { return calc_i1e(x); });
   });
 }
 
 static void erfcx_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "erfcx_cpu", [&]() {
-    cpu_kernel(
-      iter,
-      [](scalar_t a) -> scalar_t { return calc_erfcx(a); });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "erfcx_cpu", [&]() {
+        cpu_kernel(
+          iter,
+          [](scalar_t a) -> scalar_t { return calc_erfcx(a); });
   });
 }
 
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.dtype(), "round_cpu", [&]() {
         bool neg_flag = false;
         scalar_t ten_pow_decimals;
         if (decimals < 0) {
@@ -579,80 +584,88 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
 static void bessel_j0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return bessel_j0_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "bessel_j0_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return bessel_j0_forward(x);
+          });
     });
 } // bessel_j0_kernel(TensorIteratorBase& iterator)
 
 static void bessel_j1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return bessel_j1_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "bessel_j1_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return bessel_j1_forward(x);
+          });
     });
 } // bessel_j1_kernel(TensorIteratorBase& iterator)
 
 static void bessel_y0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y0_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return bessel_y0_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "bessel_y0_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return bessel_y0_forward(x);
+          });
     });
 } // bessel_y0_kernel(TensorIteratorBase& iterator)
 
 static void bessel_y1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y1_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return bessel_y1_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "bessel_y1_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return bessel_y1_forward(x);
+          });
     });
 } // bessel_y1_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_i0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return modified_bessel_i0_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return modified_bessel_i0_forward(x);
+          });
     });
 } // modified_bessel_i0_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_i1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return modified_bessel_i1_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return modified_bessel_i1_forward(x);
+          });
     });
 } // modified_bessel_i1_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_k0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return modified_bessel_k0_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return modified_bessel_k0_forward(x);
+          });
     });
 } // modified_bessel_k0_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
-        cpu_kernel(iterator, [](scalar_t x) {
-            return modified_bessel_k1_forward(x);
-        });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
+          cpu_kernel(iterator, [](scalar_t x) {
+              return modified_bessel_k1_forward(x);
+          });
     });
 } // modified_bessel_k1_kernel(TensorIteratorBase& iterator)
 
