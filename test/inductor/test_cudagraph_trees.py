@@ -100,14 +100,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     class CudaGraphTreeTests(TestCase):
         def setUp(self):
             super().setUp()
-            self.prev_enabled = config.triton.cudagraphs
-            self.tapes_enabled = config.triton.cudagraph_trees
-            self.prev_slow = config.triton.slow_path_cudagraph_asserts
-            self.prev_fast = config.triton.fast_path_cudagraph_asserts
-            config.triton.fast_path_cudagraph_asserts = True
-            config.triton.slow_path_cudagraph_asserts = True
-            config.triton.cudagraphs = True
-            config.triton.cudagraph_trees = True
+            self.graph_stack = contextlib.ExitStack()
+            self.graph_stack.enter_context(
+                config.patch(
+                    {
+                        "triton.cudagraphs": True,
+                        "triton.cudagraph_trees": True,
+                        "triton.fast_path_cudagraph_asserts": True,  # too slow
+                        "triton.slow_path_cudagraph_asserts": True,
+                    }
+                )
+            )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")
 
@@ -116,11 +119,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch._dynamo.reset()
             gc.collect()
             torch.cuda.empty_cache()
-
-            config.triton.cudagraphs = self.prev_enabled
-            config.triton.cudagraph_trees = self.tapes_enabled
-            config.triton.fast_path_cudagraph_asserts = self.prev_fast
-            config.triton.slow_path_cudagraph_asserts = self.prev_slow
+            self.graph_stack.close()
 
             self.assertIsNone(self.get_manager())
             self.assertEqual(all_live_block_count(), 0)
@@ -602,7 +601,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 out = x + x
                 return (x, x[0])
 
-            foo_cg = self.cudagraphify_impl(foo, [inp])
+            foo_cg = self.cudagraphify_impl(foo, [inp], ())
 
             for _ in range(3):
                 out_1, out_2 = foo_cg([inp])

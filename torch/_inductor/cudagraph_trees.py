@@ -1622,7 +1622,7 @@ class CUDAGraphTreeManager:
         """
         Remove all cached tensors in all nodes. Because cached tensors can hold gradients which in turn
         might reference a backward which invokes a CUDA Graph Node, we have to manually clear them on shutdown
-        to avoid a refernece cycle.
+        to avoid a reference cycle.
         """
         nodes = []
         for roots in self.roots.values():
