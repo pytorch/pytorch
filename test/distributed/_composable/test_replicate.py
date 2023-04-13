@@ -93,7 +93,7 @@ class ReplicateTest(MultiProcessTestCase):
         local_batch_size = 1
         global_batch_size = self.world_size * local_batch_size
         input = torch.randn(global_batch_size, 2)
-        target = torch.randn(global_batch_size, 4)
+        target = torch.randn(global_batch_size, 2)
 
         def step_model(model, input, target):
             model.train()
