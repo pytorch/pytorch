@@ -1,10 +1,4 @@
-import operator
-from typing import Any, Callable, Dict, List, Optional
-
-from functorch import make_fx
-
-import torch
-import torch.nn as nn
+from typing import Callable
 
 from torch import fx
 from torch.distributed._spmd.graph_optimization import (
