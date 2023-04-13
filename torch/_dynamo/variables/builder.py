@@ -873,11 +873,7 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                # TODO: This should be dynamic, as we in general do not
-                # know if bare integers are actually going to be sizevars
-                # and it is inappropriate to eagerly duck size them with
-                # real sizevars
-                dynamic_dim = DimDynamic.DUCK
+                dynamic_dim = DimDynamic.DYNAMIC
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
