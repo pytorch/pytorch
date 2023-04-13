@@ -5,31 +5,11 @@ from typing import Callable, Mapping
 import torch
 import torch._ops
 import torch.fx
-from torch.fx import traceback as fx_traceback
 from torch.fx.experimental import proxy_tensor
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
-
-
-@_beartype.beartype
-def _rename_placeholder_targets(
-    module: "torch.fx.GraphModule", reference_module: "torch.fx.GraphModule"
-):
-    """Align the argument names in module with those in reference_module.
-    After calling this function, the two forward(...) in module and reference_module should have
-    the same signature.
-    """
-    placeholders = [node for node in module.graph.nodes if node.op == "placeholder"]
-    reference_placeholders = [
-        node for node in reference_module.graph.nodes if node.op == "placeholder"
-    ]
-
-    for placeholder, reference_placeholder in zip(placeholders, reference_placeholders):
-        placeholder.target = reference_placeholder.target
-        placeholder.name = reference_placeholder.name
-
-    module.recompile()
+from torch.onnx._internal.fx.passes import _utils
 
 
 class Decompose(_pass.Transform):
@@ -46,12 +26,9 @@ class Decompose(_pass.Transform):
     @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "kwargs is not supported in Decompose."
-        # A trick adopted from `dynamo.export` in `eval_frame.py`.
-        # Running graph with interpreter is needed for propagating the stack_trace.
 
-        def graph_with_interpreter(*args):
-            with fx_traceback.preserve_node_meta():
-                return torch.fx.Interpreter(self.module).run(*args)
+        # To preserve stack trace info after `make_fx`.
+        module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
 
         # fake mode use static size to trace the size of tensors. while symbolic
         # mode generates aten::sym_size to dynamically trace the size of tensors.
@@ -72,13 +49,13 @@ class Decompose(_pass.Transform):
         # Apply decomposition table to the input graph.
         # Make sure the feed-in "module" is stateless.
         decomposed_module = proxy_tensor.make_fx(
-            graph_with_interpreter,
+            module,
             decomposition_table=self.decomposition_table,
             tracing_mode=fx_mode,
             _allow_non_fake_inputs=True,
         )(*args)
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
-        _rename_placeholder_targets(decomposed_module, self.module)
+        _utils.replace_placeholder_name_and_target(decomposed_module, self.module)
 
         return decomposed_module

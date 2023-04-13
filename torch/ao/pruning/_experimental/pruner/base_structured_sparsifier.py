@@ -7,7 +7,7 @@ from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
 from typing import Type, Set, Dict, Callable, Tuple, Optional, Union
 
-from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning import BasePruner
 from .parametrization import FakeStructuredSparsity, BiasHook, module_contains_param
 from .match_utils import apply_match, MatchAllNode
 from .prune_functions import (
@@ -203,7 +203,7 @@ def _get_default_structured_pruning_patterns() -> Dict[
     return patterns
 
 
-class BaseStructuredSparsifier(BaseSparsifier):
+class BaseStructuredSparsifier(BasePruner):
     r"""Base class for structured pruning.
 
     Abstract methods that need to be implemented:
@@ -285,7 +285,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     continue
 
                 first_module = modules.get(node.target)
-                # check if first module exists and has apropriate parameterization, otherwise skip
+                # check if first module exists and has appropriate parameterization, otherwise skip
                 if (
                     first_module is not None
                     and parametrize.is_parametrized(first_module)

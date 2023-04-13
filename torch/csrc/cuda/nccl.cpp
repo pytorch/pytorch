@@ -299,7 +299,10 @@ void check_inputs(
 } // namespace detail
 
 AutoNcclGroup::AutoNcclGroup() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
+  // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
+#endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
@@ -309,7 +312,9 @@ AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupEnd());
 #endif
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   (c10::cuda::getFreeMutex())->unlock();
+#endif
 }
 
 bool is_available(TensorList tensors) {
