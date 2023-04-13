@@ -685,7 +685,6 @@ if (!grad_fns.empty()) {
             ${statements}
         }
     }
-    ${epilog}
 }
 """
 )
@@ -1184,7 +1183,7 @@ def emit_body(
             if save_input_stmts:
                 setup.append(
                     LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
-                        preamble="", statements=save_input_stmts, epilog=""
+                        preamble="", statements=save_input_stmts
                     )
                 )
         else:
@@ -1652,7 +1651,6 @@ def emit_body(
                     f"TORCH_INTERNAL_ASSERT(differentiable_outputs.size() == grad_fns.size());"
                 ),
                 statements=f"{fn}_history(differentiable_outputs[i], grad_fns[i]);",
-                epilog="",
             )
 
     def emit_save_outputs() -> str:
@@ -1667,7 +1665,7 @@ def emit_body(
                 return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
             else:
                 return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
-                    preamble="", statements=stmts, epilog=""
+                    preamble="", statements=stmts
                 )
         return ""
 
