@@ -274,17 +274,11 @@ class NNModuleVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
-        from . import (
-            ConstantVariable,
-            ConstDictVariable,
-            ListIteratorVariable,
-            TupleVariable,
-        )
+        from . import ConstantVariable, ListIteratorVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
         module = tx.output.get_submodule(key)
-        # kwargs = ConstDictVariable(kwargs, dict)
 
         if name == "__call__":
             # TODO(whc)  do we really need this special case?
