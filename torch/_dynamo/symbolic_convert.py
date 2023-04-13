@@ -2038,7 +2038,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             raise Unsupported(
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
-                    func=func.get_code(),
+                    func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
                     args=[arg.python_type() for arg in args],
                     kwargs=kwargs,
                 ),
