@@ -285,9 +285,6 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
-                import pdb
-
-                pdb.set_trace()
                 if (
                     cur_module.weight.device != torch.device("cpu")
                     or cur_module.weight.dtype not in [torch.float16, torch.float32]
