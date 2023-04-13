@@ -154,7 +154,7 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
     std::memcpy(
         crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
   }
-  crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
+  crow_indices.mutable_data_ptr<MKL_INT>()[rows] = nnz;
 }
 #endif
 

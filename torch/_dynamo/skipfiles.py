@@ -49,8 +49,7 @@ try:
 except ImportError:
     HAS_PRIMS_REFS = False
 
-from . import comptime, external_utils
-from .config_utils import config
+from . import comptime, config, external_utils
 
 """
 A note on skipfiles:
