@@ -449,8 +449,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_set_grads_to_none",
-          [](::c10d::Reducer& reducer) { reducer.set_grads_to_none(true); },
+          "_set_optimizer_in_backward",
+          [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_mixed_precision_param_dtype",
