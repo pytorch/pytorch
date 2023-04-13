@@ -21,7 +21,7 @@ class CallbackRegistry(Generic[P]):
                 cb(*args, **kwargs)
             except Exception as e:
                 logger.exception(
-                    f"Exception in callback for {self.name} registered with CUDA trace"
+                    "Exception in callback for %s registered with CUDA trace", self.name
                 )
 
 

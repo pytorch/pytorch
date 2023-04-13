@@ -143,6 +143,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
     """
+    # Optimization is optional, because we can always just not do the fusion
     if not V.graph.sizevars.maybe_guard_list_equals(
         mat1.get_size(), mat3.get_size()
     ) or not V.graph.sizevars.maybe_guard_list_equals(mat2.get_size(), mat4.get_size()):
@@ -160,12 +161,11 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
             # see https://github.com/openai/triton/issues/1298
             # BLOCK_K = K causes llvm error
             if config.kwargs["BLOCK_K"] < k:
-                choices.append(
-                    mm_plus_mm_template.generate(
-                        (mat1, mat2, mat3, mat4),
-                        layout,
-                        **mm_options(config, k, layout),
-                    )
+                mm_plus_mm_template.maybe_append_choice(
+                    choices,
+                    (mat1, mat2, mat3, mat4),
+                    layout,
+                    **mm_options(config, k, layout),
                 )
 
     return autotune_select_algorithm(

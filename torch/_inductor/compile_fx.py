@@ -28,6 +28,7 @@ from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
+from .fx_passes.joint_graph import joint_graph_passes
 from .graph import GraphLowering
 from .mkldnn import convert_outplace_to_inplace
 from .utils import (
@@ -665,6 +666,10 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
+        if is_inference:
+            # partition_fn won't be called
+            joint_graph_passes(model)
+
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
@@ -682,6 +687,12 @@ def compile_fx(
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
     inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
+
+    def partition_fn(graph, joint_inputs, **kwargs):
+        joint_graph_passes(graph)
+        return min_cut_rematerialization_partition(
+            graph, joint_inputs, **kwargs, compiler="inductor"
+        )
 
     # Save and restore dynamic shapes setting for backwards, as it is
     # sometimes done as a context manager which won't be set when we
@@ -713,9 +724,7 @@ def compile_fx(
             bw_compiler=bw_compiler,
             inference_compiler=inference_compiler,
             decompositions=decompositions,
-            partition_fn=functools.partial(
-                min_cut_rematerialization_partition, compiler="inductor"
-            ),
+            partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
 
