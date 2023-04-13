@@ -349,7 +349,11 @@ class OptimizeContext(_TorchDynamoContext):
 
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self):
-        super().__init__(callback=False)
+        # cudagraph trees relies on generation increment
+        def on_enter():
+            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+
+        super().__init__(callback=False, on_enter=on_enter)
 
 
 class DisableContext(_TorchDynamoContext):

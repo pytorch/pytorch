@@ -592,6 +592,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.curr_node()
             self.assertEqual(node.static_input_data_ptrs, [None])
 
+        def test_frozen_fn(self):
+            @torch.compile()
+            def foo(x):
+                return x @ x
+
+            for _ in range(3):
+                out = foo(torch.rand([10, 10], device="cuda"))
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
+            frozen = torch._dynamo.run(foo)
+
+            for _ in range(3):
+                out = frozen(torch.rand([10, 10], device="cuda"))
+
+            # didnt do additional recordings
+            self.assertTrue(self.get_manager().new_graph_id().id == 2)
+
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")
 
