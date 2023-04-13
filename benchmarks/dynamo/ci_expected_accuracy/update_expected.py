@@ -97,7 +97,9 @@ def download_artifacts_and_extract_csvs(urls):
                         pd.concat([prev_df, df]) if prev_df is not None else df
                     )
                 except KeyError:
-                    print(f"Warning: Unable to find {name} in artifacts file from {url}, continuing")
+                    print(
+                        f"Warning: Unable to find {name} in artifacts file from {url}, continuing"
+                    )
 
     except urllib.error.HTTPError:
         print(f"Unable to download {url}, perhaps the CI job isn't finished?")
