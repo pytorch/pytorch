@@ -675,20 +675,6 @@ if (grad_fn) {
 """
 )
 
-SET_HISTORY_FOR_VECTOR_OF_GRAD_FN = CodeTemplate(
-    """\
-if (!grad_fns.empty()) {
-    auto differentiable_outputs = ${differentiable_outputs};
-    TORCH_INTERNAL_ASSERT(differentiable_outputs.size() == grad_fns.size());
-    for (const auto& i : c10::irange(grad_fns.size())) {
-        if (grad_fns[i] != nullptr) {
-            ${fn}_history(differentiable_outputs[i], grad_fns[i]);
-        }
-    }
-}
-"""
-)
-
 LOOP_OVER_VECTOR_OF_GRAD_FNS = CodeTemplate(
     """\
 if (!grad_fns.empty()) {
@@ -1657,10 +1643,17 @@ def emit_body(
         outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(
             outs=output_names if not is_inplace_foreach else "self"
         )
-        set_history_template = (
-            SET_HISTORY if not is_inplace_foreach else SET_HISTORY_FOR_VECTOR_OF_GRAD_FN
-        )
-        return set_history_template.substitute(fn=fn, differentiable_outputs=outs)
+        if not is_inplace_foreach:
+            return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
+        else:
+            return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
+                preamble=(
+                    f"auto differentiable_outputs = {outs};\n"
+                    f"TORCH_INTERNAL_ASSERT(differentiable_outputs.size() == grad_fns.size());"
+                ),
+                statements=f"{fn}_history(differentiable_outputs[i], grad_fns[i]);",
+                epilog="",
+            )
 
     def emit_save_outputs() -> str:
         if is_out_fn:
