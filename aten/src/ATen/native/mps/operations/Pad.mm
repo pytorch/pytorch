@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
-
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/Optional.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 namespace at::native {
 namespace mps {
