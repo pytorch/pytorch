@@ -865,7 +865,7 @@ class TorchHigherOrderOperator(VariableTracker):
             # TODO: support non single Tensor output
             if not isinstance(output, TensorVariable):
                 raise TypeError(
-                    "Expect branch out type to be a single tensor but got {}".format(
+                    "Expected branch out type to be a single tensor but got {}".format(
                         str(output.python_type())
                     ),
                 )
@@ -898,15 +898,15 @@ class TorchHigherOrderOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
             if len(args) != 4:
                 raise UserError(
-                    UserErrorType.COND_OP_RESTRICTION,
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
                     f"Expected 4 arguments but got {len(args)}.\n"
                     f"Usage: cond(pred, true_fn, false_fn, operands)",
                 )
             # predicate
             if type(args[0]) not in (TensorVariable, SymNodeVariable, ConstantVariable):
                 raise UserError(
-                    UserErrorType.COND_OP_RESTRICTION,
-                    f"Expect pred to be traced as TensorVariable, "
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected pred to be traced as TensorVariable, "
                     f"SymNodeVariable or ConstantVariable but got {str(type(args[0]))} "
                     f"with original python type {str(args[0].python_type())}.",
                 )
@@ -914,8 +914,8 @@ class TorchHigherOrderOperator(VariableTracker):
             # operands
             if type(args[3]) is not ListVariable:
                 raise UserError(
-                    UserErrorType.COND_OP_RESTRICTION,
-                    f"Expect operands to be a list but got {args[3].python_type()}",
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    f"Expected a list but got {args[3].python_type()}",
                 )
             operands = args[3].unpack_var_sequence(tx)
             if not all(
@@ -923,8 +923,8 @@ class TorchHigherOrderOperator(VariableTracker):
                 for operand in operands
             ):
                 raise UserError(
-                    UserErrorType.COND_OP_RESTRICTION,
-                    "Expect operands to be a list of tensors but got {actual_args}".format(
+                    UserErrorType.DYNAMIC_CONTROL_FLOW,
+                    "Expected a list of tensors but got {actual_args}".format(
                         actual_args=[
                             str(operand.python_type())
                             if isinstance(operand, VariableTracker)
@@ -969,7 +969,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         args[ix], operands, graph_checkpoint, checkpoint
                     )
                 except (Unsupported, TypeError) as e:
-                    raise UserError(UserErrorType.COND_OP_RESTRICTION, str(e))
+                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
             (
                 true_r,

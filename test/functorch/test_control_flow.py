@@ -6,7 +6,6 @@ from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._dynamo.exc import UserError
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestControlFlow(TestCase):
@@ -378,7 +377,7 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_raise_user_error_on_mismatch_type_size(self):
+    def test_assert_on_mismatch_type_size(self):
         def true_fn(x):
             return x.sin()
 
@@ -389,15 +388,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaisesRegex(
-            UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect true branch and false branch return with same length"
-        ):
+        with self.assertRaises(AssertionError):
             make_fx(f)(x, torch.tensor(False))
 
-
-    def test_raise_user_error_on_mismatch_tensor_size(self):
+    def test_assert_on_mismatch_tensor_size(self):
         def true_fn(x):
             return x.sin()
 
@@ -408,11 +402,7 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaisesRegex(
-            UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect each tensor returned from true branch and false branch has exact same metadata"
-        ):
+        with self.assertRaises(AssertionError):
             make_fx(f)(x, torch.tensor(False))
 
     def test_cond_traced_not_nested_fake_tensor(self):
@@ -548,7 +538,7 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_raise_user_error_on_mismatch_type_size_fake_tensor(self):
+    def test_assert_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
             return x.sin()
 
@@ -559,15 +549,11 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaisesRegex(
-            UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect true branch and false branch return with same length"
-        ):
+        with self.assertRaises(AssertionError):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
 
-    def test_raise_user_error_on_mismatch_tensor_size_fake_tensor(self):
+    def test_assert_on_mismatch_tensor_size_fake_tensor(self):
         def true_fn(x):
             return x.sin()
 
@@ -578,11 +564,7 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaisesRegex(
-            UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect each tensor returned from true branch and false branch has exact same metadata"
-        ):
+        with self.assertRaises(AssertionError):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
     def check_map_graph(self, gm, key):

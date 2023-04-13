@@ -2468,7 +2468,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
             "Expected 4 arguments",
         ):
             torch._dynamo.export(f, *example_inputs)
@@ -2481,8 +2480,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect pred to be traced as",
+            "Expected pred to be traced as",
         ):
             torch._dynamo.export(f_unsupported_pred, *example_inputs)
 
@@ -2493,8 +2491,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect operands to be a list but got",
+            "Expected a list but got",
         ):
             torch._dynamo.export(f_non_list_operands, *example_inputs)
 
@@ -2506,8 +2503,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect operands to be a list of tensors",
+            "Expected a list of tensors",
         ):
             torch._dynamo.export(f_non_tensor_operands, *example_inputs)
 
@@ -2524,7 +2520,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5), torch.rand(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
             "too many positional arguments",
         ):
             torch._dynamo.export(f_branch_args_mismatch, *example_inputs)
@@ -2536,8 +2531,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect branch out type to be a single tensor",
+            "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(f_branch_return_non_tensor, *example_inputs)
 
@@ -2548,8 +2542,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            f"{torch._dynamo.exc.UserErrorType.COND_OP_RESTRICTION.name}: "
-            "Expect branch out type to be a single tensor",
+            "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(f_branch_return_multiple_tensors, *example_inputs)
 
