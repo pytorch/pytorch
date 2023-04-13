@@ -207,12 +207,17 @@ class TestForeach(TestCase):
                     inplace_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False, zero_size=zero_size)
                     assert_multiple_grad_fns(tensors, self)
 
-                    inplace_ref([ref_tensors, rhs_arg])
-                    torch.autograd.backward(sum([t.clone() for t in ref_tensors]).sum(), inputs=ref_tensors)
-                    if inplace_op.func not in (torch._foreach_minimum_, torch._foreach_maximum_):
+                    is_foreach_max_min_imum_with_scalar_or_scalarlist = (
+                        inplace_op.func in (torch._foreach_minimum_, torch._foreach_maximum_)
+                        and (
+                            isinstance(rhs_arg, Number) or (isinstance(rhs_arg, list) and isinstance(rhs_arg[0], Number))
+                        )
+                    )
+                    if not is_foreach_max_min_imum_with_scalar_or_scalarlist:
+                        inplace_ref([ref_tensors, rhs_arg])
                         torch.autograd.backward(sum([t.clone() for t in tensors]).sum(), inputs=tensors)
-                        grads = [t.grad for t in tensors]
-                        self.assertEqual(grads, [t.grad for t in ref_tensors])
+                        torch.autograd.backward(sum([t.clone() for t in ref_tensors]).sum(), inputs=ref_tensors)
+                        self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
             if (
                 op.supports_scalar_self_arg
                 and isinstance(rhs_arg, Number)
