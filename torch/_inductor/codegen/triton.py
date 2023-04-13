@@ -1039,12 +1039,13 @@ class TritonKernel(Kernel):
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less # error-prone to use and/or/not, which is suported by triton
             cond = f"((0 <= {var}) & ({var} < {size}))"
+            cond_print = f"0 <= {var} < {size}"
             if not isinstance(original_index, sympy.Integer):
                 var_mask = f"({mask})" if "&" in mask else mask
                 var_mask = f" | ~{var_mask}"
             else:
                 var_mask = ""
-            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond}")'
+            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond_print}")'
             self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
