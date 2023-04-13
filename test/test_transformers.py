@@ -167,19 +167,19 @@ class TestTransformers(NNTestCase):
 
 
             if attn_mask_dim == 2:
-                attn_mask = torch.randn(L, L).to(device) > 0
+                attn_mask = torch.randn(L, L, device=device) > 0
             elif attn_mask_dim == 3:
-                attn_mask = torch.randn(B * H, L, L).to(device) > 0
+                attn_mask = torch.randn(B * H, L, L, device=device) > 0
             elif attn_mask_dim is None:
                 attn_mask = None
 
             if key_padding_mask_dim == 2:
-                key_padding_mask = torch.randn(B, L).to(device) > 0
+                key_padding_mask = torch.randn(B, L, device=device) > 0
             elif key_padding_mask_dim is None:
                 key_padding_mask = None
 
-            mha = nn.MultiheadAttention(D, H, batch_first=True).to(device)
-            X = torch.randn(B, L, D).to(device)
+            mha = nn.MultiheadAttention(D, H, batch_first=True, device=device)
+            X = torch.randn(B, L, D, device=device)
 
             mha.train()  # disable fast path
             out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
