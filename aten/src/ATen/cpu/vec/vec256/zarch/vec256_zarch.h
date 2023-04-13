@@ -1303,7 +1303,8 @@ Vectorized<float> C10_ALWAYS_INLINE fmadd(
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return Vectorized<float>{
-      a.vec0() * b.vec0() + c.vec0(), a.vec1() * b.vec1() + c.vec1()};
+      __builtin_s390_vfmasb(a.vec0(), b.vec0(), c.vec0()),
+      __builtin_s390_vfmasb(a.vec1(), b.vec1(), c.vec1())};
 }
 template <>
 Vectorized<double> C10_ALWAYS_INLINE fmadd(
@@ -1311,7 +1312,8 @@ Vectorized<double> C10_ALWAYS_INLINE fmadd(
     const Vectorized<double>& b,
     const Vectorized<double>& c) {
   return Vectorized<double>{
-      a.vec0() * b.vec0() + c.vec0(), a.vec1() * b.vec1() + c.vec1()};
+      __builtin_s390_vfmadb(a.vec0(), b.vec0(), c.vec0()),
+      __builtin_s390_vfmadb(a.vec1(), b.vec1(), c.vec1())};
 }
 template <>
 Vectorized<int16_t> C10_ALWAYS_INLINE fmadd(
@@ -1554,7 +1556,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
     auto float_val = convert_to_float(_vec);
-    return {(scale * float_val + scale_zp_premul)};
+    return {fmadd(scale, float_val, scale_zp_premul)};
   }
 
   template <
@@ -1625,10 +1627,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     auto vecf_2 = convert_to_float(ret32_1.first);
     auto vecf_3 = convert_to_float(ret32_1.second);
     return {
-        Vectorized<float>{scale * vecf_0 + scale_zp_premul},
-        Vectorized<float>{scale * vecf_1 + scale_zp_premul},
-        Vectorized<float>{scale * vecf_2 + scale_zp_premul},
-        Vectorized<float>{scale * vecf_3 + scale_zp_premul}};
+        fmadd(scale, vecf_0, scale_zp_premul),
+        fmadd(scale, vecf_1, scale_zp_premul),
+        fmadd(scale, vecf_2, scale_zp_premul),
+        fmadd(scale, vecf_3, scale_zp_premul)};
   }
 
   template <
@@ -2107,7 +2109,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     vi = vi ^ rsign_mask<underline_type>();
     vinner_type ret = _vec * vr;
     vinner_type vx_swapped = _vec.swapped();
-    ret = vx_swapped * vi + ret;
+    ret = fmadd(vx_swapped, vi, ret);
 #else
     vinner_type ac_bd = _vec * b;
     vinner_type d_c = bv.swapped();
@@ -2130,7 +2132,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     vi = vi ^ isign_mask<underline_type>();
     vinner_type ret = _vec * vr;
     vinner_type vx_swapped = _vec.swapped();
-    ret = vx_swapped * vi + ret;
+    ret = fmadd(vx_swapped, vi, ret);
     ret = ret / abs_b;
 #else
     // Vectorized x86 simulation
