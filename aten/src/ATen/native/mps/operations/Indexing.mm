@@ -1,27 +1,22 @@
 //  Copyright © 2022 Apple Inc.
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
+#include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/Indexing.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -260,7 +255,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
   stream->synchronize(SyncType::COMMIT_AND_WAIT);
   Tensor count_nonzero = at::empty({1}, self.options().dtype(kInt));
-  Tensor out = at::native::empty_mps(
+  Tensor out = at::empty(
       {self.numel(), nDim == 0 ? 1 : nDim}, out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   int64_t _apparentInputShape = 1;
@@ -408,8 +403,7 @@ Tensor& masked_select_out_mps(const Tensor& self, const Tensor& mask, Tensor& re
 Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   using namespace mps;
 
-  Tensor result =
-      at::native::empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor result = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   auto total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
@@ -598,8 +592,7 @@ Tensor index_select_mps(const Tensor& self, int64_t dim, const Tensor& index) {
 
   IntArrayRef output_shape = IntArrayRef(shape_data.data(), num_input_dims);
 
-  Tensor result =
-      at::native::empty_mps(output_shape, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor result = at::empty(output_shape, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   index_select_out_mps(self, dim, index, result);
   return result;
@@ -827,7 +820,7 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
 
   int64_t D = incoming_gradient_shape[num_incoming_gradient_dims - 1];
   c10::SmallVector<int64_t, 2> outgoing_gradient_shape{num_weights, D};
-  Tensor outgoing_gradient = at::native::empty_mps(
+  Tensor outgoing_gradient = at::empty(
       IntArrayRef(outgoing_gradient_shape), grad_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (outgoing_gradient.numel() == 0) {
