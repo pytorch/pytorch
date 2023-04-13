@@ -348,8 +348,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if self.export:
             return
 
-        if arg.fake_tensor is None:
-            return
+        assert arg.fake_tensor is not None
 
         def bind_symint(s, prop):
             if not (

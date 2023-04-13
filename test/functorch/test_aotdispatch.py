@@ -1435,8 +1435,8 @@ def forward(self, primals_1, primals_2):
         # (Otherwise, autograd will plumb a None as the value of the grad_output,
         # which causes inductor to complain).
         self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
-def forward(self, arg0_1):
-    return (arg0_1,)""")
+def forward(self, tangents_1):
+    return [tangents_1]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_no_grad_input_output(self):
