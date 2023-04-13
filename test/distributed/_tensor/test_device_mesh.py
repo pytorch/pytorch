@@ -94,6 +94,17 @@ class DeviceMeshTest(DTensorTestBase):
         else:
             assert mesh.get_coordinate() is None
 
+    @with_comms
+    def test_validate_device_mesh(self):
+        mesh = torch.arange(self.world_size).reshape(2, -1)
+        mesh_subgp_1 = mesh[0]
+        mesh_subgp_2 = mesh[1]
+        with self.assertRaisesRegex(RuntimeError, "different mesh"):
+            if self.rank in mesh_subgp_1:
+                mesh = DeviceMesh(self.device_type, mesh_subgp_1)
+            else:
+                mesh = DeviceMesh(self.device_type, mesh_subgp_2)
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property

@@ -81,7 +81,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
 
     @with_comms
-    def test_creat_1d_device_mesh_error(self):
+    def test_create_1d_device_mesh_error(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         with self.assertRaisesRegex(
             AssertionError,

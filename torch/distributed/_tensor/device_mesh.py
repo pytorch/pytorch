@@ -7,6 +7,7 @@ import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
     _get_default_group,
+    all_gather,
     all_to_all,
     Backend,
     broadcast,
@@ -113,6 +114,16 @@ class DeviceMesh(object):
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
+        # validate that all calling ranks pass in the same `mesh`` argument.
+        mesh_list = [torch.empty_like(self.mesh) for _ in range(get_world_size())]
+        all_gather(mesh_list, self.mesh)
+        for other_rank, other_mesh in enumerate(mesh_list):
+            if not torch.equal(self.mesh, other_mesh):
+                raise RuntimeError(
+                    f"DeviceMesh.__init__ does not allow different mesh argument:"
+                    f"rank {get_rank()} has mesh {self.mesh} while rank {other_rank}"
+                    f"has mesh {other_mesh}!"
+                )
         if _init_process_groups:
             self._dim_groups = self._init_process_groups()
 
