@@ -296,7 +296,7 @@ class NNModuleVariable(VariableTracker):
                 "Must provide a valid source in order to inline, "
                 "since inlined function may have default args which must be guarded."
             )
-            fn = module.forward.__func__
+            fn = module._call_impl.__func__
             assert istype(fn, types.FunctionType)
             options["source"] = AttrSource(
                 AttrSource(self.source, "forward"), "__func__"
