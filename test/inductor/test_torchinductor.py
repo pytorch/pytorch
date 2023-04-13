@@ -44,7 +44,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.testing._internal.common_utils import skipIfRocm
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -2167,6 +2166,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfRocm
     def test_convolution3(self):
         # Test stride or padding or dilation is 1 element list.
         m = torch.nn.Sequential(
