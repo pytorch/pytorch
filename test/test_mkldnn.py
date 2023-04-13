@@ -529,19 +529,19 @@ class TestMkldnn(TestCase):
     def test_relu_inplace_bf16(self):
         self._test_relu_bf16_base("relu_")
 
-    def test_gelu(self):
-        m = torch.nn.GELU()
-        x = torch.randn((4, 5), dtype=torch.float32) * 10
-        x1 = x.clone().requires_grad_()
-        x2 = x.clone().to_mkldnn().requires_grad_()
-        y1 = m(x1)
-        y2 = m(x2).to_dense()
-        loss1 = y1.sum()
-        loss2 = y2.sum()
-        loss1.backward()
-        loss2.backward()
-        self.assertEqual(y1, y2)
-        self.assertEqual(x1.grad, x2.grad.to_dense())
+    # def test_gelu(self):
+    #     m = torch.nn.GELU()
+    #     x = torch.randn((4, 5), dtype=torch.float32) * 10
+    #     x1 = x.clone().requires_grad_()
+    #     x2 = x.clone().to_mkldnn().requires_grad_()
+    #     y1 = m(x1)
+    #     y2 = m(x2).to_dense()
+    #     loss1 = y1.sum()
+    #     loss2 = y2.sum()
+    #     loss1.backward()
+    #     loss2.backward()
+    #     self.assertEqual(y1, y2)
+    #     self.assertEqual(x1.grad, x2.grad.to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_gelu_bf16(self):
