@@ -2224,6 +2224,28 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     count += 1
             self.assertEqual(count, 1)
 
+    def test_export_with_nonzero_static(self):
+        class BasicModule(torch.nn.Module):
+            def __init__(self, static_size):
+                super().__init__()
+                self.static_size = static_size
+
+            def forward(self, x):
+                return torch.nonzero_static(x, size=self.static_size)
+
+        input_tensors = torch.tensor([6, 8]), torch.zeros(2, 3)
+        static_sizes = 3, 4
+        for input_tensor, static_size in zip(input_tensors, static_sizes):
+            m = BasicModule(static_size)
+            gm, _ = torch._dynamo.export(m, input_tensor, aten_graph=True)
+            res = gm(input_tensor)
+            self.assertEqual(res.size(0), static_size)
+            self.assertTrue(
+                torch._dynamo.utils.same(
+                    res, torch.nonzero_static(input_tensor, size=static_size)
+                )
+            )
+
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
             def __init__(self):
