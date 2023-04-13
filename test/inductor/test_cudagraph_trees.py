@@ -43,6 +43,10 @@ requires_multigpu = functools.partial(
 )
 
 
+def cdata(t):
+    return t.untyped_storage()._cdata
+
+
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
@@ -127,13 +131,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def get_root_children(self):
             return [root.num_descendants() for root in self.get_roots()]
 
-        def cudagraphify_impl(self, *args, **kwargs):
+        def cudagraphify_impl(
+            self, *args, is_inference=True, is_backward=False, **kwargs
+        ):
             return tree_cudagraphify_impl(
                 *args,
                 **kwargs,
                 device_index=self.device_idx,
-                is_backward=False,
-                is_inference=True,
+                is_inference=is_inference,
+                is_backward=is_backward,
             )
 
         @staticmethod
@@ -381,6 +387,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # and then again to record it
             self.assertEqual(self.num_checkpoints(), 2)
 
+        def test_expanded_inputs(self):
+            x = torch.rand(1, 512, device="cuda").expand(4, 512)
+
+            def foo(x):
+                return x + 4 + torch.ones([4, 512], device="cuda")
+
+            foo_opt = torch.compile()(foo)
+
+            for _ in range(3):
+                self.assertEqual(foo_opt(x), foo(x))
+
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_tensor_dies_between_checkpoint(self):
             def foo(args):
@@ -418,7 +437,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 0)
 
         def test_aliased_storage_single_weakref(self):
-            @torch.compile
+            @torch.compile(mode="reduce-overhead")
             def foo(x):
                 x = x * 20
                 x_alias = x[0]
@@ -446,6 +465,47 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     )
 
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_aliasing_static_ref(self):
+            class Mod(torch.nn.Linear):
+                def forward(self, x):
+                    return self.weight.T @ x, self.weight.T, self.weight[0:4]
+
+            m = Mod(10, 10).cuda()
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(mod, x):
+                return mod(x)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo2(x):
+                return x[2:]
+
+            x = torch.rand([10, 10], device="cuda", requires_grad=True)
+            param_c = cdata(m.weight)
+            for _ in range(3):
+                # print("Runnng foo")
+                out1, alias_1, alias_2 = foo(m, x)
+                self.assertEqual(len({param_c, cdata(alias_1), cdata(alias_2)}), 1)
+
+                # print("Runnng foo2")
+                out2 = foo2(out1)
+                out2.sum().backward()
+                self.assertEqual(cdata(out1), cdata(out2))
+
+        def test_aliased_static_parameter(self):
+            inp = torch.rand([20, 20], device="cuda")
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x[0],)
+
+            foo_cg = self.cudagraphify_impl(foo, [inp], (0,))
+
+            for _ in range(3):
+                out = foo_cg([inp])[0]
+                self.assertEqual(cdata(inp), cdata(out))
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
@@ -580,7 +640,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return torch.sin(y) * torch.nn.functional.dropout(x, p=0.4)
 
             inp = torch.rand([4, 4], requires_grad=True, device="cuda")
-            print("Input ID", id(inp))
             out = foo(inp)
             out.sum().backward()
 

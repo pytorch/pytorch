@@ -3,7 +3,7 @@ import torch
 from collections import defaultdict
 from torch import nn
 import copy
-from ...sparsifier.utils import fqn_to_module, module_to_fqn
+from ...pruner.utils import fqn_to_module, module_to_fqn
 import warnings
 
 __all__ = ['ActivationSparsifier']
@@ -302,7 +302,7 @@ class ActivationSparsifier:
 
     def squash_mask(self, attach_sparsify_hook=True, **kwargs):
         """
-        Unregisters aggreagate hook that was applied earlier and registers sparsification hooks if
+        Unregisters aggregate hook that was applied earlier and registers sparsification hooks if
         attach_sparsify_hook = True.
         """
         for name, configs in self.data_groups.items():
