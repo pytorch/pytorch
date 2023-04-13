@@ -1666,26 +1666,18 @@ def emit_body(
         if info and info.output_differentiability_conditions:
             assert len(info.output_differentiability_conditions) == 1
             extra_condition = f"_any_requires_grad &= ({info.output_differentiability_conditions[0]});"
-        if not is_inplace_foreach:
-            return [
-                SETUP_ANY_REQUIRES_GRAD.substitute(
-                    args_with_derivatives=[arg.name for arg in args_with_derivatives],
-                    extra_differentiability_conditions=extra_condition,
-                )
-            ]
-        else:
-            args = [arg.name for arg in args_with_derivatives]
-            if inplace_foreacharg2refarg:
-                for i, arg in enumerate(args):
-                    for f_arg, r_arg in inplace_foreacharg2refarg.items():
-                        if arg == r_arg.name:
-                            args[i] = f_arg.name
-            return [
-                SETUP_ANY_REQUIRES_GRAD.substitute(
-                    args_with_derivatives=args,
-                    extra_differentiability_conditions=extra_condition,
-                )
-            ]
+        names_of_args_with_derivatives = [arg.name for arg in args_with_derivatives]
+        if is_inplace_foreach and info is not None:
+            for i, arg in enumerate(names_of_args_with_derivatives):
+                for f_arg, r_arg in inplace_foreacharg2refarg.items():
+                    if arg == r_arg.name:
+                        names_of_args_with_derivatives[i] = f_arg.name
+        return [
+            SETUP_ANY_REQUIRES_GRAD.substitute(
+                args_with_derivatives=names_of_args_with_derivatives,
+                extra_differentiability_conditions=extra_condition,
+            )
+        ]
 
     def get_any_has_forward_grad_name(var_names: Tuple[str, ...]) -> str:
         if len(var_names) == 1:
