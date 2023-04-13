@@ -56,6 +56,9 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (5) set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
         Sets the random number generator state of the specified `foo` device.
 
+    And there are some common funcs:
+    (1) is_available() -> bool:
+        Returns a bool indicating if `foo` is currently available.
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
 
