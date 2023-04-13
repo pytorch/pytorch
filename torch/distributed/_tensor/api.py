@@ -338,7 +338,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # Note that redistribute currently only supports out
         # of place redistribution, i.e. it always create a new
         # DTensor object and leave the original one unchanged.
-        device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+        device_mesh = self.device_mesh if device_mesh is None else device_mesh
         # raise error if new placements not specified
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")

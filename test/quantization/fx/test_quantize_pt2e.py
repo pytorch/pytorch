@@ -400,6 +400,61 @@ class TestQuantizePT2E(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    # TODO(jerryzh168): move all _convert_to_reference_decomposed_fx tests here
+    def test__convert_to_reference_decomposed_fx_per_channel_quant_module(self):
+        """ Test the result for per channel weight quant for reference modules
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M().eval()
+        qconfig_mapping = QConfigMapping().set_global(default_per_channel_symmetric_qnnpack_qconfig)
+        example_inputs = (torch.randn(1, 3, 10, 10),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+        m(*example_inputs)
+        m_ref = copy.deepcopy(m)
+        from torch.ao.quantization.quantize_fx import (
+            convert_to_reference_fx,
+            _convert_to_reference_decomposed_fx,
+        )
+        m_ref = convert_to_reference_fx(m_ref, backend_config=get_qnnpack_backend_config())
+        m = _convert_to_reference_decomposed_fx(m, backend_config=get_qnnpack_backend_config())
+        expected_occurrence = {
+            # for input and output activations
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
+            # weight is per channel quantized
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel.default): 1,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 1,
+        }
+        import torch._dynamo as torchdynamo
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+            tracing_mode="real",
+        )
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        res_ref = m_ref(*example_inputs)
+        res = m(*example_inputs)
+        self.assertEqual(res, res_ref)
+        # check the qmin/qmax for per channel quant
+        for n in m.graph.nodes:
+            if n.op == "call_function" and \
+               n.target == torch.ops.quantized_decomposed.quantize_per_channel.default:
+                _QUANT_MIN_INDEX = 4
+                _QUANT_MAX_INDEX = 5
+                self.assertEqual(n.args[_QUANT_MIN_INDEX], -127)
+                self.assertEqual(n.args[_QUANT_MAX_INDEX], 127)
+
 @skipIfNoQNNPACK
 class TestQuantizePT2EX86Inductor(QuantizationTestCase):
     @skipIfNoX86
@@ -571,7 +626,8 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             backend_config = get_qnnpack_backend_config()
             m_fx = prepare_fx(m_copy, qconfig_mapping, example_inputs, backend_config=backend_config)
             after_prepare_result_fx = m_fx(*example_inputs)
-            m_fx = convert_to_reference_fx(m_fx, backend_config=backend_config)
+            from torch.ao.quantization.quantize_fx import _convert_to_reference_decomposed_fx
+            m_fx = _convert_to_reference_decomposed_fx(m_fx, backend_config=backend_config)
 
             after_quant_result_fx = m_fx(*example_inputs)
 
@@ -584,5 +640,5 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             self.assertEqual(compute_sqnr(after_prepare_result, after_prepare_result_fx), torch.tensor(float("inf")))
             # there are slight differences after convert due to different implementations
             # of quant/dequant
-            self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
-            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
+            self.assertEqual(after_quant_result, after_quant_result_fx)
+            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) == torch.tensor(float("inf")))
