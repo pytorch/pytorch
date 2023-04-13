@@ -151,21 +151,43 @@ static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "threshold_cpu", [&] {
-    using Vec = Vectorized<scalar_t>;
-    scalar_t threshold = threshold_scalar.to<scalar_t>();
-    Vec threshold_v = Vec(threshold);
-    scalar_t value = value_scalar.to<scalar_t>();
-    Vec value_v = Vec(value);
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t x, scalar_t other) -> scalar_t {
-          return x <= threshold ? value : other;
-        },
-        [&](Vec x, Vec other) -> Vec {
-          return Vec::blendv(other, value_v, x <= threshold_v);
-        });
-  });
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "threshold_cpu", [&]() {
+      using Vec = Vectorized<float>;
+      float threshold = threshold_scalar.to<float>();
+      Vec threshold_v = Vec(threshold);
+      scalar_t value = value_scalar.to<scalar_t>();
+      Vec value_v = Vec(float(value));
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t x, scalar_t other) -> scalar_t {
+            return float(x) <= threshold ? value : other;
+          },
+          [&](Vectorized<scalar_t> x, Vectorized<scalar_t> other) -> Vectorized<scalar_t> {
+            Vec x0, x1, other0, other1;
+            std::tie(x0, x1) = convert_to_float<scalar_t>(x);
+            std::tie(other0, other1) = convert_to_float<scalar_t>(other);
+            return convert_from_float<scalar_t>(Vec::blendv(other0, value_v, x0 <= threshold_v),
+                                                Vec::blendv(other1, value_v, x1 <= threshold_v));
+          });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "threshold_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      scalar_t threshold = threshold_scalar.to<scalar_t>();
+      Vec threshold_v = Vec(threshold);
+      scalar_t value = value_scalar.to<scalar_t>();
+      Vec value_v = Vec(value);
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t x, scalar_t other) -> scalar_t {
+            return x <= threshold ? value : other;
+          },
+          [&](Vec x, Vec other) -> Vec {
+            return Vec::blendv(other, value_v, x <= threshold_v);
+          });
+    });
+  }
 }
 
 void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
@@ -189,17 +211,12 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
           std::tie(a0, a1) = convert_to_float<scalar_t>(a);
           auto cmp0 = (a0 > zero_vec);
           auto cmp1 = (a1 > zero_vec);
-
-          if (!cmp0.zero_mask()) {
-            res0 = a0 * poscoef_vec;
-          } else {
-            res0 = Vectorized<float>::blendv(((a0 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a0 * poscoef_vec, cmp0);
-          }
-          if (!cmp1.zero_mask()) {
-            res1 = a1 * poscoef_vec;
-          } else {
-            res1 = Vectorized<float>::blendv(((a1 * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a1 * poscoef_vec, cmp1);
-          }
+          auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a) {
+            return !cmp.zero_mask() ? a * poscoef_vec :
+              Vectorized<float>::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+          };
+          res0 = get_res_masked(cmp0, a0);
+          res1 = get_res_masked(cmp1, a1);
           return convert_from_float<scalar_t>(res0, res1);
         });
     });
@@ -1154,9 +1171,8 @@ void glu_kernel(TensorIteratorBase& iter) {
         Vectorized<float> a0, a1, b0, b1;
         std::tie(a0, a1) = convert_to_float<scalar_t>(a);
         std::tie(b0, b1) = convert_to_float<scalar_t>(b);
-        a0 = a0 * (float_one_vec / (float_one_vec + b0.neg().exp()));
-        a1 = a1 * (float_one_vec / (float_one_vec + b1.neg().exp()));
-        return convert_from_float<scalar_t>(a0, a1);
+        return convert_from_float<scalar_t>(a0 * (float_one_vec / (float_one_vec + b0.neg().exp())),
+                                            a1 * (float_one_vec / (float_one_vec + b1.neg().exp())));
       });
     });
   } else {

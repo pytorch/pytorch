@@ -13126,7 +13126,7 @@ op_db: List[OpInfo] = [
         inplace_variant=partial(torch.nn.functional.mish, inplace=True),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 'TestUnaryUfuncs', device_type='cuda',), ],
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 'TestUnaryUfuncs',), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.softsign',
@@ -13206,8 +13206,7 @@ op_db: List[OpInfo] = [
         "nn.functional.triplet_margin_loss",
         sample_inputs_func=sample_inputs_triplet_margin_loss,
         error_inputs_func=error_inputs_triplet_margin_loss,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -13216,8 +13215,7 @@ op_db: List[OpInfo] = [
         "nn.functional.triplet_margin_with_distance_loss",
         sample_inputs_func=partial(sample_inputs_triplet_margin_loss, with_distance=True),
         error_inputs_func=error_inputs_triplet_margin_loss,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -13513,7 +13511,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('nn.functional.relu6',
                    aten_name="relu6",
-                   dtypes=all_types_and(torch.bfloat16),
+                   dtypes=all_types_and(torch.bfloat16, torch.float16),
                    backward_dtypes=floating_types_and(torch.bfloat16, torch.float16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,

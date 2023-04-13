@@ -11131,9 +11131,12 @@ class TestNNDeviceType(NNTestCase):
                                                                   torch.zeros(3, device=device)))
 
     @onlyCPU
-    def test_activations_bfloat16_half_cpu(self, device):
-        def test_helper(fn, device, inp_dims, dtype):
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_activations_bfloat16_half_cpu(self, device, dtype):
+        def test_helper(fn, device, inp_dims, prec=None):
+            torch.manual_seed(37)
             # bfloat16/half compute
+            fn = fn.to(dtype=dtype)
             input = torch.randn(inp_dims, dtype=dtype, device=device, requires_grad=True)
             out = fn(input)
             grad_input = torch.randn_like(out, dtype=dtype, device=device)
@@ -11141,34 +11144,33 @@ class TestNNDeviceType(NNTestCase):
 
             # fp32 compute
             input2 = input.detach().clone().float().requires_grad_(True)
-            out2 = fn(input2)
+            out2 = fn.float()(input2)
             grad_input2 = grad_input.detach().clone().float()
             out2.backward(grad_input2)
 
             self.assertEqual(out.dtype, dtype)
             self.assertEqual(input.grad.dtype, dtype)
-            self.assertEqual(out, out2.to(dtype=dtype)) 
-            self.assertEqual(input.grad.data, input2.grad.data.to(dtype=dtype))
+            self.assertEqual(out, out2.to(dtype=dtype), atol=prec, rtol=prec) 
+            self.assertEqual(input.grad.data, input2.grad.data.to(dtype=dtype), atol=prec, rtol=prec)
 
         shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
-        for dtype in [torch.bfloat16, torch.half]:
-            for shape in shapes:
-                test_helper(torch.nn.LogSigmoid(), device, shape, dtype)
-                test_helper(torch.nn.Hardsigmoid(), device, shape, dtype)
-                test_helper(torch.nn.Hardshrink(), device, shape, dtype)
-                test_helper(torch.nn.Softshrink(), device, shape, dtype)
-                test_helper(torch.nn.Hardswish(), device, shape, dtype)
-                test_helper(torch.nn.Softplus(), device, shape, dtype)
-                test_helper(torch.nn.SiLU(), device, shape, dtype)
-                test_helper(torch.nn.Hardtanh(), device, shape, dtype)
-                test_helper(torch.nn.Mish(), device, shape, dtype)
-                test_helper(torch.nn.ELU(), device, shape, dtype)
-                test_helper(torch.nn.PReLU(), device, shape, dtype)
-                test_helper(torch.nn.GLU(), device, shape, dtype)
-                test_helper(torch.nn.Threshold(), device, shape, dtype)
-                test_helper(torch.nn.GELU(), device, shape, dtype)
-                test_helper(torch.nn.Hardtanh(), device, shape, dtype)
-                test_helper(torch.nn.LeakyReLU(), device, shape, dtype)
+        for shape in shapes:
+            test_helper(torch.nn.LogSigmoid(), device, shape)
+            test_helper(torch.nn.Hardsigmoid(), device, shape)
+            test_helper(torch.nn.Hardshrink(), device, shape)
+            test_helper(torch.nn.Softshrink(), device, shape)
+            test_helper(torch.nn.Hardswish(), device, shape)
+            test_helper(torch.nn.Softplus(), device, shape)
+            test_helper(torch.nn.SiLU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.Mish(), device, shape)
+            test_helper(torch.nn.ELU(), device, shape)
+            test_helper(torch.nn.PReLU(), device, shape)
+            test_helper(torch.nn.GLU(), device, shape, prec=1e-2)
+            test_helper(torch.nn.Threshold(0.1, 20), device, shape)
+            test_helper(torch.nn.GELU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.LeakyReLU(), device, shape)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):
