@@ -132,11 +132,12 @@ def set_logs(
     recompiles=False,
     output_code=False,
     schedule=False,
+    modules=None,
 ):
     """
     Enable setting the log level of individual components through kwargs.
     Args are set using the following format:
-        set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>)
+        set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>, ...,modules={"module.qualified.name":<log_level>})
     """
     # ignore if env var is set
     if LOG_ENV_VAR in os.environ:
@@ -147,8 +148,11 @@ def set_logs(
 
     log_state.clear()
 
+    if modules is None:
+        modules = {}
+
     def _set_logs(**kwargs):
-        for alias, val in kwargs.items():
+        for alias, val in itertools.chain(kwargs.items(), modules.items()):
             if log_registry.is_artifact(alias):
                 if val:
                     log_state.enable_artifact(alias)
