@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
+import operator
 from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
 
 import torch
@@ -188,8 +189,6 @@ def _operator_dispatch(
             # perform reduce on the collection with AND op
             ret_type = str(ret_list[0].type)
             if ret_type == "bool":
-                import operator
-
                 local_results: object = functools.reduce(operator.and_, obj_list, True)
             else:
                 raise NotImplementedError(
@@ -255,15 +254,16 @@ def _operator_dispatch(
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-        if (
-            (mesh is not None)
-            and (mesh.mesh.numel() < dist.get_world_size())
-            and (output_sharding.output_spec is None)
-        ):
+        if (mesh is not None) and (output_sharding.output_spec is None):
             # communicate the result to non-participating ranks if
             # op runs on a submesh and return type is scalar value
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
+            ret_list = op_schema.func_schema.returns
+            ret_type = str(ret_list[0].type)
+            # perform reduce on the collection with AND op
+            if ret_type == "bool":
+                local_results = functools.reduce(operator.and_, obj_list, True)
 
         # if op is a random op, adjust Philox RNG state to maintain synchronization
         if op_call in random_ops and is_rng_supported_mesh(mesh):
