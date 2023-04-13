@@ -1,65 +1,65 @@
 import copy
 import operator
-from typing import Any, Tuple
+from typing import Any, Callable, Tuple
 
 import torch
 import torch._dynamo
 from torch.fx import GraphModule, Node
 from torch.fx.subgraph_rewriter import _replace_pattern
-import torch.nn as nn
+import torch.nn.functional as F
 
 
-class _ConvBnPattern(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv = nn.Conv2d(1, 1, 1)
-        self.bn = nn.BatchNorm2d(1)
+def _conv_bn_pattern(
+    x,
+    conv_weight,
+    conv_bias,
+    bn_weight,
+    bn_bias,
+    bn_running_mean,
+    bn_running_var,
+):
+    x = F.conv2d(x, conv_weight, conv_bias)
+    x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
+    return x
 
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.bn(x)
-        return x
 
-class _FusedQATConvBnPattern(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv = nn.Conv2d(1, 1, 1)
-        self.bn = nn.BatchNorm2d(1)
-
-    @property
-    def weight(self):
-        return self.conv.weight
-
-    @property
-    def bias(self):
-        return self.conv.bias
-
-    def forward(self, input):
-        """
-        Approximated method to fuse conv and bn. It requires only one forward pass.
-        conv_orig = conv / scale_factor where scale_factor = bn.weight / running_std
-        """
-        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)  # type: ignore[operator, arg-type]
-        scale_factor = self.bn.weight / running_std
-        weight_shape = [1] * len(self.weight.shape)
-        weight_shape[0] = -1
-        bias_shape = [1] * len(self.weight.shape)
-        bias_shape[1] = -1
-        # TODO: wrap this in weight_fake_quant
-        scaled_weight = self.weight * scale_factor.reshape(weight_shape)
-        zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
-        conv = self.conv._conv_forward(input, scaled_weight, zero_bias)
-        conv_orig = conv / scale_factor.reshape(bias_shape)
-        conv_orig = conv_orig + self.bias.reshape(bias_shape)
-        conv = self.bn(conv_orig)
-        return conv
+def _fused_qat_conv_bn_pattern(
+    x,
+    conv_weight,
+    conv_bias,
+    bn_weight,
+    bn_bias,
+    bn_running_mean,
+    bn_running_var,
+):
+    """
+    Approximated method to fuse conv and bn. It requires only one forward pass.
+    conv_orig = conv / scale_factor where scale_factor = bn.weight / running_std.
+    This is based on `nniqat.ConvBn2d._forward_approximate`.
+    """
+    # TODO: don't hardcode eps
+    bn_eps = 1e-5
+    running_std = torch.sqrt(bn_running_var + bn_eps)
+    scale_factor = bn_weight / running_std
+    weight_shape = [1] * len(conv_weight.shape)
+    weight_shape[0] = -1
+    bias_shape = [1] * len(conv_weight.shape)
+    bias_shape[1] = -1
+    # TODO: wrap this in weight_fake_quant
+    scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
+    zero_bias = torch.zeros_like(conv_bias, dtype=x.dtype)
+    x = F.conv2d(x, scaled_weight, zero_bias)
+    x = x / scale_factor.reshape(bias_shape)
+    x = x + conv_bias.reshape(bias_shape)
+    x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+    return x
 
 def _get_aten_graph_module(
-        pattern: nn.Module,
+        pattern: Callable,
         example_inputs: Tuple[Any, ...],
-    ):
+):
     """
-    Convert the nn.Module pattern to an FX graph with decomposed aten ops.
+    Convert the pattern to an FX graph with decomposed aten ops.
     """
     aten_pattern, _ = torch._dynamo.export(
         pattern,
@@ -78,9 +78,17 @@ def _fuse_conv_bn_qat(m: GraphModule):
     """
     m.graph.eliminate_dead_code()
     m.recompile()
-    example_inputs = (torch.randn(1, 1, 3, 3),)
-    match_pattern = _get_aten_graph_module(_ConvBnPattern(), example_inputs)
-    replacement_pattern = _get_aten_graph_module(_FusedQATConvBnPattern(), example_inputs)
+    example_inputs = (
+        torch.randn(1, 1, 3, 3),  # x
+        torch.randn(1, 1, 1, 1),  # conv_weight
+        torch.randn(1),           # conv_bias
+        torch.randn(1),           # bn_weight
+        torch.randn(1),           # bn_bias
+        torch.randn(1),           # bn_running_mean
+        torch.randn(1),           # bn_running_var
+    )
+    match_pattern = _get_aten_graph_module(_conv_bn_pattern, example_inputs)
+    replacement_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
     match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern)
     m.recompile()
 
