@@ -1,5 +1,6 @@
-#include <ATen/native/BinaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BinaryOps.h>
 
 namespace at::native {
 namespace mps {

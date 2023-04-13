@@ -1,13 +1,7 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
-#include <ATen/native/BinaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/Optional.h>
-#include <torch/library.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BinaryOps.h>
 
 namespace at::native {
 namespace mps {
@@ -61,7 +55,7 @@ void binaryOpTensor(const Tensor& self,
     needsCopyToOutput = true;
     // else, determine if this is an in-place operation on a view output
   } else if (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))) {
-    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }
 
