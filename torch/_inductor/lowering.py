@@ -684,8 +684,10 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
     if V.graph.sizevars.size_hint(start + dim_size) < 0:
+        V.graph.sizevars.guard_lt(start + dim_size, 0)
         start = 0
     if V.graph.sizevars.size_hint(end + dim_size) < 0:
+        V.graph.sizevars.guard_lt(end + dim_size, 0)
         end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
