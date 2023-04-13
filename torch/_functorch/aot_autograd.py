@@ -1905,6 +1905,13 @@ def aot_wrapper_dedupe(
             if not keep_arg:
                 dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
                 kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
+                # HACK: For testing, skip de-dup guards for FSDP
+                if (
+                    dupe_arg_source.guard_source().is_fsdp_module()
+                    and kept_arg_source.guard_source().is_fsdp_module()
+                ):
+                    print(f"Skipping dup guard for\n{kept_arg_source}\n{dupe_arg_source}")
+                    continue
                 tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
 
     @wraps(flat_fn)
