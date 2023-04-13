@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
@@ -1523,7 +1522,7 @@ def _slice_meta(
 
     new_shape = []
     for x, y, z in zip(start_indices, limit_indices, _strides):
-        new_shape.append(math.floor((y - x) / z))
+        new_shape.append(1 + (y - x - 1) // z)
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):

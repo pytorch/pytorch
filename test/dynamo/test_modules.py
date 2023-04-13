@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
+import traceback
 import types
+import unittest
 from copy import deepcopy
 from typing import Tuple
 from unittest.mock import patch
@@ -296,6 +299,31 @@ class ModuleList(torch.nn.Module):
         return x
 
 
+class CustomGetItemModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+            ]
+        )
+
+    def __getitem__(self, idx: int):
+        return self.layers[idx]
+
+    def __len__(self) -> int:
+        return len(self.layers)
+
+    def forward(self, x):
+        for i in range(len(self)):
+            x = self[i](x)
+
+        return x
+
+
 class ModuleDict(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -308,6 +336,23 @@ class ModuleDict(torch.nn.Module):
     def forward(self, x):
         # TODO(future PR): handle more logic
         x = self.layers["0"](x)
+        return x
+
+
+class CustomGetItemModuleDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+
+    def __getitem__(self, key: str) -> torch.nn.Module:
+        return self.layers[key]
+
+    def forward(self, x):
+        x = self["0"](x)
         return x
 
 
@@ -464,7 +509,47 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
         self.param = UninitializedParameter()
 
     def initialize_parameters(self, x):
+        # force graph break to ensure this was not inlined
+        torch._dynamo.graph_break()
         self.param.materialize(x.shape)
+
+
+class LazyMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.LazyLinear(10)
+        self.relu1 = torch.nn.ReLU()
+        self.fc2 = torch.nn.LazyLinear(1)
+        self.relu2 = torch.nn.ReLU()
+
+    def forward(self, input):
+        x = self.relu1(self.fc1(input))
+        y = self.relu2(self.fc2(x))
+        return y
+
+
+class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._param = torch.nn.Parameter(torch.empty(input[0].shape).fill_(0.5))
+
+    def forward(self, input):
+        x = 0
+        for i in range(len(input)):
+            x = x + input[i]
+        return x
+
+
+class LazyModuleWithListInput(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = LazyLayerWithListInput()
+
+    def forward(self, input):
+        return self.layer(input)
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
@@ -712,6 +797,45 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
         return x
 
 
+class SequentialWithDuplicatedModule(torch.nn.Module):
+    # Sequential module(self.layer) contains three duplicated ReLU module.
+    def __init__(self):
+        super(SequentialWithDuplicatedModule, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(10, 20),
+            self.relu,
+            torch.nn.Linear(20, 20),
+            self.relu,
+            torch.nn.Linear(20, 10),
+            self.relu,
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class SequentialWithDuplicatedModule2(torch.nn.Module):
+    def __init__(self):
+        super(SequentialWithDuplicatedModule2, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            collections.OrderedDict(
+                [
+                    ("linear1", torch.nn.Linear(10, 20)),
+                    ("relu1", self.relu),
+                    ("linear2", torch.nn.Linear(20, 20)),
+                    ("relu2", self.relu),
+                    ("linear3", torch.nn.Linear(20, 10)),
+                    ("relu3", self.relu),
+                ]
+            )
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -759,7 +883,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
+    test_moduledict = make_test(CustomGetItemModuleDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
@@ -778,6 +904,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
     test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
+    test_sequential_with_duplicated_module = make_test(SequentialWithDuplicatedModule())
+    test_sequential_with_duplicated_module2 = make_test(
+        SequentialWithDuplicatedModule2()
+    )
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -964,7 +1094,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
-    def test_lazy_module(self):
+    def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -974,7 +1104,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_static_module = torch._dynamo.optimize(cnt)(test_static_module)
+        # test no graph break
+        opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
+            test_static_module
+        )
         opt_test_static_module()
 
         self.assertTrue(
@@ -1014,7 +1147,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
-        opt_test_torch_static = torch._dynamo.optimize(cnt)(test_torch_static)
+        # test no graph break
+        opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
+            test_torch_static
+        )
         opt_test_torch_static()
         out = opt_test_torch_static()
 
@@ -1025,6 +1161,60 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_lazy_module2(self):
+        # Test FX graph 'call_module' works well if argument is lazy module
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        # We should run compile mode firstly, otherwise the module
+        # would be initialized when running eager mode.
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_lazy_module3(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to cuda and second iteration
+        m = m.to("cuda")
+        x = x.to("cuda")
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_lazy_module4(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # input shape changed and second iteration
+        x = torch.rand([20, 20])
+        try:
+            opt_m(x)
+        except RuntimeError:
+            self.assertIn("must have same reduction dim", traceback.format_exc())
+
+    def test_lazy_module5(self):
+        # Test lazy module works well with list/tuple input
+        m = LazyModuleWithListInput()
+        x = [torch.rand([5, 5])] * 3
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1195,6 +1385,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1241,6 +1432,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             the eval_frame entrypoint to Module.__call__?
         """
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1305,7 +1497,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
+        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
 
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):

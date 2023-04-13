@@ -161,8 +161,9 @@ class ShardedGradScaler(GradScaler):
             for tensor in grad:
                 if tensor.device != expected_device:
                     log.error(
-                        "tensor device is %s and expected device is %s"
-                        % (tensor.device, expected_device)
+                        "tensor device is %s and expected device is %s",
+                        tensor.device,
+                        expected_device,
                     )
                     raise ValueError("Gradients must be on the same device.")
 

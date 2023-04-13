@@ -195,6 +195,8 @@ __all__ = [
     "amax",
     "amin",
     "any",
+    "cumsum",
+    "cumprod",
     "mean",
     "std",
     "std_mean",
@@ -346,7 +348,7 @@ def _broadcast_shapes(*_shapes):
 def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
     # Computes common shape
     common_shape = _broadcast_shapes(
-        *map(lambda t: t.shape if isinstance(t, TensorLike) else None, args)
+        *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
     def __maybe_broadcast(x, shape):
@@ -3980,12 +3982,12 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     )
 
 
-@register_decomposition(aten.cumsum)
-def cumsum(
+def _cumsumprod_common(
+    func,
+    init,
     a: TensorLikeType,
     dim: int,
     *,
-    keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
@@ -3994,14 +3996,36 @@ def cumsum(
     ndim = a.ndim
     dim = utils.canonicalize_dim(ndim, dim)
     if ndim == 0:
-        return sum(a.unsqueeze(0), dim=0, keepdim=keepdim, dtype=dtype, out=out)
+        return func(a.unsqueeze(0), dim=0, dtype=dtype, out=out)
     a = a.unsqueeze(dim + 1)
     rg = torch.arange(a.shape[dim], device=a.device)
     mask = rg.unsqueeze(1) <= rg
     for _ in range(ndim - dim - 1):
         mask = mask.unsqueeze(-1)
-    masked_a = utils.mask_tensor(mask, a)
-    return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
+    masked_a = torch.where(mask, a, init)
+    return func(masked_a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumsum)
+def cumsum(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=sum, init=0, a=a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumprod)
+def cumprod(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=prod, init=1, a=a, dim=dim, dtype=dtype, out=out)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -4568,7 +4592,7 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
-    if isinstance(tensors[0], list) or isinstance(tensors[0], tuple):
+    if isinstance(tensors[0], (list, tuple)):
         assert len(tensors) == 1
         tensors = tuple(tensors[0])
 
@@ -5394,7 +5418,15 @@ def log_normal(self, mean=1, std=2, generator=None):
 def normal(self, mean=0, std=1, generator=None):
     assert generator is None
     utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
-    return std * torch.randn_like(self) + mean
+    normal_samples = prims.normal(
+        self.shape,
+        mean=0.0,
+        std=1.0,
+        dtype=self.dtype,
+        device=self.device,
+        requires_grad=False,
+    )
+    return std * normal_samples + mean
 
 
 # inplace
@@ -5424,6 +5456,7 @@ copysign_ = _make_inplace(copysign)
 cos_ = _make_inplace(cos)
 cosh_ = _make_inplace(cosh)
 cumsum_ = _make_inplace(cumsum)
+cumprod_ = _make_inplace(cumprod)
 digamma_ = _make_inplace(digamma)
 div_ = _make_inplace(div)
 eq_ = _make_inplace(eq)

@@ -11,7 +11,7 @@
 #include <torch/library.h>
 
 namespace at::native {
-
+namespace mps {
 void get_shapes(MPSShape* input_shape_readonly,
                 NSMutableArray<NSNumber*>*& input_shape,
                 NSMutableArray<NSNumber*>*& new_mean_shape,
@@ -53,6 +53,7 @@ void get_shapes(MPSShape* input_shape_readonly,
       axes[i] = [NSNumber numberWithInt:i];
   }
 }
+} // namespace mps
 
 // Inverse standard deviation now becomes variance (without epsilon)
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
@@ -123,7 +124,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
     // Reduction axes
     NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
 
-    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, false);
+    native_mps::get_shapes(
+        input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, false);
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
@@ -576,13 +578,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     // Reduction axes
     NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
 
-    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, true);
+    native_mps::get_shapes(
+        input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, true);
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
     string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
         std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
-        [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input);
+        [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + native_mps::getMPSTypeString(input);
     auto input_mps_dtype = native_mps::getMPSDataType(input);
     CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
 
@@ -812,7 +815,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     if (grad_input_mask[1])
       gradWeightPlaceholder = native_mps::Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
     auto gradBiasPlaceholder = native_mps::Placeholder();
-    ;
+
     if (grad_input_mask[2])
       gradBiasPlaceholder = native_mps::Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
 

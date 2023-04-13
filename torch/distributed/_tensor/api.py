@@ -4,10 +4,9 @@ import warnings
 from typing import Callable, cast, Optional, Sequence, Tuple
 
 import torch
-import torch.nn as nn
 
 import torch.distributed._tensor.dispatch as op_dispatch
-from torch.fx.passes.shape_prop import TensorMetadata
+import torch.nn as nn
 from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -16,12 +15,14 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.distributed._tensor.redistribute import Redistribute
+from torch.distributed._tensor.sharding_prop import ShardingPropagator
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
+
 
 # NOTE [Autograd interaction between torch.Tensor]
 #
@@ -64,7 +65,7 @@ class _ToTorchTensor(torch.autograd.Function):
             shape=dtensor_meta.shape,
             dtype=dtensor_meta.dtype,
             requires_grad=grad_output.requires_grad,
-            stride=dtensor_meta.stride
+            stride=dtensor_meta.stride,
         )
 
 
@@ -198,16 +199,12 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         # TODO: populate all tensor meta fields properly
         tensor_meta = TensorMetadata(
-            shape,
-            dtype,
-            requires_grad,
-            stride,
-            torch.contiguous_format,
-            False,
-            {}
+            shape, dtype, requires_grad, stride, torch.contiguous_format, False, {}
         )
         # deepcopy and set spec
-        r._spec = DTensorSpec(device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta)
+        r._spec = DTensorSpec(
+            device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
+        )
         # detach local tensor from autograd graph as we initialize the
         # distributed tensor and autograd will be working on top of
         # the wrapper tensor directly instead of local torch.Tensor

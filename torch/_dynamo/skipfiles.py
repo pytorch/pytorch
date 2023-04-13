@@ -150,6 +150,16 @@ if HAS_PRIMS_REFS:
 
 SKIP_DIRS_RE = None
 
+is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
+# Skip fbcode paths(including torch.package paths) containing
+# one of the following strings.
+FBCODE_SKIP_DIRS = {
+    "torchrec/distributed",
+    "torchrec/fb/distributed",
+    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
+}
+FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
+
 
 def _recompile_re():
     global SKIP_DIRS_RE
@@ -162,12 +172,7 @@ def add(import_name: str):
     assert isinstance(import_name, str)
     try:
         module_spec = importlib.util.find_spec(import_name)
-    except AttributeError as e:
-        # handle fbgemm conflict caused by import torchrec.
-        if "'fbgemm' object has no attribute" in str(e):
-            return
-        raise
-    except ImportError:
+    except Exception:
         return
     if not module_spec:
         return
@@ -187,12 +192,17 @@ def check(filename, allow_torch=False):
         return False
     if allow_torch and is_torch(filename):
         return False
+    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
+        return True
     return bool(SKIP_DIRS_RE.match(filename))
 
 
 # skip common third party libs
 for _name in (
+    "einops",
+    "einops_exts",
     "functorch",
+    "fx2trt_oss",
     "intel_extension_for_pytorch",
     "networkx",
     "numpy",
@@ -210,7 +220,6 @@ for _name in (
     "tqdm",
     "tree",
     "tvm",
-    "fx2trt_oss",
     "xarray",
 ):
     add(_name)

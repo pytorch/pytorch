@@ -30,6 +30,7 @@ class _StorageBase:
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
+    def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
 
     def size(self) -> int:
@@ -91,7 +92,7 @@ class _StorageBase:
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -725,7 +726,7 @@ class TypedStorage:
 
     def __iter__(self):
         _warn_typed_storage_removal()
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         _warn_typed_storage_removal()

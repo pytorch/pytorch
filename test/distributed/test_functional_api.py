@@ -1,25 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
-import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
-
+import torch.distributed.distributed_c10d as c10d
 from functorch import make_fx
+
+from torch.testing import FileCheck
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_distributed import (
-    MultiThreadedTestCase,
-)
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase
-)
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 def new_subgroups(group_size: int, pg_tag=None):
     world_size = dist.get_world_size()
@@ -116,20 +114,21 @@ class TestExpand(MultiThreadedTestCase):
 
     def test_expand_device_mesh_tuple(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
-        tag, rankset, group_size = ft_c._expand_group(mesh)
-        self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
-        self.assertEqual([0, 2, 1, 3], rankset)
-        self.assertEqual(2, group_size)
+        with self.assertRaisesRegex(AssertionError, "Only 1D mesh"):
+            tag, rankset, group_size = ft_c._expand_group(mesh)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 0))
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
-        self.assertEqual([0, 2, 1, 3], rankset)
+        expected_rankset = [0, 2] if dist.get_rank() in [0, 2] else [1, 3]
+        self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
 
         tag, rankset, group_size = ft_c._expand_group((mesh, 1))
+        expected_rankset = [0, 1] if dist.get_rank() in [0, 1] else [2, 3]
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[1]), tag)
-        self.assertEqual([0, 1, 2, 3], rankset)
+        self.assertEqual(expected_rankset, rankset)
         self.assertEqual(2, group_size)
+
 
 class TestPgTag(MultiThreadedTestCase):
     @property
@@ -152,6 +151,7 @@ class TestPgTag(MultiThreadedTestCase):
     - _expand_group on _default-tagged pg should always resolve to it
         This mean we can't depend on empty tag + rankset.
     """
+
     def test_pg_creation_with_tag(self):
         my_group, _ = new_subgroups(group_size=2, pg_tag="blu")
         my_group2, _ = new_subgroups(group_size=2, pg_tag="blu")
@@ -204,6 +204,7 @@ class TestPgTag(MultiThreadedTestCase):
         pg = c10d._find_pg_by_ranks_and_tag("", [0, 1, 2, 3])
         self.assertEqual(dist.group.WORLD, pg)
 
+
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -224,11 +225,13 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
 
+
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
         out = ft_c.all_reduce(x, "sum", [1])
         self.assertEqual(x.size(), out.size())
+
 
 class TestGradCollectives(MultiThreadedTestCase):
     @property
@@ -246,6 +249,7 @@ class TestGradCollectives(MultiThreadedTestCase):
         (out + y).sum().backward()
         self.assertIsNone(x.grad)
 
+
 class TestMakeFx(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -260,10 +264,45 @@ class TestMakeFx(MultiThreadedTestCase):
             return ft_c.all_reduce(input, "sum", group=[0, 1]) + 1
 
         graph = make_fx(allred)(torch.rand(4))
-        nodes = list(graph.graph.nodes)
+        FileCheck().check("all_reduce").check("wait_tensor").run(str(graph.graph))
 
-        self.assertEqual("aten::all_reduce", nodes[1].target.name())
-        self.assertEqual("aten::wait_tensor", nodes[2].target.name())
+        mesh = dt.DeviceMesh("cpu", torch.arange(self.world_size))
+
+        def allred_mesh(input):
+            return ft_c.all_reduce(input, "sum", mesh) + 1
+
+        mesh_graph = make_fx(allred_mesh)(torch.rand(4))
+        FileCheck().check_not("get_attr").check("wait_tensor").run(
+            str(mesh_graph.graph)
+        )
+
+        def allred_mesh_dim(input):
+            return ft_c.all_reduce(input, "sum", (mesh, 0)) + 1
+
+        mesh_dim_graph = make_fx(allred_mesh_dim)(torch.rand(4))
+        FileCheck().check_not("get_attr").check("wait_tensor").run(
+            str(mesh_dim_graph.graph)
+        )
+
+    def test_all_gather_tracing_wait(self):
+        def allgather_alone_no_wait(input):
+            return ft_c.all_gather_tensor(input, 0, group=[0, 1])
+
+        graph = make_fx(allgather_alone_no_wait)(torch.rand(4))
+        FileCheck().check_not("get_attr").check("all_gather").check("wait_tensor").run(
+            str(graph.graph)
+        )
+
+        mesh = dt.DeviceMesh("cpu", torch.arange(self.world_size))
+
+        def allgather_mesh_dim(input):
+            return ft_c.all_gather_tensor(input, 0, (mesh, 0))
+
+        mesh_graph = make_fx(allgather_mesh_dim)(torch.rand(4))
+        FileCheck().check_not("get_attr").check("all_gather").check("wait_tensor").run(
+            str(mesh_graph.graph)
+        )
+
 
 if __name__ == "__main__":
     run_tests()
