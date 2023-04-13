@@ -2038,7 +2038,10 @@ class ShapeEnv:
             new_shape_env[k] = s + offset
             new_range_env[s] = ValueRangeAnalysis.sub(vr, offset)
 
-        new_expr = expr.xreplace(new_shape_env)
+        try:
+            new_expr = sympy.simplify(expr.xreplace(new_shape_env))
+        except RecursionError:
+            return None
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
