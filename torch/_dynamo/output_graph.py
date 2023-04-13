@@ -239,14 +239,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
-        # Although we prune unused graphargs before sending graphs to
-        # compilers, we may have legitimately triggered shape guards
-        # on "unused" inputs that we must keep track of.  So after
-        # remove_unused_graphargs is called, orig_graphargs and
-        # graphargs no longer alias; orig_graphargs is the original
-        # graphargs, and graphargs is the pruned list.  Guard creation
-        # should use original graphargs.
-        self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
