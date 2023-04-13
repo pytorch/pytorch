@@ -274,16 +274,23 @@ class NNModuleVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
-        from . import ConstantVariable, ListIteratorVariable, TupleVariable
+        from . import (
+            ConstantVariable,
+            ConstDictVariable,
+            ListIteratorVariable,
+            TupleVariable,
+        )
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
         module = tx.output.get_submodule(key)
+        # kwargs = ConstDictVariable(kwargs, dict)
 
         if name == "__call__":
             # TODO(whc)  do we really need this special case?
             return self.call_function(tx, args, kwargs)
-        elif name == "forward":
+
+        elif name in ["forward", "_call_impl"]:
             # TODO(whc)
             # This is the old special case moved to a new place.  (copy from call_function below)
             # Old behavior: we'd route "forward" meth call to 'call_function', which inlined forward.

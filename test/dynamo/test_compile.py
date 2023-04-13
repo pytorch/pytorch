@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
+import os
+import tempfile
+import unittest
+
 import torch
 from torch._dynamo.testing import CompileCounter
-import tempfile
-import os
-import unittest
+
 
 class ToyModel(torch.nn.Module):
     def __init__(self):
@@ -15,8 +17,8 @@ class ToyModel(torch.nn.Module):
     def forward(self, x):
         return self.relu(self.linear(x))
 
-class InPlaceCompilationTests(unittest.TestCase):
 
+class InPlaceCompilationTests(unittest.TestCase):
     def test_compilation(self):
         torch._dynamo.reset()
         model = ToyModel()
@@ -52,7 +54,9 @@ class InPlaceCompilationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
-            loaded_model.load_state_dict(torch.load(os.path.join(tmpdirname, "model.pt")))
+            loaded_model.load_state_dict(
+                torch.load(os.path.join(tmpdirname, "model.pt"))
+            )
             loaded_model(torch.randn(1, 10))
 
     def test_jit_save(self):

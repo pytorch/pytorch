@@ -2442,10 +2442,10 @@ class Module:
     def compile(self, *args, **kwargs):
         """
         Compile this Module's forward using :func:`torch.compile`.
-       
+
         This Module's `__call__` method is compiled and all arguments are passed as-is
         to :func:`torch.compile`.
-       
+
         See :func:`torch.compile` for details on the arguments for this function.
         """
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
