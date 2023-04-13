@@ -287,7 +287,7 @@ def pack_module(gm: torch.fx.GraphModule):
             if type(cur_module) in computation_op_packed_map:
                 if (
                     cur_module.weight.device != torch.device("cpu")
-                    or cur_module.weight.dtype not in [torch.float16, torch.float32]
+                    or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]
                     or node.args[0].meta["val"].device != cur_module.weight.device
                     or node.args[0].meta["val"].dtype != cur_module.weight.dtype
                 ):
