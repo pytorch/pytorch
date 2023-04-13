@@ -1,6 +1,6 @@
 //  Copyright © 2022 Apple Inc.
-#include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/mps/OperationUtils.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>

@@ -1,11 +1,11 @@
 //  Copyright © 2022 Apple Inc.
-#include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

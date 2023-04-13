@@ -1,9 +1,9 @@
 //  Copyright © 2022 Apple Inc.
-#include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

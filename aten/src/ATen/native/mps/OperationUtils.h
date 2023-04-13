@@ -2,6 +2,7 @@
 
 #pragma once
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
