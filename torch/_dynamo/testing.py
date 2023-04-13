@@ -11,14 +11,13 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
     is_generator,
     transform_code_object,
 )
-from .config_utils import config
 from .guards import CheckFunctionManager, GuardedCode
 from .utils import same
 
@@ -149,7 +148,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
