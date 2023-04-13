@@ -507,9 +507,6 @@ def _compile(
             _allow_non_fake_inputs=False,
         )(named_states, params, buffers, args, kwargs)
 
-    if torch.distributed.get_rank() == 0:
-        gm.graph.print_tabular()
-
     params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
         **params,
         **buffers,
@@ -539,9 +536,6 @@ def _compile(
     # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
     # dedup at tracer-level to avoid multiple graph passes.
     gm = _dedup_collectives(gm)
-
-    if torch.distributed.get_rank() == 0:
-        gm.graph.print_tabular()
 
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
