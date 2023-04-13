@@ -19,6 +19,7 @@ from .allowed_functions import is_allowed
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
+    check_exn_tab_entries,
     is_generator,
     propagate_exn_table_entries,
     transform_code_object,
@@ -219,7 +220,9 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
 
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame_assert(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         increment_frame()
         code = frame.f_code
 
@@ -328,6 +331,7 @@ def convert_frame_assert(
             export_constraints,
             hooks,
             frame,
+            frame_state=frame_state,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -346,6 +350,7 @@ def _compile(
     export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
+    frame_state=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
@@ -367,6 +372,7 @@ def _compile(
             export,
             export_constraints,
             mutated_closure_cell_contents,
+            frame_state=frame_state,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()
@@ -377,6 +383,7 @@ def _compile(
         code_options.update(output.code_options)
 
         if config.dead_code_elimination:
+            check_exn_tab_entries(instructions)
             propagate_exn_table_entries(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
@@ -472,10 +479,12 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks)
+            result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):

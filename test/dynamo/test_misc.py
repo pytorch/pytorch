@@ -23,7 +23,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
-from torch._dynamo import bytecode_transformation
+from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -4052,6 +4052,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
+            frame_state=None,
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
@@ -4609,6 +4610,40 @@ def fn():
             self.assertEquals(entry.start, exp[0] * 2)
             self.assertEquals(entry.end, exp[1] * 2)
             self.assertEquals(entry.target, exp[2] * 2)
+
+    @skipIfNotPy311
+    def test_remove_dead_code_with_exn_table_entries(self):
+        create_instruction = bytecode_transformation.create_instruction
+        target1 = create_instruction("NOP")
+        target2 = create_instruction("NOP")
+        target3 = create_instruction("NOP")
+        exn_start = create_instruction("NOP")
+        exn_end = create_instruction("NOP")
+        insts = [
+            create_instruction("JUMP_FORWARD", target=target1),
+            exn_start,  # dead
+            target1,
+            create_instruction("JUMP_FORWARD", target=target3),
+            exn_end,  # dead
+            target2,
+            target3,
+        ]
+        exn_start.exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            exn_start, exn_end, target2, 0, True
+        )
+        bytecode_transformation.propagate_exn_table_entries(insts)
+        insts = bytecode_analysis.remove_dead_code(insts)
+        self.assertEquals(len(insts), 5)
+        self.assertNotIn(exn_start, insts)
+        self.assertNotIn(exn_end, insts)
+        self.assertIn(target2, insts)
+        self.assertIn(target3, insts)
+        bytecode_transformation.update_offsets(insts)
+        tab = bytecode_transformation.compute_exception_table(insts)
+        self.assertEquals(len(tab), 1)
+        self.assertEquals(tab[0].start, 2)
+        self.assertEquals(tab[0].end, 4)
+        self.assertEquals(tab[0].target, 6)
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict

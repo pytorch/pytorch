@@ -1,4 +1,5 @@
 import bisect
+import copy
 import dataclasses
 import dis
 import itertools
@@ -7,6 +8,7 @@ import types
 from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_analysis import (
+    get_indexof,
     propagate_line_nums,
     remove_extra_line_nums,
     stacksize_analysis,
@@ -31,6 +33,15 @@ class InstructionExnTabEntry:
             f"end={self.short_inst_repr(self.end)}, "
             f"target={self.short_inst_repr(self.target)}, "
             f"depth={self.depth}, lasti={self.lasti}"
+        )
+
+    def __eq__(self, o):
+        return (
+            self.start is o.start
+            and self.end is o.end
+            and self.target is o.target
+            and self.depth == o.depth
+            and self.lasti == o.lasti
         )
 
 
@@ -468,7 +479,7 @@ def _get_instruction_front(instructions: List[Instruction], idx: int):
 
 def devirtualize_jumps(instructions):
     """Fill in args for virtualized jump target after instructions may have moved"""
-    indexof = {id(inst): i for i, inst, in enumerate(instructions)}
+    indexof = get_indexof(instructions)
     jumps = set(dis.hasjabs).union(set(dis.hasjrel))
 
     for inst in instructions:
@@ -533,7 +544,7 @@ def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruct
             while inst.offset > entry.end:
                 step()
             if inst.offset >= entry.start:
-                inst.exn_tab_entry = inst_entry
+                inst.exn_tab_entry = copy.copy(inst_entry)
     except StopIteration:
         pass
 
@@ -543,7 +554,7 @@ def compute_exception_table(
 ) -> List[ExceptionTableEntry]:
     """Compute pythonic exception table from instructions with exn_tab_entry's"""
     exn_dict = {}
-    indexof = {id(inst): i for i, inst, in enumerate(instructions)}
+    indexof = get_indexof(instructions)
 
     for inst in instructions:
         if inst.exn_tab_entry:
@@ -608,7 +619,7 @@ def check_exception_table_nested(tab: List[InstructionExnTabEntry], indexof):
     """
     entry_stack = []
     for entry in tab:
-        key = (indexof[entry.start], indexof[entry.end])
+        key = (indexof[id(entry.start)], indexof[id(entry.end)])
         while entry_stack and entry_stack[-1][1] < key[0]:
             entry_stack.pop()
         if entry_stack:
@@ -621,21 +632,41 @@ def propagate_exn_table_entries(instructions: List[Instruction]):
     Copies exception table entries to all instructions in an entry's range.
     Supports nested exception table entries.
     """
-    indexof = {inst: i for i, inst in enumerate(instructions)}
+    indexof = get_indexof(instructions)
     entries = {}
     for inst in instructions:
         if inst.exn_tab_entry:
-            key = (indexof[inst.exn_tab_entry.start], indexof[inst.exn_tab_entry.end])
+            key = (
+                indexof[id(inst.exn_tab_entry.start)],
+                indexof[id(inst.exn_tab_entry.end)],
+            )
             if key in entries:
-                assert inst.exn_tab_entry is entries[key]
+                assert inst.exn_tab_entry == entries[key]
             entries[key] = inst.exn_tab_entry
     sorted_entries = [
         entries[key] for key in sorted(entries.keys(), key=lambda t: (t[0], -t[1]))
     ]
     check_exception_table_nested(sorted_entries, indexof)
     for entry in sorted_entries:
-        for i in range(indexof[entry.start], indexof[entry.end] + 1):
-            instructions[i].exn_tab_entry = entry
+        for i in range(indexof[id(entry.start)], indexof[id(entry.end)] + 1):
+            instructions[i].exn_tab_entry = copy.copy(entry)
+
+
+def check_exn_tab_entries(instructions: List[Instruction]):
+    """
+    Checks that exn_tab_entry's of instructions are valid.
+    An entry's start, end, and target must be in instructions.
+    Instructions with exn_tab_entry's are located within
+    the entry's start and end instructions.
+    """
+    indexof = get_indexof(instructions)
+    for i, inst in enumerate(instructions):
+        if inst.exn_tab_entry:
+            entry = inst.exn_tab_entry
+            assert id(entry.start) in indexof
+            assert id(entry.end) in indexof
+            assert id(entry.target) in indexof
+            assert indexof[id(entry.start)] <= i <= indexof[id(entry.end)]
 
 
 def strip_extended_args(instructions: List[Instruction]):
@@ -923,6 +954,9 @@ def transform_code_object(code, transformations, safe=False):
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
+    # also implicitly checks for no duplicate instructions
+    check_exn_tab_entries(instructions)
+
     code_options["co_nlocals"] = len(code_options["co_varnames"])
     varname_from_oparg = None
     if sys.version_info >= (3, 11):

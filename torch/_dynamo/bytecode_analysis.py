@@ -1,3 +1,4 @@
+import bisect
 import dataclasses
 import dis
 import sys
@@ -24,9 +25,17 @@ HASFREE = set(dis.hasfree)
 stack_effect = dis.stack_effect
 
 
+def get_indexof(insts):
+    indexof = {}
+    for i, inst in enumerate(insts):
+        assert id(inst) not in indexof
+        indexof[id(inst)] = i
+    return indexof
+
+
 def remove_dead_code(instructions):
     """Dead code elimination"""
-    indexof = {id(inst): i for i, inst in enumerate(instructions)}
+    indexof = get_indexof(instructions)
     live_code = set()
 
     def find_live_code(start):
@@ -43,7 +52,29 @@ def remove_dead_code(instructions):
                 return
 
     find_live_code(0)
-    # TODO change exception table entries if start/end instructions are dead
+
+    # change exception table entries if start/end instructions are dead
+    # assumes that exception table entries have been propagated, e.g. with
+    # bytecode_transformation.propagate_exn_table_entries
+    if sys.version_info >= (3, 11):
+        live_idx = sorted(live_code)
+        for i, inst in enumerate(instructions):
+            if i in live_code and inst.exn_tab_entry:
+                # find leftmost >=
+                start_idx = bisect.bisect_left(
+                    live_idx, indexof[id(inst.exn_tab_entry.start)]
+                )
+                assert start_idx < len(live_idx)
+                # find rightmost <=
+                end_idx = (
+                    bisect.bisect_right(live_idx, indexof[id(inst.exn_tab_entry.end)])
+                    - 1
+                )
+                assert end_idx >= 0
+                assert live_idx[start_idx] <= i <= live_idx[end_idx]
+                inst.exn_tab_entry.start = instructions[live_idx[start_idx]]
+                inst.exn_tab_entry.end = instructions[live_idx[end_idx]]
+
     return [inst for i, inst in enumerate(instructions) if i in live_code]
 
 
@@ -98,7 +129,7 @@ class ReadsWrites:
 
 
 def livevars_analysis(instructions, instruction):
-    indexof = {id(inst): i for i, inst in enumerate(instructions)}
+    indexof = get_indexof(instructions)
     must = ReadsWrites(set(), set(), set())
     may = ReadsWrites(set(), set(), set())
 

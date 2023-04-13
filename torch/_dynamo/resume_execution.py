@@ -91,30 +91,32 @@ class ReenterWith:
             )
             setup_finally.append(exn_tab_begin)
 
-        reset = [
-            create_instruction("LOAD_FAST", argval=ctx_name),
-            create_instruction("LOAD_METHOD", argval="__exit__"),
-            create_instruction("LOAD_CONST", argval=None),
-            create_dup_top(),
-            create_dup_top(),
-            *create_call_method(3),
-            create_instruction("POP_TOP"),
-        ]
+        def create_reset():
+            return [
+                create_instruction("LOAD_FAST", argval=ctx_name),
+                create_instruction("LOAD_METHOD", argval="__exit__"),
+                create_instruction("LOAD_CONST", argval=None),
+                create_dup_top(),
+                create_dup_top(),
+                *create_call_method(3),
+                create_instruction("POP_TOP"),
+            ]
+
         if sys.version_info < (3, 9):
             epilogue = [
                 create_instruction("POP_BLOCK"),
                 create_instruction("BEGIN_FINALLY"),
                 except_jump_target,
-                *reset,
+                *create_reset(),
                 create_instruction("END_FINALLY"),
             ]
         elif sys.version_info < (3, 11):
             epilogue = [
                 create_instruction("POP_BLOCK"),
-                *reset,
+                *create_reset(),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
                 except_jump_target,
-                *reset,
+                *create_reset(),
                 create_instruction("RERAISE"),
                 cleanup_complete_jump_target,
             ]
@@ -130,10 +132,10 @@ class ReenterWith:
             )
             epilogue = [
                 exn_tab_end,
-                *reset,
+                *create_reset(),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
                 except_jump_target,  # PUSH_EXC_INFO
-                *reset,
+                *create_reset(),
                 finally_exn_tab_end,  # RERAISE 0
                 finally_exn_tab_target,  # COPY 3
                 create_instruction("POP_EXCEPT"),
@@ -439,7 +441,6 @@ class ContinueExecutionCache:
             instructions[:] = prefix + instructions
 
         new_code = transform_code_object(code, update)
-        # breakpoint()
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 
