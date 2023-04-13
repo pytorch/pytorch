@@ -442,7 +442,6 @@ class TestForeach(TestCase):
 
                     return hook
 
-                # note(crcrpar):
                 inplace_input_tensors = [t.clone().detach().requires_grad_() for t in tensors]
                 inplace_inputs = [t.clone() for t in inplace_input_tensors]
                 # set both to False to skip multi_tensor_apply_kernel check
@@ -787,7 +786,7 @@ class TestForeach(TestCase):
     @ops(foreach_lerp_op_db)
     def test_lerp(self, device, dtype, op, is_fastpath):
         for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
-            wrapped_op, ref, inplace_op, _ = self._get_funcs(op)
+            wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             args = [*sample.args]
             inputs = [sample.input, args[0]]
             zero_size = sample.kwargs.pop("zero_size")
@@ -831,9 +830,17 @@ class TestForeach(TestCase):
                     [t.grad for t in transformed_sample.input],
                     [t.grad for t in ref_tensors],
                 )
-                tensors = [1 * t.clone().detach().requires_grad_() for t in transformed_sample.input]
+                _tensors = [t.clone().detach().requires_grad_() for t in transformed_sample.input]
+                _ref_tensors = [t.clone().detach().requires_grad_() for t in _tensors]
+                tensors = [t.clone() for t in _tensors]
                 inplace_op((tensors, *inputs[1:]), False, False, **kwargs, zero_size=False)
+                ref_tensors = [t.clone() for t in _ref_tensors]
+                inplace_ref((ref_tensors, *inputs[1:]), **ref_kwargs)
                 assert_multiple_grad_fns(tensors, self)
+
+                torch.autograd.backward(torch.cat([t.clone().view(-1) for t in tensors]).sum(), inputs=tensors)
+                torch.autograd.backward(torch.cat([t.clone().view(-1) for t in ref_tensors]).sum(), inputs=ref_tensors)
+                self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)
