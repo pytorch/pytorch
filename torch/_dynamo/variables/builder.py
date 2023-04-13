@@ -224,7 +224,6 @@ class VariableBuilder:
                 (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
-            ((torch.SymInt, torch.SymFloat), cls.wrap_sym),
             ((tuple, list, odict_values), cls.wrap_listlike),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
@@ -582,31 +581,6 @@ class VariableBuilder:
                 else True
             )
         )
-
-    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
-        is_duplicate_sym = self.get_source() in self.tx.output.input_source_to_var
-        if is_duplicate_sym:
-            return self.tx.output.input_source_to_var[self.get_source()]
-        if not is_constant_source(self.get_source()):
-            self.tx.output.add_grapharg(GraphArg(self.get_source(), value, False, None))
-        elif is_constant_source(self.get_source()):
-            return self.tx.output.register_attr_or_module(
-                value,
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                source=None,
-                sym_num=value
-                # shape Guards live their own rich life via shape_env
-            )
-        sym_node_var = SymNodeVariable.create(
-            tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
-            sym_num=value
-            # shape Guards live their own rich life via shape_env
-        )
-        self.tx.output.input_source_to_var[self.get_source()] = sym_node_var
-        return sym_node_var
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
