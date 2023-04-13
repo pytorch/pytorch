@@ -1041,12 +1041,14 @@ class TritonKernel(Kernel):
             cond_lt = f"{var} < {size}"
             if not isinstance(original_index, sympy.Integer):
                 var_mask = f"({mask})" if "&" in mask else mask
-                var_mask = f" or not {var_mask}"
+                var_mask = f" | ~{var_mask}"
             else:
                 var_mask = ""
-            line_gt = f'tl.device_assert({cond_gt}{var_mask}, "index out of bounds: {cond_gt}")'
+            # The conditions need to be in parens because of Python's operator precedence. 
+            # It'd be less # error-prone to use and/or/not, which is suported by triton
+            line_gt = f'tl.device_assert(({cond_gt}){var_mask}, "index out of bounds: {cond_gt}")'
             self.cse.generate(buffer, line_gt, expression=False)
-            line_lt = f'tl.device_assert({cond_lt}{var_mask}, "index out of bounds: {cond_lt}")'
+            line_lt = f'tl.device_assert(({cond_lt}){var_mask}, "index out of bounds: {cond_lt}")'
             self.cse.generate(buffer, line_lt, expression=False)
 
     def load(self, name: str, index: sympy.Expr):
@@ -1705,7 +1707,7 @@ class TritonScheduling:
                 )
 
         if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug(f"Schedule:\n {node_schedule}")
+            schedule_log.debug("Schedule:\n %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
