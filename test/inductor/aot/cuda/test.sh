@@ -6,4 +6,4 @@ mkdir -p build
 cd build
 cmake ..
 make
-./test
+LD_LIBRARY_PATH=../../../../../torch/lib/ ./test

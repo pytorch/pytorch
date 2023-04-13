@@ -13,7 +13,7 @@ class Net(torch.nn.Module):
         self.weight = torch.ones(32, 64)
 
     def forward(self, x):
-        x = torch.relu(x + self.weight)
+        x = torch.relu(x - self.weight)
         return x
 */
 struct Net : torch::nn::Module {
@@ -21,7 +21,7 @@ struct Net : torch::nn::Module {
     weight = register_parameter("weight", torch::ones({32, 64}, at::TensorOptions(at::kCUDA).dtype(at::ScalarType::Float)));
   }
   torch::Tensor forward(torch::Tensor input) {
-    return torch::relu(input + weight);
+    return torch::relu(input - weight);
   }
   torch::Tensor weight;
 };
