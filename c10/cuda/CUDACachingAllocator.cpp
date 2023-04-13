@@ -867,7 +867,7 @@ class CachingAllocatorConfig {
   CachingAllocatorConfig()
       : m_max_split_size(std::numeric_limits<size_t>::max()),
         m_garbage_collection_threshold(0),
-        m_expandable_segments(true) {
+        m_expandable_segments(false) {
     m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
   }
 

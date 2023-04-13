@@ -5,7 +5,7 @@ import os
 import torch
 
 if torch.cuda.is_available():
-    torch.cuda.memory._set_allocator_settings('expandable_segments:False')
+    torch.cuda.memory._set_allocator_settings('expandable_segments:True')
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 filepath = os.path.join(current_dir, 'test_cuda.py')
