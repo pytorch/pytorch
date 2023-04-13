@@ -20,7 +20,7 @@ jobs:
       runner-type: macos-m1-12
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
-      python_version: 3.9.12
+      python-version: 3.9.12
       # We need to set the environment file here instead of trying to detect it automatically because
       # MacOS arm64 is cross-compiled from x86-64. Specifically, it means that arm64 conda environment
       # is needed when building PyTorch MacOS arm64 from x86-64
@@ -29,9 +29,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
     name: macos-12-py3-arm64-mps
@@ -40,6 +37,8 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-mps-test
       build-environment: macos-12-py3-arm64
+      # Same as the build job
+      python-version: 3.9.12
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
 
   macos-13-py3-arm64-mps-test:
@@ -48,5 +47,7 @@ jobs:
     needs: macos-12-py3-arm64-build
     with:
       build-environment: macos-12-py3-arm64
+      # Same as the build job
+      python-version: 3.9.12
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
       runs-on: macos-m1-13
