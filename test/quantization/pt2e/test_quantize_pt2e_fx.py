@@ -37,7 +37,6 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EFX(QuantizationTestCase):
-    @xfailIfPython311
     def test_qconfig_none(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -141,7 +140,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
-    @xfailIfPython311
     def test_rearrange_weight_observer_for_decomposed_linear(self):
         """
         Check whether weight observer is correctly rearranged for decomposed linear.
@@ -445,4 +443,3 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
             self.assertTrue(
                 compute_sqnr(after_quant_result, after_quant_result_fx) > 35
             )
-
