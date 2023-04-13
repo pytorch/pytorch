@@ -370,11 +370,10 @@ class _CollOp:
         dst_tensor (Tensor, optional): Provided when source and destinaton tensors are not the same.
         redop (ReduceOp, optional): reduce operation.
         root (int, optional): root of broadcast or reduce.
-        async_op (bool, optional): Whether this op should be an async op
     """
 
     def __init__(self, op: Callable, tensor: torch.Tensor, dst_tensor: Optional[torch.Tensor] = None,
-                 redop: Optional[ReduceOp] = None, root: Optional[int] = None, async_op: bool = False):
+                 redop: Optional[ReduceOp] = None, root: Optional[int] = None):
         self.op = op
         self.tensor = tensor
         self.dst_tensor = dst_tensor
@@ -1477,8 +1476,21 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
         return src
 
 
+class _CoalescingManager:
+    def __init__(self):
+        self.works: List[Work] = []
+
+    def append(self, work: Work):
+        if work:
+            self.works.append(work)
+
+    def wait(self):
+        for work in self.works:
+            work.wait()
+
+
 @contextlib.contextmanager
-def _coalescing_manager(group: Optional[ProcessGroup] = None, device: Optional[torch.device] = None, reqs: Optional[List] = None):
+def _coalescing_manager(group: Optional[ProcessGroup] = None, device: Optional[torch.device] = None):
     """
     A context manager used to coalesce collectives or P2P operations when possible.
 
@@ -1503,15 +1515,15 @@ def _coalescing_manager(group: Optional[ProcessGroup] = None, device: Optional[t
        :func:`_coalescing_manager` currently do not support coalescing all-reduces with different reduce operators, e.g.
        `ReduceOp.SUM` and `ReduceOp.PRODUCT`.
     """
-    if group is None:
-        group = _get_default_group()
+    group = group or _get_default_group()
     op_list = _world.pg_coalesce_state.setdefault(group, [])
     if op_list:
         raise RuntimeError("ProcessGroup has non-empty op list at the start of coalescing")
     if device:
         group._start_coalescing(device)
+    cm = _CoalescingManager()
     try:
-        yield
+        yield cm
     finally:
         op_list = _world.pg_coalesce_state.pop(group)
         fast_path = False
@@ -1527,17 +1539,18 @@ def _coalescing_manager(group: Optional[ProcessGroup] = None, device: Optional[t
                 for op in op_list:
                     tensors.append(op.tensor)
                 opts = AllreduceCoalescedOptions()
-                opts.reduceOp = op_list[0].redop_or_root
+                opts.reduceOp = op_list[0].redop
                 work = group.allreduce_coalesced(tensors, opts)
                 async_op = op_list[0].async_op
-                if async_op and reqs is not None:
-                    reqs.append(work)
+                if async_op:
+                    cm.append(work)
                 else:
                     work.wait()
 
         if not fast_path:
             # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
-            group._end_coalescing(device, reqs)
+            work = group._end_coalescing(device)
+            cm.append(work)
 
 
 def batch_isend_irecv(p2p_op_list):

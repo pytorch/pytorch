@@ -1390,42 +1390,52 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
 
 void ProcessGroupNCCL::startCoalescing() {
   coalescedDevices_.clear();
+  coalescedComms_.clear();
   coalescing_active_ = true;
   groupStart();
 }
 
-void ProcessGroupNCCL::endCoalescing(
-    std::vector<c10::intrusive_ptr<Work>>& reqs) {
-  if (!nccl_use_nonblocking()) {
+c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
+  if (!nccl_use_nonblocking()
+      || coalescedComms_.size() == 0) {  // There is no work being coalesced
     groupEnd();
   } else {
-    std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
-    for (const auto& req : reqs) {
-      auto ncclWork = static_cast<ProcessGroupNCCL::WorkNCCL*>(req.get());
-      ncclComms_.insert(
-          ncclComms_.end(),
-          ncclWork->ncclComms_.begin(),
-          ncclWork->ncclComms_.end());
-    }
-    groupEndNonblocking(ncclComms_);
-  }
-  if (reqs.size() != coalescedDevices_.size()) {
-    TORCH_CHECK(false, "Number of requests do not match number of collectives");
+    // `coalescedComms_` should have same set of comms across collectives
+    auto comms = coalescedComms_[0];
+    groupEndNonblocking(comms);
   }
 
-  int batch_idx = 0;
-  for (const auto& req : reqs) {
-    auto ncclWork = static_cast<ProcessGroupNCCL::WorkNCCL*>(req.get());
-    // @lint-ignore CLANGTIDY
-    std::vector<at::Device> devices = coalescedDevices_[batch_idx];
-    const auto key = getKeyFromDevices(devices);
-    auto& ncclStreams = ncclStreams_[key];
-    for (const auto i : c10::irange(devices.size())) {
-      (*ncclWork->ncclEndEvents_)[i].record(ncclStreams[i]);
-    }
-    batch_idx += 1;
-  }
   coalescing_active_ = false;
+
+  if (coalescedDevices_.size() == 0) {
+    // There is no work being coalesced
+    return nullptr;
+  }
+
+  // `coalescedDevices_` should have same set of devices across collectives
+  auto devices = coalescedDevices_[0];
+
+  // Create Work object
+  auto work = initWork(
+      devices, rank_, OpType::COALESCED, "nccl:coalesced", c10::nullopt);
+
+  // Record stream event
+  // @lint-ignore CLANGTIDY
+  const auto key = getKeyFromDevices(devices);
+  auto& ncclStreams = ncclStreams_[key];
+  for (const auto i : c10::irange(devices.size())) {
+    auto& devEvent = (*work->ncclEndEvents_)[i];
+    devEvent.record(ncclStreams[i]);
+  }
+
+  // Set appropriate work parameters.
+  work->blockingWait_ = blockingWait_;
+  work->avoidRecordStreams_ = avoidRecordStreams_;
+  work->opTimeout_ = options_->timeout;
+  work->store_ = store_;
+
+  workEnqueue(work);
+  return work;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -1461,6 +1471,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   if (coalescing_active_) {
     coalescedDevices_.push_back(devices);
+    coalescedComms_.push_back(ncclComms);
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -1574,7 +1585,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
-  workEnqueue(work);
+  if (!coalescing_active_) {
+    workEnqueue(work);
+  }
 
   return work;
 }
@@ -1624,6 +1637,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (coalescing_active_) {
     coalescedDevices_.push_back(devices);
+    coalescedComms_.push_back(ncclComms);
   }
 
   // First let NCCL streams wait for input tensors allocation streams
@@ -2164,8 +2178,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           _broadcast_oop(outputs_multi_dev, inputs_multi_dev, broadcastOpts);
       works.push_back(work);
     }
-    endCoalescing(works);
-    return initCoalescedWork(works, rank_, OpType::BROADCAST);
+    auto work = endCoalescing();
+    return work;
+    //return initCoalescedWork(works, rank_, OpType::BROADCAST);
   }
 }
 
@@ -2289,8 +2304,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       auto work = _reduce_oop(outputs_multi_dev, inputs_multi_dev, reduceOpts);
       works.push_back(work);
     }
-    endCoalescing(works);
-    return initCoalescedWork(works, rank_, OpType::REDUCE);
+    auto work = endCoalescing();
+    //return initCoalescedWork(works, rank_, OpType::REDUCE);
+    return work;
   }
 }
 
