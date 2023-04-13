@@ -16,7 +16,7 @@ from torch._guards import GuardsCheckpointState
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..config_utils import config
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -899,7 +899,6 @@ class TorchHigherOrderOperator(VariableTracker):
             if len(args) != 4:
                 raise UserError(
                     UserErrorType.COND_OP_RESTRICTION,
-                    f"{UserErrorType.COND_OP_RESTRICTION.name}. "
                     f"Expected 4 arguments but got {len(args)}.\n"
                     f"Usage: cond(pred, true_fn, false_fn, operands)",
                 )
@@ -907,7 +906,6 @@ class TorchHigherOrderOperator(VariableTracker):
             if type(args[0]) not in (TensorVariable, SymNodeVariable, ConstantVariable):
                 raise UserError(
                     UserErrorType.COND_OP_RESTRICTION,
-                    f"{UserErrorType.COND_OP_RESTRICTION.name}. "
                     f"Expect pred to be traced as TensorVariable, "
                     f"SymNodeVariable or ConstantVariable but got {str(type(args[0]))} "
                     f"with original python type {str(args[0].python_type())}.",
@@ -916,8 +914,7 @@ class TorchHigherOrderOperator(VariableTracker):
             # operands
             if type(args[3]) is not ListVariable:
                 raise UserError(
-                    UserErrorType.ANTI_PATTERN,
-                    f"{UserErrorType.COND_OP_RESTRICTION.name}. "
+                    UserErrorType.COND_OP_RESTRICTION,
                     f"Expect operands to be a list but got {args[3].python_type()}",
                 )
             operands = args[3].unpack_var_sequence(tx)
@@ -927,9 +924,7 @@ class TorchHigherOrderOperator(VariableTracker):
             ):
                 raise UserError(
                     UserErrorType.COND_OP_RESTRICTION,
-                    "{error_name}. "
                     "Expect operands to be a list of tensors but got {actual_args}".format(
-                        error_name=UserErrorType.COND_OP_RESTRICTION.name,
                         actual_args=[
                             str(operand.python_type())
                             if isinstance(operand, VariableTracker)
@@ -973,11 +968,8 @@ class TorchHigherOrderOperator(VariableTracker):
                     return speculate_subgraph(
                         args[ix], operands, graph_checkpoint, checkpoint
                     )
-                except TypeError as e:
-                    raise UserError(
-                        UserErrorType.COND_OP_RESTRICTION,
-                        f"{UserErrorType.COND_OP_RESTRICTION.name}. {str(e)}",
-                    )
+                except (Unsupported, TypeError) as e:
+                    raise UserError(UserErrorType.COND_OP_RESTRICTION, str(e))
 
             (
                 true_r,

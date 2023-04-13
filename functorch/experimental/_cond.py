@@ -59,11 +59,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     if len(flat_true_outs) != len(flat_false_outs):
         raise UserError(
             UserErrorType.COND_OP_RESTRICTION,
-            "{error_name}. "
             "Expect true branch and false branch return with same length but got\n"
             "  {true_fn} returns {true_outs}\n"
             "  {false_fn} returns {false_outs}\n".format(
-                error_name=UserErrorType.COND_OP_RESTRICTION.name,
                 true_fn=true_fn.__name__,
                 true_outs=flat_true_outs,
                 false_fn=false_fn.__name__,
@@ -77,12 +75,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if true_out.meta['tensor_meta'] != false_out.meta['tensor_meta']:
             raise UserError(
                 UserErrorType.COND_OP_RESTRICTION,
-                "{error_name}. "
                 "Expect each tensor returned from true branch and false branch "
                 "has exact same metadata but got\n"
                 "  {true_fn} returns {true_tensor_meta}\n"
                 "  {false_fn} returns {false_tensor_meta}\n".format(
-                    error_name=UserErrorType.COND_OP_RESTRICTION.name,
                     true_fn=true_fn.__name__,
                     true_tensor_meta=true_out.meta['tensor_meta'],
                     false_fn=false_fn.__name__,

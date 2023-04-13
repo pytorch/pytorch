@@ -97,6 +97,10 @@ class UserError(Unsupported):
         """
         super().__init__(msg)
         self.error_type = error_type
+        self.message = msg
+
+    def __str__(self):
+        return f"{self.error_type.name}: {self.message}"
 
 
 def unimplemented(msg: str):
