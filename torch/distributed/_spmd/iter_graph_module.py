@@ -639,9 +639,9 @@ class IterGraphModule(nn.Module):
 
     def setup(self, max_iters: int = 0) -> None:
         """
-        This method is used to tell IterGraphModule the iterations to train so
-        that IterGraphModule knows which iteration is the last one and can do
-        proper cleanup.
+        Must be called before the forward() is called. This method setups
+        the internal states and also get the signal from users that what
+        is the maximum iteration count.
         """
         if not self._is_frozen:
             self.graph.freeze_cross_iter_movement()
