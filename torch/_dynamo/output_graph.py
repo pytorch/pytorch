@@ -25,7 +25,7 @@ from torch._guards import (
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-from . import logging as torchdynamo_logging, variables
+from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
@@ -34,7 +34,6 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -199,6 +198,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         root_tx,
         export: bool,
         export_constraints,
+        frame_state,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
@@ -208,6 +208,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
         self.export = export
         self.export_constraints = export_constraints
+        self.frame_state = frame_state
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -658,6 +659,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
 
+    @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
