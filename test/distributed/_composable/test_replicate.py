@@ -16,9 +16,9 @@ from torch.testing._internal.common_utils import run_tests
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(2, 2, bias=False)
-        self.fc2 = nn.Linear(2, 2, bias=False)
-        self.fc3 = nn.Linear(2, 2, bias=False)
+        self.fc1 = nn.Linear(2, 2)
+        self.fc2 = nn.Linear(2, 2)
+        self.fc3 = nn.Linear(2, 2)
 
     def forward(self, x):
         return self.fc3(self.fc2(self.fc1(x)))

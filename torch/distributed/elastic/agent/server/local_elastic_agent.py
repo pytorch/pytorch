@@ -141,7 +141,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
         os.makedirs(base_log_dir, exist_ok=True)
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
-        log.info(f"log directory set to: {dir}")
+        log.info("log directory set to: %s", dir)
         return dir
 
     def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
@@ -152,7 +152,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
-            log.info(f"Starting a FileTimerServer with {watchdog_file_path} ...")
+            log.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             self._worker_watchdog = timer.FileTimerServer(
                 file_path=watchdog_file_path,
                 max_interval=0.1,
@@ -161,7 +161,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._worker_watchdog.start()
             log.info("FileTimerServer started")
         else:
-            log.info(f"Environment variable '{enable_watchdog_env_name}' not found. Do not start FileTimerServer.")
+            log.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
         # Propagate the watchdog file env to worker processes
         if watchdog_file_path is not None:
             for _, worker_env in envs.items():

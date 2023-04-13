@@ -1,5 +1,5 @@
 
-from torch.ao.pruning import BaseSparsifier
+from torch.ao.pruning import BasePruner
 
 from functools import wraps
 import warnings
@@ -12,8 +12,8 @@ class BaseScheduler:
     def __init__(self, sparsifier, last_epoch=-1, verbose=False):
 
         # Attach sparsifier
-        if not isinstance(sparsifier, BaseSparsifier):
-            raise TypeError('{} is not an instance of torch.ao.pruning.BaseSparsifier'.format(
+        if not isinstance(sparsifier, BasePruner):
+            raise TypeError('{} is not an instance of torch.ao.pruning.BasePruner'.format(
                 type(sparsifier).__name__))
         self.sparsifier = sparsifier
 
@@ -124,7 +124,7 @@ class BaseScheduler:
             elif self.sparsifier._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn("Detected call of `scheduler.step()` before `sparsifier.step()`. "
                               "You have to make sure you run the sparsifier.step() BEFORE any "
-                              "calls to the scheduer.step().", UserWarning)
+                              "calls to the scheduler.step().", UserWarning)
         self._step_count += 1
 
         class _enable_get_sl_call:

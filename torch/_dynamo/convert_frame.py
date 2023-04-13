@@ -177,8 +177,11 @@ def has_tensor_in_frame(frame):
             return True
 
     log.debug(
-        f"skipping because no torch.* {frame.f_code.co_name} \
-            {frame.f_code.co_filename} {frame.f_code.co_firstlineno}"
+        "skipping because no torch.* %s \
+            %s %s",
+        frame.f_code.co_name,
+        frame.f_code.co_filename,
+        frame.f_code.co_firstlineno,
     )
 
     return False
@@ -364,8 +367,12 @@ def _compile(
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
                 log.debug(
-                    f"Skipping frame {e} {code.co_name} \
-                    {code.co_filename} {code.co_firstlineno}"
+                    "Skipping frame %s %s \
+                    %s %s",
+                    e,
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
                 )
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")

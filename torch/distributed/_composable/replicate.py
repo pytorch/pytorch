@@ -1,11 +1,11 @@
-from typing import Iterable, Optional, Set, Tuple
+from typing import Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
 
 from torch.nn.parallel import DistributedDataParallel
 
-from .contract import contract
+from .contract import _get_registry, contract
 
 
 @contract()
@@ -29,17 +29,31 @@ def replicate(
     return module
 
 
+def _is_fully_sharded(module: nn.Module) -> bool:
+    r"""Check if module is marked with fully_shard."""
+    return "fully_shard" in _get_registry(module)
+
+
 class _ReplicateState:
-    def __init__(self, ignored_modules) -> None:
-        self.module = None
+    def __init__(self, ignored_modules: Optional[Iterable[torch.nn.Module]]) -> None:
+        self.module: Optional[nn.Module] = None
         self.has_initialized: bool = False
         self._param_list: nn.ParameterList = nn.ParameterList()
         self.kwargs: dict = {}
-        self.ignored_modules = (
+        self.ignored_modules: Set[torch.nn.Module] = (
             set(ignored_modules) if ignored_modules is not None else set()
         )
+        self.ignored_params: Set[torch.nn.Parameter] = {
+            p for m in self.ignored_modules for p in m.parameters()
+        }
+        # Only used for testing
+        self._names: List[str] = []
 
     def mark_module(self, module: nn.Module, **kwargs) -> None:
+        if _is_fully_sharded(module):
+            raise AssertionError(
+                "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+            )
         self.module = module
         replicate.state(module)._params_collected = False
         module.register_forward_pre_hook(self.forward_pre_hook)
@@ -48,18 +62,19 @@ class _ReplicateState:
         self.kwargs = kwargs
 
     def _collect_params(self, module: nn.Module) -> None:
+        # skip if managed by fully_sharded API
+        if _is_fully_sharded(module):
+            return
 
         if module in self.ignored_modules:
             return  # if module A is ignored, all of A's children are also ignored.
 
-        ignored_params: Set[torch.nn.Parameter] = {
-            p for m in self.ignored_modules for p in m.parameters()
-        }
-        data_parallel_param_tup = [(n, p) for n, p in module.named_parameters() if p not in ignored_params]
-        names, params = zip(*data_parallel_param_tup)
-        # _names field is just for testing.
-        replicate.state(module)._names = names
-        self._param_list.extend(params)
+        self._param_list.extend(
+            p for p in module.parameters(recurse=False) if p not in self.ignored_params
+        )
+
+        for child_module in module.children():
+            self._collect_params(child_module)
 
     def init_helper(self) -> None:
         if self.has_initialized:
@@ -68,6 +83,8 @@ class _ReplicateState:
         self.has_initialized = True
 
         self._collect_params(self.module)
+        # Only saved for testing
+        replicate.state(self.module)._names = self._names
 
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
 
