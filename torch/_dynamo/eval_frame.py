@@ -987,13 +987,24 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None):
-    """Decorator and context manager to disable TorchDynamo"""
-    if fn is not None:
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        return DisableContext()(fn)
-    return DisableContext()
+def disable(fn=None, recursive=True):
+    """
+    Decorator and context manager to disable TorchDynamo
+
+    If recursive=True, Dynamo is completely skipped on the decorated function
+    frame as well as the recursively invoked functions.
+
+    If recursive=False, Dynamo skips frames associated with the function code,
+    but still process recursively invoked frames.
+    """
+    if recursive:
+        if fn is not None:
+            fn = innermost_fn(fn)
+            assert callable(fn)
+            return DisableContext()(fn)
+        return DisableContext()
+    else:
+        return skip(fn)
 
 
 def skip(fn=None):
@@ -1037,8 +1048,8 @@ class TorchPatcher:
 
         # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
         if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
-            DistributedDataParallel._inside_ddp_forward = skip(
-                DistributedDataParallel._inside_ddp_forward
+            DistributedDataParallel._inside_ddp_forward = disable(
+                DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
         from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
