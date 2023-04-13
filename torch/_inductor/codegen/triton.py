@@ -1016,15 +1016,15 @@ class TritonKernel(Kernel):
         indirect_name = body.indirect_new
         # Many indirect variables may be mapped to the same CSE'd variable
         # For example when you do x[y, y] for x = randn(3, 8)
-        var_size = collections.defaultdict(list)
+        var_size = collections.defaultdict(set)
         for ind, size in indirect_size.items():
-            var_size[indirect_name[ind]].append(V.kernel.rename_indexing(size))
+            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
 
         indirect_vars = [
             s for s in original_index.free_symbols if s.name.startswith("tmp")
         ]
         for var in indirect_vars:
-            sizes = var_size[var]
+            sizes = list(var_size[var])
             if all(isinstance(s, sympy.Integer) for s in sizes):
                 size = min(sizes)
             else:
@@ -1036,19 +1036,16 @@ class TritonKernel(Kernel):
                         return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
 
                 size = print_min(sizes)
-            cond_gt = f"0 <= {var}"
-            cond_lt = f"{var} < {size}"
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less # error-prone to use and/or/not, which is suported by triton
+            cond = f"((0 <= {var}) & ({var} < {size}))"
             if not isinstance(original_index, sympy.Integer):
                 var_mask = f"({mask})" if "&" in mask else mask
                 var_mask = f" | ~{var_mask}"
             else:
                 var_mask = ""
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less # error-prone to use and/or/not, which is suported by triton
-            line_gt = f'tl.device_assert(({cond_gt}){var_mask}, "index out of bounds: {cond_gt}")'
-            self.cse.generate(buffer, line_gt, assignment=False)
-            line_lt = f'tl.device_assert(({cond_lt}){var_mask}, "index out of bounds: {cond_lt}")'
-            self.cse.generate(buffer, line_lt, assignment=False)
+            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond}")'
+            self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
