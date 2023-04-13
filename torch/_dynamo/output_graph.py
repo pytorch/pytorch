@@ -773,7 +773,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def fake_example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
-            if arg.fake_tensor:
+            if arg.fake_tensor is not None:
                 result.append(arg.fake_tensor)
             else:
                 # Fallback, in case fake_tensor was not set
