@@ -4,6 +4,7 @@ import itertools
 from typing import Optional
 
 import torch
+import torch._dynamo
 import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
@@ -29,7 +30,9 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
         # 2. run FakeTensorProp
         # If (1) and (2) are done with difference FakeTensorMode's, undefined behavior may
         # happen.
-        fake_tensor_mode = fake_tensor.FakeTensorMode()
+        fake_tensor_mode = (
+            torch._dynamo.utils.detect_fake_mode(args) or fake_tensor.FakeTensorMode()
+        )
 
         def to_fake_tensor(x):
             if isinstance(x, torch.Tensor) and not isinstance(

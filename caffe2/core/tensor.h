@@ -356,7 +356,7 @@ class TORCH_API Tensor final {
 
   template <typename T>
   inline T* data() const {
-    return impl_.get()->data<T>();
+    return impl_.get()->mutable_data_dtype_initialized<T>();
   }
 
   inline void* raw_mutable_data(const TypeMeta meta) const {
@@ -662,7 +662,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   }
 }
 
-CAFFE_DECLARE_KNOWN_TYPE(Tensor)
+CAFFE_DECLARE_KNOWN_TYPE(Tensor, Caffe2Tensor)
 } // namespace caffe2
 
 C10_CLANG_DIAGNOSTIC_POP()
