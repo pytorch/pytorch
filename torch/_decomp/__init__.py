@@ -1,15 +1,15 @@
 import inspect
 from collections import defaultdict
-from functools import wraps, lru_cache
+from functools import lru_cache, wraps
 from itertools import chain
 from typing import Callable, Dict, Sequence, Union
 
 import torch
 import torch.library
+from torch._decomp.canonicalizers import canonicalizer_registry
+from torch._decomp.utils import _add_op_to_registry
 from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._pytree import tree_map
-from torch._decomp.utils import _add_op_to_registry
-from torch._decomp.canonicalizers import canonicalizer_registry
 
 __all__ = [
     "decomposition_table",
@@ -144,10 +144,13 @@ def get_decompositions(
             return canonicalizer
 
         def joint_decomp(*args, **kwargs):
+            assert canonicalizer is not None and decomp is not None
             canonical = canonicalizer(*args, **kwargs)
             if canonical is not NotImplemented:
                 return canonical
             return decomp(*args, **kwargs)
+
+        return joint_decomp
 
     decompositions = {}
     for op in aten_ops:

@@ -1,6 +1,7 @@
 import torch
 from torch._ops import OpOverload, OpOverloadPacket
 
+
 def _add_op_to_registry(registry, op, fn):
     """
     This is an internal API for adding an op to the decomposition table.

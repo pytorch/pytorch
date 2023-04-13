@@ -1122,7 +1122,7 @@ def float_power(
     b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
-    return torch.pow(a, b)
+    return pow(a, b)
 
 
 # >>> a = torch.tensor(-0.2500, dtype=torch.float64)

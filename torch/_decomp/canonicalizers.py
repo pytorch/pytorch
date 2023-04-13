@@ -1,13 +1,13 @@
-from typing import Sequence
+from typing import Callable, Dict, Sequence
 
 import torch
-from torch._decomp.utils import _add_op_to_registry
 import torch._prims_common as utils
-from torch._prims_common import TensorOrNumberLikeType, Number, TensorLikeType
+from torch._decomp.utils import _add_op_to_registry
+from torch._prims_common import Number, TensorLikeType, TensorOrNumberLikeType
 
 
 aten = torch._ops.ops.aten
-canonicalizer_registry = {}
+canonicalizer_registry: Dict["torch._ops.OpOverload", Callable] = {}
 
 # A canonicalizer rewrites high level operations in a more "canonical" way. e.g.
 #   torch.mul(x, 1) -> x.clone()
@@ -39,7 +39,6 @@ def pow(
     a: TensorOrNumberLikeType,
     b: TensorOrNumberLikeType,
 ) -> TensorLikeType:
-
     if isinstance(b, Number):
         assert isinstance(a, TensorLikeType)
         if b == 1.0:
@@ -50,6 +49,7 @@ def pow(
             return torch.sqrt(a)
 
     if isinstance(a, Number):
+        assert isinstance(b, TensorLikeType)
         if a == 1.0:
             return torch.fill(b, True)
         if a == 2.0 and (
@@ -63,20 +63,21 @@ def pow(
 @register_canonicalizer(aten.cat.default)
 def cat(tensors, dim=0):
     if len(tensors) == 1:
+        t = tensors[0]
         memory_format = utils.suggest_memory_format(t)
-        return tensors[0].clone(memory_format=memory_format)
+        return t.clone(memory_format=memory_format)
     return NotImplemented
 
 
 @register_canonicalizer(aten.ceil.default)
 def ceil(x):
-    if utils.is_integer_dtype(x):
+    if utils.is_integer_dtype(x.dtype):
         return x.clone()
     return NotImplemented
 
 
 @register_canonicalizer(aten.isnan)
 def isnan(x):
-    if utils.is_integer_dtype(x):
+    if utils.is_integer_dtype(x.dtype):
         return torch.full_like(x, False, dtype=torch.bool)
     return NotImplemented
