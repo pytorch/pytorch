@@ -1015,11 +1015,10 @@ class TritonKernel(Kernel):
         indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
         indirect_name = body.indirect_new
         # Many indirect variables may be mapped to the same CSE'd variable
-        var_size = {}
+        # For example when you do x[y, y] for x = randn(3, 8)
+        var_size = collections.defaultdict(list)
         for ind, size in indirect_size.items():
-            var_size.setdefault(indirect_name[ind], []).append(
-                V.kernel.rename_indexing(size)
-            )
+            var_size[indirect_name[ind]].append(V.kernel.rename_indexing(size))
 
         indirect_vars = [
             s for s in original_index.free_symbols if s.name.startswith("tmp")
@@ -1044,12 +1043,12 @@ class TritonKernel(Kernel):
                 var_mask = f" | ~{var_mask}"
             else:
                 var_mask = ""
-            # The conditions need to be in parens because of Python's operator precedence. 
+            # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less # error-prone to use and/or/not, which is suported by triton
             line_gt = f'tl.device_assert(({cond_gt}){var_mask}, "index out of bounds: {cond_gt}")'
-            self.cse.generate(buffer, line_gt, expression=False)
+            self.cse.generate(buffer, line_gt, assignment=False)
             line_lt = f'tl.device_assert(({cond_lt}){var_mask}, "index out of bounds: {cond_lt}")'
-            self.cse.generate(buffer, line_lt, expression=False)
+            self.cse.generate(buffer, line_lt, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)

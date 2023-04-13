@@ -489,22 +489,22 @@ class CSE:
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable],
         write=True,
-        expression=True,  # If False, we assume it's a statement and returns nothing
+        assignment=True,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
-        assert write or expression
+        assert write or assignment
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
         if cache_key not in self.cache:
-            var = self.newvar() if expression else None
+            var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if expression:
+                if assignment:
                     line = f"{self.prefix}{var} = {expr}{self.suffix}"
                 else:
                     line = f"{expr}{self.suffix}"
