@@ -19896,6 +19896,10 @@ python_ref_db = [
         torch_opinfo_name="any",
     ),
     ReductionPythonRefInfo(
+        "_refs.count_nonzero",
+        torch_opinfo_name="count_nonzero",
+    ),
+    ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,

@@ -191,6 +191,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.bucketize,
             aten.celu,
             aten.col2im,
+            aten.count_nonzero,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
             aten.deg2rad,
