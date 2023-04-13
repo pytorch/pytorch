@@ -16,7 +16,14 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import ceildiv, is_ones, is_zeros, sympy_product, use_triton_template
+from ..utils import (
+    ceildiv,
+    is_ones,
+    is_zeros,
+    pad_listlike,
+    sympy_product,
+    use_triton_template,
+)
 from ..virtualized import V
 from .mm_common import filtered_configs
 
@@ -171,7 +178,18 @@ conv2d_template = TritonTemplate(
 )
 
 aten_convolution = ExternKernelChoice(
-    torch.convolution, "at::convolution", has_out_variant=False
+    torch.convolution,
+    "at::convolution",
+    (
+        "bias",
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ),
+    has_out_variant=False,
 )
 
 
@@ -291,7 +309,10 @@ def convolution(
         weight.get_size()
     )
     ndim = len(kernel_shape)
-    assert ndim == len(stride) == len(padding) == len(dilation) == len(output_padding)
+    stride = pad_listlike(stride, ndim)
+    padding = pad_listlike(padding, ndim)
+    dilation = pad_listlike(dilation, ndim)
+    output_padding = pad_listlike(output_padding, ndim)
 
     if (
         config.conv_1x1_as_mm
@@ -352,28 +373,27 @@ def convolution(
             out_chan,
             in_chan,
         ):
-            choices.append(
-                conv2d_template.generate(
-                    (x, weight),
-                    layout,
-                    KERNEL_H=kernel_shape[0],
-                    KERNEL_W=kernel_shape[1],
-                    STRIDE_H=stride[0],
-                    STRIDE_W=stride[1],
-                    PADDING_H=padding[0],
-                    PADDING_W=padding[1],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/openai/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
+            conv2d_template.maybe_append_choice(
+                choices,
+                (x, weight),
+                layout,
+                KERNEL_H=kernel_shape[0],
+                KERNEL_W=kernel_shape[1],
+                STRIDE_H=stride[0],
+                STRIDE_W=stride[1],
+                PADDING_H=padding[0],
+                PADDING_W=padding[1],
+                GROUPS=groups,
+                # TODO(jansel): try unroll for bigger kernels once fixed:
+                #               https://github.com/openai/triton/issues/1254
+                UNROLL=is_ones(kernel_shape),
+                ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+                **cfg.kwargs,
             )
 
-    return autotune_select_algorithm(choices, args, layout)
+    return autotune_select_algorithm("convolution", choices, args, layout)
 
 
 @register_lowering(aten._convolution)

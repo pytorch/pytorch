@@ -81,6 +81,16 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
+    @make_logging_test(recompiles=True)
+    def test_recompiles(self, records):
+        def fn(x, y):
+            return torch.add(x, y)
+
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
+        fn_opt(torch.ones(1000, 1000), 1)
+        self.assertGreater(len(records), 0)
+
     test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
@@ -143,7 +153,7 @@ class LoggingTests(LoggingTestCase):
 
 
 # single record tests
-exclusions = {"bytecode", "output_code", "schedule", "aot_graphs"}
+exclusions = {"bytecode", "output_code", "schedule", "aot_graphs", "recompiles"}
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
