@@ -1514,13 +1514,18 @@ class ForeachKernel(Kernel):
     def __init__(self, input_names, output_names, layouts):
         super().__init__()
         self.body = IndentedBuffer()
-        self.tensor_elem_counts = [sympy_product(layout.size) for layout in layouts]
+        self.tensor_elem_counts = [
+            int(sympy_product(layout.size)) for layout in layouts
+        ]
+        self.input_vars = []
+        self.output_vars = []
+        self.block_size = 1024
 
         for name in input_names:
-            self.args.input(name)
+            self.input_vars.append(self.args.input(name))
 
         for name in output_names:
-            self.args.output(name)
+            self.output_vars.append(self.args.output(name))
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -1532,9 +1537,7 @@ class ForeachKernel(Kernel):
 
     @staticmethod
     def _gen_tile_loads(
-        left_arg_name,
-        right_arg_name,
-        out_arg_name,
+        arg_names,
         block_ind,
         num_elems,
         block_size,
@@ -1547,14 +1550,13 @@ class ForeachKernel(Kernel):
         code.writeline(f"if pid >= {block_ind} and pid < {upper_bound_pid}:")
         with code.indent():
             code.writeline(f"elem_ind_offset = (pid - {block_ind}) * BLOCK_SIZE")
-            code.writeline(f"left_ptr = {left_arg_name} + elem_ind_offset")
-            code.writeline(f"right_ptr = {right_arg_name} + elem_ind_offset")
-            code.writeline(f"out_ptr = {out_arg_name} + elem_ind_offset")
+            for name in arg_names:
+                code.writeline(f"{name}_ptr = {name} + elem_ind_offset")
             code.writeline(f"if pid == {upper_bound_pid - 1}:")
             with code.indent():
-                f"elem_count = {last_block_elem_count}"
+                code.writeline(f"elem_count = {last_block_elem_count}")
 
-        return
+        return block_ind + num_blocks
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -1568,9 +1570,8 @@ class ForeachKernel(Kernel):
             """
         )
         argdefs, _, signature = self.args.python_argdefs()
+        code.writeline("@triton.jit")
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
-        with code.indent():
-            code.writeline("pass")
         if config.benchmark_kernel:
             code.splice(
                 """
@@ -1580,6 +1581,39 @@ class ForeachKernel(Kernel):
                     from torch._inductor.triton_heuristics import grid
                 """
             )
+
+        def pairwise(a):
+            a, b = itertools.tee(a)
+            next(b, None)
+            return zip(a, b)
+
+        partitioned_args = []
+        for lower, upper in pairwise(
+            range(0, len(argdefs) + 1, len(self.tensor_elem_counts))
+        ):
+            partitioned_args.append(argdefs[lower:upper])
+
+        lefts, rights, outs = partitioned_args
+
+        block_ind = 0
+        with code.indent():
+            for left, right, out in zip(lefts, rights, outs):
+                block_ind = ForeachKernel._gen_tile_loads(
+                    [left, right, out],
+                    block_ind,
+                    self.tensor_elem_counts[0],
+                    self.block_size,
+                    code,
+                )
+
+            code.writeline(
+                "left = tl.load(left_ptr + tl.arange(0, BLOCK_SIZE), mask=elem_count)"
+            )
+            code.writeline(
+                "right = tl.load(right_ptr + tl.arange(0, BLOCK_SIZE), mask=elem_count)"
+            )
+            code.writeline("tmp = left + right")
+            code.writeline("tl.store(out_ptr, tmp, mask=elem_count)")
 
         return code.getvalue()
 
@@ -1950,8 +1984,7 @@ class TritonScheduling:
         with kernel:
             foreach_node.mark_run()
             # foreach_node.codegen()
-
-        src_code = kernel.codegen_kernel()
+            src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, [foreach_node])
         # self.scheduler.free_buffers()
 

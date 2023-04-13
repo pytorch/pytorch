@@ -5,6 +5,7 @@ import itertools
 import logging
 import re
 import textwrap
+import weakref
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
@@ -42,6 +43,7 @@ from .utils import (
     developer_warning,
     sympy_dot,
     sympy_product,
+    sympy_str,
     sympy_subs,
     sympy_symbol,
 )
@@ -94,7 +96,7 @@ def validate_ir(node_or_nodes):
             (
                 DynamicScalar,
                 TensorBox,
-                BufferList,
+                TensorList,
                 RandSeedBuffer,
                 sympy.Symbol,
                 sympy.core.relational.Relational,
@@ -2054,6 +2056,9 @@ class BufferList(IRNode):
     def get_layout(self, ind):
         return self.layouts[ind]
 
+    def get_layouts(self):
+        return self.layouts
+
     def get_storage_numel(self):
         return self.get_numel()
 
@@ -2103,23 +2108,34 @@ class BufferList(IRNode):
 
     @cache_on_self
     def normalized_read_writes(self):
+        class ExtractListLoads(V.MockHandler):
+            def __init__(self):
+                super().__init__()
+                self._reads: Set[dependencies.StarDep] = set()
+
+            def load(self, name: str, index: sympy.Expr) -> str:
+                for name in TensorList.name_to_instance[name].get_names():
+                    self._reads.add(dependencies.StarDep(name))
+                return f"ops.load({name}, {sympy_str(index)})"
+
+        list_load_extractor = ExtractListLoads()
+        with V.set_ops_handler(list_load_extractor):
+            self.data.make_loader()()
+
         name = self.get_name()
-        deps = dependencies.ReadWrites(set(), set(), set())
-        for input in self.data.get_inputs():
-            layout = input.get_layout()
-            indexer = layout.make_indexer()
+        deps = dependencies.ReadWrites(list_load_extractor._reads, set(), set())
 
-            def dummy(index, rindex):
-                assert len(rindex) == 0
-                return ops.store(name, indexer(index), "fake")
+        layout = self.get_layout(0)
+        indexer = layout.make_indexer()
 
-            deps = deps.merge(
-                dependencies.extract_read_writes(dummy, layout.size, (), normalize=True)
-            )
+        def dummy(index, rindex):
+            assert len(rindex) == 0
+            return ops.store(name, indexer(index), "fake")
 
-        deps.reads = {
-            dependencies.StarDep(x.get_name()) for x in self.data.get_inputs()
-        }
+        deps = deps.merge(
+            dependencies.extract_read_writes(dummy, layout.size, (), normalize=True)
+        )
+
         return deps
 
     def get_reads(self):
@@ -3967,31 +3983,96 @@ class StorageBox(MutableBox):
         return len(read_writes.reads)
 
 
+# This class is used to represent a list of tensors
+# Since each list provided as args to a kernel is a
+# different immmutable list object of tensors
+# this is used to track which lists are passed to foreach ops
+# and ensure the same list of args is mapped to the same TensorList
+class TensorList(IRNode):
+    name_to_instance = dict()
+
+    def __init__(self, tensor_boxes, name=None):
+        self.data: Union[ForeachPointwise, list[TensorBox], BufferList] = tensor_boxes
+        self.name = name
+
+    @classmethod
+    def create(cls, tensor_boxes):
+        if isinstance(tensor_boxes, TensorList):
+            return tensor_boxes
+
+        if not isinstance(tensor_boxes, ForeachPointwise):
+            name = "_".join([t.data.realize() for t in tensor_boxes])
+            if name not in TensorList.name_to_instance:
+                TensorList.name_to_instance[name] = cls(tensor_boxes, name)
+
+            return TensorList.name_to_instance[name]
+        else:
+            return cls(tensor_boxes)
+
+    def __getitem__(self, ind):
+        self.realize()
+        assert isinstance(self.data, BufferList)
+        return self.data[ind]
+
+    def is_realized(self):
+        return isinstance(self.data, (BufferList, list))
+
+    def make_loader(self):
+        has_loader = not isinstance(self.data, list)
+        if has_loader:
+            return self.data.make_loader()
+        else:
+
+            def fn():
+                return ops.load(self.name, sympy.Symbol("fake"))
+
+            return fn
+
+    def get_layouts(self):
+        if isinstance(self.data, list):
+            return [t.data.get_layout() for t in self.data]
+        else:
+            return self.data.get_layouts()
+
+    def get_names(self):
+        assert isinstance(self.data, list)
+        return [t.data.get_name() for t in self.data]
+
+    def realize(self):
+        if not self.is_realized():
+            self.data = BufferList(self.data)
+
+
 # This will have some other metadata and stuffs
 class ForeachPointwise(IRNode):
-    def __init__(self, left_inputs, right_inputs):
+    def __init__(self, left_arg, right_arg, op_fn):
         super().__init__()
-        self.layouts = [i.get_layout() for i in left_inputs]
-        self.left_inputs = InputsKernel.unwrap_storage(left_inputs)
-        self.right_inputs = InputsKernel.unwrap_storage(right_inputs)
+        self.layouts = left_arg.get_layouts()
+        self.left_inputs = left_arg
+        self.right_inputs = right_arg
+        self.op_fn = op_fn
 
     @classmethod
     def create(cls, *args, **kwargs):
-        return BufferList(cls(*args, **kwargs))
+        return TensorList.create(cls(*args, **kwargs))
 
     def get_inputs(self):
         return itertools.chain(self.left_inputs, self.right_inputs)
 
-    def body(self, indices):
-        for i, input in enumerate(self.get_inputs()):
-            loader = input.make_loader()
-            loader(indices[i])
+    def make_loader(self):
+        left_loader = self.left_inputs.make_loader()
+        right_loader = self.right_inputs.make_loader()
 
-    def _index(self, ind):
-        return [
-            sympy.Integer(0) if s == 1 else sympy_symbol(f"i{n}")
-            for n, s in enumerate(self.layouts[ind].size)
-        ]
+        def fn():
+            return self.op_fn(left_loader(), right_loader())
+
+        return fn
+
+    def _create_compute_fn(self):
+        pass
+
+    def get_layouts(self):
+        return self.layouts
 
 
 class InterpreterShim(torch.fx.Interpreter):

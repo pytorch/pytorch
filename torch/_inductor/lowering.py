@@ -36,6 +36,7 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    TensorList,
     validate_ir,
     View,
 )
@@ -380,60 +381,18 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(
-    fn,
-    override_return_dtype=None,
-    override_device=None,
-    override_fn_when_input_bool=None,
-    override_fn_when_cuda_float64=None,
-    allow_alpha=False,
-):
+def make_foreach_pointwise(fn):
     def inner(*inputs: List[List[TensorBox]], alpha=None):
-        inputs = [promote_constants(input, override_return_dtype) for input in inputs]
-        if allow_alpha:
-            if alpha is not None and alpha != 1:
-                inputs = list(inputs)
-                inputs[-1] = mul(inputs[-1], alpha)
-        else:
-            assert alpha is None
-        loaders = [[x.make_loader() for x in input] for input in inputs]
         ranges = [input.get_size() for input in inputs[0]]
-        dtype = override_return_dtype or inputs[0][0].get_dtype()
-        is_cuda = decode_device(inputs[0][0].get_device()).type == "cuda"
 
         for ind, other, dims in zip(itertools.count(), inputs[1], ranges):
             assert len(dims) == len(
                 other.get_size()
             ), f"ndim mismatch {fn} {dims} {other.get_size()} at arg list ind {ind}"
 
-        def inner_fn(input_ind, index):
-            assert len(index) == len(
-                ranges[input_ind]
-            ), f"mismatched lengths {index} {ranges[input_ind]} at index {input_ind}"
+        list_inputs = [TensorList.create(input) for input in inputs]
 
-            return fn(loaders[0][input_ind](index), loaders[1][input_ind](index))
-
-        if not override_device:
-            device = None
-            for i in inputs[0]:
-                if i.get_device().type == "cuda":
-                    device = i.get_device()
-                    break
-            if not device:
-                device = inputs[0][0].get_device()
-
-        device = override_device or device
-
-        def new_layout(old_layout):
-            return ir.FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                list(old_layout.size),
-                old_layout.stride,
-                old_layout.offset,
-            )
-
-        return ForeachPointwise.create(inputs[0], inputs[1])
+        return ForeachPointwise.create(*list_inputs, fn)
 
     return inner
 
@@ -510,6 +469,7 @@ def register_pointwise(
 
 def register_foreach_pointwise(
     aten_fn,
+    aten_pointwise_fn,
     name=None,
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -521,19 +481,11 @@ def register_foreach_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
+    pw_name = aten_pointwise_fn.__name__
     fn = ops_wrapper(name)
-    if use_libdevice_for_f64:
-        fn_libdevice = ops_wrapper("libdevice_" + name)
-    if override_fn_when_input_bool is not None:
-        override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
+    pw_fn = ops_wrapper(pw_name)
 
-    fn = make_foreach_pointwise(
-        fn,
-        override_return_dtype=override_return_dtype,
-        override_fn_when_input_bool=override_fn_when_input_bool,
-        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
-        allow_alpha=allow_alpha,
-    )
+    fn = make_foreach_pointwise(pw_fn)
     fn = register_lowering(
         aten_fn,
         broadcast=broadcast,
@@ -3943,7 +3895,7 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List)
+register_foreach_pointwise(aten._foreach_add.List, aten.add)
 
 
 def register_inplace(aten_op, outplace_op):

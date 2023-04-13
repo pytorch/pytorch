@@ -32,13 +32,13 @@ from .exc import (
     MissingOperatorWithoutDecomp,
 )
 from .ir import (
-    BufferList,
     Constant,
     FixedLayout,
     InputBuffer,
     Pointwise,
     Reduction,
     TensorBox,
+    TensorList,
 )
 from .lowering import (
     FALLBACK_ALLOW_LIST,
@@ -363,7 +363,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def call_function(self, target, args, kwargs):
         if target is operator.getitem and isinstance(
-            args[0], (list, tuple, BufferList)
+            args[0], (list, tuple, TensorList)
         ):
             return super().call_function(target, args, kwargs)
 
