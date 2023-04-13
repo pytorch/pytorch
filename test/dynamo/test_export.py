@@ -1872,7 +1872,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
-    @skipIfRocm 
+    @skipIfRocm
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):

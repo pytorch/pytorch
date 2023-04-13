@@ -379,7 +379,7 @@ if not TEST_WITH_ROCM:
 else:
     # aten.miopen_batch_norm is unsupported for lowering
     inductor_expected_failures_single_sample["cuda"]["nn.functional.batch_norm"] = {f16, f32}
-    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {f16, f32}  
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {f16, f32}
 
 inductor_should_fail_with_exception = defaultdict(dict)
 

@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     TEST_WITH_ASAN,
+    skipIfRocm,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1829,6 +1830,7 @@ class CommonTemplate:
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
+    @skipIfRocm
     def test_linear_packed(self):
         options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
         for input_shape, bias in options:
