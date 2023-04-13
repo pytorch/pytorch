@@ -997,26 +997,41 @@ def emit_body(
     view_info = get_view_info(f)
 
     is_inplace_foreach = name.startswith("_foreach") and inplace
-
-    inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
-    if is_inplace_foreach and info is not None:
-        assert (
-            len(f.func.arguments.flat_non_out)
-            == len(info.func.func.arguments.flat_non_out)
-        ) or (
-            # These two lack `alpha` of scaling factor to applied to the right hand side argument.
-            f.func.name.name.base in ("_foreach_add", "_foreach_sub")
-            and f.func.name.overload_name in ("Scalar", "ScalarList")
-        ), (
-            f"{f.func.name.name.base}.{f.func.name.overload_name} has {len(f.func.arguments.flat_non_out)} args "
-            f"but the reference has {len(info.func.func.arguments.flat_non_out)}"
-        )
-        for foreach_arg, ref_arg in zip(
-            f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
-        ):
-            foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
-            assert foreach_arg_type == ref_arg.type
-            inplace_foreacharg2refarg[foreach_arg] = ref_arg
+    if is_inplace_foreach:
+        inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
+        if info is None:
+            # FIXME(crcrpar): Let `_foreach_zero_` have backward.
+            assert (
+                (
+                    # No reference backward available due to the lack of `{maximum, minimum}(tensor, scalar)`.
+                    f.func.name.name.base in ("_foreach_maximum", "_foreach_minimum")
+                    and f.func.name.overload_name in ("Scalar", "ScalarList")
+                )
+                or (
+                    # No reference backward available as addcdiv/addcmul don't support Tensor as scaling factor.
+                    f.func.name.name.base in ("_foreach_addcdiv", "_foreach_addcmul")
+                    and f.func.name.overload_name == "Tensor"
+                )
+                or f.func.name.name.base == "_foreach_zero"
+            ), f"{f.func.name}"
+        else:
+            assert (
+                len(f.func.arguments.flat_non_out)
+                == len(info.func.func.arguments.flat_non_out)
+            ) or (
+                # These two lack `alpha` of scaling factor to applied to the right hand side argument.
+                f.func.name.name.base in ("_foreach_add", "_foreach_sub")
+                and f.func.name.overload_name in ("Scalar", "ScalarList")
+            ), (
+                f"{f.func.name.name.base}.{f.func.name.overload_name} has {len(f.func.arguments.flat_non_out)} args "
+                f"but the reference has {len(info.func.func.arguments.flat_non_out)}"
+            )
+            for foreach_arg, ref_arg in zip(
+                f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
+            ):
+                foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
+                assert foreach_arg_type == ref_arg.type
+                inplace_foreacharg2refarg[foreach_arg] = ref_arg
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -1041,7 +1056,7 @@ def emit_body(
     @with_native_function
     def gen_differentiable_inputs(f: NativeFunction) -> List[DifferentiableInput]:
         arguments = list(f.func.arguments.non_out)
-        if inplace_foreacharg2refarg:
+        if is_inplace_foreach and info is not None:
             for i, arg in enumerate(f.func.arguments.flat_non_out):
                 if arg in inplace_foreacharg2refarg:
                     mapped_arg = inplace_foreacharg2refarg[arg]
@@ -1227,7 +1242,7 @@ def emit_body(
             list_like_arg = "self"
             args = [arg.name for arg in args_with_derivatives]
             for i, arg in enumerate(args):
-                if inplace_foreacharg2refarg:
+                if is_inplace_foreach and info is not None:
                     for foreach_arg, ref_arg in inplace_foreacharg2refarg.items():
                         if arg == ref_arg.name:
                             args[i] = foreach_arg.name + (
@@ -1330,7 +1345,7 @@ def emit_body(
             foreacharg: Optional[Argument] = None
             is_foreacharg_list_type: bool = False
             remove_underscore_before_replace: bool = False
-            if inplace_foreacharg2refarg:
+            if is_inplace_foreach and info is not None:
                 for _foreacharg, refarg in inplace_foreacharg2refarg.items():
                     if refarg.name == name or (
                         refarg.name in name and "scalar_type" in name
