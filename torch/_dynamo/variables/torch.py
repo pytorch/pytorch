@@ -13,9 +13,8 @@ from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 
-from .. import variables
+from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..config_utils import config
 from ..exc import unimplemented
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
@@ -783,6 +782,7 @@ class TorchHigherOrderOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -887,9 +887,12 @@ class TorchHigherOrderOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-
             assert len(args) == 4
-            assert type(args[0]) in (TensorVariable, SymNodeVariable), str(
+            assert type(args[0]) in (
+                TensorVariable,
+                SymNodeVariable,
+                ConstantVariable,
+            ), str(
                 type(args[0])
             )  # predicate
             assert isinstance(
