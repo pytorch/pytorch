@@ -21,13 +21,13 @@ def functional_call(
     and buffers with the provided ones.
 
     .. note:: If the module has active parametrizations, passing a value in the
-        :attr:`parameters_and_buffers` argument with the name set to the regular parameter
+        :attr:`parameter_and_buffer_dicts` argument with the name set to the regular parameter
         name will completely disable the parametrization.
         If you want to apply the parametrization function to the value passed
         please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
     .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected
-        in the ``parameters_and_buffers`` input.
+        in the ``parameter_and_buffer_dicts`` input.
 
 
          Example::
@@ -102,7 +102,7 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffers (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
+        parameters_and_buffer_dicts (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
             the module call. If given a tuple of dictionaries, they must have distinct keys so that all dictionaries can
             be used together
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
