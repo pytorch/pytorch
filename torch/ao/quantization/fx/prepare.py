@@ -501,7 +501,7 @@ def _get_arg_target_dtype_as_output(
     else:
         if "target_dtype_info" in arg.meta:
             output_act_obs_or_fq_ctr = \
-                arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+                arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
         else:
             output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
     output_act_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
