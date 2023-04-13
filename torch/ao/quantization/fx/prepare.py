@@ -628,6 +628,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 # input etc.
                 arg_as_input_target_is_dynamic and arg is node.args[0]
             )
+        # if node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] == None
+        # or node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"] == None
+        needs_obs = needs_obs and (act_post_process_ctr is not None)
 
     else:
         assert qconfig is not None
@@ -801,6 +804,7 @@ def _maybe_insert_output_observer_for_node(
 
     output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
     target_dtype, is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    should_insert_observer = (target_dtype is not None)
     should_insert_observer = target_dtype not in _DO_NOT_OBS_DTYPE_LIST + [torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
