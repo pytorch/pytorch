@@ -269,7 +269,7 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     fake_mode = detect_fake_mode(example_inputs)
     if config.cpp.weight_prepack:
-        if not fake_mode.allow_non_fake_inputs:
+        if not fake_mode or not fake_mode.allow_non_fake_inputs:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         gm = pack_module(gm)

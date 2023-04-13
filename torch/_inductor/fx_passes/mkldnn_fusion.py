@@ -274,7 +274,7 @@ if torch._C.has_mkldnn:
             return False
         if any(
             (not isinstance(n.args[0].meta.get("val", None), torch.Tensor))
-            or (not isinstance(n.args[1].meta.get("val", None), torch.Tensor))
+            or not isinstance(n.args[1].meta.get("val", None), torch.Tensor)
             for n in binary_nodes
         ):
             return False
