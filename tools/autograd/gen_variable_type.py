@@ -609,6 +609,8 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """
 )
 
+# note(crcrpar): `compute_requires_grad` in the template below is supplied with arguments indexed with `i`
+# while the `SETUP_ANY_REQUIRES_GRAD` above takes whole tensors and scalars.
 ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 for (const auto& i : c10::irange( ${irange} )) {
