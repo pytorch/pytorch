@@ -8,7 +8,7 @@ class LambdaSL(BaseScheduler):
     """Sets the sparsity level of each parameter group to the final sl
     times a given function. When last_epoch=-1, sets initial sl as zero.
     Args:
-        sparsifier (BaseSparsifier): Wrapped sparsifier.
+        pruner (BasePruner): Wrapped pruner.
         sl_lambda (function or list): A function which computes a multiplicative
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in sparsifier.param_groups.
