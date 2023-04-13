@@ -530,7 +530,7 @@ def _convert_to_distributed(
 
         elif node.op == OP.CALL_FUNCTION:
             if node.target == torch.ops.aten.sym_numel:
-                node_to_obj[node] = args[0].numel()
+                node_to_obj[node] = args[0].numel()  # type: ignore[has-type]
             else:
                 args = tree_map(partial(_remap_arg, node_to_obj), node.args)
                 kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
