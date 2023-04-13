@@ -1,5 +1,6 @@
 import builtins
 import collections
+import enum
 import importlib
 import itertools
 import logging
@@ -597,7 +598,11 @@ class GuardBuilder(GuardBuilderBase):
             weakref.ref(type(guarded_object)) if guarded_object is not None else None
         )
         obj_ref = None
-        if hasattr(guarded_object.__class__, "__weakref__"):
+        # Not necessary to have weakref for Enum type, but there is a bug that
+        # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
+            guarded_object, enum.Enum
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(

@@ -475,23 +475,29 @@ class WrapperCodeGen(CodeGen):
         for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
             code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
 
-    def codegen_sizevar(self, x: Expr) -> str:
+    def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
+    def codegen_sizevar(self, x: Expr) -> str:
+        return self.codegen_python_sizevar(x)
+
+    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_python_sizevar, shape))
         if len(parts) == 0:
             return "()"
         if len(parts) == 1:
             return f"({parts[0]}, )"
         return f"({', '.join(parts)})"
 
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        return self.codegen_python_shape_tuple(shape)
+
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
-                f"{self.codegen_shape_tuple(shape)}, "
-                f"{self.codegen_shape_tuple(stride)}, "
+                f"{self.codegen_python_shape_tuple(shape)}, "
+                f"{self.codegen_python_shape_tuple(stride)}, "
                 f"device='{device}', dtype={dtype})"
             )
 
