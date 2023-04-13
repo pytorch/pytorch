@@ -42,7 +42,7 @@ template <typename T>
 void memcpy_from_mapping_impl(api::MemoryMap& src_mapping, Tensor& dst) {
   T* data_ptr = src_mapping.template data<T>();
   memcpy(
-      dst.data_ptr<T>(),
+      dst.mutable_data_ptr<T>(),
       data_ptr,
       std::min(src_mapping.nbytes(), dst.nbytes()));
 }
