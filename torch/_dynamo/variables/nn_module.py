@@ -264,10 +264,17 @@ class NNModuleVariable(VariableTracker):
                     # to avoid treating it as lazy on subsequent recompile.
                     assert len(kwargs) == 0
                     if hasattr(mod, "_initialize_hook"):
+
+                        def convert_to_fake(x):
+                            if isinstance(x, torch.fx.Proxy):
+                                return get_fake_value(x.node, tx)
+                            else:
+                                return x
+
                         input = [
-                            type(arg)([get_fake_value(x.node, tx) for x in arg])
+                            type(arg)([convert_to_fake(x) for x in arg])
                             if isinstance(arg, (list, tuple))
-                            else get_fake_value(arg.node, tx)
+                            else convert_to_fake(arg)
                             for arg in proxy_args_kwargs(args, {})[0]
                         ]
                         mod._infer_parameters(mod, input)
