@@ -273,8 +273,8 @@ if torch._C.has_mkldnn:
         if len(binary_nodes) < 1:
             return False
         if any(
-            not isinstance(n.args[0].meta.get("val", None), torch.Tensor)
-            or not isinstance(n.args[1].meta.get("val", None), torch.Tensor)
+            (not isinstance(n.args[0].meta.get("val", None), torch.Tensor))
+            or (not isinstance(n.args[1].meta.get("val", None), torch.Tensor))
             for n in binary_nodes
         ):
             return False
@@ -290,6 +290,7 @@ if torch._C.has_mkldnn:
             return False
         if any(
             n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
+            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
             for n in binary_nodes
         ):
             return False

@@ -9,7 +9,7 @@ from torch._dynamo import config as dynamo_config
 
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import replace_node_module
-from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.modules.utils import _pair
 from . import config
 
@@ -269,8 +269,9 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     fake_mode = detect_fake_mode(example_inputs)
     if config.cpp.weight_prepack:
-        if not dynamo_config.dynamic_shapes:
-            ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+        if not fake_mode.allow_non_fake_inputs:
+            fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
         gm = pack_module(gm)
     return gm
 
@@ -278,14 +279,25 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 def pack_module(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
     for node in gm.graph.nodes:
-        if node.op == "call_module":
+        if node.op == "call_module" and isinstance(
+            node.args[0].meta.get("val", None), torch.Tensor
+        ):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
+                import pdb
+
+                pdb.set_trace()
+                if (
+                    cur_module.weight.device != torch.device("cpu")
+                    or cur_module.weight.dtype not in [torch.float16, torch.float32]
+                    or node.args[0].meta["val"].device != cur_module.weight.device
+                    or node.args[0].meta["val"].dtype != cur_module.weight.dtype
+                ):
+                    continue
                 if cur_module.training:
                     continue
                 if dynamo_config.dynamic_shapes:
-                    computation_node_input_meta = None
                     computation_node_input_size = None
                     if (
                         type(cur_module) in [torch.nn.Linear]
@@ -293,8 +305,7 @@ def pack_module(gm: torch.fx.GraphModule):
                     ):
                         continue
                 else:
-                    computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                    computation_node_input_size = computation_node_input_meta.shape
+                    computation_node_input_size = node.args[0].meta["val"].shape
                     if type(cur_module) in [torch.nn.Linear]:
                         # for fp32 linear, only packed when has mkl.
                         if (

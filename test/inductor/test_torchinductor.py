@@ -1485,6 +1485,18 @@ class CommonTemplate:
             ),
         )
 
+    def test_linear_float64(self):
+        # https://github.com/pytorch/pytorch/issues/98979
+        mod = torch.nn.Sequential(torch.nn.Linear(8, 16).to(torch.float64)).eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(2, 8).to(torch.float64),))
+
+    def test_linear_mixed_device(self):
+        # https://github.com/pytorch/pytorch/issues/96406
+        mod = torch.nn.Sequential(torch.nn.Linear(8, 16)).cuda().eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(2, 8),))
+
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
