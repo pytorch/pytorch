@@ -128,8 +128,9 @@ def get_decompositions(
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
     decomp_registry = global_decomposition_table[type]
+    registered_ops = decomp_registry.keys() | canonicalizer_registry.keys()
     packets_to_overloads = defaultdict(list)
-    for opo in registry:
+    for opo in registered_ops:
         packets_to_overloads[opo.overloadpacket].append(opo)
 
     def canonical_decomp(overload):
@@ -153,7 +154,7 @@ def get_decompositions(
         if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
                 decompositions[op_overload] = canonical_decomp(op_overload)
-        elif isinstance(op, OpOverload) and op in registry:
+        elif isinstance(op, OpOverload) and op in registered_ops:
             decompositions[op] = canonical_decomp(op)
 
     return decompositions
@@ -169,7 +170,7 @@ import torch._refs
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[OpOverload, Callable]:
     # Canonicalizers never call prims
-    decompositions = canonicalizer_registry.clone()
+    decompositions = canonicalizer_registry.copy()
     # Select only decompositions not using prims
     decompositions.update(get_decompositions(_get_core_decomposition_ops()))
     return decompositions
@@ -177,6 +178,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
 
 @lru_cache(None)
 def _get_core_decomposition_ops():
+    aten = torch.ops.aten
     return [
         aten._adaptive_avg_pool2d_backward,
         aten.addcdiv,
