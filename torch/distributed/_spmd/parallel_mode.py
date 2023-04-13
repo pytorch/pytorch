@@ -22,6 +22,8 @@ class ParallelMode(ABC):
     def partition(
         self,
         gm: GraphModule,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
         params_and_buffers: Dict[str, Any],
         named_states: Dict[str, Any],
         args: Tuple[Any, ...],
@@ -29,6 +31,9 @@ class ParallelMode(ABC):
     ) -> GraphModule:
         """
         Partition a single device graph to a distributed graph.
+
+        TODO(@wanchaol): some of these arguments are not necessary for
+        partitioning, remove the unnecessary ones later.
         """
         raise NotImplementedError()
 
@@ -45,10 +50,10 @@ class ParallelMode(ABC):
         raise NotImplementedError()
 
 
-class DTensorFallbackMode(ParallelMode):
+class DTensorExpandMode(ParallelMode):
     """
-    The DTensor fallback parallel mode. It's replicating the parameters
-    and shard the inputs to represent DDP like behavior, it's currently
+    The DTensor Expand mode. It's replicating the parameters and
+    shard the inputs to represent DDP like behavior, it's currently
     a transitent mode before we move to the new data parallel expansion.
     """
 
@@ -65,6 +70,8 @@ class DTensorFallbackMode(ParallelMode):
     def partition(
         self,
         gm: GraphModule,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
         params_and_buffers: Dict[str, Any],
         named_states: Dict[str, Any],
         args: Tuple[Any, ...],

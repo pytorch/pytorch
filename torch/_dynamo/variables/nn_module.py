@@ -216,7 +216,8 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for child_name, submod in mod.named_children():
+                # TODO: Use named_children when it supports remove_duplicate=False.
+                for child_name, submod in mod._modules.items():
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
@@ -264,8 +265,10 @@ class NNModuleVariable(VariableTracker):
                     assert len(kwargs) == 0
                     if hasattr(mod, "_initialize_hook"):
                         input = [
-                            get_fake_value(x.node, tx)
-                            for x in proxy_args_kwargs(args, {})[0]
+                            type(arg)([get_fake_value(x.node, tx) for x in arg])
+                            if isinstance(arg, (list, tuple))
+                            else get_fake_value(arg.node, tx)
+                            for arg in proxy_args_kwargs(args, {})[0]
                         ]
                         mod._infer_parameters(mod, input)
                     fn = mod.__call__
