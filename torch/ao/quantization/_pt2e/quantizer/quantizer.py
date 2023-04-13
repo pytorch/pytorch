@@ -1,6 +1,6 @@
 import types
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import List, NamedTuple, Optional, Union
 
 import torch
@@ -19,8 +19,17 @@ SUPPORTED_QSCHEMES = [
     torch.per_channel_affine_float_qparams,
 ]
 
+# TODO: add support for torch dtype in quant code base
+# this includes observers and prepare/convert code
+_TORCH_DTYPE_TO_QDTYPE = {
+    torch.int8: torch.qint8,
+    torch.uint8: torch.quint8,
+    torch.int32: torch.qint32,
+    torch.float16: torch.float16,
+}
 
-@dataclass(eq=True, frozen=True)
+
+@dataclass(eq=True)
 class QuantizationSpec:
     dtype: torch.dtype
     is_dynamic: bool = False
@@ -33,6 +42,18 @@ class QuantizationSpec:
         # check dtype is one of the supported types
         if self.dtype not in SUPPORTED_DTYPES:
             raise TypeError(f"Unsupported dtype {self.dtype}.")
+
+        if self.quant_max is None:
+            if self.dtype in [torch.float16, torch.float32]:
+                self.quant_max = torch.finfo(self.dtype).max
+            else:
+                self.quant_max = torch.iinfo(self.dtype).max
+
+        if self.quant_min is None:
+            if self.dtype in [torch.float16, torch.float32]:
+                self.quant_max = torch.finfo(self.dtype).min
+            else:
+                self.quant_max = torch.iinfo(self.dtype).min
 
         # quant_min must be less than quant_max
         if (
@@ -52,6 +73,12 @@ class QuantizationSpec:
         # but no way to check here. Just check that it is not < 0.
         if self.ch_axis is not None and self.ch_axis < 0:
             raise ValueError("Ch_axis is < 0.")
+
+
+def get_observer_kwargs(quant_spec: QuantizationSpec):
+    kwargs_dict = asdict(quant_spec)
+    kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
+    return kwargs_dict
 
 
 # In the absence of better name, just winging it with QuantizationConfig
@@ -107,5 +134,5 @@ class Quantizer(ABC):
     # to convey the desired way of quantization
     @classmethod
     @abstractmethod
-    def get_supported_operators(self) -> List[OperatorConfig]:
+    def get_supported_operators(cls) -> List[OperatorConfig]:
         pass
