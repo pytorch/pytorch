@@ -30,7 +30,6 @@ import unittest
 import weakref
 
 import torch
-import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
 
 
@@ -137,7 +136,6 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {

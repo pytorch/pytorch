@@ -14,7 +14,7 @@ class _ConvBnPattern(nn.Module):
         super().__init__()
         self.conv = nn.Conv2d(1, 1, 1)
         self.bn = nn.BatchNorm2d(1)
-    
+
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
@@ -39,8 +39,7 @@ class _FusedQATConvBnPattern(nn.Module):
         Approximated method to fuse conv and bn. It requires only one forward pass.
         conv_orig = conv / scale_factor where scale_factor = bn.weight / running_std
         """
-        # TODO: deduplicate from nniqat.ConvBn2d
-        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)  # type: ignore[operator, arg-type]
         scale_factor = self.bn.weight / running_std
         weight_shape = [1] * len(self.weight.shape)
         weight_shape[0] = -1
@@ -86,21 +85,22 @@ def _fuse_conv_bn_qat(m: GraphModule):
     m.recompile()
 
     # Copy over metadata from original subgraph
+    # This ensures the stack traces and annotations are preserved in the new subgraph
     for mr in match_and_replacement:
-        # Find replaced conv and bn nodes by climbing upwards from anchor node
-        assert len(mr.replacements) == 1, "expected only one replaced node"
-        replaced_conv_node = None
-        replaced_bn_node = None
-        replaced_anchor = mr.replacements[0]
-        assert replaced_anchor.target == operator.getitem
-        n = replaced_anchor
-        while replaced_conv_node is None or replaced_bn_node is None:
+        # Find replacement conv and bn nodes by climbing upwards from anchor node
+        assert len(mr.replacements) == 1, "expected only one replacement node"
+        replacement_conv_node = None
+        replacement_bn_node = None
+        replacement_anchor = mr.replacements[0]
+        assert replacement_anchor.target == operator.getitem
+        n = replacement_anchor
+        while replacement_conv_node is None or replacement_bn_node is None:
             if n.target == torch.ops.aten.convolution.default:
-                replaced_conv_node = n
+                replacement_conv_node = n
             if n.target == torch.ops.aten._native_batch_norm_legit.default:
-                replaced_bn_node = n
+                replacement_bn_node = n
+            assert isinstance(n.args[0], Node)
             n = n.args[0]
-            assert isinstance(n, Node)
 
         # Copy over metadata for conv node, bn node, conv args, bn args, and bn users
         for match_pattern_node, original_node in mr.nodes_map.items():
@@ -108,19 +108,19 @@ def _fuse_conv_bn_qat(m: GraphModule):
                 # Matched: conv(_, weight, bias, ...)
                 (_, weight, bias, *_) = match_pattern_node.args
                 # Replaced: conv(_, mul(weight, ...), zeros_like(bias), ...)
-                (_, mul_node, zeros_like_node, *_) = replaced_conv_node.args
+                (_, mul_node, zeros_like_node, *_) = replacement_conv_node.args
                 assert mul_node.target == torch.ops.aten.mul.Tensor
                 assert zeros_like_node.target == torch.ops.aten.zeros_like.default
                 mul_node.args[0].meta = mr.nodes_map[weight].meta
                 zeros_like_node.args[0].meta = mr.nodes_map[bias].meta
-                replaced_conv_node.meta = original_node.meta
+                replacement_conv_node.meta = original_node.meta
             if match_pattern_node.target == torch.ops.aten._native_batch_norm_legit.default:
                 (_, weight, bias, running_mean, running_var, *_) = match_pattern_node.args
-                replaced_bn_node.args[1].meta = mr.nodes_map[weight].meta
-                replaced_bn_node.args[2].meta = mr.nodes_map[bias].meta
-                replaced_bn_node.args[3].meta = mr.nodes_map[running_mean].meta
-                replaced_bn_node.args[4].meta = mr.nodes_map[running_var].meta
-                replaced_bn_node.meta = original_node.meta
+                replacement_bn_node.args[1].meta = mr.nodes_map[weight].meta
+                replacement_bn_node.args[2].meta = mr.nodes_map[bias].meta
+                replacement_bn_node.args[3].meta = mr.nodes_map[running_mean].meta
+                replacement_bn_node.args[4].meta = mr.nodes_map[running_var].meta
+                replacement_bn_node.meta = original_node.meta
             if match_pattern_node.target == operator.getitem:
-                replaced_anchor.meta = original_node.meta
+                replacement_anchor.meta = original_node.meta
     return m
