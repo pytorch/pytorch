@@ -1,5 +1,3 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
-
 # This file is copied from Meta internal repo and is not synced with the
 # internal version. Once the internal version is fully mature, we should
 # upstream again and retire the internal version. @yifuwang
@@ -8,8 +6,9 @@ import logging
 import operator
 from typing import Callable, List, Optional, Set, Tuple
 
-import torch
 from functorch import make_fx
+
+import torch
 
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.decomposition import select_decomp_table
@@ -54,7 +53,7 @@ def _is_container_node(node: torch.fx.Node) -> bool:
     return False
 
 
-def _lower_subgraph_nodes(  # noqa
+def _lower_subgraph_nodes(
     gm: torch.fx.GraphModule,
     subgraph_name: str,
     subgraph_nodes: List[torch.fx.Node],
@@ -122,8 +121,7 @@ def _lower_subgraph_nodes(  # noqa
 
     subgraph_module = _create_subgraph_module(inputs, body, outputs)
     readable_tag = dumper(str(subgraph_module.graph))
-    subgraph_module = _InductorModule(subgraph_module)
-    setattr(gm, subgraph_name, subgraph_module)
+    setattr(gm, subgraph_name, _InductorModule(subgraph_module))
 
     insertion_point = subgraph_nodes[-1].next
     for node in prologue:
@@ -168,13 +166,13 @@ class _InductorModule(torch.nn.Module):
             decomp_gm = make_fx(self.gm, decomposition_table=inductor_decompositions)(
                 *args
             )
-            logging.info(f"Lowering subgraph ({tag}) to Inductor...")
+            logger.info("Lowering subgraph (%s) to Inductor...", tag)
             self.compiled = compile_fx_inner(
                 decomp_gm,
                 list(args),
                 cudagraphs=False,
             )
-            logging.info(f"Completed lowering subgraph ({tag}) to Inductor")
+            logger.info("Completed lowering subgraph (%s) to Inductor", tag)
         with torch.profiler.record_function(tag):
             assert self.compiled is not None
             return self.compiled(list(args))
@@ -249,8 +247,8 @@ def partial_lower(
             nodes_per_subgraph[-1].append(ptr)
         else:
             if len(nodes_per_subgraph[-1]) > 0:
-                logging.warning(
-                    f"partial_lower: graph break at {ptr}. Reason: {reason}"
+                logger.warning(
+                    "partial_lower: graph break at %s. Reason: %s", str(ptr), reason
                 )
             nodes_per_subgraph.append([])
         ptr = ptr.next
