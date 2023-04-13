@@ -1099,29 +1099,40 @@ class TestPrims(TestCase):
         make_arg = partial(make_tensor, device=device, dtype=dtype)
 
         inp = make_arg((4, 1))
-        # as_strided_scatter in prim is only making a clone of input
-        # and doesn't copy from src, clone src of itself for testing
-        src = inp.clone()
+        src = make_arg((4, 1))
         out = prims.as_strided_scatter(
             inp,
             src,
-            size=inp.size(),
-            stride=inp.stride(),
+            size=(4, 1),
+            stride=(1, 1),
             storage_offset=0,
         )
         self.assertEqual(src, out)
 
-        # test with tensor with offset (view)
-        src = inp[1].clone()
+        # test with view input
+        src = make_arg((1,))
         out = prims.as_strided_scatter(
             inp[1],
             src,
-            size=inp[1].size(),
-            stride=inp[1].stride(),
+            size=(1,),
+            stride=(1,),
             storage_offset=1,
         )
         # shoud not raise size check error
         self.assertEqual(src, out)
+
+        # test with view input but copy src to outside the view
+        out = prims.as_strided_scatter(
+            inp[1],
+            src,
+            size=(1,),
+            stride=(1,),
+            storage_offset=2,
+        )
+        # shoud not raise size check error
+        # since src is copy to storage_offset=2
+        # out will still be same as inp[1]
+        self.assertEqual(inp[1], out)
 
 
 class TestPrimsBasic(TestCase):

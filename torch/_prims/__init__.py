@@ -1814,19 +1814,17 @@ def _as_strided_scatter_meta(
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
-    input_length = utils.compute_required_storage_length(
-        input.size(), input.stride(), input.storage_offset()
-    )
-    required_view_length = utils.compute_required_storage_length(
+    input_size = input.untyped_storage().size()
+    required_view_size = input.element_size() * utils.compute_required_storage_length(
         size, stride, storage_offset
     )
     utils.check(
-        input_length >= required_view_length,
+        input_size >= required_view_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
             f" and itemsize {input.element_size()} requiring a storage size of "
-            f"{required_view_length * input.element_size()} are out of bounds "
-            f"for storage of size {input_length * input.element_size()}"
+            f"{required_view_size} are out of bounds "
+            f"for storage of size {input_size}"
         ),
     )
     utils.check(
