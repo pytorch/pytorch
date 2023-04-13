@@ -1,7 +1,7 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 
 namespace at::native {
 namespace mps {
@@ -262,8 +262,7 @@ Tensor& logit_out_mps(const Tensor& self, c10::optional<double> eps, Tensor& res
 }
 
 Tensor logit_mps(const Tensor& self, c10::optional<double> eps) {
-  Tensor result =
-      at::native::empty_mps(self.sizes(), ScalarType::Float, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor result = at::empty(self.sizes(), ScalarType::Float, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }

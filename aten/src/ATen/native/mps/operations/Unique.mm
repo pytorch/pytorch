@@ -1,8 +1,8 @@
 //  Copyright © 2022 Apple Inc.
-
+#include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
-#include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
 namespace mps {
@@ -263,10 +263,11 @@ std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   if (!return_counts)
     countsShape = {};
 
-  Tensor output = at::native::empty_mps(outputShape, input.scalar_type(), c10::nullopt, kMPS);
-  Tensor inverse_indices = at::native::empty_mps(inverseIndicesShape, ScalarType::Long, c10::nullopt, kMPS);
-  Tensor counts = at::native::empty_mps(countsShape, ScalarType::Long, c10::nullopt, kMPS);
-  Tensor length = at::native::empty_mps({1}, ScalarType::Int, c10::nullopt, kMPS);
+  Tensor output = at::empty(outputShape, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor inverse_indices =
+      at::empty(inverseIndicesShape, ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor counts = at::empty(countsShape, ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor length = at::empty({1}, ScalarType::Int, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (input.numel() == 0) {
     return std::make_tuple(output, inverse_indices, counts);
