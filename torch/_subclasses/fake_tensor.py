@@ -1157,6 +1157,8 @@ class FakeTensorMode(TorchDispatchMode):
 
             return converter(self, args[0])
 
+        # Recompute flat_arg_fake_tensors here again in case some of the inputs
+        # were real tensors and fakified in validate_and_convert_non_fake_tensors
         args, kwargs, flat_arg_fake_tensors = self.validate_and_convert_non_fake_tensors(
             func, converter, args, kwargs
         )
