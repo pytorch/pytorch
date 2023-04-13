@@ -36,6 +36,7 @@ from torch.ao.ns.fx.utils import (
 )
 import copy
 import itertools
+import unittest
 from torch._inductor.compile_fx import compile_fx
 
 
