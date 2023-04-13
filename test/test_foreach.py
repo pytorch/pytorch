@@ -424,9 +424,7 @@ class TestForeach(TestCase):
                 inplace_op, inplace_ref, [sample.input], is_fastpath and not disable_fastpath, zero_size=zero_size
             )
             if op.supports_autograd and dtype in floating_types() and not zero_size:
-                num_tensors = len(sample.input)
-                transformed_sample = sample.transform(get_transform_func(num_tensors, dtype, device, is_fastpath))
-                tensors = transformed_sample.input
+                tensors = [t.clone().detach().requires_grad_() for t in sample.input]
                 ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
                 out = wrapped_op.func(tensors)
                 torch.cat([t.view(-1) for t in out]).mean().backward()
@@ -467,7 +465,7 @@ class TestForeach(TestCase):
                 inplace_input_tensors[0].grad = None
                 hook_buffer.clear()
 
-                sum_of_cloned_tensors = sum(cloned_tensors)
+                sum_of_cloned_tensors = torch.cat([t.view(-1) for t in cloned_tensors]).sum()
                 grad_output = torch.rand_like(sum_of_cloned_tensors)
                 torch.autograd.grad(
                     sum_of_cloned_tensors,
@@ -475,13 +473,16 @@ class TestForeach(TestCase):
                     grad_outputs=(grad_output,),
                     retain_graph=False,
                 )
-                self.assertEqual(hook_buffer, list(range(num_tensors - 1, -1, -1)))
+                self.assertEqual(hook_buffer, list(range(len(tensors) - 1, -1, -1)))
 
                 ref_inplace_input_tensors = [t.clone().detach().requires_grad_() for t in inplace_input_tensors]
                 ref_inplace_inputs = [t.clone() for t in ref_inplace_input_tensors]
                 ref_output = inplace_ref([ref_inplace_inputs])
                 torch.autograd.grad(
-                    sum(ref_output), inputs=tuple(ref_inplace_input_tensors), grad_outputs=(grad_output,))
+                    torch.cat([t.view(-1) for t in ref_output]).sum(),
+                    inputs=tuple(ref_inplace_input_tensors),
+                    grad_outputs=(grad_output,),
+                )
                 self.assertEqual([t.grad for t in inplace_input_tensors], [t.grad for t in ref_inplace_input_tensors])
 
     @ops(foreach_reduce_op_db)
