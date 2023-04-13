@@ -152,6 +152,11 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         new_symbols = free_symbols(node.meta["val"]) - saved_symbols
         # NB: Deterministic order please!
         for s in sorted(new_symbols, key=lambda s: s.name):
+            # NB: For well formed graphs, the symbol should always be present,
+            # but we also have ways to produce ill-formed graphs, e.g., direct
+            # make_fx usages, so don't choke in this case
+            if s not in symbol_bindings:
+                continue
             saved_sym_nodes_binding.append(symbol_bindings[s])
         saved_symbols |= new_symbols
 
