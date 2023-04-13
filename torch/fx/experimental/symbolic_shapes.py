@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Type, Union
+from typing import cast, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 
@@ -1344,6 +1344,13 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
 
 
 class DynamicDimConstraintPrinter(StrPrinter):
+    """
+    Printer for dynamic dim constraints.
+    - Instead of t.size()[d] it prints dynamic_dim(t, d)
+    - Instead of Eq(_, _), Mod(_, _), etc. it prints _ == _, _ % _, etc.
+
+    We use this to suggest code for specifying dynamic dim constraints.
+    """
     def __init__(self, symbol_to_source):
         super().__init__()
         self.symbol_to_source = symbol_to_source
@@ -1372,33 +1379,38 @@ class DimConstraints:
 
     def __init__(self, symbol_to_source, var_to_val):
         # We try to solve systems of inequalities with 1 free variable.
-        self._univariate_inequalities = defaultdict(set)
+        self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
-        self._symbols_with_equalities = set()
+        # NOTE: _symbols_with_equalities is always a subset of _univariate_inequalities.keys()
+        # and removing a symbol from the former => removing it from the latter.
+        self._symbols_with_equalities: Set[sympy.Symbol] = set()
         # A solution of a free variable with equalities becomes a substitution.
         # We use these substitutions to simplify other constraints.
-        self._substitutions = {}
+        # NOTE: removing a symbol from _symbols_with_equalities => adding it to _substitutions.
+        self._substitutions: Dict[sympy.Symbol, sympy.Integer] = {}
 
         # In general, constraints may have // and % operations.
         # Of course, // can be expressed in terms of / and %.
         # Our inequality solver can handle / but not %. So we need to transform them away.
         # We do so by using the values of variables as hints to evaluate %.
         # For soundness we record additional congruence guards and solve them separately.
-        self._var_to_val = var_to_val
-        self._congruences = defaultdict(set)
+        self._var_to_val: Dict[sympy.Symbol, sympy.Integer] = var_to_val
+        self._congruences: Set[sympy.Expr] = defaultdict(set)
 
         # We do not try to (directly) solve inequalities with > 1 free variables.
-        self._multivariate_inequalities = set()
+        # NOTE: free variables in these inequalities cannot also be in _substitutions.
+        self._multivariate_inequalities: Set[sympy.Expr] = set()
 
         # We park external equalities between free variables here.
-        self._symbolic_equivalences = []
+        self._symbolic_equivalences: List[Tuple[Source, sympy.Expr]] = []
 
         # Solutions come in two forms:
         # - (static) specializations
         # - (dynamic) inequalities / congruences
-        self._static_results = set()
-        self._dynamic_results = set()
+        self._static_results: Set[str] = set()
+        self._dynamic_results: Set[str] = set()
 
+        # printer for solutions
         self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
 
     def rewrite_with_congruences(self, s, expr):
@@ -1509,7 +1521,7 @@ class DimConstraints:
                 if s == symbol:
                     # This means the solution is of the form s = modulus*tmp + remainder.
                     modulus, remainder = sympy.polys.polytools.div(solution, tmp)
-                    if isinstance(modulus, int) and isinstance(remainder, int):
+                    if isinstance(modulus, sympy.Integer) and isinstance(remainder, sympy.Integer):
                         # Make sure 0 <= remainder <= modulus.
                         remainder = remainder % modulus
                         remainder_modulus_pairs.append((remainder, modulus))
@@ -1535,6 +1547,7 @@ class DimConstraints:
 
     def solve(self):
         # as long as there are symbols with equalities, solve for them
+        # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
         while(self._symbols_with_equalities):
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
@@ -1579,30 +1592,6 @@ class DimConstraints:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
                 if not (s in self._substitutions) or not sympy.checksol(congruence, {s: self._substitutions[s]}):
                     self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
-
-    def prettify_univariate_inequalities(self):
-        buf = "{"
-        for free_symbol, exprs in self._univariate_inequalities.items():
-            buf += f"\n\t{free_symbol}: ["
-            for expr in exprs:
-                buf += f"\n\t\t{expr},"
-            buf += f"\n\t],"
-        return buf + "\n}"
-
-    def prettify_multivariate_inequalities(self):
-        buf = "["
-        for expr in self._multivariate_inequalities:
-            buf += f"\n\t{expr},"
-        return buf + "\n]"
-
-    def prettify_congruences(self):
-        buf = "{"
-        for free_symbol, exprs in self._congruences.items():
-            buf += f"\n\t{free_symbol}: ["
-            for expr in exprs:
-                buf += f"\n\t\t{expr.args[0]} % {expr.args[1]} == 0,"
-            buf += f"\n\t],"
-        return buf + "\n}"
 
     def prettify_results(self):
         buf = ""
@@ -2173,7 +2162,7 @@ class ShapeEnv:
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
                             record_constraint_violation(lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{c_vr.lower}, {c_vr.upper}]."
+                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
                                 "constrain_range manually, or we forgot to update this error message? "
@@ -2529,16 +2518,14 @@ class ShapeEnv:
         if torch._dynamo.config.print_guards:
             if log.level <= logging.WARNING:
                 # reusing flag that prints guards
-                tc = TracingContext.get()
-                if tc is not None:
-                    frame_summaries = tc.frame_summary_stack
-                    # frame_summaries describes a stack of functions
-                    # TODO(avik): It would be better to describe a stack of function calls instead
-                    current_loc = tc.loc_in_frame
-                    # current_loc describes a line in the current frame
-                    user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
-                    expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
-                    log.warning(f"Adding shape guard {expr} at \n{user_stack}")
+                frame_summaries = TracingContext.get().frame_summary_stack
+                # frame_summaries describes a stack of functions
+                # TODO(avik): It would be better to describe a stack of function calls instead
+                current_loc = TracingContext.get().loc_in_frame
+                # current_loc describes a line in the current frame
+                user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
+                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
+                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
             log.debug("SHAPE GUARD", stack_info=True)
         self.guards.append(guard)
 

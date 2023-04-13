@@ -835,8 +835,24 @@ class TestFloorDiv(TestCase):
 
 
 class TestDimConstraints(TestCase):
-    def test_dim_constraints_solver(self):
-        from sympy import Eq, Integer, Integer, Mod, Ne, Symbol
+    def test_dim_constraints_reduce_congruences_simple():
+        from sympy import Symbol
+        from torch.fx.experimental.symbolic_shapes import DimConstraints
+
+        s = Symbol("s", positive=True, integer=True)
+        dim_constraints = DimConstraints({}, {})
+        dim_constraints._congruences[s] = {
+            (s / 2) % 2,
+            (s / 2) % 8,
+            (s / 2) % 4,
+            s % 2,
+            ((s / 16) + 2) % 4,
+        }
+        congruences = dim_constraints.reduce_congruences()
+        assert congruences[s] == {(s + 32) % 64}
+
+    def test_dim_constraints_solve_full(self):
+        from sympy import Eq, Integer, Mod, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
 
         src0 = TensorPropertySource(
