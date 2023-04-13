@@ -1513,7 +1513,8 @@ class ForeachKernel(Kernel):
 
     def __init__(self, input_names, output_names, layouts):
         super().__init__()
-        self.body = IndentedBuffer()
+        self.list_name_to_buffernames = {}
+        self.list_name_to_var_name = {}
         self.tensor_elem_counts = [
             int(sympy_product(layout.size)) for layout in layouts
         ]
@@ -1557,6 +1558,13 @@ class ForeachKernel(Kernel):
                 code.writeline(f"elem_count = {last_block_elem_count}")
 
         return block_ind + num_blocks
+
+    def load(self, name: str, _):
+        if name not in self.list_name_to_var_name:
+            var = self.cse.newvar()
+            self.list_name_to_var_name[name] = var
+
+        return self.list_name_to_var_name[name]
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -1984,6 +1992,7 @@ class TritonScheduling:
         with kernel:
             foreach_node.mark_run()
             # foreach_node.codegen()
+            foreach_node.node.data.make_loader()()
             src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, [foreach_node])
         # self.scheduler.free_buffers()
