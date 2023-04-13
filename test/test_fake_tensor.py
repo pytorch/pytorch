@@ -524,7 +524,7 @@ class FakeTensorTest(TestCase):
         example_inputs = (torch.randn(1, 1, 3, 3),)
         mod = _TestPattern()
         with FakeTensorMode(allow_non_fake_inputs=True):
-               out = mod(torch.randn(1, 1, 3, 3))
+            out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
 
 

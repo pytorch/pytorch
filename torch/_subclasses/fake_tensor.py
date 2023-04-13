@@ -1299,6 +1299,7 @@ class FakeTensorMode(TorchDispatchMode):
         Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
         flat_arg_fake_tensors = []
+
         def validate(x):
             nonlocal flat_arg_fake_tensors
             if not isinstance(x, FakeTensor):
