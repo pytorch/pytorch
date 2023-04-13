@@ -8,6 +8,7 @@
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 #include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
@@ -162,6 +163,7 @@ struct Capsule {
   _(Int)                     \
   _(SymInt)                  \
   _(SymFloat)                \
+  _(SymBool)                 \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -615,6 +617,23 @@ public:
   c10::SymFloat toSymFloat() &&;
   c10::SymFloat toSymFloat() const&;
 
+  IValue(c10::SymBool i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymBool;
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    } else {
+      tag = Tag::Bool;
+      payload.u.as_bool = i.as_bool_unchecked();
+    }
+  }
+
+  bool isSymBool() const {
+    return Tag::SymBool == tag;
+  }
+
+  c10::SymBool toSymBool() &&;
+  c10::SymBool toSymBool() const&;
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
@@ -840,6 +859,9 @@ public:
     } else if (s.isSymFloat()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = s.toSymFloat().toSymNodeImpl().release();
+    } else if (s.isSymBool()) {
+      tag = Tag::SymBool;
+      payload.u.as_intrusive_ptr = s.toSymBool().toSymNodeImpl().release();
     } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
@@ -856,7 +878,7 @@ public:
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat() || isSymBool();
   }
 
   at::Scalar toScalar() const {
@@ -872,6 +894,8 @@ public:
       return toSymInt();
     else if (isSymFloat())
       return toSymFloat();
+    else if (isSymBool())
+      return toSymBool();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -1170,6 +1194,8 @@ public:
       case Tag::SymInt:
         return true;
       case Tag::SymFloat:
+        return true;
+      case Tag::SymBool:
         return true;
       case Tag::Bool:
         return false;

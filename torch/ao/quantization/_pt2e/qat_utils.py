@@ -1,4 +1,5 @@
 import copy
+import operator
 from typing import Any, Tuple
 
 import torch
@@ -86,20 +87,12 @@ def _fuse_conv_bn_qat(m: GraphModule):
 
     # Copy over metadata from original subgraph
     for mr in match_and_replacement:
-        # Find original conv and bn nodes. These have the metadata we want.
-        original_conv_node = None
-        original_bn_node = None
-        for _, n in mr.nodes_map.items():
-            if n.target == torch.ops.aten.convolution.default:
-                original_conv_node = n
-            if n.target == torch.ops.aten._native_batch_norm_legit.default:
-                original_bn_node = n
-
         # Find replaced conv and bn nodes
         assert len(mr.replacements) == 1, "expected only one replaced node"
         replaced_conv_node = None
         replaced_bn_node = None
-        n = mr.replacements[0]
+        replaced_anchor = mr.replacements[0]
+        n = replaced_anchor
         while replaced_conv_node is None or replaced_bn_node is None:
             if n.target == torch.ops.aten.convolution.default:
                 replaced_conv_node = n
@@ -108,8 +101,26 @@ def _fuse_conv_bn_qat(m: GraphModule):
             n = n.args[0]
             assert isinstance(n, Node)
 
-        # Copy over conv and bn metadata
-        # We need to also do this for conv args and bn users
-        replaced_conv_node.meta = original_conv_node.meta
-        replaced_bn_node.meta = original_bn_node.meta
+        # Copy over metadata from original nodes
+        # We need to also do this for conv args, bn args, and bn users
+        for match_pattern_node, original_node in mr.nodes_map.items():
+            if match_pattern_node.target == torch.ops.aten.convolution.default:
+                # Matched: conv(_, weight, bias, ...)
+                (_, weight, bias, *_) = match_pattern_node.args
+                # Replaced: conv(_, mul(weight, ...), zeros_like(bias), ...)
+                (_, mul_node, zeros_like_node, *_) = replaced_conv_node.args
+                assert mul_node.target == torch.ops.aten.mul.Tensor
+                assert zeros_like_node.target == torch.ops.aten.zeros_like.default
+                mul_node.args[0].meta = mr.nodes_map[weight].meta
+                zeros_like_node.args[0].meta = mr.nodes_map[bias].meta
+                replaced_conv_node.meta = original_node.meta
+            if match_pattern_node.target == torch.ops.aten._native_batch_norm_legit.default:
+                (_, weight, bias, running_mean, running_var, *_) = match_pattern_node.args
+                replaced_bn_node.args[1].meta = mr.nodes_map[weight].meta
+                replaced_bn_node.args[2].meta = mr.nodes_map[bias].meta
+                replaced_bn_node.args[3].meta = mr.nodes_map[running_mean].meta
+                replaced_bn_node.args[4].meta = mr.nodes_map[running_var].meta
+                replaced_bn_node.meta = original_node.meta
+            if match_pattern_node.target == operator.getitem:
+                replaced_anchor.meta = original_node.meta
     return m
