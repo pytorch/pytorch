@@ -1680,16 +1680,12 @@ def emit_body(
                     for f_arg, r_arg in inplace_foreacharg2refarg.items():
                         if arg == r_arg.name:
                             args[i] = f_arg.name
-            return (
-                [
-                    "auto _any_requires_grad = false;",
-                ]
-                + [
-                    f"_any_requires_grad |= compute_requires_grad( {arg} );"
-                    for arg in args
-                ]
-                + [extra_condition, "(void)_any_requires_grad;"]
-            )
+            return [
+                SETUP_ANY_REQUIRES_GRAD.substitute(
+                    args_with_derivatives=args,
+                    extra_differentiability_conditions=extra_condition,
+                )
+            ]
 
     def get_any_has_forward_grad_name(var_names: Tuple[str, ...]) -> str:
         if len(var_names) == 1:
