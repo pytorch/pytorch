@@ -15,12 +15,11 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer
 
+import torch._dynamo.config as dynamo_config
 import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
-
-from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import identity
 from torch._prims_common import (
     compute_required_storage_length,
@@ -87,27 +86,27 @@ In these cases, the underlying StorageBox/Buffer will be shared with the pre-vie
 
 
 def validate_ir(node_or_nodes):
-    def _check_tensorbox(node):
+    def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        assert isinstance(
-            node,
-            (
-                DynamicScalar,
-                TensorBox,
-                RandSeedBuffer,
-                sympy.Symbol,
-                sympy.core.relational.Relational,
-                Expr,
-            ),
-        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+        if isinstance(nodes, (List, Tuple)):
+            for node in nodes:
+                _check_tensorbox(node)
+        else:
+            assert isinstance(
+                nodes,
+                (
+                    DynamicScalar,
+                    TensorBox,
+                    RandSeedBuffer,
+                    sympy.Symbol,
+                    sympy.core.relational.Relational,
+                    Expr,
+                ),
+            ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
     # Be picky about the accepted data structure (don't use pytree here)
-    if isinstance(node_or_nodes, (List, Tuple)):
-        for node in node_or_nodes:
-            _check_tensorbox(node)
-    else:
-        _check_tensorbox(node_or_nodes)
+    _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
