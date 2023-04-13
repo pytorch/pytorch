@@ -34,7 +34,7 @@ void memcpy_to_mapping_impl(const Tensor& src, api::MemoryMap& dst_mapping) {
   T* data_ptr = dst_mapping.template data<T>();
   memcpy(
       data_ptr,
-      src.data_ptr<T>(),
+      src.const_data_ptr<T>(),
       std::min(src.nbytes(), dst_mapping.nbytes()));
 }
 
