@@ -565,10 +565,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(
+            TracingContext.set_current_loc(
                 self.f_code.co_filename, self.lineno, self.f_code.co_name
-            ):
-                getattr(self, inst.opname)(inst)
+            )
+            getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -1806,10 +1806,17 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
+        frame_state,
     ):
         super().__init__(
             output=OutputGraph(
-                f_globals, code_options, compiler_fn, self, export, export_constraints
+                f_globals,
+                code_options,
+                compiler_fn,
+                self,
+                export,
+                export_constraints,
+                frame_state,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -2020,7 +2027,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_function(), "_torchdynamo_disable", False
         ):
             unimplemented(
-                f"call torch._dynamo.skip() wrapped function {func.get_function()}"
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
     @staticmethod

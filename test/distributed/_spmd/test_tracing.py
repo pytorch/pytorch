@@ -596,9 +596,7 @@ class TraceTrainStepTest(DTensorTestBase):
     def test_adam_fused(self):
         self._test_adam(foreach=False, fused=True)
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_train_step_override(self):
+    def _test_train_step_override(self, module_override_key):
         transform_targets = []
 
         class DDMOverride(Override):
@@ -629,7 +627,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={DataDependentModule: DDMOverride()})
+        @compile(module_override={module_override_key: DDMOverride()})
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -645,6 +643,16 @@ class TraceTrainStepTest(DTensorTestBase):
             transform_targets,
             [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default],
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_type_override(self):
+        self._test_train_step_override(module_override_key=DataDependentModule)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_fqn_override(self):
+        self._test_train_step_override(module_override_key="ddm")
 
     @skip_if_lt_x_gpu(2)
     @with_comms
