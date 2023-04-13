@@ -1,6 +1,6 @@
 //  Copyright © 2022 Apple Inc.
-
 #include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
