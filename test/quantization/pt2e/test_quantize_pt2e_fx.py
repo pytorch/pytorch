@@ -4,11 +4,6 @@ import itertools
 
 import torch
 import torch._dynamo as torchdynamo
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    skip_if_no_torchvision,
-    skipIfNoQNNPACK,
-    skipIfNoX86,
 import torch.nn as nn
 from torch._inductor.compile_fx import compile_fx
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -38,7 +33,6 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import xfailIfPython311
 
 
 @skipIfNoQNNPACK
