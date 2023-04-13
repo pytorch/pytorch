@@ -1,10 +1,5 @@
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/Optional.h>
-#include <torch/library.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 // Steps to add op for MPS backend:
 // 1. Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
@@ -32,7 +27,7 @@ namespace at::native {
 
 Tensor& eye_out_mps(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return eye_out_mps(n, n, result);
+  return at::native::eye_out_mps(n, n, result);
 }
 
 Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {

@@ -1,7 +1,8 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/native/Cross.h>
 #include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
+#include <ATen/native/Cross.h>
 
 namespace at::native {
 namespace {
