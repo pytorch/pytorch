@@ -1500,7 +1500,7 @@ class CommonTemplate:
                 self.linear = nn.Linear(4, 4)
 
             def forward(self, data):
-                data = data.to('cuda')
+                data = data.to("cuda")
                 return self.linear(data)
 
         mod = Model().cuda().eval()
