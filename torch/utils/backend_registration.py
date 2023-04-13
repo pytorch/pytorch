@@ -1,13 +1,15 @@
+import warnings
 import torch
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
 from typing import List, Optional, Union
 
-__all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
+__all__ = ["rename_privateuse1_backend", "get_custom_mod_func",
+           "generate_methods_for_privateuse1_backend"]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
 # renamed-backend name for `privateuse1`, but the func will cause an
-# with torch._jit_script_compile, so we use the global variable named
-# `_privateuse1_backend_name`.
+# error with torch._jit_script_compile, so we use the global variable
+# named `_privateuse1_backend_name`.
 _privateuse1_backend_name = "privateuseone"
 
 def rename_privateuse1_backend(backend_name: str) -> None:
@@ -86,7 +88,6 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _rename_privateuse1_backend(backend_name)
     global _privateuse1_backend_name
     _privateuse1_backend_name = backend_name
-
 
 def _check_register_once(module, attr):
     if hasattr(module, attr):
@@ -300,3 +301,40 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
 
     if for_storage:
         _generate_storage_methods_for_privateuse1_backend(custom_backend_name, unsupported_dtype)
+
+def get_custom_mod_func(func_name: str):
+    r"""
+    Return the func named `_func_name_` defined in custom device module. If not defined,
+    return `None`. And the func is registered with `torch.utils.rename_privateuse1_backend('foo')`
+    and `torch._register_device_module('foo', BackendModule)`.
+    If the custom device module or the func is not defined, it will give warning or error message.
+    Args:
+        func_name (str): return the callable func named func_name defined in custom device module.
+    Example::
+        class DummyfooModule:
+            @staticmethod
+            def is_available():
+                return True
+            @staticmethod
+            def func_name(*args, **kwargs):
+                ....
+        torch.utils.rename_privateuse1_backend("foo")
+        torch._register_device_module("foo", DummyfooModule)
+        foo_is_available_func = get_custom_mod_func("is_available")
+        if foo_is_available_func:
+            foo_is_available = foo_is_available_func()
+        func_ = get_custom_mod_func("func_name")
+        if func_:
+            result = func_(*args, **kwargs)
+        # raise error/warning, you must have define func named `device_count` in `DummyfooModule` module
+        run_custom_device_mod_func("device_count")
+    """
+    assert isinstance(func_name, str), f"func_name must be `str`, but got `{type(func_name)}`."
+    backend_name = _get_privateuse1_backend_name()
+    custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
+    if custom_device_mod is None:
+        message = f'Try to use torch.{backend_name}.{func_name}. The backend must register a custom backend '
+        message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "
+        message += f"BackendModule needs to have the following API's:\n `{func_name}(*args, **kwargs)`. \n"
+        warnings.warn(message)
+    return getattr(custom_device_mod, func_name, None)

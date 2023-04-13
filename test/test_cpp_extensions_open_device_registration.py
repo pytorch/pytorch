@@ -186,7 +186,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
                 pass
-
+                
         def test_open_device_tensor():
             device = self.module.custom_device()
             # check whether print tensor.type() meets the expectation
@@ -423,6 +423,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
 
+        self.assertTrue(torch.utils.custom_device_name == "foo")
+        self.assertTrue(torch.utils.get_custom_mod_func("device_count")() == 1)
+        self.assertTrue(torch.utils.get_custom_mod_func("func_name") is None)
 
 if __name__ == "__main__":
     common.run_tests()
