@@ -1,5 +1,8 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import hint_int, magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import (
+    hint_int, magic_methods, method_to_operator, free_symbols,
+    is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
+)
 import torch
 import torch.fx as fx
 import operator
@@ -7,6 +10,8 @@ import math
 import torch.utils._pytree as pytree
 import copy
 import os
+import itertools
+import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
 from typing import Tuple
@@ -119,6 +124,41 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
                 if saved_sym.name == node.name:
                     saved_sym_nodes.remove(saved_sym)
                     break
+
+    # Now that we have the finalized list of saved values, we need to ensure
+    # we propagate all symbols which are referenced by backwards inputs.
+    # These are not directly used in the graph but are required for downstream
+    # sizevar assignment
+    saved_symbols: Set[sympy.Symbol] = set()
+    saved_sym_nodes_binding = []
+    saved_sym_nodes_derived = []
+
+    # Some symbols may already be bound in the directly saved_sym_nodes,
+    # keep track of them so we don't re-bind them
+    for node in saved_sym_nodes:
+        symbol = is_symbol_binding_fx_node(node)
+        if symbol:
+            saved_symbols.add(symbol)
+            saved_sym_nodes_binding.append(node)
+        else:
+            saved_sym_nodes_derived.append(node)
+
+    # Now go through all of the prospective backward inputs and track any
+    # other symbols we need to bind
+    symbol_bindings = find_symbol_binding_fx_nodes(joint_module.graph)
+    for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
+        if "val" not in node.meta:
+            continue
+        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        # NB: Deterministic order please!
+        for s in sorted(new_symbols, key=lambda s: s.name):
+            saved_sym_nodes_binding.append(symbol_bindings[s])
+        saved_symbols |= new_symbols
+
+
+    # Update saved_sym_nodes that are now reordered to have all bindings
+    # at front
+    saved_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
@@ -350,14 +390,6 @@ def min_cut_rematerialization_partition(
         return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
 
     orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
-
-    def is_tensor_node(x):
-        # When dynamic shapes are not enabled, fw outputs can be raw ints and not fx nodes
-        if not isinstance(x, fx.Node):
-            return False
-        # It would be nice if we could guarantee that all fx nodes from make_fx get a 'val'
-        # key in their meta dict, but that isn't always true today (see proxy_tensor.py)
-        return 'tensor_meta' in x.meta or ('val' in x.meta and isinstance(x.meta['val'], torch.Tensor))
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
