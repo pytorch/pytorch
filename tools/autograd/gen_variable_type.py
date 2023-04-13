@@ -1172,7 +1172,10 @@ def emit_body(
             save_input_stmts = save_variables(info.all_saved_inputs, False, guard_for)
             if save_input_stmts:
                 setup.append(
-                    LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(preamble="", statements=save_input_stmts, epilog=""))
+                    LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
+                        preamble="", statements=save_input_stmts, epilog=""
+                    )
+                )
         else:
             setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
             for arg in args_with_derivatives:
@@ -1339,11 +1342,13 @@ def emit_body(
                 var = name
                 name += "_"
                 if var == "self" and inplace:
-                    original_self_var = "original_self" if not is_inplace_foreach else "original_selfs[i]"
-                    self_var = var if not is_inplace_foreach else var + "[i]"
-                    stmts_prepend = (
-                        f"if (!{original_self_var}.has_value()) {original_self_var} = {self_var}.clone()"
+                    original_self_var = (
+                        "original_self"
+                        if not is_inplace_foreach
+                        else "original_selfs[i]"
                     )
+                    self_var = var if not is_inplace_foreach else var + "[i]"
+                    stmts_prepend = f"if (!{original_self_var}.has_value()) {original_self_var} = {self_var}.clone()"
                     var = f"{original_self_var}.value()"
                     assert not is_output
                 if inplace and is_output:
@@ -1643,7 +1648,9 @@ def emit_body(
             if not is_inplace_foreach:
                 return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
             else:
-                return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(preamble="", statements=stmts, epilog="")
+                return LOOP_OVER_VECTOR_OF_GRAD_FNS.substitute(
+                    preamble="", statements=stmts, epilog=""
+                )
         return ""
 
     def emit_any_requires_grad() -> List[str]:
