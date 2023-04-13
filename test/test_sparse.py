@@ -58,15 +58,6 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
         subtest(torch.sparse_bsc, name='SparseBSC'),
     ][(0 if include_strided else 1):])
 
-def gradcheck_semantics(test_name='gradcheck'):
-    gradcheck_sparse = functools.partial(gradcheck, masked=False)
-    gradcheck_masked = functools.partial(gradcheck, masked=True)
-    gradcheck_sparse.masked = False
-    gradcheck_masked.masked = True
-    return parametrize(test_name, [
-        subtest(gradcheck_sparse, name='sparse'),
-        subtest(gradcheck_masked, name='masked')])
-
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
@@ -464,8 +455,7 @@ class TestSparse(TestSparseBase):
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    @gradcheck_semantics()
-    def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
+    def test_to_dense_with_gradcheck(self, device, dtype):
 
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -483,7 +473,7 @@ class TestSparse(TestSparseBase):
                 return
 
             def fn(x):
-                return x.to_dense(masked_grad=gradcheck.masked)
+                return x.to_dense(masked_grad=False)
             x.requires_grad_(True)
             gradcheck(fn, (x,))
 
@@ -599,8 +589,7 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    @gradcheck_semantics()
-    def test_to_dense_hybrid(self, device, dtype, gradcheck):
+    def test_to_dense_hybrid(self, device, dtype):
 
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -610,7 +599,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual(res, self.safeToDense(x))
 
             def fn(x):
-                return x.to_dense(masked_grad=gradcheck.masked)
+                return x.to_dense(masked_grad=False)
             x.requires_grad_(True)
             gradcheck(fn, (x,))
 
@@ -955,8 +944,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    @gradcheck_semantics()
-    def test_permute(self, device, dtype, coalesced, gradcheck):
+    def test_permute(self, device, dtype, coalesced):
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
@@ -988,7 +976,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=False), s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1616,8 +1604,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    @gradcheck_semantics()
-    def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
+    def test_sparse_mul(self, device, dtype, coalesced):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
@@ -4473,8 +4460,7 @@ class TestSparseAny(TestCase):
     @all_sparse_layouts('from_layout', include_strided=False)
     @dtypes(torch.float64, torch.complex128)
     @parametrize("index_dtype", [torch.int64])
-    @gradcheck_semantics()
-    def test_gradcheck_to_dense(self, from_layout, device, dtype, index_dtype, gradcheck):
+    def test_gradcheck_to_dense(self, from_layout, device, dtype, index_dtype):
         for t in self.generate_simple_inputs(
                 from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
             batch_dim = t.dim() - t.dense_dim() - t.sparse_dim()
@@ -4482,7 +4468,7 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
+            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=False), t)
             self.assertTrue(r)
 
     @all_sparse_layouts('from_layout', include_strided=True)
