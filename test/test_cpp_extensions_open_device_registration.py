@@ -152,6 +152,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
+            self.assertTrue(torch.utils.get_custom_mod_func("device_count")() == 1)
+            self.assertTrue(torch.utils.get_custom_mod_func("func_name") is None)
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
@@ -186,7 +188,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
                 pass
-                
+
         def test_open_device_tensor():
             device = self.module.custom_device()
             # check whether print tensor.type() meets the expectation
@@ -423,9 +425,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
 
-        self.assertTrue(torch.utils.custom_device_name == "foo")
-        self.assertTrue(torch.utils.get_custom_mod_func("device_count")() == 1)
-        self.assertTrue(torch.utils.get_custom_mod_func("func_name") is None)
 
 if __name__ == "__main__":
     common.run_tests()

@@ -3,8 +3,8 @@ import torch
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
 from typing import List, Optional, Union
 
-__all__ = ["rename_privateuse1_backend", "get_custom_mod_func",
-           "generate_methods_for_privateuse1_backend"]
+__all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend",
+           "get_custom_mod_func"]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
 # renamed-backend name for `privateuse1`, but the func will cause an
@@ -304,7 +304,7 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
 
 def get_custom_mod_func(func_name: str):
     r"""
-    Return the func named `_func_name_` defined in custom device module. If not defined,
+    Return the func named `func_name` defined in custom device module. If not defined,
     return `None`. And the func is registered with `torch.utils.rename_privateuse1_backend('foo')`
     and `torch._register_device_module('foo', BackendModule)`.
     If the custom device module or the func is not defined, it will give warning or error message.
@@ -320,14 +320,13 @@ def get_custom_mod_func(func_name: str):
                 ....
         torch.utils.rename_privateuse1_backend("foo")
         torch._register_device_module("foo", DummyfooModule)
-        foo_is_available_func = get_custom_mod_func("is_available")
+        foo_is_available_func = torch.utils.get_custom_mod_func("is_available")
         if foo_is_available_func:
             foo_is_available = foo_is_available_func()
-        func_ = get_custom_mod_func("func_name")
+        func_ = torch.utils.get_custom_mod_func("func_name")
         if func_:
             result = func_(*args, **kwargs)
-        # raise error/warning, you must have define func named `device_count` in `DummyfooModule` module
-        run_custom_device_mod_func("device_count")
+    Attention: This func is only used for custom device.
     """
     assert isinstance(func_name, str), f"func_name must be `str`, but got `{type(func_name)}`."
     backend_name = _get_privateuse1_backend_name()
