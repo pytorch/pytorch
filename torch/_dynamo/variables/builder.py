@@ -793,7 +793,7 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        self.tx.output.add_grapharg(GraphArg(source, value, False, fake_tensor_value))
+        tensor_proxy.node.meta["grapharg"] = GraphArg(source, value, False, fake_tensor_value)
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__
@@ -893,14 +893,12 @@ class VariableBuilder:
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
-                self.tx.output.add_grapharg(
-                    GraphArg(
-                        self.get_source(),
-                        wrapped_value,
-                        isinstance(wrapped_value, torch.Tensor),
-                        fake_tensor_value,
-                        is_tensor=False,
-                    )
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.get_source(),
+                    wrapped_value,
+                    isinstance(wrapped_value, torch.Tensor),
+                    fake_tensor_value,
+                    is_tensor=False,
                 )
             return unspec_var
 

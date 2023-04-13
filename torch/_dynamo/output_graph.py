@@ -8,7 +8,7 @@ import re
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
+from typing import Any, Dict, List, Iterator, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch._guards
 
@@ -75,7 +75,6 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 class OutputGraphState(NamedTuple):
-    graphargs: List[GraphArg]
     input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
@@ -202,7 +201,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
-        self.graphargs: List[GraphArg] = []
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -300,7 +298,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         assert self.param_name_to_source is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
-            list(self.graphargs),
             dict(self.input_source_to_var),
             list(self.tracked_fakes),
             guards_graph_state,
@@ -315,7 +312,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def restore_graphstate(self, state: OutputGraphState):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
-            self.graphargs,
             self.input_source_to_var,
             self.tracked_fakes,
             guards_state,
@@ -337,9 +333,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.real_value_cache.pop(node, None)
                 removed_nodes += 1
         log.debug("restore_graphstate: removed %s nodes", removed_nodes)
-
-    def add_grapharg(self, arg: GraphArg):
-        self.graphargs.append(arg)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -696,6 +689,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         cg.make_call_generated_code(name)
         return cg.get_instructions()
 
+    @property
+    def placeholders(self) -> Iterator[fx.Node]:
+        r = []
+        for node in self.graph.nodes:
+            if node.op == "placeholder":
+                r.append(node)
+                continue
+            break
+        return r
+
+    @property
+    def graphargs(self) -> List[GraphArg]:
+        return [node.meta['grapharg'] for node in self.placeholders]
+
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         tot = 0
@@ -706,8 +713,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if node.op == "placeholder":
                 placeholders.append(node)
         torch._dynamo.utils.increment_op_count(tot)
-        assert len(placeholders) == len(self.graphargs)
-        for pl, arg in zip(placeholders, self.graphargs):
+        for pl in placeholders:
+            arg = pl.meta['grapharg']
+            # TODO: Why isn't this stored in meta :think:
             pl._dynamo_source = arg.source
 
         gm._param_name_to_source = self.param_name_to_source
@@ -796,22 +804,16 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 elif node.op == "call_function" and node.target is operator.getitem:
                     self.remove_node(node)
 
-        for arg in self.graphargs:
-            arg.uses = 0
-
-        for node, arg in zip(self.graph.nodes, self.graphargs):
-            assert node.op == "placeholder"
-            arg.uses += len(node.users)
-
-        for node, arg in list(zip(self.graph.nodes, self.graphargs)):
-            if arg.uses == 0:
-                log.debug("REMOVE UNUSED GRAPHARG %s", arg.source.name())
+        for i, node in enumerate(self.placeholders):
+            if not node.users:
+                log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
+                # I'm not really sure why you need to delete these from the
+                # node since the node is going to get removed
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
+                del node.meta["grapharg"]
                 self.remove_node(node)
                 self.real_value_cache.pop(node, None)
-
-        self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
@@ -835,13 +837,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.nn_modules = None
         self.param_name_to_source = None
 
-        # Cleanup graphargs
-        for graph_arg in self.graphargs:
-            graph_arg.erase()
-
         for node in self.graph.nodes:
             if "example_value" in node.meta:
                 del node.meta["example_value"]
+            if "grapharg" in node.meta:
+                del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.keepalive = []
