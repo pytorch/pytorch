@@ -1,3 +1,4 @@
+import weakref
 from typing import Iterable, List, Optional, Set, Tuple
 
 import torch
@@ -85,8 +86,21 @@ class _ReplicateState:
         self._collect_params(self.module)
         # Only saved for testing
         replicate.state(self.module)._names = self._names
+        if "device_ids" in self.kwargs:
+            # replicate() supports a small usability enhancement where
+            # device_ids=[self.device] can also be passed in for CPU so users
+            # don't have to code change for CPU / GPU runs.
+            device_ids = self.kwargs["device_ids"]
+            if device_ids is not None and not isinstance(device_ids, list):
+                raise RuntimeError(
+                    f"Expected device_ids arg to be Optional[List[Union[int, torch.device]]], got {device_ids}"
+                )
+            device_id = device_ids[0]
+            if isinstance(device_id, torch.device) and device_id.type == "cpu":
+                self.kwargs["device_ids"] = None
 
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
+        replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
     def forward_pre_hook(
         self, module: nn.Module, input: Tuple[torch.Tensor, ...]

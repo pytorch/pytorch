@@ -180,6 +180,21 @@ class ReplicateTest(MultiProcessTestCase):
         )
         self._compare_module(model, replicate_model)
 
+    def test_replicate_cpu_device_input(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        model = Net()
+        replicate(model, device_ids=[torch.device("cpu")])
+        # DDP instance is attached in first pre forward
+        model(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
+        self.assertEqual(None, replicate_ddp_weakref.device_ids)
+
+
 
 if __name__ == "__main__":
     run_tests()
