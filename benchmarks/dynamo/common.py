@@ -1393,7 +1393,7 @@ class BenchmarkRunner:
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
             except Exception:
-                log.exception(f"Backend {mode} failed in warmup()")
+                log.exception("Backend %s failed in warmup()", mode)
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -1610,6 +1610,9 @@ def parse_args(args=None):
         "--batch-size-file", type=str, help="String to load batch size from"
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
+    parser.add_argument(
+        "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
+    )
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
@@ -2251,6 +2254,7 @@ def run(runner, args, original_dir=None):
         )
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
+        inductor_config.cpp_wrapper = args.cpp_wrapper
 
     runner.setup_amp()
 
