@@ -133,7 +133,8 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
                 inp_name = f"inp_{idx}"
                 if inp_name not in active_inputs:
                     log.warning(
-                        f"input {inp_name} skipped as not found in tvm's runtime library"
+                        "input %s skipped as not found in tvm's runtime library",
+                        inp_name,
                     )
                     continue
                 m.set_input(
