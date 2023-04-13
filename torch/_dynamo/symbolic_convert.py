@@ -565,10 +565,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(
+            TracingContext.set_current_loc(
                 self.f_code.co_filename, self.lineno, self.f_code.co_name
-            ):
-                getattr(self, inst.opname)(inst)
+            )
+            getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
