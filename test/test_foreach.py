@@ -1,5 +1,6 @@
 # Owner(s): ["module: mta"]
 
+from contextlib import nullcontext
 from numbers import Number
 import re
 import torch
@@ -43,7 +44,7 @@ class ForeachFuncWrapper:
     def __init__(self, func):
         self.func = func
         # Some foreach functions don't have in-place implementations.
-        self._is_inplace = False if func is None else func.__name__.endswith('_')
+        self.is_inplace = False if func is None else func.__name__.endswith('_')
 
     def __call__(self, inputs, is_cuda, is_fastpath, **kwargs):
         actual = None
@@ -61,7 +62,7 @@ class ForeachFuncWrapper:
         else:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.
-        return inputs[0] if self._is_inplace else actual
+        return inputs[0] if self.is_inplace else actual
 
 
 class InplaceForeachVersionBumpCheck:
@@ -126,12 +127,14 @@ class TestForeach(TestCase):
         alpha, scalar_self_arg: bool, zero_size: bool,
     ):
         if zero_size:
-            op(inputs, self.is_cuda, is_fastpath, zero_size=zero_size)
-            return
+            with InplaceForeachVersionBumpCheck(self, inputs[0]) if op.is_inplace else nullcontext():
+                op(inputs, self.is_cuda, is_fastpath, zero_size=zero_size)
+                return
 
         ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1]] if is_inplace else inputs
         try:
-            actual = op(inputs, self.is_cuda, is_fastpath, zero_size=zero_size)
+            with InplaceForeachVersionBumpCheck(self, inputs[0]) if op.is_inplace else nullcontext():
+                actual = op(inputs, self.is_cuda, is_fastpath, zero_size=zero_size)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 if not scalar_self_arg:
@@ -148,7 +151,8 @@ class TestForeach(TestCase):
                 op_kwargs = {}
                 op_kwargs.update(kwargs)
                 op_kwargs['zero_size'] = zero_size
-                actual = op(inputs, self.is_cuda, is_fastpath, **op_kwargs)
+                with InplaceForeachVersionBumpCheck(self, inputs[0]) if op.is_inplace else nullcontext():
+                    actual = op(inputs, self.is_cuda, is_fastpath, **op_kwargs)
             except RuntimeError as e:
                 with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     ref(ref_inputs, **kwargs)
@@ -175,12 +179,11 @@ class TestForeach(TestCase):
                 is_fastpath and not disable_fastpath, False,
                 alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
             )
-            with InplaceForeachVersionBumpCheck(self, sample.input):
-                self._binary_test(
-                    dtype, inplace_op, inplace_ref, [sample.input, rhs_arg],
-                    is_fastpath and not disable_fastpath, True,
-                    alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
-                )
+            self._binary_test(
+                dtype, inplace_op, inplace_ref, [sample.input, rhs_arg],
+                is_fastpath and not disable_fastpath, True,
+                alpha=alpha, zero_size=zero_size, scalar_self_arg=False,
+            )
 
             if op.supports_autograd and dtype in floating_types() and not zero_size:
                 transformed_sample = sample.transform(get_transform_func(len(sample.input), dtype, device, is_fastpath))
