@@ -1,8 +1,8 @@
 //  Copyright © 2022 Apple Inc.
-
+#include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
-#include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
 namespace mps {
@@ -407,7 +407,7 @@ Tensor where_mps(const Tensor& condition, const Tensor& self, const Tensor& othe
     out_arr[i] = (cond_idx == 0 || self_idx == 0 || other_idx == 0) ? 0 : max_idx;
   }
 
-  Tensor ret = empty_mps(
+  Tensor ret = at::empty(
       IntArrayRef(out_arr), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
   return where_self_out_mps(condition, self, other, ret);
 }
