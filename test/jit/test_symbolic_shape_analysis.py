@@ -573,3 +573,14 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_register_shape_compute_graph_for_node(node, too_many_inputs.graph)
 
         self.assertTrue("fewer arguments than schema" in str(error.exception))
+
+    def test_cross_entropy_loss(self):
+        @torch.jit.script
+        def foo(x, y):
+            return torch.ops.aten.cross_entropy_loss(x, y, reduction=0)
+
+        inputs = list(foo.graph.inputs())
+        inputs[0].setType(inputs[0].type().with_sizes([8, 2]))
+        inputs[1].setType(inputs[1].type().with_sizes([8,]))
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        self.assertEqual(next(foo.graph.outputs()).type().sizes(), [8,])
