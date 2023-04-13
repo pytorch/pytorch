@@ -129,7 +129,7 @@ BCSRSerializationType PackedLinearWeight::serialize() {
   std::transform(
       packed_weight_values.begin(),
       packed_weight_values.end(),
-      weight_values.data_ptr<uint8_t>(),
+      weight_values.mutable_data_ptr<uint8_t>(),
       [](int8_t v) {
         return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);
       });

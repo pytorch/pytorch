@@ -549,7 +549,7 @@ class LazyModuleWithListInput(torch.nn.Module):
         self.layer = LazyLayerWithListInput()
 
     def forward(self, input):
-        return self.layer(input)
+        return self.layer(input[:-1])
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
@@ -1210,7 +1210,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
-        x = [torch.rand([5, 5])] * 3
+        x = [torch.rand([5, 5])] * 3 + [None]
         opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
         res = opt_m(x)
         ref = m(x)
