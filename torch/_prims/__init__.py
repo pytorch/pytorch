@@ -1814,7 +1814,7 @@ def _as_strided_scatter_meta(
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
-    input_size = input.untyped_storage().size()
+    input_size = input.untyped_storage().size()  # type: ignore[attr-defined]
     required_view_size = input.element_size() * utils.compute_required_storage_length(
         size, stride, storage_offset
     )
