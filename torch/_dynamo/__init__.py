@@ -12,7 +12,6 @@ from .eval_frame import (
     OptimizedModule,
     reset_code,
     run,
-    skip,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -21,7 +20,6 @@ from .utils import compilation_metrics, guard_failures, orig_code_map, reset_fra
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
-    "config",
     "disallow_in_graph",
     "forbid_in_graph",
     "graph_break",
@@ -35,14 +33,11 @@ __all__ = [
     "replay",
     "disable",
     "reset",
-    "skip",
     "OptimizedModule",
     "is_compiling",
     "register_backend",
     "list_backends",
 ]
-
-from .config_utils import config
 
 
 def reset():
