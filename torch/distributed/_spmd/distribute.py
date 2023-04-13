@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
@@ -45,6 +45,16 @@ class TrainingPhase(Enum):
 class Schema:
     mesh: DeviceMesh
     placements: List[Placement]
+
+
+@dataclass
+class DSize:
+    """
+    DSize represents a size value retrieved by aten.sym_size.
+    """
+
+    size: int  # local size
+    placement: Placement  # DTensor placement of the dimension where the size was retrieved
 
 
 def _is_partial_dtensor(obj: object) -> bool:
@@ -159,6 +169,35 @@ def _remap_arg(node_to_obj: Dict[fx.Node, object], arg: object) -> object:
         return arg
 
 
+def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[object, ...]) -> DTensor:
+    assert len(args) == 2, f"Expect two args but got op {node.target} with args {args}"
+    assert isinstance(
+        args[0], DTensor
+    ), f"Expect 1st argument to be DTensor but got {args[0]}"
+    assert isinstance(args[1], list), f"Expect 2nd argument as list but got {args[1]}"
+
+    local_sizes = [a.size if isinstance(a, DSize) else a for a in args[1]]
+    placements = [a.placement if isinstance(a, DSize) else Replicate() for a in args[1]]
+    assert len([p for p in placements if p.is_shard()]) == args[0].device_mesh.ndim
+
+    # set node args to real int sizes.
+    node.args = (node.args[0], local_sizes)
+    op = cast(torch._ops.OpOverload, node.target)
+    return DTensor.from_local(
+        local_tensor=op(args[0]._local_tensor, local_sizes),
+        device_mesh=args[0].device_mesh,
+        placements=[Shard(i) for i, p in enumerate(placements) if p.is_shard()],
+        run_check=False,
+    )
+
+
+# Dispatch override for
+SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
+    aten.expand.default: binop_sym_int_consumer_rule,
+    aten.view.default: binop_sym_int_consumer_rule,
+}
+
+
 def _get_dtensor_dispatch_graph(
     node: fx.Node, node_to_obj: Dict[fx.Node, object], force_make_fx: bool = False
 ) -> Optional[fx.GraphModule]:
@@ -169,12 +208,31 @@ def _get_dtensor_dispatch_graph(
 
         op_overload = cast(torch._ops.OpOverload, node.target)
 
+        if any(
+            a.placement.is_shard()
+            for a in tree_flatten(args)[0]
+            if isinstance(a, DSize)
+        ):
+            # If an operator consumes SymInt sizes on a sharded dimension, we
+            # override with callables in SYM_INT_CONSUMERS to create DTensor
+            # activations.
+            assert op_overload in SYM_INT_CONSUMERS, (
+                f"{op_overload} consumes SymInt args from a sharded dimension, "
+                "but SPMD expansion does not support this use case."
+            )
+            assert len(kwargs) == 0, f"Expect empty kwargs, but got {kwargs}"
+            node_to_obj[node] = SYM_INT_CONSUMERS[op_overload](node, args)
+            # skip DTensor expansion
+            return None
+
         if node.target == torch.ops.aten.view.default:
             # HACK: this is a hack to get around with the fact that some
             # view operations on a "global" tensor is invalid usage
             # but somehow the view operation on the batch input might hit it
             # so we convert the view op to reshape before calling DTensor
             op_overload = torch.ops.aten.reshape.default
+
+        args = tree_map(lambda a: a.size if isinstance(a, DSize) else a, args)
 
         # run dispatch once to get the real DTensor output.
         out, op_schema, output_sharding = _operator_dispatch(
@@ -491,7 +549,17 @@ def _convert_to_distributed(
                 # prevent running this collective in backwards pass
                 run_check=False,
             )
-
+        elif node.target == aten.sym_size:
+            dim: int = node.args[1]
+            dtensor: DTensor = cast(DTensor, node_to_obj[node.args[0]])
+            placement: Placement = (
+                Shard(dim)
+                if any(p.is_shard(dim) for p in dtensor.placements)
+                else Replicate()
+            )
+            node_to_obj[node] = DSize(
+                size=dtensor._local_tensor.size(dim), placement=placement
+            )
         elif isinstance(node.target, torch._ops.OpOverload):
             if node.target == torch.ops.aten.scalar_tensor.default:
                 node_to_obj[node] = DTensor.from_local(
