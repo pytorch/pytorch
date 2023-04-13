@@ -9,7 +9,7 @@ import torch.nn
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
-from ..exc import RestartAnalysis, unimplemented
+from ..exc import RestartAnalysis, unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -216,7 +216,8 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for child_name, submod in mod.named_children():
+                # TODO: Use named_children when it supports remove_duplicate=False.
+                for child_name, submod in mod._modules.items():
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
@@ -263,10 +264,17 @@ class NNModuleVariable(VariableTracker):
                     # to avoid treating it as lazy on subsequent recompile.
                     assert len(kwargs) == 0
                     if hasattr(mod, "_initialize_hook"):
+
+                        def convert_to_fake(x):
+                            if isinstance(x, torch.fx.Proxy):
+                                return get_fake_value(x.node, tx)
+                            else:
+                                return x
+
                         input = [
-                            type(arg)([get_fake_value(x.node, tx) for x in arg])
+                            type(arg)([convert_to_fake(x) for x in arg])
                             if isinstance(arg, (list, tuple))
-                            else get_fake_value(arg.node, tx)
+                            else convert_to_fake(arg)
                             for arg in proxy_args_kwargs(args, {})[0]
                         ]
                         mod._infer_parameters(mod, input)
@@ -604,6 +612,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
+        if type(value) is torch.jit._script.RecursiveScriptModule:
+            raise Unsupported(
+                "ScriptModules aren't supported in UnspecializedNNModuleVariable"
+                " becuase their .forward function isn't a static member of their type"
+            )
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
@@ -646,13 +659,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        # TODO mlazos: only support __call__ for lazy modules
-        # until we can support a larger swath of python
-        if is_lazy_module(self.value) and self.source:
-            name = "__call__"
-        else:
-            name = "forward"
-
+        name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
