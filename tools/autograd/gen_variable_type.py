@@ -614,8 +614,10 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 ASSIGN_VECTOR_OF_GRAD_FN = CodeTemplate(
     """\
 for (const auto& i : c10::irange( ${irange} )) {
+  const auto ith_requires_grad = compute_requires_grad(${args_with_derivatives});
+  check_inplace(self[i], ith_requires_grad);
   grad_fns.push_back([&]() -> std::shared_ptr<${op}> {
-      if (!compute_requires_grad(${args_with_derivatives})) {
+      if (!ith_requires_grad) {
           return nullptr;
       } else {
           auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);

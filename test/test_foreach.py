@@ -862,18 +862,24 @@ class TestForeach(TestCase):
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
         dtypes=(torch.float,),
     )
-    def test_inplace_foreach_preserves_requires_grad(self, device, dtype, op):
+    def test_inplace_foreach_leaf_check_and_grad_fn(self, device, dtype, op):
         inplace_op = op.inplace_variant
         if inplace_op is None:
             return
 
         sample = list(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True))[0]
-        tensors = sample.input
-        tensors[1].requires_grad_(True)
-        inplace_op(sample.input, *sample.args)
+        sample.input[0].requires_grad_(True)
+        with self.assertRaisesRegex(RuntimeError, "false INTERNAL ASSERT FAILED"):
+            inplace_op(sample.input, *sample.args)
+        sample.input[1].requires_grad_(True)
+        with self.assertRaisesRegex(RuntimeError, "false INTERNAL ASSERT FAILED"):
+            inplace_op(sample.input, *sample.args)
 
-        self.assertIsNone(tensors[0].grad_fn)
-        self.assertIsNotNone(tensors[1].grad_fn)
+        _tensors = [t.clone().detach().requires_grad_(i == 0) for i, t in enumerate(sample.input)]
+        tensors = [t.clone() for t in _tensors]
+        inplace_op(tensors, *sample.args)
+        self.assertIsNotNone(tensors[0].grad_fn)
+        self.assertIsNone(tensors[1].grad_fn)
 
 
 instantiate_device_type_tests(TestForeach, globals())
