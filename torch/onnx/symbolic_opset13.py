@@ -474,6 +474,7 @@ def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
             "Input rank must be known at export time.",
         )
 
+    # dim could be negative
     input_dim = g.op("Constant", value_t=torch.tensor([input_dim], dtype=torch.int64))
     dim = g.op("Add", input_dim, dim)
     dim = g.op("Mod", dim, input_dim)
