@@ -378,6 +378,24 @@ void resize_tensor(Tensor* output) {
   output->resize_(output->sizes());
 }
 
+Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
+  // Copied and modified from aten/stc/ATen/ScalarOps.h
+  // as MPS doesn't support float64 tensor.
+  Tensor tensor;
+  if (scalar.isFloatingPoint()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kFloat));
+  } else if (scalar.isBoolean()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kBool));
+  } else if (scalar.isComplex()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
+  } else {
+    AT_ASSERT(scalar.isIntegral(false));
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));
+  }
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
 MPSGraph* make_mps_graph() {
   MPSGraph* mpsGraph = [[MPSGraph new] autorelease];
   return mpsGraph;
