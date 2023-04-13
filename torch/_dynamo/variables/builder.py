@@ -7,7 +7,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
 import torch
 
@@ -793,7 +793,9 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        tensor_proxy.node.meta["grapharg"] = GraphArg(source, value, False, fake_tensor_value)
+        tensor_proxy.node.meta["grapharg"] = GraphArg(
+            source, value, False, fake_tensor_value
+        )
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__

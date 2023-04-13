@@ -8,7 +8,17 @@ import re
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Any, Dict, List, Iterator, NamedTuple, Optional, OrderedDict, Set, Union
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Union,
+)
 
 import torch._guards
 
@@ -701,7 +711,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     @property
     def graphargs(self) -> List[GraphArg]:
-        return [node.meta['grapharg'] for node in self.placeholders]
+        return [node.meta["grapharg"] for node in self.placeholders]
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
@@ -714,7 +724,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 placeholders.append(node)
         torch._dynamo.utils.increment_op_count(tot)
         for pl in placeholders:
-            arg = pl.meta['grapharg']
+            arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
             pl._dynamo_source = arg.source
 
@@ -806,7 +816,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         for i, node in enumerate(self.placeholders):
             if not node.users:
-                log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
+                log.debug(
+                    "REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name()
+                )
                 # I'm not really sure why you need to delete these from the
                 # node since the node is going to get removed
                 if "example_value" in node.meta:
