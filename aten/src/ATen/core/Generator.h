@@ -94,8 +94,7 @@ struct TORCH_API Generator {
 
   void set_current_seed(uint64_t seed) { impl_->set_current_seed(seed); }
   // Sets the offset of Generator state to the desired offset. This is currently
-  // supported only for CUDAGenerator because CUDA implementation uses Philox
-  // RNG, and has a clear mapping for offset.
+  // supported for only Philox based Generators, i.e., CUDA and MPS.
   void set_offset(uint64_t offset) { impl_->set_offset(offset); }
 
   uint64_t current_seed() const { return impl_->current_seed(); }
