@@ -2057,9 +2057,9 @@ class CppKernelProxy(CppKernel):
                 _legalize_bf16(body)
 
     def codegen_nodes(self, nodes):
-        self.data_type_propagation(nodes)
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
+        self.data_type_propagation(nodes)
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
