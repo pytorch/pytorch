@@ -24,7 +24,6 @@ import torch.distributed as dist
 
 # We need to import _functional_collectives to trigger op registration
 import torch.distributed._functional_collectives
-import torch.library
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
@@ -38,19 +37,11 @@ from torch.distributed._spmd.parallel_mode import (
     DTensorExpandMode,
     ParallelMode,
 )
+from torch.distributed._spmd.data_parallel import gradients_tagging
 from torch.distributed._tensor import Placement, Replicate
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
-
-
-# used by data parallel to tag gradients.
-_spmd_lib_def = torch.library.Library("_spmd", "DEF")
-_spmd_lib_def.define("tag_grad(Tensor self) -> Tensor")
-
-_spmd_lib_impl = torch.library.Library("_spmd", "IMPL")
-for dispatch_key in ("CPU", "CUDA", "Meta"):
-    _spmd_lib_impl.impl("tag_grad", lambda x: x, dispatch_key)
 
 
 class SPMD(nn.Module):
@@ -437,6 +428,8 @@ def _compile(
                 # Parameter as keys
                 named_states[n] = opt.state[p]  # type: ignore[index]
 
+    is_data_parallel_mode = isinstance(parallel_mode, DataParallel)
+
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
@@ -445,24 +438,12 @@ def _compile(
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
-            # For DataParallel mode, install hooks first to tag the graidents
-            # we would remove those nodes later, this is safe to trace
-            tagging_hooks = []
-            if isinstance(parallel_mode, DataParallel):
-                for p in params.values():
-                    h = p.register_hook(lambda grad: torch.ops._spmd.tag_grad(grad))
-                    tagging_hooks.append(h)
-
-            ret = func(*args, **kwargs)
-
-            # clear up the hooks after the train step
-            for h in tagging_hooks:
-                h.remove()
+            # For DataParallel mode, install hooks first to tag the gradients
+            with gradients_tagging(params) if is_data_parallel_mode else nullcontext():
+                ret = func(*args, **kwargs)
 
             # make sure updated parameters are returned
             return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
-
-    is_data_parallel_mode = isinstance(parallel_mode, DataParallel)
 
     # FIXME: Using symbolic tracing to work around in DTensor expand mode.
     # Otherwise it hits shape mismatch error, as we use local inputs to

@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 
@@ -5,6 +6,7 @@ from typing import Any, cast, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx as fx
+import torch.library
 import torch.nn as nn
 
 import torch.utils._pytree as pytree
@@ -22,6 +24,14 @@ from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 
 aten = torch.ops.aten
+
+# Dummy op used by data parallel to tag gradients.
+_spmd_lib_def = torch.library.Library("_spmd", "DEF")
+_spmd_lib_def.define("tag_grad(Tensor self) -> Tensor")
+
+_spmd_lib_impl = torch.library.Library("_spmd", "IMPL")
+for dispatch_key in ("CPU", "CUDA", "Meta"):
+    _spmd_lib_impl.impl("tag_grad", lambda x: x, dispatch_key)
 
 
 class DataParallelStyle(Enum):
@@ -82,6 +92,27 @@ class DataParallelStrategy(StrategyList):
 
     def __str__(self) -> str:
         return f"type: {self.node_type}, {super().__str__()}"
+
+
+@contextmanager
+def gradients_tagging(params: Dict[str, torch.Tensor]):
+    """
+    This is a helper function that tags the gradient of the parameters
+    with a special tag, so that we can identify them during SPMD expansion.
+
+    It's safe to trace those hooks and we would remove those nodes later.
+    """
+
+    tagging_hooks = []
+    try:
+        for p in params.values():
+            h = p.register_hook(lambda grad: torch.ops._spmd.tag_grad(grad))
+            tagging_hooks.append(h)
+        yield
+    finally:
+        # remove those hooks after tracing
+        for h in tagging_hooks:
+            h.remove()
 
 
 class BatchDimAnalyzer(object):
