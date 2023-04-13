@@ -1473,11 +1473,11 @@ class DimConstraints:
         return expr
 
     def add(self, expr):
-        if expr == True:
+        if expr == sympy.true:
             return
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
-        assert orig_reduced != False, f"{orig_expr} is inconsistent!"
+        assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
@@ -1488,9 +1488,9 @@ class DimConstraints:
             s = next(iter(free_symbols))
             # eliminate // and % (see documentation of `rewrite_with_congruences` above)
             expr = self.rewrite_with_congruences(s, expr)
-            if expr != True:
+            if expr != sympy.true:
                 reduced = expr.subs(self._var_to_val)
-                assert reduced != False, f"{expr}, obtained by rewriting {orig_expr} with congruences, is inconsistent!"
+                assert reduced != sympy.false, f"{expr}, obtained by rewriting {orig_expr} with congruences, is inconsistent!"
                 if isinstance(expr, sympy.Eq):
                     # special status for symbols that have equalities (see `solve` below)
                     self._symbols_with_equalities.add(s)
