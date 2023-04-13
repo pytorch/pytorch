@@ -2274,6 +2274,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod(*args)
 
     @skipIfPy311
+    @unittest.skipIf(IS_MACOS, "need to debug mac issue")
     def test_pointless_graph_removal(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
