@@ -295,10 +295,11 @@ class autocast:
             torch.hpu.set_autocast_hpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
             torch.autocast_increment_nesting()
         elif self.device == 'xla':
-            self.prev = torch.is_autocast_cpu_enabled()
+            self.prev = torch.is_autocast_xla_enabled()
             self.prev_fastdtype = torch.get_autocast_xla_dtype()
             torch.set_autocast_xla_enabled(self._enabled)
             torch.set_autocast_xla_dtype(self.fast_dtype)  # type: ignore[arg-type]
+            torch.autocast_increment_nesting()
         elif self.device == self.custom_backend_name:
             self.prev = getattr(self.custom_device_mod, f'is_autocast_{self.custom_backend_name}_enabled')()
             self.prev_fastdtype = getattr(self.custom_device_mod, f'get_autocast_{self.custom_backend_name}_dtype')()
