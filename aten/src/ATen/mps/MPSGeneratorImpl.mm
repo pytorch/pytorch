@@ -29,7 +29,7 @@ MPSGeneratorImpl::MPSGeneratorImpl(uint64_t seed_in)
 
 void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   data_.seed = seed;
-  data._offset = 0;
+  data_.offset = 0;
   data_.state.fill(1);
   // the two last state values are the Philox keys
   // TODO: make "key" in PhiloxRNGEngine.h public so we don't duplicate code here
