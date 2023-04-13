@@ -23,7 +23,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_symbol_binding_fx_node, free_symbols
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -44,6 +44,8 @@ from .source import (
     is_constant_source,
     LocalSource,
     ParamBufferSource,
+    TensorProperty,
+    TensorPropertySource,
     ShapeEnvSource,
 )
 from .utils import (
@@ -345,6 +347,31 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
     def add_grapharg(self, arg: GraphArg):
+        # Insert implicit size vars as necessary
+        import sympy
+        if arg.fake_tensor is not None:
+            def bind_symint(s, prop):
+                if not (isinstance(s, torch.SymInt) and isinstance(s.node.expr, sympy.Symbol)):
+                    return
+                # TODO: make this not quadratic
+                if any(s.node.expr == a.example.node.expr for a in self.graphargs if isinstance(a.example, torch.SymInt)):
+                    return
+                self.create_graph_input(str(s.node.expr), torch.SymInt, before=True)
+                # Insert one before the last placeholder
+                self.graphargs.insert(-1, GraphArg(
+                    prop(arg.source),
+                    s,
+                    is_unspecialized=False,
+                    fake_tensor=None,
+                    is_tensor=False,
+                ))
+
+            for i, s in enumerate(arg.fake_tensor.size()):
+                bind_symint(s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i))
+            for i, s in enumerate(arg.fake_tensor.stride()):
+                bind_symint(s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i))
+            bind_symint(arg.fake_tensor.storage_offset(), lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET))
+
         self.graphargs.append(arg)
 
     def count_calls(self):
@@ -360,7 +387,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 obj = getattr(obj, k)
         return obj
 
-    def create_graph_input(self, name, type_expr=None):
+    # when before=True, we will insert this input before the most recent
+    # inserted proxy.  This is a hack to get around an ordering problem,
+    # where we first insert a tensor argument, and then insert bindings
+    # for SymInts that may occur in the tensor argument.
+    # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
+    # fixed.
+    def create_graph_input(self, name, type_expr=None, before=False):
         # unique
         if name in self.input_name_to_proxy:
             for i in itertools.count():
@@ -371,12 +404,21 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
-            ctx = self.graph.inserting_after(self.input_name_to_proxy[prev_name].node)
+            node = self.input_name_to_proxy[prev_name].node
+            if before:
+                ctx = self.graph.inserting_before(node)
+            else:
+                ctx = self.graph.inserting_after(node)
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
             proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
-            self.input_name_to_proxy[name] = proxy
+            if self.input_name_to_proxy and before:
+                k, v = self.input_name_to_proxy.popitem()
+                self.input_name_to_proxy[name] = proxy
+                self.input_name_to_proxy[k] = v
+            else:
+                self.input_name_to_proxy[name] = proxy
             return proxy
 
     def new_var(self, name="tmp"):
@@ -711,7 +753,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if node.op == "placeholder":
                 placeholders.append(node)
         torch._dynamo.utils.increment_op_count(tot)
-        assert len(placeholders) == len(self.graphargs)
+        assert len(placeholders) == len(self.graphargs), f"{placeholders} != {self.graphargs}"
         for pl, arg in zip(placeholders, self.graphargs):
             pl._dynamo_source = arg.source
 
@@ -806,9 +848,25 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             expanded_graphargs.extend([arg] * len(arg))
             arg.uses = 0
 
+        symbol_uses = collections.defaultdict(int)
+
+        import sympy
         for node, arg in zip(self.graph.nodes, expanded_graphargs):
             assert node.op == "placeholder"
             arg.uses += len(node.users)
+            # If an argument refers to a free symbol, the symbol binding
+            # fx placeholder also counts as being used.  We are storing
+            # uses on GraphArg so it's a little inconvenient to get at
+            # it directly, so instead we do it in two passes
+            fake = arg.fake_tensor if arg.fake_tensor is not None else arg.example
+            if not (isinstance(fake, torch.SymInt) and isinstance(fake.node.expr, sympy.Symbol)):
+                for s in free_symbols(fake):
+                    symbol_uses[s] += 1
+
+        for node, arg in zip(self.graph.nodes, expanded_graphargs):
+            fake = arg.fake_tensor if arg.fake_tensor is not None else arg.example
+            if isinstance(fake, torch.SymInt) and isinstance(fake.node.expr, sympy.Symbol):
+                arg.uses += symbol_uses.pop(fake.node.expr)
 
         for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
             if arg.uses == 0:

@@ -49,7 +49,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
-    "method_to_operator", "hint_int", "SYMPY_INTERP",
+    "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -151,6 +151,41 @@ def is_concrete_int(a: Union[int, SymInt]):
 # that's quite an obscure case
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
+
+def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+    if isinstance(val, SymInt):
+        return val.node.expr.free_symbols
+    elif isinstance(val, int):
+        return set()
+    elif isinstance(val, torch.Tensor):
+        r = set()
+        for s in val.size():
+            r |= free_symbols(s)
+        for s in val.stride():
+            r |= free_symbols(s)
+        r |= free_symbols(val.storage_offset())
+        return r
+    else:
+        raise AssertionError(f"cannot compute free_symbols of {val}")
+
+# WARNING: Don't use this on Dynamo produced graphs, they don't have meta
+# setup!
+def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
+    if (
+        node.op == "placeholder" and
+        "val" in node.meta and
+        isinstance(node.meta["val"], torch.SymInt) and
+        isinstance(node.meta["val"].node.expr, sympy.Symbol)
+    ):
+        return node.meta["val"].node.expr
+    return None
+
+def find_symbol_binding_fx_nodes(graph):
+    return {
+        node.meta["val"].node.expr: node
+        for node in graph.nodes
+        if is_symbol_binding_fx_node(node)
+    }
 
 def definitely_true(a):
     """

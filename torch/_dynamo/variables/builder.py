@@ -126,6 +126,10 @@ class GraphArg:
     # or not.
     is_tensor: bool = True
 
+    # This is scratch space that is used in remove_unused_graphargs
+    # (and, btw, is preventing this class from being frozen=True)
+    uses: int = 0
+
     def __post_init__(self):
         if isinstance(self.example, torch.Tensor):
             assert isinstance(

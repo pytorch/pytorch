@@ -192,7 +192,13 @@ class TensorPropertySource(Source):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        assert self.prop is TensorProperty.SIZE
+        return [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_attr("size"),
+            codegen.create_load_const(self.idx),
+            *create_call_function(1, True),
+        ]
 
     def guard_source(self):
         return self.base.guard_source()
