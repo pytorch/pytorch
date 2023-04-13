@@ -1895,7 +1895,6 @@ def gather(x, dim, index, sparse_grad=False):
     def fn(idx):
         idx = list(idx)
         if len(idx) != 0:
-            assert dim < len(size)
             idx[dim] = ops.indirect_indexing(index_loader(idx), size[dim])
         return x_loader(idx)
 
@@ -2492,11 +2491,12 @@ def reflection_pad2d(x, padding):
     w = V.graph.sizevars.guard_static_shape(w)
 
     def reflect(x, size, offset):
+        size_num = size
         size = ops.constant(size - 1, torch.int32)
         x = ops.index_expr(x, torch.int32)
         x = ops.sub(x, ops.constant(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size)
+        return ops.indirect_indexing(x, size_num)
 
     def fn(idx):
         *b, x, y = idx
