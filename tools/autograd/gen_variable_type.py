@@ -1000,9 +1000,17 @@ def emit_body(
 
     inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
     if is_inplace_foreach and info is not None:
-        # TODO(crcrpar): Ideally we should guarantee that `f`'s arity matches `info.func`'s.
-        # Currently `_foreach_add_` and `_foreach_sub_` with `Scalar` and `ScalarList` lack `alpha`.
-        # I don't know why these don't have `alpha`. It'll need changes in ATen.
+        assert (
+            len(f.func.arguments.flat_non_out)
+            == len(info.func.func.arguments.flat_non_out)
+        ) or (
+            # These two lack `alpha` of scaling factor to applied to the right hand side argument.
+            f.func.name.name.base in ("_foreach_add", "_foreach_sub")
+            and f.func.name.overload_name in ("Scalar", "ScalarList")
+        ), (
+            f"{f.func.name.name.base}.{f.func.name.overload_name} has {len(f.func.arguments.flat_non_out)} args "
+            f"but the reference has {len(info.func.func.arguments.flat_non_out)}"
+        )
         for foreach_arg, ref_arg in zip(
             f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
         ):
