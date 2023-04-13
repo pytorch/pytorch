@@ -5,6 +5,10 @@ import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._subclasses import FakeTensorMode
+from torch.distributed._spmd.data_parallel import (
+    DataParallelStyle,
+    partition_data_parallel,
+)
 from torch.distributed._spmd.distribute import _convert_to_distributed, Schema
 from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
 
@@ -46,6 +50,75 @@ class ParallelMode(ABC):
         The returned result should be a compiled executable graph in
         the distributed environment.
         """
+        # TODO: add more necessary arguments to this interface.
+        raise NotImplementedError()
+
+
+class DataParallel(ParallelMode):
+    """Data Parallelism mode."""
+
+    def __init__(
+        self,
+        parallel_style: str = "replicate",
+        custom_passes: Optional[Callable[[GraphModule], GraphModule]] = None,
+    ):
+        """
+        DataParallel Mode that partition the model and graph to data parallel style
+        parallelism (i.e. DDP/FSDP/ZERO-3). It currently supports three different
+        parallel styles: "replicate", "fully_shard", and "default". See
+        :class:`DataParallelStyle` for more details.
+
+        Args:
+            parallel_style (str): parallel style to use. Currently supports
+                "replicate", "fully_shard", and "default".
+            custom_passes (Callable[[GraphModule], GraphModule], optional):
+                A custom callable that overrides the default graph transformation
+                and optimization passes.
+
+        """
+        if parallel_style == "replicate":
+            self.parallel_style = DataParallelStyle.REPLICATE
+        elif parallel_style == "fully_shard":
+            self.parallel_style = DataParallelStyle.FULLY_SHARD
+        elif parallel_style == "default":
+            self.parallel_style = DataParallelStyle.DEFAULT
+        else:
+            raise RuntimeError(f"Unknown parallel style: {parallel_style}")
+
+        if custom_passes is not None:
+            self._gm_passes: Callable[[GraphModule], GraphModule] = custom_passes
+        else:
+            # TODO: add a few default passes here.
+            self._gm_passes = lambda gm: gm
+
+    def partition(
+        self,
+        gm: GraphModule,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        params_and_buffers: Dict[str, Any],
+        named_states: Dict[str, Any],
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+    ) -> GraphModule:
+        # TODO: figure out a way to avoid explicit "cuda" mesh.
+        mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()))
+
+        gm = partition_data_parallel(
+            gm,
+            model,
+            optimizer,
+            params_and_buffers,
+            named_states,
+            args,
+            kwargs,
+            mesh,
+            self.parallel_style,
+        )
+        return gm
+
+    def transform_and_compile(self, gm: GraphModule) -> GraphModule:
+        """optimize a distributed graph with a set of optimization passes"""
         # TODO: add more necessary arguments to this interface.
         raise NotImplementedError()
 

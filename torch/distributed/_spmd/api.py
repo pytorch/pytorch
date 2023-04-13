@@ -24,17 +24,33 @@ import torch.distributed as dist
 
 # We need to import _functional_collectives to trigger op registration
 import torch.distributed._functional_collectives
+import torch.library
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from torch import fx
+
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.distribute import distribute, Schema
 from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._spmd.parallel_mode import DTensorExpandMode, ParallelMode
+from torch.distributed._spmd.parallel_mode import (
+    DataParallel,
+    DTensorExpandMode,
+    ParallelMode,
+)
 from torch.distributed._tensor import Placement, Replicate
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
+
+
+# used by data parallel to tag gradients.
+_spmd_lib_def = torch.library.Library("_spmd", "DEF")
+_spmd_lib_def.define("tag_grad(Tensor self) -> Tensor")
+
+_spmd_lib_impl = torch.library.Library("_spmd", "IMPL")
+for dispatch_key in ("CPU", "CUDA", "Meta"):
+    _spmd_lib_impl.impl("tag_grad", lambda x: x, dispatch_key)
 
 
 class SPMD(nn.Module):
@@ -429,14 +445,51 @@ def _compile(
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
+            # For DataParallel mode, install hooks first to tag the graidents
+            # we would remove those nodes later, this is safe to trace
+            tagging_hooks = []
+            if isinstance(parallel_mode, DataParallel):
+                for p in params.values():
+                    h = p.register_hook(lambda grad: torch.ops._spmd.tag_grad(grad))
+                    tagging_hooks.append(h)
+
             ret = func(*args, **kwargs)
+
+            # clear up the hooks after the train step
+            for h in tagging_hooks:
+                h.remove()
+
             # make sure updated parameters are returned
             return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
 
-    # FIXME: Using symbolic tracing to work around. Otherwise it hits
-    # shape mismatch error, as we use local inputs to trace local graph
-    # and use DTensor to expand operators, where DTensor's shape is the
-    # global shape.
+    is_data_parallel_mode = isinstance(parallel_mode, DataParallel)
+
+    # FIXME: Using symbolic tracing to work around in DTensor expand mode.
+    # Otherwise it hits shape mismatch error, as we use local inputs to
+    # trace local graph and use DTensor to expand operators, where
+    # DTensor's shape is the global shape.
+    tracing_mode = "fake" if is_data_parallel_mode else "symbolic"
+
+    if is_data_parallel_mode:
+        fake_mode = FakeTensorMode()
+
+        def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
+            # since compilation happen in the first iteration and we
+            # receives mini-batch input, convert them to full batch
+            # fake tensor input first for data parallel sharding
+            # propagations
+            fake_arg = fake_mode.from_tensor(arg)
+            arg_dims = [1] * arg.ndim
+            # we assume the first dim is batch dim in data parallel
+            arg_dims[0] *= dist.get_world_size()
+            return fake_arg.repeat(arg_dims)
+
+        args = pytree.tree_map_only(
+            torch.Tensor,
+            _get_full_batch_arg,
+            args,
+        )
+
     with _enable_compile():
         # FIXME(@mrshenli): functionalization does not work for our use
         # case yet. Use explicit decompositions for foreach ops.
@@ -444,7 +497,7 @@ def _compile(
         # Issue: https://github.com/pytorch/pytorch/issues/97852
         gm = make_fx(
             partial(stateless_func, func),
-            tracing_mode="symbolic",
+            tracing_mode=tracing_mode,
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
         )(params, buffers, named_states, args, kwargs)
