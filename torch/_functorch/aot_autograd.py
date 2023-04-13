@@ -876,6 +876,7 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
+    enable_log: bool = True
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -1282,7 +1283,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     assert copy_count == copy_count2
 
-    aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+    if aot_config.enable_log:
+        aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -1856,31 +1858,33 @@ def aot_wrapper_dedupe(
     # This is done via (respectively):
     #
     #   seen_args = {a: 0, b: 1, c: 2}
-    #   add_dupe_map = {  # how to get args from the deduped list
-    #       0: 0,
-    #       1: 1,
-    #       2: 0,
-    #       3: 2,
-    #   }
+    #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
+    #       (0, 0),
+    #       (1, 1),
+    #       (2, 0),
+    #       (3, 2),
+    #   ]
     #   keep_arg_mask = [True, True, False, True]
 
     seen_args = {}
     keep_arg_mask = []
-    add_dupe_map = {}
+    # Implicitly map duped arg position (list index) to de-duped arg position
+    add_dupe_map: List[int] = []
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
             keep_arg_mask.append(False)
-            add_dupe_map[i] = seen_args[t]
+            add_dupe_map.append(seen_args[t])
             continue
         keep_arg_mask.append(True)
         seen_args[t] = j
-        add_dupe_map[i] = j
+        add_dupe_map.append(j)
         j += 1
-
-    unique_args = j
+    assert len(add_dupe_map) == duped_arg_len, (
+        f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+    )
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -1900,8 +1904,8 @@ def aot_wrapper_dedupe(
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
-        for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            if dupe_arg_pos != kept_pos:
+        for dupe_arg_pos, (kept_pos, keep_arg) in enumerate(zip(add_dupe_map, keep_arg_mask)):
+            if not keep_arg:
                 dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
                 kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
                 tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
@@ -2312,7 +2316,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             "Graph partitioning without functionalization is not sound, we may introduce errors"
         )
 
-    aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
+    if aot_config.enable_log:
+        aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2389,8 +2394,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if bw_out is None:
                 _indices_of_inps_to_detach.append(i)
 
-        aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
-        aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
+        if aot_config.enable_log:
+            aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+            aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(
@@ -2842,6 +2848,7 @@ def aot_function(
     *,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
+    enable_log=True,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -2914,6 +2921,7 @@ def aot_function(
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
         aot_autograd_arg_pos_to_source=None,
+        enable_log=enable_log,
     )
     cached_res = None
 
