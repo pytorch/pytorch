@@ -6159,6 +6159,7 @@ class TestQuantizeFx(QuantizationTestCase):
         res = m(*example_inputs)
         self.assertEqual(res, res_ref)
 
+    @unittest.skip("only testing this locally since torch.compile does not work with windows in CI")
     def test__convert_to_reference_decomposed_fx_per_channel_quant_module(self):
         """ Test the result for per channel weight quant for reference modules
         """
