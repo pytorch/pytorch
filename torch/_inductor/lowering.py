@@ -1291,6 +1291,7 @@ make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.cumsum, require_dense, warn=False)
+make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1328,7 +1329,7 @@ make_fallback(aten._cdist_forward)
 make_fallback(aten.count_nonzero)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.cumprod)
+make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.deg2rad)
 make_fallback(aten.diagonal_copy, warn=False)
 make_fallback(aten.diagonal_scatter, warn=False)
@@ -2520,13 +2521,14 @@ def reflection_pad2d_backward(grad_output, x, padding):
     h = V.graph.sizevars.guard_static_shape(h) - 1
     w = V.graph.sizevars.guard_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
+    *_, h_grad, w_grad = grad_output.get_size()
 
     def fn(idx):
         *b, x, y = idx
 
         def load_from_output(x, y):
-            x = ops.indirect_indexing(ops.index_expr(x, torch.int32), h)
-            y = ops.indirect_indexing(ops.index_expr(y, torch.int32), w)
+            x = ops.indirect_indexing(ops.index_expr(x, torch.int32), h_grad)
+            y = ops.indirect_indexing(ops.index_expr(y, torch.int32), w_grad)
             return grad_loader([*b, x, y])
 
         def index_range_condition(index_range):
@@ -2590,7 +2592,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
 
 @register_lowering(prims.rev.default)
 def rev(x, dims):
-    # note - dims pre-canoncalized
+    # note - dims pre-canonicalized
     x_loader = x.make_loader()
     sizes = x.get_size()
 
@@ -3562,29 +3564,27 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-def _is_ir_node_and_cuda(x):
-    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
-        return True
-
-    return False
+fallback_pow = fallback_handler(aten.pow)
 
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
-        assert a.get_dtype() in (
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
-    elif isinstance(b, int) and -32 < b < 32:
-        # Optimize away small fixed powers
+
+    # Type promotion ensures all tensor arguments have the same type
+    dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
+    is_integer_pow = is_integer_dtype(dtype)
+
+    # Optimize away small fixed powers, or for integers avoid falling back to ATen
+    embed_exponent = isinstance(b, int) and (
+        -32 < b < 32 or (is_integer_pow and b >= 0)
+    )
+    if embed_exponent:
         loader = a.make_loader()
 
         def fn(idx):
@@ -3602,6 +3602,10 @@ def pow(a, b):
             return full_like(b, 1)
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
+
+    if is_integer_pow:
+        # ops.pow doesn't work for integers
+        return fallback_pow(a, b)
 
     return pow_native(a, b)
 
