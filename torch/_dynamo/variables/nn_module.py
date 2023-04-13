@@ -216,7 +216,8 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for child_name, submod in mod.named_children():
+                # TODO: Use named_children when it supports remove_duplicate=False.
+                for child_name, submod in mod._modules.items():
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
