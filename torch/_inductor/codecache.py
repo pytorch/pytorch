@@ -662,7 +662,7 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load(cls, source_code):
+    def load(cls, source_code, include_pytorch=False):
         picked_vec_isa = pick_vec_isa()
         key, input_path = write(
             source_code,
@@ -678,7 +678,10 @@ class CppCodeCache:
                 output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
                     cmd = cpp_compile_command(
-                        input=input_path, output=output_path, vec_isa=picked_vec_isa
+                        input=input_path,
+                        output=output_path,
+                        vec_isa=picked_vec_isa,
+                        include_pytorch=include_pytorch,
                     ).split(" ")
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)

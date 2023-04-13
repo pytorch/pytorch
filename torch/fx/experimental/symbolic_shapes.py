@@ -9,11 +9,14 @@ import sys
 import textwrap
 import threading
 import traceback
+import dataclasses
 from dataclasses import dataclass
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Type, Union
+from typing import cast, Dict, List, Optional, Set, Type, Union, Callable
 from enum import Enum
+import time
+import ctypes
 
 import torch
 
@@ -41,6 +44,7 @@ class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
 import sympy
+from sympy.printing.c import C11CodePrinter
 from sympy.printing.str import StrPrinter
 from sympy.core.logic import fuzzy_and, fuzzy_or
 
@@ -1331,36 +1335,88 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-class ShapeGuardPrinter(StrPrinter):
+# There are 2 classes for generating the guards:
+#   - PythonShapeGuardPrinter
+#   - CShapeGuardPrinter
+#
+# Even though they generate, semantically, the same guards,
+# the 'CShapeGuardPrinter' is used for compiling and running
+# the guards in runtime.
+#
+# 'PythonShapeGuardPrinter', on the other hand, is used for the
+# verbose code parts. They help find the reason a guard has failed.
+#
+# Note that they are similar to each other. The only differences
+# being the parent class (specific for each language) and the
+# '_print_Mod' implementation for 'CShapeGuardPrinter'.
+
+
+class PythonShapeGuardPrinter(StrPrinter):
     def __init__(
         self,
         symbol_to_source,
         source_ref,
-        var_to_sources,
     ):
         super().__init__()
         self.symbol_to_source = symbol_to_source
         self.source_ref = source_ref
-        self.var_to_sources = var_to_sources
 
     def _print_Symbol(self, expr) -> str:
-        assert isinstance(expr, sympy.Symbol), str(type(expr))
-
-        def repr_symbol_to_source():
-            return repr({
-                symbol: [s.name() for s in sources]
-                for symbol, sources in self.symbol_to_source.items()
-            })
-
+        # assert isinstance(expr, Symbol), str(type(expr))
         assert expr in self.symbol_to_source, (
-            f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
-            f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
-            "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
+            f"{expr} (could be from {[s.name() for s in expr.sources]}) "
+            f"not in {self.symbol_to_source}"
         )
         return self.source_ref(self.symbol_to_source[expr][0])
 
 
-class LoggingShapeGuardPrinter(ShapeGuardPrinter):
+class CShapeGuardPrinter(C11CodePrinter):
+    def __init__(
+        self,
+        symbol_to_source,
+        source_ref,
+    ):
+        super().__init__()
+        self.symbol_to_source = symbol_to_source
+        self.source_ref = source_ref
+
+    # Results of operations such as 'pow' and division can result in floating
+    # point numbers. We call 'modi' so as to implicitly cast them to integer.
+    def _print_Mod(self, expr) -> str:
+        dividend, divisor = self._print(expr.args[0]), self._print(expr.args[1])
+        return f"modi({dividend}, {divisor})"
+
+    # Division between integers behave differently in C++ and Python. Here, we
+    # call a 'div' function, instead, which emulates Python behavior.
+    def _print_Mul(self, expr) -> str:
+        numerator = []
+        denominator = []
+
+        for item in expr.args:
+            if item.is_commutative and item.is_Pow and item.exp.is_Rational and item.exp.is_negative:
+                denominator.append(sympy.Pow(item.base, -item.exp))
+            else:
+                numerator.append(item)
+
+        numerator_str = "1" if len(numerator) == 0 else \
+            super()._print_Mul(sympy.Mul._from_args(numerator))
+
+        if len(denominator) > 0:
+            denominator_str = super()._print_Mul(sympy.Mul._from_args(denominator))
+            return f"pydiv({numerator_str}, {denominator_str})"
+
+        return numerator_str
+
+    def _print_Symbol(self, expr) -> str:
+        # assert isinstance(expr, Symbol), str(type(expr))
+        assert expr in self.symbol_to_source, (
+            f"{expr} (could be from {[s.name() for s in expr.sources]}) "
+            f"not in {self.symbol_to_source}"
+        )
+        return self.source_ref(self.symbol_to_source[expr][0])
+
+
+class LoggingShapeGuardPrinter(PythonShapeGuardPrinter):
     def __init__(self, var_to_sources):
         super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
 
@@ -1664,9 +1720,11 @@ class ShapeEnv:
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
-    ) -> List[str]:
+    ) -> "GuardCompiler.SymbolicShapesExpr":
         assert len(placeholders) == len(sources)
 
+        guard_compiler = GuardCompiler(source_ref)
+        
         # Expand optional inputs, or verify invariants are upheld
         if constraint_inputs is None:
             constraint_inputs = [
@@ -1813,6 +1871,10 @@ class ShapeEnv:
                         "about why it is constant, set torch._dynamo.config.print_specializations = True"
                     ))
 
+        def track_tensor_property(source, val, name = None):
+            guard_compiler.register_source(source, name=name)
+            track_symint(source, val)
+
         for t, source, constraint in zip(placeholders, sources, constraint_inputs):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
@@ -1820,22 +1882,31 @@ class ShapeEnv:
             assert isinstance(source, Source)
             if t is None:
                 continue
+            if guard_compiler.is_source_registered(source):
+                continue
             if isinstance(t, (SymInt, int)):
+                guard_compiler.register_parameter(source, type=SymInt)
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
-            for i, ss in enumerate(t.size()):
-                property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-                track_symint(property_source, ss, constraint[i])
+            guard_compiler.register_parameter(source, type=torch.Tensor)
+
+            tensor_size_name = guard_compiler.namespace.generate()
+
+            for i, ss in enumerate(t.size()):    
+                track_tensor_property(TensorPropertySource(source, TensorProperty.SIZE, i), ss, tensor_size_name)
+            
+            tensor_stride_name = guard_compiler.namespace.generate()
             for i, ss in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
-            track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
+                track_tensor_property(TensorPropertySource(source, TensorProperty.STRIDE, i), ss, tensor_stride_name)
+            track_tensor_property(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
+        python_exprs = []
         if not _simplified:
             for source, expr in input_guards:
                 # Small optimization
@@ -1845,8 +1916,12 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
-                exprs.append(f"{source_ref(source)} == {sexpr}")
+                sexpr = CShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(expr)
+                exprs.append(f"{guard_compiler.flat_source_ref(source)} == {sexpr}")
+
+                python_sexpr = PythonShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                python_exprs.append(f"{source_ref(source)} == {python_sexpr}")
+
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -1860,8 +1935,10 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
+                guard_expr = CShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(g)
+                # breakpoint()
                 exprs.append(guard_expr)
+                python_exprs.append(PythonShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
@@ -1893,7 +1970,9 @@ class ShapeEnv:
         # in simplified.  However, when we start updating value ranges
         # these should probably get reported in tests too
         if not _simplified:
+
             for symbol, sources in symbol_to_source.items():
+                names_to_sources = [guard_compiler.get_source_info(source).name for source in sources]
                 r = self.var_to_range[symbol]
 
                 for c in symbol_to_constraints[symbol]:
@@ -1918,10 +1997,14 @@ class ShapeEnv:
 
                 assert sources
                 assert symbol.is_integer
+                py_bounds = []
                 bounds = []
+
                 if r.lower != -sympy.oo:
+                    py_bounds.append(str(r.lower))
                     bounds.append(str(r.lower))
-                bounds.append(source_ref(sources[0]))
+                py_bounds.append(source_ref(sources[0]))
+                bounds.append(names_to_sources[0])
                 # NB: This looks like an off-by-one error but it's not: the
                 # upper bound may be sys.maxsize - 1 because we intentionally
                 # exclude sys.maxsize from our bounds to deal with direct
@@ -1930,8 +2013,10 @@ class ShapeEnv:
                 # won't matter because sizes in practice will be no where near
                 # the 64-bit limit.
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
+                    py_bounds.append(str(r.upper))
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
+                    python_exprs.append(" <= ".join(py_bounds))
                     exprs.append(" <= ".join(bounds))
 
         if constraint_violations:
@@ -1948,7 +2033,8 @@ class ShapeEnv:
             if len(error_msgs) > 0:
                 raise ConstraintViolationError(f"Constraints violated!\n{error_msgs}")
 
-        return exprs
+        breakpoint()
+        return guard_compiler.compile(exprs, python_exprs)
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import LocalSource
@@ -2346,3 +2432,199 @@ def _is_int(expr):
 # WARNING: This is legacy, DO NOT USE
 def _is_dim_dynamic(t, d):
     return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
+
+@dataclasses.dataclass
+class Namespace:
+    counter: int = 0
+    data: Set[str] = dataclasses.field(default_factory=set)
+
+    def has(self, name: str) -> bool:
+        return name in self.data
+
+    def add(self, name: str) -> None:
+        assert not self.has(name)
+        self.data.add(name)
+
+    def generate(self, prefix: str = "_var") -> str:
+        while True:
+            name = f"{prefix}{self.counter}"
+            self.counter += 1
+            if not self.has(name):
+                return name
+
+
+@contextmanager
+def no_conda_cpp_compiler():
+    import torch._inductor.config as config
+    old_cxx = config.cpp.cxx
+    config.cpp.cxx = ("g++", "clang++")
+    try:
+        yield
+    finally:
+        config.cpp.cxx = old_cxx
+
+@dataclasses.dataclass
+class GuardCompiler:
+    @dataclasses.dataclass
+    class SourceInfo:
+        name: str
+        source: Source
+        type: Type
+
+    @dataclasses.dataclass
+    class SymbolicShapesExpr:
+        python: List[str]
+        call: str
+        fn: Optional[Callable] = None
+
+    source_ref: Callable[[Source], str]
+
+    # Used when generating a new name for a given source.
+    # Avoids dupplicated parameter names.
+    namespace: Namespace = dataclasses.field(default_factory=Namespace)
+
+    # Maps Source (unhashable, so 'name()' instead) into SourceInfo types.
+    # SourceInfo holds the mapped unique name, original source, and type.
+    source_expr_to_info: Dict[str, "GuardCompiler.SourceInfo"] = dataclasses.field(default_factory=dict)
+
+    # Keeps track of the SourceInfo that are the actual parameters.
+    parameter_infos: List["GuardCompiler.SourceInfo"] = dataclasses.field(default_factory=list)
+
+    def _type_to_cpp_argtype(self, type: Type) -> str:
+        if type == SymInt:
+            return "int64_t"
+        elif type == torch.Tensor:
+            return "void*"
+        else:
+            raise TypeError(f"unexpected type: {type}")
+
+    def is_source_registered(self, source: Source) -> bool:
+        return source.name() in self.source_expr_to_info
+
+    def get_source_info(self, source: Source) -> "GuardCompiler.SourceInfo":
+        return self.source_expr_to_info[source.name()]
+
+    def register_source(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
+        assert not self.is_source_registered(source)
+        if name is None:
+            name = self.namespace.generate()
+        self.source_expr_to_info[source.name()] = self.SourceInfo(name, source, type)
+
+    def register_parameter(self, source: Source, name: Optional[str] = None, type: Optional[Type] = None) -> None:
+        assert not self.is_source_registered(source)
+        self.register_source(source, name=name, type=type)
+        self.parameter_infos.append(self.get_source_info(source))
+
+    def flat_source_ref(self, source: Source) -> str:
+        from torch._dynamo.source import TensorPropertySource
+
+        # We need to call 'source_ref' here due to its side effects.
+        ref = self.source_ref(source)
+
+        info = self.get_source_info(source)
+        index_expr = ""
+        if isinstance(source, TensorPropertySource) and source.idx is not None:
+            index_expr = f"[{source.idx}]"
+        return f"{info.name}{index_expr}"
+
+    def compile(self, exprs: List[str], python_exprs: List[str]) -> "GuardCompiler.SymbolicShapesExpr":
+        """Generates and compiles the guard function in C++.
+        1. Generates a C++ function based on its object's registered parameters
+        2. Compiles the C++ function, and loads it with the help of `CppCodeCache`
+        The overall structure of the generated function is as follows:
+        extern "C" int guard(PyObject** inputs) {
+            // Inputs unpacking
+            // Source creation (e.g. sizes, strides, and storage offset variables are defined)
+            // Return the actual guard expression
+        }
+        """
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
+
+        if len(exprs) == 0:
+            return self.SymbolicShapesExpr([], "True")
+
+        fn_name = "___symbolic_shape_fn"
+
+        # 1. Function call
+        #     a) Get all the argument expressions for each parameter
+        call_arguments = ", ".join(info.source.name() for info in self.parameter_infos)
+        #     b) Generate the actual function call
+        call_expression = f"{fn_name}({call_arguments})"
+
+        # 2. Function definition
+        #     a) Generate the actual guard expression
+        guard_expression = " & ".join(f"({e})" for e in exprs)
+        #     b) Generate the extra temporary variables corresponding to Tensor
+        #        properties (e.g. sizes, strides, and storage_offset)
+        source_creation = []
+        for i, info in enumerate(self.parameter_infos):
+            if info.type == SymInt:
+                source_creation.append(f"int64_t {info.name} = THPUtils_unpackLong(inputs[{i}]);")
+
+            elif info.type == torch.Tensor:
+                source_creation.append(f"const auto& {info.name} = THPVariable_Unpack(inputs[{i}]);")
+
+                for tensor_property in TensorProperty:
+                    if tensor_property == TensorProperty.STORAGE_OFFSET:
+                        tensor_property_str = "storage_offset"
+                        tensor_property_source = TensorPropertySource(info.source, tensor_property)
+                    else:
+                        tensor_property_str = f"{tensor_property.name.lower()}s().data"
+                        tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
+
+                    if not self.is_source_registered(tensor_property_source):
+                        # Skip if there are no SymInts tracked for this property.
+                        # Usually true for scalar tensors.
+                        continue
+
+                    tensor_property_info = self.get_source_info(tensor_property_source)
+                    source_creation.append(
+                        f"auto {tensor_property_info.name} = {info.name}.{tensor_property_str}();"
+                    )
+
+        source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
+        #     c) Generate the C++ source corresponding to this guard.
+        #         - 'floordiv': applies the floor function after floating-point division
+        #         - 'modi': implicitly converts the arguments to integer
+        #         - 'pydiv': implicitly converts the arguments to double, also returning a double
+        cpp_code = f"""\
+#include <torch/python.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <cmath>
+static int64_t floordiv(double a, double b) {{
+    return floor(a / b);
+}}
+static int64_t modi(int64_t dividend, int64_t divisor) {{
+    return dividend % divisor;
+}}
+static double pydiv(double dividend, double divisor) {{
+    return dividend / divisor;
+}}
+extern "C" int guard(PyObject** inputs) {{
+{source_creation_str}
+    return {guard_expression};
+}}
+"""
+
+        #     d) Compile the generated C++ source and cache it
+        try:
+            from torch._inductor.codecache import CppCodeCache
+            with no_conda_cpp_compiler():
+                start = time.time_ns()
+                fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
+                end = time.time_ns()
+                print("Compile took", (end-start)/ 1_000_000_000, "s")
+        except Exception:
+            print(f"Code: \n{cpp_code}")
+            raise
+
+        # Before actually executing the compiled function, we need to
+        # preprocess the tensor variables to what numba is actually expecting
+        # (according to the signature we gave above).
+        # In other words, we need to get a pointer to the actual tensor. In
+        # cpython, that can be done by calling the id function.
+        def wrapper_fn(*args):
+            args = (ctypes.c_void_p * len(args))(*[id(a) for a in args])
+            return bool(fn(args))
+
+        return self.SymbolicShapesExpr(python_exprs, call_expression, wrapper_fn)

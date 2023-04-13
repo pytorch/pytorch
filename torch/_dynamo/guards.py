@@ -1,3 +1,4 @@
+import ast
 import builtins
 import collections
 import enum
@@ -7,6 +8,7 @@ import logging
 import math
 import os
 import re
+import sys
 import types
 import weakref
 from inspect import currentframe, getframeinfo
@@ -23,7 +25,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import Namespace, SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -68,6 +70,36 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
     ]
 )
+
+HAS_UNPARSE_FUNCTIONS = False
+
+if sys.version_info[:2] <= (3, 8):
+    # [Note: Python Version <= 3.8]
+    # This branch should be dropped when we drop support for Python 3.8.
+    # Reason: 'ast.unparse' function was introduced in Python 3.9.
+
+    try:
+        import astunparse  # type: ignore[import]
+
+        def _ast_unparse(node: ast.AST) -> str:
+            return astunparse.unparse(node).replace("\n", "")
+
+        def _ast_unparse_implemented(node: ast.AST) -> bool:
+            return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+
+        HAS_UNPARSE_FUNCTIONS = True
+    except ImportError:
+        pass
+
+else:
+
+    def _ast_unparse(node: ast.AST) -> str:
+        return ast.unparse(node).replace("\n", "")
+
+    def _ast_unparse_implemented(node: ast.AST) -> bool:
+        return True
+
+    HAS_UNPARSE_FUNCTIONS = True
 
 
 def strip_function_call(name):
@@ -137,6 +169,7 @@ class GuardBuilder(GuardBuilderBase):
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[str] = []
+        self.shape_env_code_verbose: List[str] = []
 
         # [Note - On Eager Tensor Guards]
         # Most of the time, we generate Python code in a guard to directly
@@ -154,6 +187,8 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_examples: List[torch.Tensor] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
+
+        self.shape_env_fn = None
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -465,8 +500,10 @@ class GuardBuilder(GuardBuilderBase):
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
-        for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+        self.shape_env_fn = guards.fn
+        self._produce_guard_code(
+            guard, [guards.call], guards.python, shape_env=True
+        )
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -564,7 +601,12 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False
+        self,
+        guard,
+        code_list,
+        verbose_code_list=None,
+        provided_guarded_object=None,
+        shape_env=False,
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -583,6 +625,12 @@ class GuardBuilder(GuardBuilderBase):
 
         if shape_env:
             self.shape_env_code.extend(code_list)
+
+            # Start treating 'verbose_code_list' as 'code_list', since we want to expose
+            # the Python guards, instead of the compiled function call.
+            if verbose_code_list is not None:
+                code_list = verbose_code_list
+                self.shape_env_code_verbose.extend(verbose_code_list)
         else:
             self.code.extend(code_list)
 
@@ -611,6 +659,140 @@ class GuardBuilder(GuardBuilderBase):
             code_list,
             obj_ref,
         )
+
+
+# Common Sub-Expression Elimination for Python expressions.
+#
+# There are 2 steps to this pass:
+#     1. Count the frequency of each sub-expression (i.e. inner
+#        node in the AST tree)
+#
+#     2. Replace those that occur more than once by a fresh variable 'v'.
+#        'v' will be defined in the 'preface' list (output argument to
+#        'NodeTransformer')
+class PyExprCSEPass:
+    IGNORED_NODE_TYPES = (
+        # Proxy nodes
+        # i.e. nodes that result in the same unparsed string as their children
+        ast.Expression,
+        ast.Index,
+        ast.Expr,
+        ast.Module,
+        # Leaf Expression nodes
+        ast.Name,
+        ast.Constant,
+        # Expr-Context nodes
+        ast.Load,
+        ast.Store,
+        ast.Del,
+        # Bool Operation nodes
+        ast.And,
+        ast.Or,
+        # Arithmetic Operation nodes
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.MatMult,
+        ast.Div,
+        ast.Mod,
+        ast.Pow,
+        ast.LShift,
+        ast.RShift,
+        ast.BitOr,
+        ast.BitXor,
+        ast.BitAnd,
+        ast.FloorDiv,
+        # Unary Operation nodes
+        ast.Invert,
+        ast.Not,
+        ast.UAdd,
+        ast.USub,
+        # Compare Operation nodes
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+    )
+
+    class CSEVisitor(ast.NodeVisitor):
+        IGNORE = object()
+
+        def __init__(self) -> None:
+            self._expr_counter: Dict[str, int] = collections.defaultdict(lambda: 0)
+
+        def visit(self, node: ast.AST) -> Any:
+            if _ast_unparse_implemented(node) and not isinstance(
+                node, PyExprCSEPass.IGNORED_NODE_TYPES
+            ):
+                self._expr_counter[_ast_unparse(node)] += 1
+            super().visit(node)
+
+    class CSETransformer(ast.NodeTransformer):
+        def __init__(
+            self,
+            expr_counter: Dict[str, int],
+            preface: List[str],
+            gen_name_from_expr: Callable[[str], str],
+        ) -> None:
+            super().__init__()
+            self._expr_counter = expr_counter
+            self._preface = preface
+            self._gen_name_from_expr = gen_name_from_expr
+            self._expr_to_name: Dict[str, str] = {}
+
+        def visit(self, node: ast.AST) -> Any:
+            if _ast_unparse_implemented(node) and not isinstance(
+                node, PyExprCSEPass.IGNORED_NODE_TYPES
+            ):
+                expr = _ast_unparse(node)
+
+                # Replacement only occurs if a given expression is used more
+                # than once.
+                if self._expr_counter[expr] > 1:
+                    if expr not in self._expr_to_name:
+                        # Parent 'visit' is called so that we CSE the inner expressions first.
+                        #
+                        # The resulting expression is used as right-hand-side of the variable
+                        # assignment. i.e. we are CSE-ing the children before the parents.
+                        #
+                        # Indexing still uses the old 'node', since that's what was counted
+                        # by the 'NodeVisitor'.
+                        node_ = super().visit(node)
+                        expr_ = _ast_unparse(node_)
+                        var_name = self._gen_name_from_expr(expr)
+                        self._preface.append(f"{var_name} = {expr_}")
+                        self._expr_to_name[expr] = var_name
+                    else:
+                        var_name = self._expr_to_name[expr]
+                    return ast.Name(var_name, ast.Load())
+
+            return super().visit(node)
+
+    def __init__(self, gen_name_from_expr: Callable[[str], str]) -> None:
+        self._gen_name_from_expr = gen_name_from_expr
+
+    def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
+        preface: List[str] = []
+        parsed_exprs = [ast.parse(e) for e in exprs]
+        new_exprs = []
+
+        visitor = self.CSEVisitor()
+        transformer = self.CSETransformer(
+            visitor._expr_counter, preface, self._gen_name_from_expr
+        )
+
+        for e in parsed_exprs:
+            visitor.visit(e)
+        for e in parsed_exprs:
+            new_exprs.append(_ast_unparse(transformer.visit(e)))
+
+        return preface, new_exprs
 
 
 # NB: Naively, you'd expect this to only be a function that produces
@@ -695,8 +877,13 @@ class CheckFunctionManager:
         self, local_builder, global_builder, guards_out, guard_fail_fn
     ):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
+        namespace = Namespace()
+
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = local_builder.argnames
+        for name in largs:
+            namespace.add(name)
+
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
@@ -749,26 +936,40 @@ class CheckFunctionManager:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         code_parts.extend(local_builder.shape_env_code)
-        verbose_code_parts.extend(local_builder.shape_env_code)
+        verbose_code_parts.extend(local_builder.shape_env_code_verbose)
         assert not global_builder.shape_env_code
 
-        code = " and ".join(unique(code_parts))
+        # if HAS_UNPARSE_FUNCTIONS:
+        #     preface, opt_code_parts = PyExprCSEPass(lambda _: namespace.generate()).run(
+        #         list(unique(code_parts))
+        #     )
+        # else:
+        preface = []
+        opt_code_parts = list(unique(code_parts))
+
+        preface_str = "\n".join(f"{'': ^4}{line}" for line in preface)
+        code = " and ".join(opt_code_parts)
+
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("___symbolic_shape_fn", local_builder.shape_env_fn),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
         )
+        # breakpoint()
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
+{preface_str}
     return lambda L: {code}
 """
-        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", code)
+
+        # if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+        # print(py_code)
         set_guard_fail_hook(guard_fail_hook)
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
