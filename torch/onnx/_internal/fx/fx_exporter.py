@@ -40,6 +40,22 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
         # Remove them since ONNX inference does not need them.
         module = passes.RemoveInputMutation(module).run(*fx_module_args)
 
+        # ONNX does not support views and mutations.
+        # Functionalize to get a semantically equivalent graph without mutations.
+        module = passes.Functionalize(
+            module, enable_dynamic_axes=self.options.dynamic_shapes
+        ).run(*fx_module_args)
+        # Input mutations are detected and distilled after `Functionalize` pass.
+        # Remove them since ONNX inference does not need them.
+        module = passes.RemoveInputMutation(module).run(*fx_module_args)
+
+        # Run ShapeInferenceWithFakeTensor  to get static shape of nodes for op_level_debug purposes.
+        # The pass added nodes with static shape into original node metadata:
+        # node.meta["node_with_static_shape"]: torch.fx.Node
+        # TODO(titaiwang): refactor the pass to stop relying on Transformer.transform()
+        if self.options.op_level_debug:
+            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
+
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
         # receive FakeTensor and results runtime error. In addition, TorchScript-based

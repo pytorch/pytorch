@@ -45,6 +45,12 @@ def register_decomposition(ops):
     return decomp.register_decomposition(ops, decompositions)
 
 
+@register_decomposition(aten._unsafe_view.default)
+def _unsafe_view(self, size):
+    # this makes pattern matching easier
+    return self.view(size)
+
+
 @register_decomposition([aten.clamp])
 @pw_cast_for_opmath
 def clamp(x, min=None, max=None):
