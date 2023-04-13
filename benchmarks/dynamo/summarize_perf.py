@@ -66,11 +66,11 @@ def main(directory, amp, float32):
 
     for k, v in sorted(dfs.items()):
         regex = (
-            "(inductor_with_cudagraphs|inductor_no_cudagraphs|inductor_dynamic)_"
+            "(.+)_"
             "(torchbench|huggingface|timm_models)_"
             "(float32|amp)_"
             "(inference|training)_"
-            "cuda_"
+            "(cpu|cuda)_"
             r"performance\.csv"
         )
         m = re.match(regex, k)
@@ -79,6 +79,7 @@ def main(directory, amp, float32):
         benchmark = m.group(2)
         dtype = m.group(3)
         mode = m.group(4)
+        device = m.group(5)
 
         df = pd.concat(v)
         df = df.dropna().query("speedup != 0")
@@ -93,7 +94,7 @@ def main(directory, amp, float32):
             continue
 
         for statistic, v in statistics.items():
-            results[f"{dtype} {mode}"][statistic][benchmark][compiler] = v
+            results[f"{device} {dtype} {mode}"][statistic][benchmark][compiler] = v
 
     descriptions = {
         "speedup": "Geometric mean speedup",
