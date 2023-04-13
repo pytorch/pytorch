@@ -332,7 +332,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
-    dont_care("unflatten", opsets=[opsets_before(13)], reason=reason_onnx_does_not_support("Unflatten")),
+    fixme("unflatten", opsets=[opsets_before(13)], reason="helper function is needed to support legacy ops."),
 )
 # fmt: on
 
@@ -342,9 +342,9 @@ SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
         reason="ONNX STFT does not support complex results",
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,
     ),
-    dont_care(
+    fixme(
         "unflatten",
-        reason="fixme: Logic not implemented for size 0 inputs in op.Reshape",
+        reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
     ),
 )

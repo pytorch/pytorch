@@ -463,6 +463,8 @@ def _reduce_with_dtype(onnx_op, name):
     return reduce
 
 
+# Ported from https://github.com/microsoft/onnx-script/blob/main/onnxscript/function_libs/torch_aten/ops/core.py aten_unflatten
+# NOTE: Supporting aten::unflatten before opset13 needs helper function to adjust ONNX op changes in Concat, Slice, ...
 @_onnx_symbolic("aten::unflatten")
 @_beartype.beartype
 def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
