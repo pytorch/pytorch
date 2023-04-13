@@ -311,29 +311,6 @@ class NNModuleVariable(VariableTracker):
                     kwargs,
                 )
 
-    @staticmethod
-    def _should_inline(module, name):
-        if (
-            name in ["forward"]
-            or name == "_conv_forward"
-            and type(module)
-            in [
-                torch.nn.modules.conv.Conv1d,
-                torch.nn.modules.conv.Conv2d,
-                torch.nn.modules.conv.Conv3d,
-            ]
-            or name == "_output_padding"
-            and type(module)
-            in [
-                torch.nn.modules.conv.ConvTranspose1d,
-                torch.nn.modules.conv.ConvTranspose2d,
-                torch.nn.modules.conv.ConvTranspose3d,
-            ]
-        ):
-            return True
-        else:
-            return False
-
     def call_method(
         self,
         tx,
@@ -348,28 +325,14 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "__call__":
+        if name == "__call__" or name == "forward" and is_allowed(module.__class__):
+            # This is used for explicit calling:
+            #   name == "__call__": (rare case) - inline __call__;
+            #   name == "forward" and is allowed:
+            #       PyTorch builtin module - put `call_module` node in FX.
+            # For name == "forward" and is not allowed, it has been inlined
+            # before getting here.
             return self.call_function(tx, args, kwargs)
-        elif self._should_inline(module, name):
-            # This is used for users explicitly call another forward in a forward function:
-            #
-            # def forward(x):
-            #       return self.layer.forward(x)
-            #
-            assert self.source, (
-                "Must provide a valid source in order to inline, "
-                "since inlined function may have default args which must be guarded."
-            )
-            fn = getattr(module, name).__func__
-            assert istype(fn, types.FunctionType)
-            options["source"] = AttrSource(AttrSource(self.source, name), "__func__")
-            args = [self] + args
-
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
-                args,
-                kwargs,
-            )
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
