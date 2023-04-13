@@ -2,6 +2,9 @@
 import torch
 import torch.nn as nn
 import torch._dynamo as torchdynamo
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+)
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
@@ -265,10 +268,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         )
 
         m = prepare_pt2e_quantizer(m, quantizer)
-        print("after prepare:", m)
         m(*example_inputs)
         m = convert_pt2e(m)
-        print("m:", m)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
@@ -401,6 +402,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     # TODO(jerryzh168): move all _convert_to_reference_decomposed_fx tests here
+    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test__convert_to_reference_decomposed_fx_per_channel_quant_module(self):
         """ Test the result for per channel weight quant for reference modules
         """

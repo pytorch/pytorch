@@ -57,7 +57,7 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
     CPU_tensor_apply2<double, scalar_t>(
         a4, a1, [](double& y, scalar_t x) { y = (double)(x * x); });
     for (const auto i : c10::irange(a0.numel())) {
-      auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
+      auto target = a1.const_data_ptr<scalar_t>()[i] * a1.const_data_ptr<scalar_t>()[i];
       ASSERT(a0.data_ptr<scalar_t>()[i] == target);
       ASSERT(a4.data_ptr<double>()[i] == target);
     }
@@ -73,8 +73,8 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
           y = (double)(x * x + z);
         });
     for (const auto i : c10::irange(a0.numel())) {
-      auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
-      target = target + a2.data_ptr<scalar_t>()[i];
+      auto target = a1.const_data_ptr<scalar_t>()[i] * a1.const_data_ptr<scalar_t>()[i];
+      target = target + a2.const_data_ptr<scalar_t>()[i];
       ASSERT(a0.data_ptr<scalar_t>()[i] == target);
       ASSERT(a4.data_ptr<double>()[i] == target);
     }
@@ -99,8 +99,8 @@ void test(DeprecatedTypeProperties& type, IntArrayRef shape, int64_t a = 0, int6
           y = (double)(x * x + z * a);
         });
     for (const auto i : c10::irange(a0.numel())) {
-      auto target = a1.data_ptr<scalar_t>()[i] * a1.data_ptr<scalar_t>()[i];
-      target = target + a2.data_ptr<scalar_t>()[i] * a3.data_ptr<scalar_t>()[i];
+      auto target = a1.const_data_ptr<scalar_t>()[i] * a1.const_data_ptr<scalar_t>()[i];
+      target = target + a2.const_data_ptr<scalar_t>()[i] * a3.const_data_ptr<scalar_t>()[i];
       ASSERT(a0.data_ptr<scalar_t>()[i] == target);
       ASSERT(a4.data_ptr<double>()[i] == target);
     }
