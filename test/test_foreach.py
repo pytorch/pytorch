@@ -403,7 +403,7 @@ class TestForeach(TestCase):
     @parametrize("is_fastpath", (True, False))
     def test_unary_op(self, device, dtype, op, is_fastpath):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
-        samples = op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
+        samples = op.sample_inputs(device, dtype, requires_grad=True, noncontiguous=not is_fastpath)
         disable_fastpath = op.name == "_foreach_abs" and dtype in complex_types()
         for sample in samples:
             zero_size = sample.kwargs.pop('zero_size')
@@ -411,7 +411,7 @@ class TestForeach(TestCase):
             if zero_size:
                 wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size)
                 inplace_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size)
-                return
+                continue
             inputs = [sample.input]
             disable_fastpath = (op.name == "_foreach_abs" and dtype in complex_types()) or sample.kwargs.pop(
                 "disable_fastpath"
@@ -425,20 +425,12 @@ class TestForeach(TestCase):
             )
             if op.supports_autograd and dtype in floating_types() and not zero_size:
                 num_tensors = len(sample.input)
-                tensors = [
-                    make_tensor(
-                        (num_tensors, num_tensors),
-                        dtype=dtype,
-                        device=device,
-                        requires_grad=True,
-                        noncontiguous=not is_fastpath,
-                    )
-                    for _ in range(num_tensors)
-                ]
+                transformed_sample = sample.transform(get_transform_func(num_tensors, dtype, device, is_fastpath))
+                tensors = transformed_sample.input
                 ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
                 out = wrapped_op.func(tensors)
-                sum(out).mean().backward()
-                sum([ref.func(t) for t in ref_tensors]).mean().backward()
+                torch.cat([t.view(-1) for t in out]).mean().backward()
+                torch.cat([ref.func(t).view(-1) for t in ref_tensors]).mean().backward()
                 self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
                 self.assertEqual(len({t.grad_fn for t in out}), 1)
 
@@ -452,8 +444,9 @@ class TestForeach(TestCase):
 
                     return hook
 
-                inplace_input_tensors = [(1 - torch.rand(())).requires_grad_() for _ in range(num_tensors)]
-                inplace_inputs = [0.1 + t for t in inplace_input_tensors]
+                # note(crcrpar):
+                inplace_input_tensors = [t.clone().detach().requires_grad_() for t in tensors]
+                inplace_inputs = [t.clone() for t in inplace_input_tensors]
                 # set both to False to skip multi_tensor_apply_kernel check
                 inplace_op([inplace_inputs], False, False, zero_size=zero_size)
                 assert_multiple_grad_fns(inplace_inputs, self)
@@ -464,18 +457,31 @@ class TestForeach(TestCase):
                     c.register_hook(get_hook(i))
                     cloned_tensors.append(c)
 
-                torch.autograd.grad(cloned_tensors[0] * 1, inputs=(inplace_input_tensors[0],), retain_graph=True)
+                torch.autograd.grad(
+                    cloned_tensors[0] * 1,
+                    inputs=(inplace_input_tensors[0],),
+                    grad_outputs=(torch.rand_like(cloned_tensors[0]),),
+                    retain_graph=True,
+                )
                 self.assertEqual(hook_buffer, [0])
                 inplace_input_tensors[0].grad = None
                 hook_buffer.clear()
 
-                torch.autograd.grad(sum(cloned_tensors), inputs=tuple(inplace_input_tensors), retain_graph=False)
+                sum_of_cloned_tensors = sum(cloned_tensors)
+                grad_output = torch.rand_like(sum_of_cloned_tensors)
+                torch.autograd.grad(
+                    sum_of_cloned_tensors,
+                    inputs=tuple(inplace_input_tensors),
+                    grad_outputs=(grad_output,),
+                    retain_graph=False,
+                )
                 self.assertEqual(hook_buffer, list(range(num_tensors - 1, -1, -1)))
 
                 ref_inplace_input_tensors = [t.clone().detach().requires_grad_() for t in inplace_input_tensors]
-                ref_inplace_inputs = [0.1 + t for t in ref_inplace_input_tensors]
+                ref_inplace_inputs = [t.clone() for t in ref_inplace_input_tensors]
                 ref_output = inplace_ref([ref_inplace_inputs])
-                torch.autograd.grad(sum(ref_output), inputs=tuple(ref_inplace_input_tensors))
+                torch.autograd.grad(
+                    sum(ref_output), inputs=tuple(ref_inplace_input_tensors), grad_outputs=(grad_output,))
                 self.assertEqual([t.grad for t in inplace_input_tensors], [t.grad for t in ref_inplace_input_tensors])
 
     @ops(foreach_reduce_op_db)
