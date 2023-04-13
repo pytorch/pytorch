@@ -15,7 +15,6 @@ from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
-    is_float_dtype,
     is_integer_dtype,
     Number,
     type_to_dtype,
@@ -543,8 +542,6 @@ def isinf(x):
 
 @register_lowering(aten.isnan)
 def isnan(x):
-    if is_integer_type(x):
-        return full_like(x, False, dtype=torch.bool)
     fn = ops_wrapper("isnan")
     return make_pointwise(fn, override_return_dtype=torch.bool)(x)
 
@@ -3558,10 +3555,6 @@ def pow(a, b):
         ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
-    elif isinstance(b, float) and b == 0.5:
-        return sqrt(a)
-    elif isinstance(b, int) and b == 1:
-        return a
     elif isinstance(b, int) and -32 < b < 32:
         # Optimize away small fixed powers
         loader = a.make_loader()
@@ -3575,12 +3568,6 @@ def pow(a, b):
             inner_fn=fn,
             ranges=a.get_size(),
         )
-
-    if isinstance(a, Number):
-        if a == 1:
-            return full_like(b, 1)
-        if a == 2 and is_float_dtype(b.get_dtype()):
-            return exp2(b)
 
     return pow_native(a, b)
 
