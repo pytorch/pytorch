@@ -189,7 +189,11 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName, IS_ARM64
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+    IS_ARM64,
+    IS_WINDOWS,
+)
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
@@ -6159,7 +6163,7 @@ class TestQuantizeFx(QuantizationTestCase):
         res = m(*example_inputs)
         self.assertEqual(res, res_ref)
 
-    @unittest.skip("only testing this locally since torch.compile does not work with windows in CI")
+    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test__convert_to_reference_decomposed_fx_per_channel_quant_module(self):
         """ Test the result for per channel weight quant for reference modules
         """
