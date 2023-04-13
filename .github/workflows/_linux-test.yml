@@ -40,7 +40,7 @@ env:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch'
+    if: github.repository_owner == 'pytorch' && inputs.test-matrix != '[]'
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
