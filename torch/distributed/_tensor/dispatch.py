@@ -259,6 +259,7 @@ def _operator_dispatch(
             # op runs on a submesh and return type is scalar value
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
+            obj_list = list(filter(lambda x: x is not None, obj_list))
             ret_list = op_schema.func_schema.returns
             ret_type = str(ret_list[0].type)
             # perform reduce on the collection with AND op
