@@ -199,7 +199,10 @@ def check(filename, allow_torch=False):
 
 # skip common third party libs
 for _name in (
+    "einops",
+    "einops_exts",
     "functorch",
+    "fx2trt_oss",
     "intel_extension_for_pytorch",
     "networkx",
     "numpy",
@@ -217,7 +220,6 @@ for _name in (
     "tqdm",
     "tree",
     "tvm",
-    "fx2trt_oss",
     "xarray",
 ):
     add(_name)
