@@ -12,7 +12,6 @@ from .eval_frame import (
     OptimizedModule,
     reset_code,
     run,
-    skip,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -34,7 +33,6 @@ __all__ = [
     "replay",
     "disable",
     "reset",
-    "skip",
     "OptimizedModule",
     "is_compiling",
     "register_backend",

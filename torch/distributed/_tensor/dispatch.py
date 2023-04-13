@@ -250,18 +250,12 @@ def _operator_dispatch(
         if op_call in random_ops and is_rng_supported_mesh(mesh):
             set_post_op_offset(dtensor_arg._spec, old_offset)
 
-    # NOTE: can we move this logic into wrap() function???
-    # NOTE: operator _local_scalar_dense has return type "number" but does not
-    # have a straightforward pattern on how to reduce or even if we should reduce
-    # the local results
     # communicate the result to all ranks for some operators that return scalar value
     if output_sharding.output_spec is None:
         if op_call == torch.ops.aten.equal.default:
             obj_list = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(obj_list, local_results)
             obj_list = list(filter(lambda x: x is not None, obj_list))
-            ret_list = op_schema.func_schema.returns
-            ret_type = str(ret_list[0].type)
             # perform reduce on the collection with AND op
             local_results = functools.reduce(operator.and_, obj_list, True)
 
