@@ -79,7 +79,7 @@ class TransformationTest(DTensorTestBase):
         self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
         return model, optim, ddp_model, ddp_optim
 
-    def _test_tran_step_with_ddp(
+    def _test_train_step(
         self, train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=False
     ):
         def _ddp_train_step(model, optim, batch):
@@ -117,7 +117,7 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step_with_ddp(train_step, num_iters, batch_size, layers, dim)
+        self._test_train_step(train_step, num_iters, batch_size, layers, dim)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -139,7 +139,7 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step_with_ddp(
+        self._test_train_step(
             train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
         )
 
@@ -163,7 +163,7 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step_with_ddp(train_step, num_iters, batch_size, layers, dim)
+        self._test_train_step(train_step, num_iters, batch_size, layers, dim)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -185,7 +185,7 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step_with_ddp(
+        self._test_train_step(
             train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
         )
 

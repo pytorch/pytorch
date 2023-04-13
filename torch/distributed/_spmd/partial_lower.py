@@ -1,5 +1,9 @@
 # (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
+# This file is copied from Meta internal repo and is not synced with the
+# internal version. Once the internal version is fully mature, we should
+# upstream again and retire the internal version. @yifuwang
+
 import logging
 import operator
 from typing import Callable, List, Optional, Set, Tuple
