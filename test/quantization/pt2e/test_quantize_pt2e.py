@@ -37,7 +37,6 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
-    @xfailIfPython311
     def test_simple_quantizer(self):
         class M(torch.nn.Module):
             def __init__(self):
