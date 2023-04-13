@@ -30,7 +30,6 @@ import unittest
 import weakref
 
 import torch
-import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
 
 
@@ -50,8 +49,7 @@ try:
 except ImportError:
     HAS_PRIMS_REFS = False
 
-from . import comptime, external_utils
-from .config_utils import config
+from . import comptime, config, external_utils
 
 """
 A note on skipfiles:
@@ -138,7 +136,6 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
 if HAS_PRIMS_REFS:
     FILENAME_ALLOWLIST |= {
