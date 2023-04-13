@@ -301,10 +301,9 @@ class NNModuleVariable(VariableTracker):
             else:
                 assert name == "_call_impl"
                 fn = module._call_impl.__func__
+
             assert istype(fn, types.FunctionType)
-            options["source"] = AttrSource(
-                AttrSource(self.source, "forward"), "__func__"
-            )
+            options["source"] = AttrSource(AttrSource(self.source, name), "__func__")
             args = [self] + args
 
             return tx.inline_user_function_return(
