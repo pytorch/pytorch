@@ -71,6 +71,11 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
 
 class ReplicateTest(MultiProcessTestCase):
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
