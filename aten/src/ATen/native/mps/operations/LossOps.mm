@@ -1,6 +1,6 @@
 //  Copyright © 2022 Apple Inc.
-
 #include <ATen/native/mps/OperationUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 namespace at::native {
 namespace mps {
@@ -995,8 +995,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
 
 Tensor huber_loss_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.");
-  Tensor output =
-      at::native::empty_mps(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output = at::empty(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   return huber_loss_out_mps(input, target, reduction, delta, output);
 }
 

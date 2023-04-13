@@ -1,8 +1,6 @@
-#include <ATen/ATen.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/Optional.h>
-#include <torch/library.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 
 namespace at::native {
 
