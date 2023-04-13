@@ -53,6 +53,9 @@ requires_cuda = functools.partial(
 )
 
 
+_GLOBAL_CPU_TENSOR = torch.randn(3)
+
+
 def is_fx_tracing_test() -> bool:
     """
     Copied from the hpc trainer codebase
@@ -1414,7 +1417,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def fn():
             condition_shape = (5, 5)
             dtypes = (torch.bool,)
@@ -2400,7 +2403,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # dynamo eval frame handler is active), as that will cause the
         # generator to become exhausted and trigger the throw_flag == TRUE
         # case.
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def f(x):
             generator_box.clear()
             return g(x)
@@ -2901,6 +2904,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
 
         f(torch.zeros(4), float, np.float16)
+
+    def test_dedup_global(self):
+        @torch.compile()
+        def f():
+            return _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR
+
+        self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
 
 if __name__ == "__main__":

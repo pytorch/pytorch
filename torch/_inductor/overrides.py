@@ -284,7 +284,7 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
 
-                def cat_args(tensors, dim):
+                def cat_args(tensors, dim=0):
                     return tensors, dim
 
                 tensors, dim = cat_args(*node.args, **node.kwargs)
