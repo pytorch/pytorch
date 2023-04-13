@@ -168,10 +168,12 @@ jobs:
           fi
 
           # Print out some information about the test environment
-          ${CONDA_RUN} which python3 || true
-          ${CONDA_RUN} python3 --version || true
-          ${CONDA_RUN} which python || true
-          ${CONDA_RUN} python --version || true
+          which conda
+          conda --version
+          ${CONDA_RUN} which python3
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} python --version
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
