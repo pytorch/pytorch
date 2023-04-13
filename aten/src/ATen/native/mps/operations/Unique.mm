@@ -4,6 +4,16 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_unique2.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/unique_consecutive.h>
+#include <ATen/ops/unique_dim_consecutive.h>
+#endif
+
 namespace at::native {
 namespace mps {
 

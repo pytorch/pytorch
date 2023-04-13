@@ -18,6 +18,17 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/index.h>
+#include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_put.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/nonzero.h>
+#endif
+
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif

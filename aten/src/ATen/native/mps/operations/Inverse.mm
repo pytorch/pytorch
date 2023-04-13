@@ -2,6 +2,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/linalg_inv_ex.h>
+#include <ATen/ops/linalg_inv_ex_native.h>
+#endif
+
 namespace at::native {
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {

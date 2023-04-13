@@ -2,6 +2,33 @@
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/elu_backward_native.h>
+#include <ATen/ops/elu_native.h>
+#include <ATen/ops/gelu_backward_native.h>
+#include <ATen/ops/gelu_native.h>
+#include <ATen/ops/threshold_backward_native.h>
+#include <ATen/ops/threshold_native.h>
+//#include <ATen/ops/gelu_native.h>
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/glu_native.h>
+#include <ATen/ops/hardsigmoid_backward_native.h>
+#include <ATen/ops/hardsigmoid_native.h>
+#include <ATen/ops/hardtanh_backward_native.h>
+#include <ATen/ops/leaky_relu_backward_native.h>
+#include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/silu_backward_native.h>
+#include <ATen/ops/silu_native.h>
+#include <ATen/ops/softplus_backward_native.h>
+#include <ATen/ops/softplus_native.h>
+#include <ATen/ops/tanh_backward_native.h>
+#endif
+
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
