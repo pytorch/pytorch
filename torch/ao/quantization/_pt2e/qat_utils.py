@@ -87,11 +87,12 @@ def _fuse_conv_bn_qat(m: GraphModule):
 
     # Copy over metadata from original subgraph
     for mr in match_and_replacement:
-        # Find replaced conv and bn nodes
+        # Find replaced conv and bn nodes by climbing upwards from anchor node
         assert len(mr.replacements) == 1, "expected only one replaced node"
         replaced_conv_node = None
         replaced_bn_node = None
         replaced_anchor = mr.replacements[0]
+        assert replaced_anchor.target == operator.getitem
         n = replaced_anchor
         while replaced_conv_node is None or replaced_bn_node is None:
             if n.target == torch.ops.aten.convolution.default:
@@ -101,8 +102,7 @@ def _fuse_conv_bn_qat(m: GraphModule):
             n = n.args[0]
             assert isinstance(n, Node)
 
-        # Copy over metadata from original nodes
-        # We need to also do this for conv args, bn args, and bn users
+        # Copy over metadata for conv node, bn node, conv args, bn args, and bn users
         for match_pattern_node, original_node in mr.nodes_map.items():
             if match_pattern_node.target == torch.ops.aten.convolution.default:
                 # Matched: conv(_, weight, bias, ...)
