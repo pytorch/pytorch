@@ -139,6 +139,9 @@ class ConstantVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable(result).add_options(self)
 
+    def reconstruct(self, codegen):
+        return [codegen._create_load_const(self.value)]
+
 
 class EnumVariable(VariableTracker):
     def __init__(self, value, **kwargs):

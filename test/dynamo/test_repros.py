@@ -3190,6 +3190,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
+    def test_constant_variable_reconstruction(self):
+        import logging
+
+        from torch._dynamo.comptime import comptime
+
+        torch._logging.set_logs(dynamo=logging.DEBUG)
+        torch._dynamo.config.verbose = True
+
+        @torch._dynamo.optimize("eager")
+        def h():
+            x = set()
+            comptime.graph_break()
+            x.add(1)
+            return x
+
+        h()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
