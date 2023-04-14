@@ -224,7 +224,7 @@ def _get_weight_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
                 dtype=qdtype,
                 quant_min=tensor_spec.quant_min,
                 quant_max=tensor_spec.quant_max,
-                eps=2**-12
+                eps=2**-12,
             )
         elif tensor_spec.qscheme == torch.per_channel_symmetric:
             return PerChannelMinMaxObserver.with_args(
@@ -232,7 +232,7 @@ def _get_weight_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
                 dtype=qdtype,
                 quant_min=tensor_spec.quant_min,
                 quant_max=tensor_spec.quant_max,
-                eps=2**-12
+                eps=2**-12,
             )
         else:
             raise Exception("Unsupported tensor_spec for weight: {}".format(tensor_spec))

@@ -28,7 +28,7 @@ def _conv_bn_pattern(
     bn_bias: torch.Tensor,
     bn_running_mean: torch.Tensor,
     bn_running_var: torch.Tensor,
-):
+) -> torch.Tensor:
     x = F.conv2d(x, conv_weight, conv_bias)
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
     return x
@@ -41,7 +41,7 @@ def _fused_qat_conv_bn_pattern(
     bn_bias: torch.Tensor,
     bn_running_mean: torch.Tensor,
     bn_running_var: torch.Tensor,
-):
+) -> torch.Tensor:
     """
     Approximated method to fuse conv and bn. It requires only one forward pass.
     conv_orig = conv / scale_factor where scale_factor = bn.weight / running_std.
@@ -64,9 +64,9 @@ def _fused_qat_conv_bn_pattern(
     return x
 
 def _get_aten_graph_module(
-        pattern: Callable,
-        example_inputs: Tuple[Any, ...],
-):
+    pattern: Callable,
+    example_inputs: Tuple[Any, ...],
+) -> GraphModule:
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
@@ -80,7 +80,7 @@ def _get_aten_graph_module(
     aten_pattern.recompile()
     return aten_pattern
 
-def _fuse_conv_bn_qat(m: GraphModule):
+def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     """
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
     the fused QAT subgraph equivalent. The input graph should already be annotated.
