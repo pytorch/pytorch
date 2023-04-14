@@ -1387,7 +1387,6 @@ from torch import multiprocessing as multiprocessing
 from torch import sparse as sparse
 from torch import special as special
 import torch.utils.backcompat
-from torch import onnx as onnx
 from torch import jit as jit
 from torch import linalg as linalg
 from torch import hub as hub
@@ -1635,6 +1634,9 @@ import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
 from torch.func import vmap
+
+# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
