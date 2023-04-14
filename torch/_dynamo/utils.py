@@ -1390,6 +1390,7 @@ class TensorStaticReason(enum.Enum):
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
+    NN_MODULE_PROPERTY = 5
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
@@ -1399,11 +1400,13 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
         return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
+    if reason == TensorStaticReason.NN_MODULE_PROPERTY:
+        return "tensor is static because it is nn module associated."
     raise AssertionError(f"Illegal reason {reason}")
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool, guard_source: "GuardSource"
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -1422,6 +1425,8 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
+    if guard_source.is_nn_module():
+        return True, TensorStaticReason.NN_MODULE_PROPERTY
     return False, None
 
 

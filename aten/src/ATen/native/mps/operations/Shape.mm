@@ -1,11 +1,20 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/topk.h>
+#include <ATen/ops/topk_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -35,8 +44,8 @@ void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimen
     if (dim == dimension) {
       continue;
     }
-    int64_t first_dim_size = at::native::size(first, dim);
-    int64_t second_dim_size = at::native::size(second, dim);
+    int64_t first_dim_size = first.size(dim);
+    int64_t second_dim_size = second.size(dim);
     TORCH_CHECK(first_dim_size == second_dim_size,
                 "Sizes of tensors must match except in dimension ",
                 dim,
@@ -257,7 +266,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   // this behavior for backwards compatibility, but only for this specific size
   // (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
-  auto should_skip = [](const Tensor& t) { return t.dim() == 1 && at::native::size(t, 0) == 0; };
+  auto should_skip = [](const Tensor& t) { return t.dim() == 1 && t.size(0) == 0; };
   at::assert_no_internal_overlap(out);
 
   Tensor notSkippedTensor;
@@ -310,7 +319,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
     if (!should_skip(tensor)) {
       // TODO: Factor out `check_shape_except_dim`
       check_shape_except_dim(notSkippedTensor, tensor, dimension, idx);
-      cat_dim_size += at::native::size(tensor, dimension);
+      cat_dim_size += tensor.size(dimension);
       idx++;
     }
   }
