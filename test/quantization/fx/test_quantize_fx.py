@@ -48,6 +48,7 @@ from torch.ao.quantization import (
     default_reuse_input_qconfig,
     default_symmetric_qnnpack_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
+    default_per_channel_symmetric_qnnpack_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float16_static_qconfig,
@@ -92,6 +93,7 @@ from torch.ao.quantization.backend_config.native import (
 
 from torch.ao.quantization.qconfig_mapping import (
     _get_symmetric_qnnpack_qconfig_mapping,
+    _get_symmetric_qnnpack_qat_qconfig_mapping,
     _GLOBAL_DICT_KEY,
     _MODULE_NAME_DICT_KEY,
     _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
@@ -187,7 +189,11 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName, IS_ARM64
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+    IS_ARM64,
+    IS_WINDOWS,
+)
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
@@ -5978,6 +5984,38 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
             model(*example_inputs)
 
+    def test_symmetric_qnnpack_qat_qconfig_mapping(self):
+        """
+        Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qat_qconfig_mapping`
+        works with the QNNPACK BackendConfig.
+        """
+        if "qnnpack" not in supported_qengines:
+            return
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with override_quantized_engine("qnnpack"):
+            qconfig_mapping = _get_symmetric_qnnpack_qat_qconfig_mapping()
+            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+            backend_config = get_qnnpack_backend_config()
+            model = MyModel()
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+                ns.call_module(torch.nn.Linear) : 0,
+            }
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            model(*example_inputs)
+
+
     def test_get_executorch_backend_config(self):
         from torch.ao.quantization.backend_config import get_executorch_backend_config
         # make sure this runs
@@ -6124,6 +6162,57 @@ class TestQuantizeFx(QuantizationTestCase):
         res_ref = m_ref(*example_inputs)
         res = m(*example_inputs)
         self.assertEqual(res, res_ref)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
+    def test__convert_to_reference_decomposed_fx_per_channel_quant_module(self):
+        """ Test the result for per channel weight quant for reference modules
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M().eval()
+        qconfig_mapping = QConfigMapping().set_global(default_per_channel_symmetric_qnnpack_qconfig)
+        example_inputs = (torch.randn(1, 3, 10, 10),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+        m(*example_inputs)
+        m_ref = copy.deepcopy(m)
+        m_ref = convert_to_reference_fx(m_ref, backend_config=get_qnnpack_backend_config())
+        m = _convert_to_reference_decomposed_fx(m, backend_config=get_qnnpack_backend_config())
+        expected_occurrence = {
+            # for input and output activations
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
+            # weight is per channel quantized
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel.default): 1,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 1,
+        }
+        import torch._dynamo as torchdynamo
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+            tracing_mode="real",
+        )
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        res_ref = m_ref(*example_inputs)
+        res = m(*example_inputs)
+        self.assertEqual(res, res_ref)
+        # check the qmin/qmax for per channel quant
+        for n in m.graph.nodes:
+            if n.op == "call_function" and \
+               n.target == torch.ops.quantized_decomposed.quantize_per_channel.default:
+                _QUANT_MIN_INDEX = 4
+                _QUANT_MAX_INDEX = 5
+                self.assertEqual(n.args[_QUANT_MIN_INDEX], -127)
+                self.assertEqual(n.args[_QUANT_MAX_INDEX], 127)
 
     def test_change_backend_config_for_fixed_qparam_ops(self):
         """ Making sure we can skip validation of qconfigs for fixedqparam ops based

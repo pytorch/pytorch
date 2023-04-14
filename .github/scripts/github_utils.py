@@ -55,6 +55,7 @@ def gh_fetch_json(
     url: str,
     params: Optional[Dict[str, Any]] = None,
     data: Optional[Dict[str, Any]] = None,
+    method: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -63,7 +64,7 @@ def gh_fetch_json(
         )
     return cast(
         List[Dict[str, Any]],
-        gh_fetch_url(url, headers=headers, data=data, reader=json.load),
+        gh_fetch_url(url, headers=headers, data=data, reader=json.load, method=method),
     )
 
 

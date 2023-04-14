@@ -226,7 +226,7 @@ def bceloss_weights_no_reduce_test():
 
 
 def bceloss_weights_no_reduce_scalar_test():
-    t = torch.randn(()).double()
+    t = torch.randn(()).gt(0).double()
     weights = torch.rand(())
     return dict(
         fullname='BCELoss_weights_no_reduce_scalar',
@@ -3930,7 +3930,7 @@ for reduction in reductions:
 # Check that classification criterion work with no batch dimensions
 # List of tuples of (name, input_fn, target_fn)
 classification_criterion_no_batch = [
-    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9)),
+    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9).gt(0).double()),
     ('BCEWithLogitsLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
     ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
