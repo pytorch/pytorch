@@ -59,10 +59,6 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "gt",
             "eq",
             "ne",
-            "bitwise_not",
-            "bitwise_or",
-            "bitwise_left_shift",
-            "bitwise_right_shift",
         ]
         ops_with_dtype_arg = ["constant", "to_dtype", "rand", "randn"]
         reduction_to_dtype = {

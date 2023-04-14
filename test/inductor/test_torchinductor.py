@@ -6008,7 +6008,7 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(x), opt_fn(x))
 
-    def test_cpp_data_type_propogation(self):
+    def test_data_type_propogation(self):
         _graph: torch.fx.Graph = torch.fx.Graph()
         ops: torch.fx.Node = _graph.create_node("placeholder", "ops")
         get_index: torch.fx.Node = _graph.create_node(
@@ -6076,6 +6076,32 @@ class CommonTemplate:
                 add,
             ),
         )
+        bitwise_not: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "bitwise_not",
+            args=(
+                ops,
+                argmin,
+            ),
+        )
+        bitwise_or: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "bitwise_or",
+            args=(
+                ops,
+                eq,
+                any,
+            ),
+        )
+        bitwise_left_shift: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "bitwise_left_shift",
+            args=(
+                ops,
+                argmin,
+                bitwise_not,
+            ),
+        )
         _data_type_propagation(_graph)
 
         def get_data_type(node: torch.fx.Node):
@@ -6091,6 +6117,9 @@ class CommonTemplate:
         self.assertEqual(get_data_type(eq), torch.bool)
         self.assertEqual(get_data_type(argmin), torch.int64)
         self.assertEqual(get_data_type(any), torch.bool)
+        self.assertEqual(get_data_type(bitwise_not), torch.int64)
+        self.assertEqual(get_data_type(bitwise_or), torch.bool)
+        self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
 
 
 @dataclasses.dataclass
