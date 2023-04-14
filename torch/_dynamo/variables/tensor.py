@@ -16,6 +16,7 @@ from ..utils import (
     fqn,
     get_fake_value,
     get_real_value,
+    HAS_NUMPY_TORCH_INTEROP,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -350,9 +351,10 @@ class TensorVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
-            if not config.numpy_ndarray_as_tensor:
+            if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
                 unimplemented(
-                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor to support tensor.numpy()."
+                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor and install torch_np to support "
+                    f"tensor.numpy(). "
                 )
             from torch_np import ndarray
 
