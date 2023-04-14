@@ -16,8 +16,8 @@ from unittest import mock
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_nccl_available():
+    print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -381,6 +381,34 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                     RuntimeError, "Cannot use " + err + " with NCCL"
             ):
                 allreduce(tensors, op)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_alltoall_ops_with_cudafree_race(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        opts = c10d.AllToAllOptions()
+        local_device = f"cuda:{self.rank_to_GPU[self.rank][0]}"
+        torch.cuda.set_device(local_device)
+        input = torch.rand(1000, 1000, device=local_device)
+        output = torch.rand(1000, 1000, device=local_device)
+        race_tensors = []
+        # create some tensors to race with alltoall collective
+        for _ in range(10):
+            tmp = []
+            for i in range(5):
+                tmp.append(torch.rand(10 ** (3 + i), device=local_device))
+            race_tensors.append(tmp)
+
+        for i in range(10):
+            race_tensors.pop()
+            work = pg.alltoall_base(output, input, [], [], opts)
+            # this triggers cudaFree
+            torch.cuda.empty_cache()
+            work.wait()
+        torch.cuda.synchronize(local_device)
+
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
