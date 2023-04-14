@@ -2686,13 +2686,18 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
     try:
         reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
-
-        reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+
+        reset_grads()
+        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
+        if all([x is None for x in orig_grad]):
+            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
+                call_forwards_backwards(compiled_f)
+        else:
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
 
         def create_new_arg(x):
             if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
@@ -2702,13 +2707,18 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
         args = pytree.tree_map(create_new_arg, args)
 
         reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
-
-        reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+
+        reset_grads()
+        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
+        if all([x is None for x in orig_grad]):
+            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
+                call_forwards_backwards(compiled_f)
+        else:
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
     except DynamicOutputShapeException:
         self.skipTest("Dynamic output shape operation in trace")
 
