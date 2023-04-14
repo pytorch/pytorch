@@ -312,6 +312,8 @@ class QNNPackQuantizer(Quantizer):
         bn_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "weight_index": 1,
+            "bias_index": 2,
             "_annotated": True,
         }
 

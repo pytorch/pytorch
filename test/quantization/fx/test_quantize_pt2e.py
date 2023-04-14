@@ -17,6 +17,7 @@ from torch.ao.quantization import (
     QConfigMapping,
     observer,
 )
+from torch.ao.quantization.fx.prepare import _insert_observer
 from torch.ao.quantization.qconfig import default_per_channel_symmetric_qnnpack_qconfig
 from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
@@ -25,8 +26,14 @@ from torch.ao.quantization.backend_config._qnnpack_pt2e import get_qnnpack_pt2e_
 from torch.ao.quantization.backend_config._x86_inductor_pt2e import get_x86_inductor_pt2e_backend_config
 from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx, convert_fx
-from torch.ao.quantization._pt2e.quantizer import Quantizer
-from torch.ao.quantization._pt2e.quantizer import QNNPackQuantizer
+from torch.ao.quantization._pt2e.qat_utils import (
+    _fused_qat_conv_bn_pattern,
+    _get_aten_graph_module,
+)
+from torch.ao.quantization._pt2e.quantizer import (
+    Quantizer,
+    QNNPackQuantizer,
+)
 from torch.ao.quantization._quantize_pt2e import (
     prepare_pt2e,
     convert_pt2e,
@@ -36,6 +43,7 @@ from torch.ao.quantization._quantize_pt2e import (
 from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
+from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 import copy
 import itertools
 from torch._inductor.compile_fx import compile_fx
@@ -332,7 +340,33 @@ class TestQuantizePT2E(QuantizationTestCase):
         m = prepare_qat_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
 
-        # TODO: check that subgraph was replaced
+        # Verify that the subgraph was replaced successfully with observers inserted
+        # Do this by matching against the fused QAT pattern with observers manually inserted
+        example_inputs = (
+            torch.randn(1, 1, 3, 3),  # x
+            torch.randn(1, 1, 1, 1),  # conv_weight
+            torch.randn(1),           # conv_bias
+            torch.randn(1),           # bn_weight
+            torch.randn(1),           # bn_bias
+            torch.randn(1),           # bn_running_mean
+            torch.randn(1),           # bn_running_var
+        )
+        obs0 = copy.deepcopy(m.activation_post_process_0)
+        obs1 = copy.deepcopy(m.activation_post_process_1)
+        check_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
+        for node in check_pattern.graph.nodes:
+            named_modules = dict(check_pattern.named_modules(remove_duplicate=False))
+            graph = check_pattern.graph
+            if node.target == torch.ops.aten.convolution.default:
+                obs0_node = _insert_observer(node.args[0], obs0, check_pattern, named_modules, graph)
+                obs1_node = _insert_observer(node.args[1], obs1, check_pattern, named_modules, graph)
+                node.replace_input_with(node.args[0], obs0_node)
+                node.replace_input_with(node.args[1], obs1_node)
+            # TODO: insert output observer after BN
+        check_pattern.graph.eliminate_dead_code()
+        check_pattern.recompile()
+        matcher = SubgraphMatcher(check_pattern.graph)
+        self.assertEquals(len(matcher.match(m.graph)), 1)
 
     def test_rearrange_weight_observer_for_decomposed_linear(self):
         """
