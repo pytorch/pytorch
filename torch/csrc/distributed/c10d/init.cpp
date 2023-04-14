@@ -1970,8 +1970,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
-          .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
-          .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly(
@@ -2001,6 +1999,10 @@ Example::
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
+  processGroupNCCL.def_static(
+      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
+  processGroupNCCL.def_static(
+      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
 #endif
 
 #ifdef USE_C10D_MPI
