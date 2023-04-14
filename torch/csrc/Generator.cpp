@@ -201,6 +201,13 @@ static PyObject* THPGenerator_initialSeed(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
+  return THPUtils_packUInt64(self->cdata.get_offset());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
@@ -220,6 +227,7 @@ static PyMethodDef THPGenerator_methods[] = {
     {"manual_seed", THPGenerator_manualSeed, METH_O, nullptr},
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
+    {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

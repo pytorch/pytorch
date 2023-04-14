@@ -3,9 +3,8 @@ from typing import cast, Iterable, List, Union
 from . import _lazy_init, _lazy_call, device_count, current_device
 from .. import Tensor
 
-__all__ = ['get_rng_state', 'get_rng_state_all',
-           'set_rng_state', 'set_rng_state_all',
-           'set_rng_state_offset',
+__all__ = ['get_rng_state', 'get_rng_state_all', 'get_rng_state_offset',
+           'set_rng_state', 'set_rng_state_all', 'set_rng_state_offset',
            'manual_seed', 'manual_seed_all',
            'seed', 'seed_all', 'initial_seed']
 
@@ -39,6 +38,28 @@ def get_rng_state_all() -> List[Tensor]:
     for i in range(device_count()):
         results.append(get_rng_state(i))
     return results
+
+
+def get_rng_state_offset(device: Union[int, str, torch.device] = 'cuda') -> int:
+    r"""Returns the random number generator state offset of the specified GPU.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state offset of.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+
+    .. warning::
+        This function eagerly initializes CUDA.
+    """
+    _lazy_init()
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
+        device = torch.device('cuda', device)
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    default_generator = torch.cuda.default_generators[idx]
+    return default_generator.get_offset()
 
 
 def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cuda') -> None:
