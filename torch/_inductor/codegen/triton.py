@@ -1528,6 +1528,8 @@ class ForeachKernel(Kernel):
         for name in output_names:
             self.output_vars.append(self.args.output(name))
 
+        self.compute_output_var = None
+
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
         num_blocks = 0
@@ -1565,6 +1567,9 @@ class ForeachKernel(Kernel):
             self.list_name_to_var_name[name] = var
 
         return self.list_name_to_var_name[name]
+
+    def store(self, _: str, value):
+        self.compute_output_var = value
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -1620,7 +1625,7 @@ class ForeachKernel(Kernel):
             code.writeline(
                 "right = tl.load(right_ptr + tl.arange(0, BLOCK_SIZE), mask=elem_count)"
             )
-            code.writeline("tmp = left + right")
+            code.splice(self.compute)
             code.writeline("tl.store(out_ptr, tmp, mask=elem_count)")
 
         return code.getvalue()
@@ -1980,7 +1985,7 @@ class TritonScheduling:
 
     def codegen_foreach(self, foreach_node):
         """ """
-        if isinstance(foreach_node.node, ir.ForeachOutputBuffer):
+        if isinstance(foreach_node.node, ir.ListElemBuffer):
             return
 
         kernel = ForeachKernel(
@@ -1991,8 +1996,7 @@ class TritonScheduling:
 
         with kernel:
             foreach_node.mark_run()
-            # foreach_node.codegen()
-            foreach_node.node.data.make_loader()()
+            foreach_node.codegen()
             src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, [foreach_node])
         # self.scheduler.free_buffers()

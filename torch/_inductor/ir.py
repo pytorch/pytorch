@@ -5,7 +5,6 @@ import itertools
 import logging
 import re
 import textwrap
-import weakref
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
@@ -2022,42 +2021,42 @@ class BufferList(IRNode):
     def __init__(self, data):
         super().__init__()
         self.name = V.graph.register_buffer(self)
-        self.layouts = data.layouts
         self.buffers = [
-            ForeachOutputBuffer(layout, self, i)
-            for i, layout in enumerate(self.layouts)
+            ListElemBuffer(layout, self, i)
+            for i, layout in enumerate(self.data.layouts)
         ]
+        names = [t.name for t in self.data.buffers]
+        self.list_name = V.graph.register_list(names)
         self.data = data
 
     def __getitem__(self, ind):
         return TensorBox.create(self.buffers[ind])
 
     def make_indexer(self, ind):
-        return self.layouts[ind].make_indexer()
+        return self.data.layouts[ind].make_indexer()
 
     def get_name(self):
-        assert self.name
         return self.name
 
     # TODO mlazos: Ensure each Bufferlist has uniform dtype and device
     def get_device(self, ind=0):
-        return self.layouts[ind].device
+        return self.data.layouts[ind].device
 
     # TODO mlazos: Ensure each Bufferlist has uniform dtype and device
     def get_dtype(self, ind=0):
-        return getattr(self.layouts[ind], "dtype", None)
+        return getattr(self.data.layouts[ind], "dtype", None)
 
     def get_size(self, ind):
-        return list(self.layouts[ind].size)
+        return list(self.data.layouts[ind].size)
 
     def get_stride(self, ind):
-        return list(self.layouts[ind].stride)
+        return list(self.data.layouts[ind].stride)
 
     def get_layout(self, ind):
-        return self.layouts[ind]
+        return self.data.layouts[ind]
 
     def get_layouts(self):
-        return self.layouts
+        return self.data.layouts
 
     def get_storage_numel(self):
         return self.get_numel()
@@ -2081,12 +2080,18 @@ class BufferList(IRNode):
         assert isinstance(self.layout, FlexibleLayout)
         self.layout = self.layout.as_same_order(stride)
 
-    def make_loader(self, ind):
-        def loader(index):
-            indexer = self.layouts[ind].make_indexer()
-            return ops.load(self.name, indexer(index))
+    def make_loader(self):
+        load = self.data.make_loader()
 
-        return loader
+        def fn():
+            result = load()
+            # write out intermediate, so that we properly support
+            # returning an intermediate but fusing the rest of
+            # the foreach computation
+            ops.store(self.list_name, result)
+            return result
+
+        return fn
 
     def is_no_op(self):
         return False
@@ -2114,7 +2119,7 @@ class BufferList(IRNode):
                 self._reads: Set[dependencies.StarDep] = set()
 
             def load(self, name: str, index: sympy.Expr) -> str:
-                for name in TensorList.name_to_instance[name].get_names():
+                for name in V.graph.lists[name]:
                     self._reads.add(dependencies.StarDep(name))
                 return f"ops.load({name}, {sympy_str(index)})"
 
@@ -2151,7 +2156,7 @@ class BufferList(IRNode):
         self.data.body(indices)
 
 
-class ForeachOutputBuffer(Buffer):
+class ListElemBuffer(Buffer):
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.input.get_name()}_{self.index}")
 
@@ -3906,7 +3911,7 @@ class StorageBox(MutableBox):
                 InputBuffer,
                 ReinterpretView,
                 TemplateBuffer,
-                ForeachOutputBuffer,
+                ListElemBuffer,
             ),
         ):
             return self.data.get_name()
@@ -3989,8 +3994,6 @@ class StorageBox(MutableBox):
 # this is used to track which lists are passed to foreach ops
 # and ensure the same list of args is mapped to the same TensorList
 class TensorList(IRNode):
-    name_to_instance = dict()
-
     def __init__(self, tensor_boxes, name=None):
         self.data: Union[ForeachPointwise, list[TensorBox], BufferList] = tensor_boxes
         self.name = name
@@ -4001,11 +4004,8 @@ class TensorList(IRNode):
             return tensor_boxes
 
         if not isinstance(tensor_boxes, ForeachPointwise):
-            name = "_".join([t.data.realize() for t in tensor_boxes])
-            if name not in TensorList.name_to_instance:
-                TensorList.name_to_instance[name] = cls(tensor_boxes, name)
-
-            return TensorList.name_to_instance[name]
+            names = [t.data.realize() for t in tensor_boxes]
+            cls(tensor_boxes, V.graph.register_list(names))
         else:
             return cls(tensor_boxes)
 
@@ -4041,13 +4041,14 @@ class TensorList(IRNode):
     def realize(self):
         if not self.is_realized():
             self.data = BufferList(self.data)
+            self.name = self.data.list_name
 
 
 # This will have some other metadata and stuffs
 class ForeachPointwise(IRNode):
     def __init__(self, left_arg, right_arg, op_fn):
         super().__init__()
-        self.layouts = left_arg.get_layouts()
+        self.data.layouts = left_arg.get_layouts()
         self.left_inputs = left_arg
         self.right_inputs = right_arg
         self.op_fn = op_fn

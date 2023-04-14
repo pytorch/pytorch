@@ -173,6 +173,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code = None
         self.num_static_inputs = num_static_inputs
+        self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
         self.randomness_offset = sympy.Integer(0)
@@ -263,6 +264,11 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        return name
+
+    def register_list(self, buffer_names: List[str]):
+        name = "list_" + "_".join(buffer_names)
+        self.lists[name] = buffer_names
         return name
 
     def realize_users_of(self, name: str):

@@ -37,7 +37,6 @@ from .symbolic_convert import InstructionTranslator
 from .utils import (
     CleanupManager,
     counters,
-    dynamo_profiled,
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
@@ -332,7 +331,6 @@ def convert_frame_assert(
 
 
 @dynamo_timed(phase_name="entire_frame_compile")
-@dynamo_profiled
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],

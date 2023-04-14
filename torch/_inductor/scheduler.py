@@ -352,8 +352,11 @@ class ForeachKernelSchedulerNode(BaseSchedulerNode):
     def mark_run(self):
         pass
 
+    def codegen(self):
+        self.node.make_loader()()
+
     def can_free(self):
-        return isinstance(self.node, ir.ForeachOutputBuffer)
+        return isinstance(self.node, ir.ListElemBuffer)
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
@@ -370,7 +373,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.group = (node.get_device(), group_fn(self._sizes))
 
-        if self.is_template() or isinstance(node, ir.ForeachOutputBuffer):
+        if self.is_template() or isinstance(node, ir.ListElemBuffer):
             self.set_read_writes(node.normalized_read_writes())
         else:
             self.set_read_writes(
@@ -646,7 +649,7 @@ class Scheduler:
             elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
                 group_fn = self.get_backend(node.get_device()).group_fn
                 self.nodes.append(SchedulerNode(self, node, group_fn))
-            elif isinstance(node, (ir.BufferList, ir.ForeachOutputBuffer)):
+            elif isinstance(node, (ir.BufferList, ir.ListElemBuffer)):
                 self.nodes.append(ForeachKernelSchedulerNode(self, node))
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchedulerNode(self, node))
@@ -981,8 +984,8 @@ class Scheduler:
             or not config.epilogue_fusion
         ):
             return False
-        if isinstance(node1.node, ir.ForeachOutputBuffer) or isinstance(
-            node2.node, ir.ForeachOutputBuffer
+        if isinstance(node1.node, ir.ListElemBuffer) or isinstance(
+            node2.node, ir.ListElemBuffer
         ):
             return False
 
