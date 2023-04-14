@@ -1,12 +1,9 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import itertools
 from typing import List
 
 import torch
 import torch._dynamo as torchdynamo
-import torch.nn as nn
-from torch._inductor.compile_fx import compile_fx
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import observer, QConfigMapping
 from torch.ao.quantization._pt2e.quantizer import (
@@ -14,18 +11,10 @@ from torch.ao.quantization._pt2e.quantizer import (
     QNNPackQuantizer,
     Quantizer,
 )
-from torch.ao.quantization._quantize_pt2e import (
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_pt2e_quantizer,
-)
+from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
-from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.qconfig import default_per_channel_symmetric_qnnpack_qconfig
-from torch.ao.quantization.quantize_fx import (
-    convert_to_reference_fx,
-    prepare_fx,
-)
+from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -123,9 +112,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
 
         quantizer = QNNPackQuantizer()
-        operator_config = (
-            qq.get_symmetric_quantization_config(is_per_channel=True)
-        )
+        operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -176,9 +163,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
 
         quantizer = QNNPackQuantizer()
-        operator_config = (
-            qq.get_symmetric_quantization_config(is_per_channel=True)
-        )
+        operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -223,6 +208,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
+
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
@@ -245,9 +231,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
 
             quantizer = QNNPackQuantizer()
-            operator_config = (
-                qq.get_symmetric_quantization_config(is_per_channel=True)
-            )
+            operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
             quantizer.set_global(operator_config)
             m = prepare_pt2e_quantizer(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
