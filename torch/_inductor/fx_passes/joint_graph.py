@@ -5,6 +5,7 @@ import torch
 from .. import config
 from ..pattern_matcher import PatternMatcherPass
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 
@@ -14,10 +15,6 @@ def lazy_init():
     from .fuse_attention import _sfdp_init
 
     _sfdp_init()
-    if torch._C.has_mkldnn:
-        from .mkldnn_fusion import _mkldnn_fusion_init
-
-        _mkldnn_fusion_init()
 
 
 def joint_graph_passes(graph: torch.fx.GraphModule):
