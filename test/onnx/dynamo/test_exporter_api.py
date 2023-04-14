@@ -137,7 +137,7 @@ class TestDynamoExportAPI(unittest.TestCase):
         with self.assertRaises(roar.BeartypeException):
             ExportOutput(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
         export_output = ExportOutput(
-            onnx.ModelProto(), exporter.InputFormatter(), exporter.OutputFormatter()
+            onnx.ModelProto(), exporter.InputAdapter(), exporter.OutputAdapter()
         )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]
