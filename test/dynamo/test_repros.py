@@ -2441,7 +2441,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch._dynamo.optimize(cnt, nopython=True, dynamic=True)(f)
         self.assertTrue(same(f(*args), opt_f(*args)))
-        self.assertEqual(cnt.op_count, 7)
+        self.assertEqual(cnt.op_count, 6)
         self.assertEqual(cnt.frame_count, 1)
 
         exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))

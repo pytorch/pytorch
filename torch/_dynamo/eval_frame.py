@@ -10,7 +10,6 @@ import math
 import operator
 import os
 import sys
-import sympy
 import textwrap
 import threading
 import traceback
@@ -21,6 +20,8 @@ from collections import defaultdict
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
+
+import sympy
 
 import torch
 import torch.fx
@@ -62,9 +63,6 @@ from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
-
-
-import sympy
 
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -644,6 +642,177 @@ class Constraint:
         )
 
 
+class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
+    def __init__(
+        self,
+        m,
+        constraints,
+        flat_args,
+    ):
+        super().__init__(m)
+        self.count = 0
+        self.flat_args = flat_args
+        self.constraints_id_to_constraint = defaultdict(list)
+        if constraints is not None:
+            # map input tensor to it's constraints
+            for constraint in constraints:
+                self.constraints_id_to_constraint[constraint.t_id].append(constraint)
+
+    def placeholder(self, target, args, kwargs):
+        arg = super().placeholder(target, args, kwargs)
+        orig_inp_id = id(self.flat_args[self.count])
+
+        if orig_inp_id not in self.constraints_id_to_constraint:
+            self.count += 1
+            return arg
+
+        constraints = self.constraints_id_to_constraint[orig_inp_id]
+
+        # Convert simple sympy Integers into concrete int to
+        # insert into graph
+        def _convert_to_int(val):
+            if val == sympy.oo:
+                return math.inf
+            if isinstance(val, sympy.Integer):
+                return int(val)
+            # TODO ignore expressions for now
+            return None
+
+        for constraint in constraints:
+            constraint_range = constraint.constraint_range
+            if constraint_range is None:
+                continue
+
+            min_int_val = _convert_to_int(constraint_range.vr.lower)
+            max_int_val = _convert_to_int(constraint_range.vr.upper)
+
+            if min_int_val is None and max_int_val is None:
+                continue
+
+            dim = self.tracer.create_proxy(
+                "call_function", torch.ops.aten.sym_size, (arg, constraint.dim), {}
+            )
+            assert_msg = f"Input #{self.count}'s dimension #{constraint.dim} size is outside of supported dynamic range"
+
+            if min_int_val and min_int_val > 2:
+                gt = self.tracer.create_proxy(
+                    "call_function", operator.gt, (dim, min_int_val), {}
+                )
+                tensor_gt = self.tracer.create_proxy(
+                    "call_function", torch.scalar_tensor, (gt,), {}
+                )
+                self.tracer.create_proxy(
+                    "call_function",
+                    torch.ops.aten._assert_async.msg,
+                    (tensor_gt, assert_msg),
+                    {},
+                )
+
+            if max_int_val and max_int_val < math.inf:
+                lt = self.tracer.create_proxy(
+                    "call_function", operator.lt, (dim, max_int_val), {}
+                )
+                tensor_lt = self.tracer.create_proxy(
+                    "call_function", torch.scalar_tensor, (lt,), {}
+                )
+                self.tracer.create_proxy(
+                    "call_function",
+                    torch.ops.aten._assert_async.msg,
+                    (tensor_lt, assert_msg),
+                    {},
+                )
+
+        self.count += 1
+        return arg
+
+    def call_function(self, target, args, kwargs):
+        arg = super().call_function(target, args, kwargs)
+        from torch._export.constraints import constrain_as_size
+
+        if target == constrain_as_size:
+            min_val = kwargs["min"]
+            max_val = kwargs["max"]
+            gt = self.tracer.create_proxy(
+                "call_function", operator.gt, (args[0], min_val), {}
+            )
+            tensor_gt = self.tracer.create_proxy(
+                "call_function", torch.scalar_tensor, (gt,), {}
+            )
+            lt = self.tracer.create_proxy(
+                "call_function", operator.lt, (args[0], max_val), {}
+            )
+            tensor_lt = self.tracer.create_proxy(
+                "call_function", torch.scalar_tensor, (lt,), {}
+            )
+
+            self.tracer.create_proxy(
+                "call_function",
+                torch.ops.aten._assert_async.msg,
+                (tensor_gt, "min_val"),
+                {},
+            )
+
+            self.tracer.create_proxy(
+                "call_function",
+                torch.ops.aten._assert_async.msg,
+                (tensor_lt, "max_val"),
+                {},
+            )
+        return arg
+
+    def run_node(self, n):
+        self.current_node = n
+        r = super().run_node(n)
+        if "val" in self.current_node.meta:
+            r.node.meta["val"] = self.current_node.meta["val"]
+        if "tensor_dict" in self.current_node.meta:
+            r.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        return r
+
+
+class _ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
+    def __init__(
+        self,
+        m,
+        flat_args,
+        matched_input_elements_positions,
+        matched_output_elements_positions,
+    ):
+        super().__init__(m)
+        self.flat_args = flat_args
+        self.matched_input_elements_positions = matched_input_elements_positions
+        self.matched_output_elements_positions = matched_output_elements_positions
+        arg_len = len(self.flat_args)
+        self.new_args = [
+            super(_ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
+            for i in range(0, arg_len)
+        ]
+        self.old_args_gen = (
+            self.new_args[i] for i in self.matched_input_elements_positions
+        )
+
+    def placeholder(self, target, args, kwargs):
+        arg = next(self.old_args_gen)
+        if "val" in self.current_node.meta:
+            arg.node.meta["val"] = self.current_node.meta["val"]
+        if "tensor_dict" in self.current_node.meta:
+            arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        return arg
+
+    def output(self, target, args, kwargs):
+        dynamo_result_flat = args[0]
+        lookup = [*dynamo_result_flat, *self.new_args]
+        new_result_flat = [lookup[i] for i in self.matched_output_elements_positions]
+        return super().output(target, (new_result_flat,), {})
+
+    def run_node(self, n):
+        self.current_node = n
+        r = super().run_node(n)
+        if "val" in self.current_node.meta:
+            r.node.meta["val"] = self.current_node.meta["val"]
+        return r
+
+
 def export(
     f: Callable[..., Any],
     *args,
@@ -791,110 +960,11 @@ def export(
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
-    class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
-        def __init__(
-            self,
-            m,
-        ):
-            super().__init__(m)
-            arg_len = len(flat_args)
-            self.new_args = [
-                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-                for i in range(0, arg_len)
-            ]
-            self.old_args_gen = (
-                self.new_args[i] for i in matched_input_elements_positions
-            )
-
-        def placeholder(self, target, args, kwargs):
-            arg = next(self.old_args_gen)
-            if "val" in self.current_node.meta:
-                arg.node.meta["val"] = self.current_node.meta["val"]
-            if "tensor_dict" in self.current_node.meta:
-                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
-            return arg
-
-        def output(self, target, args, kwargs):
-            dynamo_result_flat = args[0]
-            lookup = [*dynamo_result_flat, *self.new_args]
-            new_result_flat = [lookup[i] for i in matched_output_elements_positions]
-            return super().output(target, (new_result_flat,), {})
-
-        def run_node(self, n):
-            self.current_node = n
-            r = super().run_node(n)
-            if "val" in self.current_node.meta:
-                r.node.meta["val"] = self.current_node.meta["val"]
-            return r
-
-    class AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
-        def __init__(
-            self,
-            m,
-        ):
-            super().__init__(m)
-            self.count = 0
-            self.constraints_id_to_constraint = defaultdict(list)
-            if constraints is not None:
-                # map input tensor to it's constraints
-                for constraint in constraints:
-                    self.constraints_id_to_constraint[constraint.t_id].append(constraint)
-
-        def placeholder(self, target, args, kwargs):
-            arg = super().placeholder(target, args, kwargs)
-            orig_inp_id = id(flat_args[self.count])
-
-            if orig_inp_id not in self.constraints_id_to_constraint:
-                self.count += 1
-                return arg
-
-            constraints = self.constraints_id_to_constraint[orig_inp_id]
-
-            # Convert simple sympy Integers into concrete int to
-            # insert into graph
-            def _convert_to_int(val):
-                if val == sympy.oo:
-                    return math.inf
-                if isinstance(val, sympy.Integer):
-                    return int(val)
-                # TODO ignore expressions for now
-                return None
-
-            for constraint in constraints:
-                constraint_range = constraint.constraint_range
-                if constraint_range is None:
-                    continue
-
-                min_int_val = _convert_to_int(constraint_range.vr.lower)
-                max_int_val = _convert_to_int(constraint_range.vr.upper)
-
-                if min_int_val is None and max_int_val is None:
-                    continue
-
-                dim = self.tracer.create_proxy('call_function', torch.ops.aten.sym_size, (arg, constraint.dim), {})
-                assert_msg = f"Input #{self.count}'s dimension #{constraint.dim} size is outside of supported dynamic range"
-
-                if min_int_val:
-                    gt = self.tracer.create_proxy('call_function', operator.gt, (dim, min_int_val), {})
-                    tensor_gt = self.tracer.create_proxy('call_function', torch.scalar_tensor, (gt,), {})
-                    self.tracer.create_proxy('call_function', torch.ops.aten._assert_async.msg, (tensor_gt, assert_msg), {})
-
-                if max_int_val:
-                    lt = self.tracer.create_proxy('call_function', operator.lt, (dim, max_int_val), {})
-                    tensor_lt = self.tracer.create_proxy('call_function', torch.scalar_tensor, (lt,), {})
-                    self.tracer.create_proxy('call_function', torch.ops.aten._assert_async.msg, (tensor_lt, assert_msg), {})
-
-            self.count += 1
-            return arg
-
-        def run_node(self, n):
-            self.current_node = n
-            r = super().run_node(n)
-            if "val" in self.current_node.meta:
-                r.node.meta["val"] = self.current_node.meta["val"]
-            if "tensor_dict" in self.current_node.meta:
-                r.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
-            return r
+    graph = _AddRuntimeAssertsInInputConstraint(
+        graph,
+        constraints,
+        flat_args,
+    ).transform()
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
@@ -916,13 +986,15 @@ def export(
                 _allow_non_fake_inputs=True,
             )(*example_fake_inputs)
 
-    new_graph = ChangeInputOutputSignature(
+    new_graph = _ChangeInputOutputSignature(
         graph,
+        flat_args,
+        matched_input_elements_positions,
+        matched_output_elements_positions,
     ).transform()
 
-    new_graph = AddRuntimeAssertsInInputConstraint(
-        new_graph,
-    ).transform()
+    new_graph.graph.eliminate_dead_code()
+    new_graph.recompile()
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
