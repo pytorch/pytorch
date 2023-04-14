@@ -159,6 +159,16 @@ class ProtobufExportOutputSerializer:
 # TODO(bowbao): Add diagnostics for IO formatters.
 @runtime_checkable
 class InputFormatStep(Protocol):
+    """A protocol that defines a step in the input formatting process.
+
+    The input formatting process is a sequence of steps that are applied to the
+    PyTorch model inputs to transform them into the inputs format expected by the
+    exported ONNX model. Each step takes the PyTorch model inputs as arguments and
+    returns the transformed inputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    input signature by any individual component in the exporter.
+    """
     def format(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
@@ -203,6 +213,16 @@ class InputFormatter:
 
 @runtime_checkable
 class OutputFormatStep(Protocol):
+    """A protocol that defines a step in the output formatting process.
+
+    The output formatting process is a sequence of steps that are applied to the
+    PyTorch model outputs to transform them into the outputs format produced by the
+    exported ONNX model. Each step takes the PyTorch model outputs as arguments and
+    returns the transformed outputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    output signature by any individual component in the exporter.
+    """
     def format(self, model_outputs: Any) -> Any:
         ...
 
@@ -316,6 +336,9 @@ class ExportOutput:
             >>> print(export_output.format_torch_inputs_to_onnx(x_dict, y_tuple))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
+        .. warning::
+            This API is experimental and is *NOT* backward-compatible.
+
         """
         return self._input_formatter.to_onnx(*model_args, **model_kwargs)
 
@@ -361,6 +384,9 @@ class ExportOutput:
             (tensor(3.), (tensor(5.), tensor(8.)))
             >>> print(export_output.format_torch_outputs_to_onnx(pt_output))
             [tensor(3.), tensor(5.), tensor(8.)]
+
+        .. warning::
+            This API is experimental and is *NOT* backward-compatible.
 
         """
         return self._output_formatter.to_onnx(model_outputs)
@@ -517,6 +543,8 @@ def dynamo_export(
 
     _assert_dependencies(resolved_export_options)
 
+    # Import inside to avoid introducing the dependencies on `onnx` and `onnxscript` for
+    # this file (exporter.py).
     from torch.onnx._internal.fx.dynamo_exporter import DynamoExporter
 
     return DynamoExporter(

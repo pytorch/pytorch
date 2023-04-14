@@ -202,7 +202,7 @@ def _wrap_model_with_output_formatter(
     # Preserve original function signature.
     @functools.wraps(model_func)
     def wrapped(*args, **kwargs):
-        return output_formatter.format(model(*args, **kwargs))
+        return output_formatter.format(model_func(*args, **kwargs))
 
     return wrapped
 

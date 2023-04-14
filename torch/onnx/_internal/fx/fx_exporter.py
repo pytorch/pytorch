@@ -11,7 +11,6 @@ import torch.onnx
 import torch.onnx._internal.fx.function_dispatcher as function_dispatcher
 import torch.onnx._internal.fx.passes as passes
 from torch.onnx._internal import _beartype, exporter
-from torch.onnx._internal.fx import fx_exporter
 from torch.utils import _pytree as pytree
 
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
@@ -328,12 +327,10 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
             onnxscript_graph = passes.export_fx_to_onnxscript(module, self.options)
             # ONNX does not support None inputs. During graph building, all None inputs
             # are removed. Here we register this step to input formatter.
-            self._apply_input_format_step(
-                fx_exporter.RemoveNoneInputStep, fx_module_args, {}
-            )
+            self._apply_input_format_step(RemoveNoneInputStep, fx_module_args, {})
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
-            self._output_formatter.append_step(fx_exporter.FlattenOutputStep())
+            self._output_formatter.append_step(FlattenOutputStep())
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
