@@ -8,9 +8,11 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._composable.replicate import replicate
-from torch.testing._internal.common_distributed import MultiProcessTestCase, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests
-
 
 
 class Net(nn.Module):
@@ -71,7 +73,6 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
 
 class ReplicateTest(MultiProcessTestCase):
-
     @property
     def world_size(self) -> int:
         return 2
@@ -152,7 +153,7 @@ class ReplicateTest(MultiProcessTestCase):
         torch.cuda.manual_seed(self.rank)
         model = Net().cuda()
         replicate(model, ignored_modules=[model.fc1])
-        inp = torch.randn(5, 2, device='cuda') * (self.rank + 1)
+        inp = torch.randn(5, 2, device="cuda") * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
@@ -164,7 +165,9 @@ class ReplicateTest(MultiProcessTestCase):
             self.assertNotEqual(grad, g)
 
         for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
-            tensor_list = [torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())]
+            tensor_list = [
+                torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
+            ]
             dist.all_gather(tensor_list, dp_grad)
             grad, rest = tensor_list[0], tensor_list[1:]
             for g in rest:

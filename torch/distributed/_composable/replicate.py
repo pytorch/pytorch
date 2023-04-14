@@ -82,7 +82,7 @@ class _ReplicateState:
 
         self.has_initialized = True
 
-        self._collect_params(self.module)
+        self._collect_params(self.module)  # type: ignore[arg-type]
         # Only saved for testing
         replicate.state(self.module)._names = self._names
 
