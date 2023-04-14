@@ -432,39 +432,36 @@ class TestForeach(TestCase):
                 self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
                 self.assertEqual(len({t.grad_fn for t in out}), 1)
 
-                # per-tensor `grad_fn` check.
-                hook_buffer = []
-
-                def get_hook(i):
-
-                    def hook(_):
-                        hook_buffer.append(i)
-
-                    return hook
-
                 inplace_input_tensors = [t.clone().detach().requires_grad_() for t in tensors]
                 inplace_inputs = [t.clone() for t in inplace_input_tensors]
                 # set both to False to skip multi_tensor_apply_kernel check
                 inplace_op([inplace_inputs], False, False, zero_size=zero_size)
                 assert_multiple_grad_fns(inplace_inputs, self)
 
-                cloned_tensors = []
+                # per-tensor `grad_fn` check.
+                hook_buffer = []
+
+                def get_grad_fn_hook(i):
+
+                    def hook(grad_inputs, grad_outputs) -> None:
+                        hook_buffer.append(i)
+
+                    return hook
+
                 for i, t in enumerate(inplace_inputs):
-                    c = t.clone()
-                    c.register_hook(get_hook(i))
-                    cloned_tensors.append(c)
+                    t.grad_fn.register_hook(get_grad_fn_hook(i))
 
                 torch.autograd.grad(
-                    cloned_tensors[0] * 1,
+                    inplace_inputs[0],
                     inputs=(inplace_input_tensors[0],),
-                    grad_outputs=(torch.rand_like(cloned_tensors[0]),),
+                    grad_outputs=(torch.rand_like(inplace_inputs[0]),),
                     retain_graph=True,
                 )
                 self.assertEqual(hook_buffer, [0])
                 inplace_input_tensors[0].grad = None
                 hook_buffer.clear()
 
-                sum_of_cloned_tensors = torch.cat([t.view(-1) for t in cloned_tensors]).sum()
+                sum_of_cloned_tensors = torch.cat([t.view(-1) for t in inplace_inputs]).sum()
                 grad_output = torch.rand_like(sum_of_cloned_tensors)
                 torch.autograd.grad(
                     sum_of_cloned_tensors,
@@ -472,7 +469,7 @@ class TestForeach(TestCase):
                     grad_outputs=(grad_output,),
                     retain_graph=False,
                 )
-                self.assertEqual(hook_buffer, list(range(len(tensors) - 1, -1, -1)))
+                self.assertEqual(hook_buffer, list(reversed(range(len(inplace_inputs)))))
 
                 ref_inplace_input_tensors = [t.clone().detach().requires_grad_() for t in inplace_input_tensors]
                 ref_inplace_inputs = [t.clone() for t in ref_inplace_input_tensors]
