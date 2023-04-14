@@ -47,8 +47,6 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 def _data_type_propagation(sub_graph: torch.fx.Graph):
     def propagate_node(node: torch.fx.Node):
         _node: torch.fx.Node = node
-        if _node.target == "ops":
-            return False
         ops_to_bool = [
             "is_inf",
             "is_nan",
@@ -67,9 +65,14 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "bitwise_right_shift",
         ]
         ops_with_dtype_arg = ["constant", "to_dtype", "rand", "randn"]
-        reduction_to_bool = ["any"]
-        reduction_to_int64 = ["argmin", "argmax"]
+        reduction_to_dtype = {
+            "any": torch.bool,
+            "argmin": torch.int64,
+            "argmax": torch.int64,
+        }
         ops_without_dtype = ["ops", "get_index"]
+        if _node.target in ops_without_dtype:
+            return False
         if OptimizationContext.key in _node.meta:
             opt_ctx = _node.meta[OptimizationContext.key]
         else:
@@ -82,10 +85,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             opt_ctx.dtype = _node.args[-1]
         elif _node.target == "reduction":
             reduction_type = _node.args[4]
-            if reduction_type in reduction_to_bool:
-                opt_ctx.dtype = torch.bool
-            elif reduction_type in reduction_to_int64:
-                opt_ctx.dtype = torch.int64
+            opt_ctx.dtype = reduction_to_dtype[reduction_type]
         elif _node.target == "load":
             opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
         if opt_ctx.dtype is not None:
@@ -127,7 +127,6 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             )
         data_type_logger(msg + input_msg)
         _node.meta[OptimizationContext.key] = opt_ctx
-        opt_ctx.dtype_propogated = True
         return True
 
     new_node_propogated = False
