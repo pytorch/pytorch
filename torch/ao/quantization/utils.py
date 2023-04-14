@@ -580,7 +580,7 @@ def determine_qparams(
                 [float(zero_point)], dtype=zero_point.dtype, device=device
             )
 
-    return scale, zero_point.to(torch.int64)
+    return scale, zero_point
 
 def _get_num_pos_args(f: Callable) -> int:
     """ Get number of positional args for a function
