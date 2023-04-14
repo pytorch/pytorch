@@ -332,8 +332,20 @@ class QNNPackQuantizer(Quantizer):
 
         return model
 
-    # Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     def _annotate_conv2d_bn(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+        """
+        Match the following pattern:
+
+          ... -> conv -> bn -> getitem[0] - ...
+
+        Annotate it to get the following pattern after prepare:
+
+                weight -> obs1
+                           |
+          ...  -> obs0 -> conv -> bn -> getitem[0] -> obs2 -> ...
+
+        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+        """
         if node.op != "call_function" or node.target != operator.getitem or node.args[1] != 0:
             return
         getitem_node = node

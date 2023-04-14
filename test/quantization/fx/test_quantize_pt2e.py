@@ -345,9 +345,9 @@ class TestQuantizePT2E(QuantizationTestCase):
             _fused_qat_conv_bn_pattern,
             _conv_bn_pattern_example_inputs,
         )
-        obs0 = copy.deepcopy(m.activation_post_process_0)
-        obs1 = copy.deepcopy(m.activation_post_process_1)
-        obs2 = copy.deepcopy(m.activation_post_process_2)
+        obs0 = copy.deepcopy(m.activation_post_process_0)  # conv input activation
+        obs1 = copy.deepcopy(m.activation_post_process_1)  # conv weight
+        obs2 = copy.deepcopy(m.activation_post_process_2)  # bn - getitem output activation
         for node in check_pattern.graph.nodes:
             named_modules = dict(check_pattern.named_modules(remove_duplicate=False))
             graph = check_pattern.graph

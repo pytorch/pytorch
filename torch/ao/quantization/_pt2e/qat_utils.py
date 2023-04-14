@@ -21,33 +21,33 @@ _conv_bn_pattern_example_inputs = (
 )
 
 def _conv_bn_pattern(
-    x,
-    conv_weight,
-    conv_bias,
-    bn_weight,
-    bn_bias,
-    bn_running_mean,
-    bn_running_var,
+    x: torch.Tensor,
+    conv_weight: torch.Tensor,
+    conv_bias: torch.Tensor,
+    bn_weight: torch.Tensor,
+    bn_bias: torch.Tensor,
+    bn_running_mean: torch.Tensor,
+    bn_running_var: torch.Tensor,
 ):
     x = F.conv2d(x, conv_weight, conv_bias)
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
     return x
 
 def _fused_qat_conv_bn_pattern(
-    x,
-    conv_weight,
-    conv_bias,
-    bn_weight,
-    bn_bias,
-    bn_running_mean,
-    bn_running_var,
+    x: torch.Tensor,
+    conv_weight: torch.Tensor,
+    conv_bias: torch.Tensor,
+    bn_weight: torch.Tensor,
+    bn_bias: torch.Tensor,
+    bn_running_mean: torch.Tensor,
+    bn_running_var: torch.Tensor,
 ):
     """
     Approximated method to fuse conv and bn. It requires only one forward pass.
     conv_orig = conv / scale_factor where scale_factor = bn.weight / running_std.
     This is based on `nniqat.ConvBn2d._forward_approximate`.
     """
-    # TODO: don't hardcode eps
+    # TODO: allow setting eps
     bn_eps = 1e-5
     running_std = torch.sqrt(bn_running_var + bn_eps)
     scale_factor = bn_weight / running_std
@@ -55,7 +55,6 @@ def _fused_qat_conv_bn_pattern(
     weight_shape[0] = -1
     bias_shape = [1] * len(conv_weight.shape)
     bias_shape[1] = -1
-    # TODO: wrap this in weight_fake_quant
     scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
     zero_bias = torch.zeros_like(conv_bias, dtype=x.dtype)
     x = F.conv2d(x, scaled_weight, zero_bias)
@@ -85,6 +84,8 @@ def _fuse_conv_bn_qat(m: GraphModule):
     """
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
     the fused QAT subgraph equivalent. The input graph should already be annotated.
+    The annotations in the original nodes will be preserved in the corresponding
+    nodes in the new subgraph.
     """
     m.graph.eliminate_dead_code()
     m.recompile()
