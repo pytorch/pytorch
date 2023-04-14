@@ -82,7 +82,6 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
-    CONSTRAIN_VIOLATION = auto()
 
 
 class UserError(Unsupported):
@@ -96,10 +95,6 @@ class UserError(Unsupported):
         """
         super().__init__(msg)
         self.error_type = error_type
-
-
-class IncorrectUsage(Exception):
-    pass
 
 
 def unimplemented(msg: str):
