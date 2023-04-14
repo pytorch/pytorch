@@ -6,14 +6,14 @@ import os
 import random
 import sys
 import unittest
-from typing import Mapping, Optional, Type
+from typing import Optional
 
 import numpy as np
 import packaging.version
 
 import torch
 from torch.autograd import function
-from torch.onnx._internal import diagnostics, exporter
+from torch.onnx._internal import diagnostics
 from torch.testing._internal import common_utils
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -205,6 +205,7 @@ def skip_dynamic_fx_test(reason: str):
 
     return skip_dec
 
+
 def xfail(reason: str):
     """Expect failure.
 
@@ -215,6 +216,7 @@ def xfail(reason: str):
         A decorator for expecting test failure.
     """
     return unittest.expectedFailure
+
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper

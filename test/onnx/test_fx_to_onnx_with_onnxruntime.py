@@ -535,7 +535,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
         "while running Expand node. Name:'_0x55b501ebaf10_n2' "
         "Status Message: invalid expand shape"
@@ -559,6 +559,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
+    )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
             def forward(self, x):
@@ -688,7 +691,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @pytorch_test_common.xfail("RuntimeError: Unknown call_function target: aten.copy.default")
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.copy.default"
+    )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -709,7 +714,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.xfail("Unknown call_function target: aten.lift_fresh_copy.default")
+    @pytorch_test_common.xfail(
+        "Unknown call_function target: aten.lift_fresh_copy.default"
+    )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -750,7 +757,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.xfail("Shapes are assumed static by default by 'dynamo.export'.")
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "Shapes are assumed static by default by 'dynamo.export'."
+    )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
