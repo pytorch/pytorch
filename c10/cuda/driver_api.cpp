@@ -1,4 +1,5 @@
-#if !defined(USE_ROCM) && !defined(_WIN32)
+#if !defined(USE_ROCM) && !defined(USE_BAZEL) && !defined(FBCODE_CAFFE2) && \
+    !defined(OVRSOURCE) && !defined(_WIN32)
 
 #include <c10/cuda/driver_api.h>
 #include <c10/util/Exception.h>
