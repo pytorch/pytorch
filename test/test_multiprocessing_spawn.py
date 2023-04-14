@@ -196,7 +196,6 @@ class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 
     def test_exception_raises(self):
-        self.assertEqual(1, 2)
         with self.assertRaises(mp.ProcessRaisedException):
             mp.spawn(_test_success_first_then_exception_func, args=(), nprocs=1)
 
