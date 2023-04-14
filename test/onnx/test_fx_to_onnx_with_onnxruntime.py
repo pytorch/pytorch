@@ -130,11 +130,11 @@ def _compare_pytorch_onnx_with_ort(
         ref_input_kwargs = input_kwargs
 
     # Format original model inputs into the format expected by exported ONNX model.
-    onnx_format_args = export_output.format_torch_inputs_to_onnx(
+    onnx_format_args = export_output.adapt_torch_inputs_to_onnx(
         *input_args, **input_kwargs
     )
 
-    ref_outputs = export_output.format_torch_outputs_to_onnx(
+    ref_outputs = export_output.adapt_torch_outputs_to_onnx(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
     ort_outputs = _run_ort(export_output, onnx_format_args)
@@ -371,7 +371,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     # @beartyped onnxscript.function_libs.torch_aten.graph_building.TorchScriptGraph.add_input()
     # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
     # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
-    @unittest.expectedFailure
+    # @unittest.expectedFailure
+    @pytorch_test_common.skip_fx_exporters(
+        {
+            DynamoExporter: (
+                "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
+                "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
+                "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
+                "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
+                "instance of <protocol 'torch.Tensor'>."
+            ),
+            DynamoOptimizeExporter: (
+                "RuntimeError: The two modules have different number of arguments. "
+                "module: 2, reference_module: 1"
+            ),
+        }
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -599,8 +614,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @unittest.skip(
-        "RuntimeError: The two modules have different number of arguments. module: 1, reference_module: 0"
+    @pytorch_test_common.skip_fx_exporters(
+        {
+            DynamoExporter: (
+                "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
+            ),
+            DynamoOptimizeExporter: (
+                "RuntimeError: The two modules have different number of arguments. "
+                "module: 1, reference_module: 0"
+            ),
+        }
     )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
@@ -693,8 +716,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    @unittest.skip(
-        "RuntimeError: The two modules have different number of arguments. module: 1, reference_module: 0"
+    @pytorch_test_common.skip_fx_exporters(
+        {
+            DynamoExporter: "TypeError: missing a required argument: 'end'",
+            DynamoOptimizeExporter: (
+                "RuntimeError: The two modules have different number of arguments. "
+                "module: 1, reference_module: 0"
+            ),
+        }
     )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
@@ -942,11 +971,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             args = create_args()
             kwargs = create_pytorch_only_kwargs()
             # Original outputs.
-            ref_outputs = export_output.format_torch_outputs_to_onnx(
+            ref_outputs = export_output.adapt_torch_outputs_to_onnx(
                 model(*args, **kwargs)
             )
             # ORT outputs.
-            args_not_none = export_output.format_torch_inputs_to_onnx(*args)
+            args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
             ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,

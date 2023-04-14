@@ -235,6 +235,9 @@ class FlattenOutputWithTreeSpecValidationStep:
 
 
 class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
+    _input_adapter: exporter.InputAdapter
+    _output_adapter: exporter.OutputAdapter
+
     @property
     def decomposition_table(self) -> Mapping[torch._ops.OpOverload, Callable]:
         return function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE

@@ -10,7 +10,7 @@ import torch.onnx
 
 import torch.onnx._internal.fx.fx_exporter as fx_exporter
 import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, exporter
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -164,6 +164,9 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
         )
 
     def export(self) -> torch.onnx.ExportOutput:
+        self._input_adapter = exporter.InputAdapter()
+        self._output_adapter = exporter.OutputAdapter()
+
         graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace()
 
         # Make sure all placeholder nodes are executed before get_attr nodes.

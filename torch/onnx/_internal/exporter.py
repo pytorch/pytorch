@@ -286,7 +286,7 @@ class ExportOutput:
         return self._model_proto
 
     @_beartype.beartype
-    def format_torch_inputs_to_onnx(
+    def adapt_torch_inputs_to_onnx(
         self, *model_args, **model_kwargs
     ) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
@@ -335,7 +335,7 @@ class ExportOutput:
             >>> print(x_dict, y_tuple)
             {'a': tensor(1.)}
             (tensor(2.), (tensor(3.), tensor(4.)))
-            >>> print(export_output.format_torch_inputs_to_onnx(x_dict, y_tuple))
+            >>> print(export_output.adapt_torch_inputs_to_onnx(x_dict, y_tuple))
             (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
 
         .. warning::
@@ -345,9 +345,7 @@ class ExportOutput:
         return self._input_adapter.to_onnx(*model_args, **model_kwargs)
 
     @_beartype.beartype
-    def format_torch_outputs_to_onnx(
-        self, model_outputs: Any
-    ) -> Sequence[torch.Tensor]:
+    def adapt_torch_outputs_to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -384,7 +382,7 @@ class ExportOutput:
             >>> pt_output = func_returning_tuples(x, y, z)
             >>> print(pt_output)
             (tensor(3.), (tensor(5.), tensor(8.)))
-            >>> print(export_output.format_torch_outputs_to_onnx(pt_output))
+            >>> print(export_output.adapt_torch_outputs_to_onnx(pt_output))
             [tensor(3.), tensor(5.), tensor(8.)]
 
         .. warning::
@@ -413,9 +411,6 @@ class ExportOutput:
 
 
 class Exporter(abc.ABC):
-    _input_adapter: InputAdapter
-    _output_adapter: OutputAdapter
-
     @_beartype.beartype
     def __init__(
         self,
@@ -433,9 +428,6 @@ class Exporter(abc.ABC):
         self.model = model
         self.model_args = model_args
         self.model_kwargs = model_kwargs
-
-        self._input_adapter = InputAdapter()
-        self._output_adapter = OutputAdapter()
 
     @abc.abstractmethod
     def export(self) -> ExportOutput:

@@ -8,13 +8,16 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, U
 import torch._dynamo
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, exporter
 from torch.onnx._internal.fx import fx_exporter
 from torch.utils import _pytree as pytree
 
 
 class DynamoOptimizeExporter(fx_exporter.FXGraphModuleExporter):
     def export(self) -> torch.onnx.ExportOutput:
+        self._input_adapter = exporter.InputAdapter()
+        self._output_adapter = exporter.OutputAdapter()
+
         # Fill in default values for optional args and kwargs. The goal is to preserve
         # them as inputs in `dynamo.optimize` produced FX graph. Otherwise, they will
         # be traced as constants.
@@ -209,6 +212,9 @@ def _wrap_model_with_output_adapter(
 
 class DynamoExporter(fx_exporter.FXGraphModuleExporter):
     def export(self) -> torch.onnx.ExportOutput:
+        self._input_adapter = exporter.InputAdapter()
+        self._output_adapter = exporter.OutputAdapter()
+
         # args will be converted to symbolic tensor. Let's copy to avoid side effects.
         args = copy.deepcopy(self.model_args)
         kwargs = copy.deepcopy(self.model_kwargs)
