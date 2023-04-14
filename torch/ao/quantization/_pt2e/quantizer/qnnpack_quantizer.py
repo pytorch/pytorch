@@ -30,10 +30,8 @@ __all__ = [
 ]
 
 
-def supported_symmetric_quantized_operators() -> Dict[
-    str, List[List[OperatorPatternType]]
-]:
-    supported_operators: Dict[str, List[List[OperatorPatternType]]] = {
+def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
+    supported_operators: Dict[str, List[OperatorPatternType]] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -230,7 +228,7 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_quantization_config(
         cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[List[OperatorPatternType]]:
+    ) -> List[OperatorPatternType]:
         if quantization_config is None:
             all_ops = []
             for _, ops in cls.supported_config_and_operators:
