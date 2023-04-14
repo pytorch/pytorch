@@ -813,13 +813,7 @@ def clone_inputs(args):
 
     return inputs
 
-def get_traced_sample_variant_pairs(device, dtype, op):
-    # tuples of (variant, sample)
-    outputs: List[Tuple[Any, Any]] = []
-
-    samples = op.sample_inputs(device, dtype)
-
-    # Acquires variants to test
+def get_traced_variants(device, dtype, op) -> Dict[str, Any]:
     func = op.get_op()
     method = op.get_method()
     variants = {
@@ -828,10 +822,17 @@ def get_traced_sample_variant_pairs(device, dtype, op):
     }
 
     # TODO: find better way to standardize on op registration itself..
-    has_fake_function = op.name in ["resize_", 'resize_as_']
+    has_fake_function = op_has_fake_function(op)
 
     if has_fake_function:
         variants = {'method': getattr(torch.Tensor, op.name)}
+
+    return variants
+
+def get_traced_samples(device, dtype, op, variant_callable):
+    outputs: List[Any] = []
+
+    has_fake_function = op_has_fake_function(op)
 
     # In eager mode, these ops can take (Tensor, bool) args; but in
     # JIT they can only take (Tensor, Scalar), and bool is not a
@@ -870,24 +871,38 @@ def get_traced_sample_variant_pairs(device, dtype, op):
 
     # doesn't support tracing
     if has_fake_function:
-        return outputs
+        return []
+
+    samples = op.sample_inputs(device, dtype)
 
     for sample in samples:
-        for func_type, variant in variants.items():
-            if variant is None:
-                continue
+        if variant_callable is None:
+            continue
 
-            if is_lambda(variant):
-                continue
+        if is_lambda(variant_callable):
+            continue
 
-            matching_ops = filter(lambda x: op.formatted_name == x["name"], ops_with_unsupported_bool_args)
-            for op_data in matching_ops:
-                for idx in op_data["arg_idx"]:
-                    args = list(sample.args)
-                    if len(sample.args) > idx and isinstance(sample.args[idx], bool):
-                        args[idx] = int(args[idx])
-                    sample.args = tuple(args)
+        matching_ops = filter(lambda x: op.formatted_name == x["name"], ops_with_unsupported_bool_args)
+        for op_data in matching_ops:
+            for idx in op_data["arg_idx"]:
+                args = list(sample.args)
+                if len(sample.args) > idx and isinstance(sample.args[idx], bool):
+                    args[idx] = int(args[idx])
+                sample.args = tuple(args)
 
+        outputs.append(sample)
+
+    return outputs
+
+def get_traced_sample_variant_pairs(device, dtype, op):
+    # tuples of (variant, sample)
+    outputs: List[Tuple[Any, Any]] = []
+
+    variants = get_traced_variants(device, dtype, op)
+
+    for func_type, variant in variants.items():
+        samples = get_traced_samples(device, dtype, op, variant)
+        for sample in samples:
             outputs.append((variant, sample))
 
     return outputs
@@ -896,3 +911,6 @@ def get_traced_sample_variant_pairs(device, dtype, op):
 def is_lambda(lamb):
     LAMBDA = lambda: 0  # noqa: E731
     return isinstance(lamb, type(LAMBDA)) and lamb.__name__ == LAMBDA.__name__
+
+def op_has_fake_function(op):
+    return op.name in ["resize_", "resize_as_"]

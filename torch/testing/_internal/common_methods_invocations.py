@@ -9023,6 +9023,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            supports_autograd=False,
            is_factory_function=True,
+           assert_jit_shape_analysis=True,
            error_inputs_func=error_inputs_arange,
            sample_inputs_func=sample_inputs_arange,
            skips=(
@@ -9313,6 +9314,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9331,6 +9333,7 @@ op_db: List[OpInfo] = [
            variant_test_name='decomposed',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9426,6 +9429,7 @@ op_db: List[OpInfo] = [
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
            supports_forward_ad=True,
@@ -9471,6 +9475,7 @@ op_db: List[OpInfo] = [
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9689,6 +9694,7 @@ op_db: List[OpInfo] = [
            dtypes=_dispatch_dtypes((torch.float32,)),
            supports_out=False,
            supports_gradgrad=False,
+           assert_jit_shape_analysis=True,
            assert_autodiffed=False,
            supports_autograd=False,
            supports_scripting=False,
@@ -9941,6 +9947,8 @@ op_db: List[OpInfo] = [
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
                                                     torch.half, torch.chalf),
+
+                   assert_jit_shape_analysis=True,
                    supports_sparse=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10307,6 +10315,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('expand_as',
            op=lambda self, other: self.expand_as(other),
+           assert_jit_shape_analysis=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11543,6 +11552,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        assert_jit_shape_analysis=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -11770,6 +11780,7 @@ op_db: List[OpInfo] = [
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
+           assert_jit_shape_analysis=True,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12796,6 +12807,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.linear',
            aten_name='linear',
+           assert_jit_shape_analysis=True,
            supports_autograd=True,
            supports_gradgrad=True,
            sample_inputs_func=sample_inputs_linear,
@@ -13570,6 +13582,7 @@ op_db: List[OpInfo] = [
     OpInfo('mm',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14202,6 +14215,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -15634,6 +15648,7 @@ op_db: List[OpInfo] = [
            is_factory_function=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_ones_zeros,
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
@@ -16008,6 +16023,7 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16115,6 +16131,7 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            skips=(
                # https://github.com/pytorch/pytorch/issues/89353
@@ -16250,6 +16267,7 @@ op_db: List[OpInfo] = [
            variant_test_name="multiple",
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
@@ -16427,6 +16445,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
            skips=(
                # lambda impl
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -17091,6 +17110,7 @@ op_db: List[OpInfo] = [
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            error_inputs_func=error_inputs_t),
     OpInfo(
@@ -17665,6 +17685,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         'sum',
+        assert_jit_shape_analysis=True,
         identity=0,
         nan_policy='propagate',
         supports_out=False,

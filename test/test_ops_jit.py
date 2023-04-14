@@ -5,15 +5,23 @@ from textwrap import dedent
 
 import torch
 
+import torch.jit._shape_functions
+
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import \
     (run_tests, IS_SANDCASTLE, clone_input_helper, first_sample)
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skipOps, xfail
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, check_alias_annotation
-from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
-
+from torch.testing._internal.jit_utils import (
+    clone_inputs,
+    disable_autodiff_subgraph_inlining,
+    get_traced_samples,
+    get_traced_variants,
+    is_lambda,
+    op_has_fake_function,
+)
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -23,6 +31,35 @@ torch.set_default_dtype(torch.float32)
 _variant_ops = partial(ops, dtypes=OpDTypes.supported,
                        allowed_dtypes=(torch.float, torch.cfloat))
 
+shape_analysis_jit_failures = {
+    # Can't trace
+    xfail("allclose"),
+    xfail("empty"),
+    xfail("empty_permuted"),
+    xfail("fill"),
+    xfail("new_empty"),
+    xfail("new_empty_strided"),
+    # Shape function actually doesn't work for some reason
+    xfail("_native_batch_norm_legit"),
+    xfail("arange"),
+    xfail("broadcast_shapes"),
+    xfail("cat"),
+    xfail("masked.sum"),
+    xfail("nn.functional.adaptive_avg_pool2d"),
+    xfail("nn.functional.conv1d"),
+    xfail("nn.functional.conv2d"),
+    xfail("nn.functional.conv_transpose1d"),
+    xfail("nn.functional.conv_transpose2d"),
+    xfail("nn.functional.conv_transpose3d"),
+    xfail("nn.functional.nll_loss"),
+    xfail("stack"),
+    xfail("squeeze", "multiple"),
+    xfail("zeros"),
+}
+
+# Allows super() calls on TestJit.
+class TestJitOpInfoParent(JitCommonTestCase):
+    pass
 
 
 # Tests operators for consistency between JIT and eager, also checks
@@ -30,13 +67,20 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 #   autodifferentiation behavior.
 # Inherits from JitCommonTestCase instead of TestCase directly to share
 #   functionality with original test_jit.py method operator tests
-class TestJit(JitCommonTestCase):
+class TestJit(TestJitOpInfoParent):
     exact_dtype = True
 
-    @staticmethod
-    def _has_fake_function(op):
-        # TODO: find better way to standardize on op registration itself..
-        return op.name in ["resize_", 'resize_as_']
+    def setUp(self):
+        super(TestJitOpInfoParent, self).setUp()
+
+        def strip_aten_name(schema):
+            assert "(" in schema
+            return schema[: schema.find("(")]
+
+        self.aten_ops_with_shape_fns = {
+            strip_aten_name(schema)
+            for schema in torch.jit._shape_functions.shape_compute_graph_mapping.keys()
+        }
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
@@ -63,12 +107,11 @@ class TestJit(JitCommonTestCase):
         if isinstance(func, torch._ops.OpOverload):
             self.skipTest("variant consistency doesn't work on torch.ops")
 
-        has_fake_function = TestJit._has_fake_function(op)
+        has_fake_function = op_has_fake_function(op)
 
         if has_fake_function:
             variants = {'method': getattr(torch.Tensor, op.name)}
             samples = op.sample_inputs(device, dtype, requires_grad=False)
-
 
         tested = False
         for sample in samples:
@@ -276,35 +319,76 @@ class TestJit(JitCommonTestCase):
                 FileCheck().check(op_name).check_not(variant_name).run(graph)
 
 
-    @ops(dtypes=OpDTypes.supported, allowed_dtypes=(torch.float,))
+    @ops(op_db, dtypes=OpDTypes.supported, allowed_dtypes=(torch.float,))
+    @skipOps("TestJit", "test_shape_analysis_jit", shape_analysis_jit_failures)
     def test_shape_analysis_jit(self, device, dtype, op):
-        has_fake_function = TestJit._has_fake_function(op)
+        outer_self = self
+
+        has_fake_function = op_has_fake_function(op)
 
         supports_tracing = op.supports_tracing and not has_fake_function
         if op.assert_jit_shape_analysis:
             self.assertTrue(supports_tracing)
 
-        # TODO: use script graph as well
-        checked_shape_analysis = False
-        if supports_tracing:
-            out = variant(get_sample(), *sample.args, **sample.kwargs)
+        variants = get_traced_variants(device, dtype, op)
 
-            # right now, tuple of outputs and tensor output supported
-            # TODO: list of tensor outputs
-            tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+        for func_type, variant in variants.items():
+            samples = get_traced_samples(device, dtype, op, variant)
 
-            if isinstance(out, torch.Tensor) or tuple_of_tensors:
-                if tuple_of_tensors:
-                    sizes = [elem.size() for elem in out]
-                else:
-                    sizes = out.size()
-                self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
-                checked_shape_analysis = True
-        if op.assert_jit_shape_analysis:
-            self.assertTrue(checked_shape_analysis)
+            if supports_tracing and samples:
+                traced_fn = create_traced_fn(self, variant)
+
+                traced_fn(
+                    *clone_inputs([samples[0].input, *samples[0].args]),
+                    **samples[0].kwargs,
+                )
+                aten_ops = 0
+                has_unsupported_aten_ops = False
+                for n in traced_fn.graph.nodes():
+                    if n.kind().startswith("aten::"):
+                        aten_ops += 1
+                        if n.kind() not in self.aten_ops_with_shape_fns:
+                            has_unsupported_aten_ops = True
+                            self.assertTrue(False, f"Bad op, {n.kind()}")
+
+                if not op.assert_jit_shape_analysis:
+                    self.assertTrue(
+                        has_unsupported_aten_ops,
+                        "This op looks like it should support shape propagation, but op.assert_jit_shape_analysis "
+                        "is set to False. Either skip this op, or set assert_jit_shape_analysis=True to turn on "
+                        "tests for this op.",
+                    )
+
+                if op.assert_jit_shape_analysis:
+                    for sample in samples:
+                        checked_shape_analysis = False
+                        out = variant(
+                            *clone_inputs([sample.input, *sample.args]), **sample.kwargs
+                        )
+                        out_traced = traced_fn(
+                            *clone_inputs([sample.input, *sample.args]), **sample.kwargs
+                        )
+
+                        # right now, tuple of outputs and tensor output supported
+                        # TODO: list of tensor outputs
+                        tuple_of_tensors = isinstance(out, tuple) and all(
+                            [isinstance(elem, torch.Tensor) for elem in out]
+                        )
+
+                        if isinstance(out, torch.Tensor) or tuple_of_tensors:
+                            if tuple_of_tensors:
+                                sizes = [elem.size() for elem in out]
+                            else:
+                                sizes = out.size()
+                            self.checkShapeAnalysis(
+                                sizes, traced_fn.graph, op.assert_jit_shape_analysis
+                            )
+                            checked_shape_analysis = True
+
+                        self.assertTrue(checked_shape_analysis)
 
 
 instantiate_device_type_tests(TestJit, globals())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
