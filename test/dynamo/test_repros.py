@@ -37,7 +37,6 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -2283,7 +2282,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod(*args)
 
     @skipIfPy311
-    @unittest.skipIf(IS_MACOS, "need to debug mac issue")
     def test_pointless_graph_removal(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -2821,10 +2819,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
         )
-        if not IS_MACOS:
-            # TODO(jansel): I have no idea why these are failing on mac...
-            self.assertEqual(cnt.op_count, 6)
-            self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
 
