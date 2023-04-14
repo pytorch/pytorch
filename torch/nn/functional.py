@@ -2138,6 +2138,11 @@ def embedding(
 
     See :class:`torch.nn.Embedding` for more details.
 
+    .. warning::
+        To ensure correct gradients during backward, make sure the entries in the :attr:`weight`
+        matrix at the row specified by :attr:`padding_idx` are all zeroes. Alternatively, use
+        :class:`torch.nn.Embedding`, which initializes the appropriate weights automatically.
+
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
