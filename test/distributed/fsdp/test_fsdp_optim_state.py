@@ -1728,6 +1728,7 @@ class TestFSDPOptimState(FSDPTest):
         self._check_same_state(
             original_fsdp_state_dict, fsdp_optim_state, check_same_param_keys=True
         )
+        self.assertEqual(original_param_groups, optim.state_dict()["param_groups"])
 
     @skip_if_lt_x_gpu(2)
     def test_with_empty_optimizer_state(self):
