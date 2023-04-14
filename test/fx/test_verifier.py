@@ -119,12 +119,14 @@ class FeedForwardBlock(nn.Module):
         return y
 
 
-def skip_condition():
-    return sys.version_info >= (3, 11) or os.name == 'nt'
+def skip_condition(fn):
+    if os.name == 'nt':
+        return unittest.skip("not supported by dynamo")(fn)
+    return fn
 
 class VerifierTest(TestCase):
 
-    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    @skip_condition
     def test_verifier(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
@@ -132,7 +134,7 @@ class VerifierTest(TestCase):
         check_valid(egm)
         self.assertTrue(is_valid(egm))
 
-    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    @skip_condition
     def testr_verifier_call_module(self) -> None:
         m = FeedForwardBlock(10, 10)
         gm = torch.fx.symbolic_trace(m)
@@ -141,7 +143,7 @@ class VerifierTest(TestCase):
             check_valid(gm)
         self.assertFalse(is_valid(gm))
 
-    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    @skip_condition
     def test_verifier_no_functional(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
@@ -152,14 +154,14 @@ class VerifierTest(TestCase):
             check_valid(egm)
         self.assertFalse(is_valid(egm))
 
-    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    @skip_condition
     def test_aten_dialect(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
         check_valid_aten_dialect(egm)
         self.assertTrue(is_valid_aten_dialect(egm))
 
-    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    @skip_condition
     def test_aten_wrong_mem_format(self) -> None:
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -178,7 +180,7 @@ class VerifierTest(TestCase):
             check_valid_aten_dialect(egm)
         self.assertFalse(is_valid_aten_dialect(egm))
 
-    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    @skip_condition
     def test_aten_wrong_mem_format_buffer(self) -> None:
         class TestModel(torch.nn.Module):
             def __init__(self):

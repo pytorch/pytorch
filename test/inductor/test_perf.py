@@ -25,8 +25,7 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-# TODO remove version check once dynamo supports 3.11
-if sys.version_info < (3, 11) and not IS_WINDOWS:
+if not IS_WINDOWS:
 
     @torch._dynamo.optimize("count_bytes_inductor")
     def f(x):
