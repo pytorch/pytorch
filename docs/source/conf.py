@@ -238,7 +238,6 @@ coverage_ignore_classes = [
     "StaticModule",
     "StringType",
     "SymIntType",
-    "SymBoolType",
     "ThroughputBenchmark",
     "TracingState",
     "TupleType",
