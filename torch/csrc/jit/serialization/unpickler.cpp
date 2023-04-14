@@ -88,7 +88,8 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymIntType::Kind:
-        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // TODO: Can this really show up though? :think:
+        TORCH_CHECK(!w.value.toSymInt().is_heap_allocated());
         // no op, there is nothing to tag
         break;
       case c10::SymFloatType::Kind:
