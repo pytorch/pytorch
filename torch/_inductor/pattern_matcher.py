@@ -3,7 +3,6 @@ import functools
 import inspect
 import itertools
 import logging
-import operator
 import os
 import re
 from collections import defaultdict
