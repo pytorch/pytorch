@@ -83,11 +83,38 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    def __init__(self, mod, dynamo_ctx):
+    def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
         # Installs the params/buffer
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
+
+        # do this stuff in constructor to lower overhead slightly
+        if skipfiles.check(inspect.getsourcefile(self._orig_mod.forward)):
+            # this is likely a torch.nn.* instance in skipfiles.py
+            # workaround to add an extra frame we can capture
+            self._optimized_call = self.dynamo_ctx(external_utils.wrap_inline(mod))
+            self.forward = self.dynamo_ctx(external_utils.wrap_inline(mod.forward))
+        else:
+            # Invoke hooks outside of dynamo then pickup the inner frame
+            self._optimized_call = self.dynamo_ctx(mod.__call__)
+            # If the user calls forward directly they skip hooks (same as eager)
+            self.forward = self.dynamo_ctx(mod.forward)
+
+        # these are needed for some tests to work
+        self.named_parameters = mod.named_parameters
+        self.named_buffers = mod.named_buffers
+
+        if hasattr(mod, "_initialize_hook"):
+            self.__call__ = self._call_lazy_check
+        else:
+            self.__call__ = self._optimized_call
+
+    def __getstate__(self):
+        return (self._orig_mod, self.dynamo_ctx)
+
+    def __setstate__(self, state):
+        self.__init__(*state)
 
     def __getattr__(self, name):
         if name == "_orig_mod":
@@ -106,7 +133,7 @@ class OptimizedModule(torch.nn.Module):
             )
         super().__setattr__(name, value)
 
-    def __call__(self, *args, **kwargs):
+    def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
@@ -114,14 +141,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
-
-    def forward(self, *args, **kwargs):
-        log.warning(
-            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
-            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
-        )
-        return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
+        return self._optimized_call(*args, **kwargs)
 
 
 def remove_from_cache(f):
@@ -222,8 +242,17 @@ class _TorchDynamoContext:
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
-
         assert callable(fn)
+
+        try:
+            filename = inspect.getsourcefile(fn)
+        except TypeError:
+            filename = None
+        if (filename is None or skipfiles.check(filename)) and (
+            getattr(fn, "__name__") != "_call_impl"
+        ):
+            # call to a builtin without a frame for us to capture
+            fn = external_utils.wrap_inline(fn)
 
         callback = self.callback
         on_enter = self.on_enter
@@ -345,20 +374,6 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
         )
-
-    def __call__(self, fn):
-        if _will_skip(fn):
-            # this is likely a torch.nn.* instance in skipfiles.py
-            # workaround to add an extra frame we can capture
-            fn = external_utils.wrap_inline(fn)
-        return super().__call__(fn)
-
-
-def _will_skip(fn):
-    code = getattr(getattr(fn, "forward", fn), "__code__", None)
-    if isinstance(code, types.CodeType):
-        return skipfiles.check(code.co_filename)
-    return False
 
 
 class RunOnlyContext(_TorchDynamoContext):
@@ -1001,13 +1016,24 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None):
-    """Decorator and context manager to disable TorchDynamo"""
-    if fn is not None:
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        return DisableContext()(fn)
-    return DisableContext()
+def disable(fn=None, recursive=True):
+    """
+    Decorator and context manager to disable TorchDynamo
+
+    If recursive=True, Dynamo is completely skipped on the decorated function
+    frame as well as the recursively invoked functions.
+
+    If recursive=False, Dynamo skips frames associated with the function code,
+    but still process recursively invoked frames.
+    """
+    if recursive:
+        if fn is not None:
+            fn = innermost_fn(fn)
+            assert callable(fn)
+            return DisableContext()(fn)
+        return DisableContext()
+    else:
+        return skip(fn)
 
 
 def skip(fn=None):
@@ -1051,8 +1077,8 @@ class TorchPatcher:
 
         # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
         if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
-            DistributedDataParallel._inside_ddp_forward = skip(
-                DistributedDataParallel._inside_ddp_forward
+            DistributedDataParallel._inside_ddp_forward = disable(
+                DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
         from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
