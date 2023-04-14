@@ -40,7 +40,7 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 void MPSGeneratorImpl::set_offset(uint64_t offset) {
-  data._offset = offset;
+  data_.offset = offset;
   engine_.set_offset(offset);
 }
 
