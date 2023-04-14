@@ -97,6 +97,10 @@ struct TORCH_API Generator {
   // supported for only Philox based Generators, i.e., CUDA and MPS.
   void set_offset(uint64_t offset) { impl_->set_offset(offset); }
 
+  // Returns the offset of Generator state. This is currently supported for only
+  // Philox based Generators, i.e., CUDA and MPS.
+  uint64_t get_offset() const { return impl_->get_offset(); }
+
   uint64_t current_seed() const { return impl_->current_seed(); }
 
   uint64_t seed() { return impl_->seed(); }

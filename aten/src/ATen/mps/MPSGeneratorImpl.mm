@@ -44,6 +44,10 @@ void MPSGeneratorImpl::set_offset(uint64_t offset) {
   engine_.set_offset(offset);
 }
 
+uint64_t MPSGeneratorImpl::get_offset() const {
+  return data_.offset;
+}
+
 uint64_t MPSGeneratorImpl::current_seed() const {
   return data_.seed;
 }

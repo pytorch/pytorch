@@ -128,6 +128,16 @@ void CUDAGeneratorImpl::set_offset(uint64_t offset) {
   no_reset_rnn_state_.clear();
 }
 
+/**
+ * Gets the current offset of CUDAGeneratorImpl.
+ */
+uint64_t CUDAGeneratorImpl::get_offset() const {
+  // Debatable if get_offset() should be allowed in captured regions.
+  // Conservatively disallow it for now.
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::current_seed");
+  return philox_offset_per_thread_;
+}
+
 #define CAPTURE_DEFAULT_GENS_MSG \
 "In regions captured by CUDA graphs, you may only use the default CUDA RNG " \
 "generator on the device that's current when capture begins. " \
