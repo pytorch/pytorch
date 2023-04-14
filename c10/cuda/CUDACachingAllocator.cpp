@@ -9,6 +9,12 @@
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
+#if !defined(USE_ROCM) && !defined(USE_BAZEL) && !defined(FBCODE_CAFFE2) && \
+    !defined(OVRSOURCE) && !defined(_WIN32)
+#define EXPANDABLE_SEGMENTS_SUPPORTED
+#include <c10/cuda/driver_api.h>
+#endif
+
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -248,21 +254,6 @@ struct Block {
   }
 };
 
-#define C10_CUDA_DRIVER_CHECK(EXPR)                   \
-  do {                                                \
-    CUresult __err = EXPR;                            \
-    if (__err != CUDA_SUCCESS) {                      \
-      const char* err_str;                            \
-      CUresult get_error_str_err C10_UNUSED =         \
-          cuGetErrorString(__err, &err_str);          \
-      if (get_error_str_err != CUDA_SUCCESS) {        \
-        AT_ERROR("CUDA driver error: unknown error"); \
-      } else {                                        \
-        AT_ERROR("CUDA driver error: ", err_str);     \
-      }                                               \
-    }                                                 \
-  } while (0)
-
 #if !defined(USE_ROCM) && !defined(USE_BAZEL) && !defined(FBCODE_CAFFE2) && \
     !defined(OVRSOURCE)
 #define EXPANDABLE_SEGMENTS_SUPPORTED
@@ -388,7 +379,7 @@ struct ExpandableSegment {
     // This allows for some cases where we have to unmap pages earlier in the
     // segment to put them at the end.
     max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
-    C10_CUDA_DRIVER_CHECK(cuMemAddressReserve(
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
   }
   // begin must be aligned to segment_size_.
@@ -412,12 +403,13 @@ struct ExpandableSegment {
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
       prop.location.id = device_;
-      auto status = cuMemCreate(&handle, segment_size_, &prop, 0);
+      auto status =
+          DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
           auto handle = handles_.at(j).value();
           handles_.at(j) = c10::nullopt;
-          C10_CUDA_DRIVER_CHECK(cuMemRelease(handle));
+          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(handle));
         }
         trimHandles();
         return rangeFromHandles(begin, begin);
@@ -426,7 +418,7 @@ struct ExpandableSegment {
       handles_.at(i) = handle;
     }
     for (auto i : c10::irange(begin, end)) {
-      C10_CUDA_DRIVER_CHECK(cuMemMap(
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
           ptr_ + i * segment_size_,
           segment_size_,
           0,
@@ -470,7 +462,8 @@ struct ExpandableSegment {
   ~ExpandableSegment() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
-    C10_CUDA_DRIVER_CHECK(cuMemAddressFree(ptr_, segment_size_ * max_handles_));
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
+        ptr_, segment_size_ * max_handles_));
   }
 
  private:
@@ -479,7 +472,7 @@ struct ExpandableSegment {
     desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     desc.location.id = device;
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    C10_CUDA_DRIVER_CHECK(cuMemSetAccess(
+    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
   }
 
@@ -495,9 +488,9 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
       CUmemGenericAllocationHandle h = handles_.at(i).value();
       handles_.at(i) = c10::nullopt;
-      C10_CUDA_DRIVER_CHECK(
-          cuMemUnmap(ptr_ + segment_size_ * i, segment_size_));
-      C10_CUDA_DRIVER_CHECK(cuMemRelease(h));
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
+          ptr_ + segment_size_ * i, segment_size_));
+      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h));
     }
     trimHandles();
   }
