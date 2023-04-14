@@ -100,7 +100,7 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         )
 
 
-# TODO: sandcastle_skip_if does not work here.
+# TODO: skip_but_pass_in_sandcastle_if does not work here.
 @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):
@@ -724,7 +724,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         if self.world_size < MIN_WORLD_SIZE:
             common_distributed.logger.info(
                 "Skipping `test_nondefault_process_group()` since world size "
-                f"of {self.world_size} is less than {MIN_WORLD_SIZE}"
+                "of %s is less than %s",
+                self.world_size, MIN_WORLD_SIZE
             )
             return
         BACKEND = dist.Backend.GLOO

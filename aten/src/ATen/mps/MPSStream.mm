@@ -1,7 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/MPSStream.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSStream.h>
 
 namespace at {
 namespace mps {
@@ -17,9 +17,9 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
   _executionDescriptor = [MPSGraphExecutionDescriptor new];
-  _executionDescriptor.completionHandler = ^(NSDictionary<MPSGraphTensor *,
-                                             MPSGraphTensorData *> * resultsDictionary,
-                                             NSError * _Nullable error) { };
+  _executionDescriptor.completionHandler =
+      ^(NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* resultsDictionary, NSError* _Nullable error) {
+      };
 }
 
 MPSStream::~MPSStream() {
@@ -41,7 +41,7 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
 void MPSStream::synchronize(SyncType syncType) {
   if (!_commandBuffer)
     return;
-  switch(syncType) {
+  switch (syncType) {
     case SyncType::NONE:
       // typically in GPU to GPU copies we won't commit explicitly
       break;
@@ -108,32 +108,34 @@ void MPSStream::_flush(bool commitAndWait) const {
 }
 
 void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
- dispatch_sync(_serialQueue, ^() {
+  dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       [commandBuffer() addCompletedHandler:block];
     }
   });
 }
 
-void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType)
-{
+void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType) {
   TORCH_INTERNAL_ASSERT(length >= offset);
-  if (length == 0) return;
+  if (length == 0)
+    return;
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
 
-      [blitEncoder fillBuffer:buffer
-                        range:NSMakeRange(offset, length)
-                        value:value];
+      [blitEncoder fillBuffer:buffer range:NSMakeRange(offset, length) value:value];
       [blitEncoder endEncoding];
       synchronize(syncType);
     }
   });
 }
 
-void MPSStream::copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
-                    size_t length, size_t srcOffset, size_t dstOffset, SyncType syncType) {
+void MPSStream::copy(id<MTLBuffer> srcBuffer,
+                     id<MTLBuffer> dstBuffer,
+                     size_t length,
+                     size_t srcOffset,
+                     size_t dstOffset,
+                     SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
@@ -149,10 +151,14 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
   });
 }
 
-void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer, size_t length,
-                              size_t srcOffset, size_t dstOffset, bool non_blocking) {
-  copy(srcBuffer, dstBuffer, length, srcOffset, dstOffset,
-       !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
+void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer,
+                              id<MTLBuffer> dstBuffer,
+                              size_t length,
+                              size_t srcOffset,
+                              size_t dstOffset,
+                              bool non_blocking) {
+  copy(
+      srcBuffer, dstBuffer, length, srcOffset, dstOffset, !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
 }
 
 void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
@@ -173,7 +179,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                         resultsDictionary:results
                       executionDescriptor:_executionDescriptor];
 #endif
- });
+  });
 }
 
 //-----------------------------------------------------------------
@@ -184,8 +190,7 @@ MPSStream* MPSStreamImpl::_stream = nullptr;
 
 MPSStream* MPSStreamImpl::getInstance() {
   if (_stream == nullptr) {
-    _stream =
-        new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS), 0));
+    _stream = new MPSStream(Stream(Stream::UNSAFE, c10::Device(DeviceType::MPS), 0));
   }
   return _stream;
 }
@@ -204,8 +209,8 @@ MPSStream* getDefaultMPSStream() {
 //  MPSEvent
 //-----------------------------------------------------------------
 
-MPSEvent::MPSEvent(bool deferInitialization) :
-    is_initialized(false), _signalCounter(0), _stream(nil), _event(nil), _listener(nil) {
+MPSEvent::MPSEvent(bool deferInitialization)
+    : is_initialized(false), _signalCounter(0), _stream(nil), _event(nil), _listener(nil) {
   if (!deferInitialization) {
     initialize();
   }
@@ -256,8 +261,7 @@ void MPSEvent::waitForEvent(bool syncEvent) {
   });
 }
 
-void MPSEvent::notifyEvent(MTLSharedEventNotificationBlock block)
-{
+void MPSEvent::notifyEvent(MTLSharedEventNotificationBlock block) {
   if (!is_initialized)
     initialize();
   dispatch_sync(_stream->queue(), ^() {

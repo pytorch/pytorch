@@ -56,7 +56,7 @@ def _parse_to(
     memory_format: memory_format,
 ) -> Tuple[_device, _dtype, _bool, memory_format]: ...
 
-# Defined in aten/src/ATen/naitve/PadSequence.cpp
+# Defined in aten/src/ATen/native/PadSequence.cpp
 def pad_sequence(
     sequences: List[Tensor],
     batch_first: bool = False,

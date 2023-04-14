@@ -58,8 +58,10 @@ def _apply_optim_in_backward_hook(
         hook_state: Any, bucket: dist.GradBucket, optim_stream_state,
     ) -> torch.futures.Future[torch.Tensor]:
         # Run original hook
-        reducer_weakref, process_group = hook_state
-        fut = reducer_weakref()._run_allreduce_hook(bucket)
+        ddp_weakref = hook_state
+        ddp_inst = ddp_weakref()
+        reducer, process_group = ddp_inst.reducer, ddp_inst.process_group
+        fut = reducer._run_allreduce_hook(bucket)
         optimizer_stream = optim_stream_state.optim_stream
         with torch.cuda.stream(optimizer_stream):
             fut.wait()
@@ -69,6 +71,8 @@ def _apply_optim_in_backward_hook(
             bucket.buffer().div_(process_group.size())
             model_params = bucket.parameters()
             grads = bucket.gradients()
+            # TODO (rohan-varma): upcast as needed for DDP mixed precision,
+            # once optimizer in backward + DDP mixed precision is supported.
             for p, g in zip(model_params, grads):
                 if hasattr(p, '_in_backward_optimizers'):
                     # Note: need to set grad to the bucket's grad, because
@@ -84,11 +88,16 @@ def _apply_optim_in_backward_hook(
         ret_fut.set_result(bucket.buffer())
 
         # enqueue a callback to wait for this optimizer stream at the end of
-        # backward.
+        # backward and set all DDP managed grads to None.
         def wait_for_optim_stream_callback():
             torch.cuda.current_stream().wait_stream(
                 optim_stream_state.optim_stream
             )
+            # Set DDP managed grads to None
+            for param in ddp_inst._get_data_parallel_params(ddp_inst.module):
+                if hasattr(param, '_in_backward_optimizers'):
+                    param.grad = None
+
             # reset for the next backwards pass
             optim_stream_state.wait_for_optim_stream_enqueued = False
 

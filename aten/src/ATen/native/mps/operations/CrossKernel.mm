@@ -1,9 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Cross.h>
+#include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
+namespace {
 
 static const char* METAL_CROSS = R"CROSS_METAL(
 
@@ -82,12 +83,12 @@ static id<MTLLibrary> compileCrossOpLibrary(id<MTLDevice> device) {
     return crossLibrary;
   }
 
-  NSError *error = nil;
-  MTLCompileOptions *options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion: MTLLanguageVersion2_3];
-  crossLibrary  = [device newLibraryWithSource:[NSString stringWithCString: METAL_CROSS encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:MTLLanguageVersion2_3];
+  crossLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_CROSS encoding:NSASCIIStringEncoding]
+                                      options:options
+                                        error:&error];
   TORCH_CHECK(crossLibrary, "Failed to create metal cross library, error: ", [[error description] UTF8String]);
   return crossLibrary;
 }
@@ -115,25 +116,25 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
 
   auto iter = TensorIteratorConfig()
-      .add_output(out)
-      .add_input(input)
-      .add_input(other)
-      .resize_outputs(false)
-      .declare_static_shape(out.sizes(), /*squash_dims=*/dim)
-      .build();
+                  .add_output(out)
+                  .add_input(input)
+                  .add_input(other)
+                  .resize_outputs(false)
+                  .declare_static_shape(out.sizes(), /*squash_dims=*/dim)
+                  .build();
 
-  id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
-  id<MTLBuffer> otherBuffer  = getMTLBufferStorage(other);
+  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
+  id<MTLBuffer> otherBuffer = getMTLBufferStorage(other);
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(out);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const int64_t out_dim_stride =  out.stride(dim);
+  const int64_t out_dim_stride = out.stride(dim);
   const int64_t input_dim_stride = input.stride(dim);
   const int64_t other_dim_stride = other.stride(dim);
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
-  dispatch_sync(mpsStream->queue(), ^(){
+  dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
@@ -143,23 +144,25 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       std::vector<uint32_t> iterShapeData(iterShape.size());
       std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
 
-      for (const auto i: c10::irange(iterShape.size())) {
+      for (const auto i : c10::irange(iterShape.size())) {
         TORCH_CHECK(i <= UINT32_MAX);
         iterShapeData[i] = (uint32_t)(iterShape[i]);
       }
 
-      for (const auto i: c10::irange(nDim)) {
-        for (const auto offset: c10::irange(nOffsets)) {
-            strides[i][offset] = iter.strides(offset)[i];
+      for (const auto i : c10::irange(nDim)) {
+        for (const auto offset : c10::irange(nOffsets)) {
+          strides[i][offset] = iter.strides(offset)[i];
         }
       }
 
-      id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
-      id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
-                                                                                                error: &error] autorelease];
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(simd_uint3)
-                                                             options: 0] autorelease];
-      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+      id<MTLFunction> kernelDataOffsetsFunction =
+          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
+      id<MTLComputePipelineState> kernelDataOffsetsPSO =
+          [[device newComputePipelineStateWithFunction:kernelDataOffsetsFunction error:&error] autorelease];
+      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
+                                                             options:0] autorelease];
+      TORCH_CHECK(
+          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
@@ -169,37 +172,35 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 
       NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
       if (kernelOffsetsTGSize > numThreads)
-          kernelOffsetsTGSize = numThreads;
+        kernelOffsetsTGSize = numThreads;
 
       MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
-      [computeEncoder dispatchThreads: gridSize
-                threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
 
       id<MTLComputePipelineState> crossPSO = crossPipelineState(device, out.scalar_type());
       [computeEncoder setComputePipelineState:crossPSO];
-      [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:otherBuffer  offset:other.storage_offset() * other.element_size() atIndex:1];
+      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
+      [computeEncoder setBuffer:otherBuffer offset:other.storage_offset() * other.element_size() atIndex:1];
       [computeEncoder setBuffer:outputBuffer offset:out.storage_offset() * out.element_size() atIndex:2];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      [computeEncoder setBytes:&out_dim_stride  length:sizeof(int64_t)  atIndex:4];
+      [computeEncoder setBytes:&out_dim_stride length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:&input_dim_stride length:sizeof(int64_t) atIndex:5];
       [computeEncoder setBytes:&other_dim_stride length:sizeof(int64_t) atIndex:6];
 
       NSUInteger tgSize = crossPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
-          tgSize = numThreads;
+        tgSize = numThreads;
       }
 
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads: gridSize
-                threadsPerThreadgroup: threadGroupSize];
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
 
       [computeEncoder endEncoding];
       mpsStream->commit(true);
     }
   });
 }
+} // anonymous namespace
 
 REGISTER_DISPATCH(cross_stub, &cross_mps_impl);
-
 } // namespace at::native

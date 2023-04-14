@@ -216,7 +216,7 @@ class TestBenchmarkUtils(TestCase):
 
         def __init__(self, stmt, setup, timer, globals):
             self._random_state = np.random.RandomState(seed=self._seed)
-            self._mean_cost = {k: v for k, v in self._function_costs}[stmt]
+            self._mean_cost = dict(self._function_costs)[stmt]
 
         def sample(self, mean, noise_level):
             return max(self._random_state.normal(mean, mean * noise_level), 5e-9)

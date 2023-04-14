@@ -33,12 +33,17 @@ TensorBase empty_mps(
     TORCH_CHECK_NOT_IMPLEMENTED(
         layout_or_default(layout_opt) == Layout::Strided,
         "strided tensors not supported yet");
+
+    TORCH_CHECK(size.size() <= 16, "MPS supports tensors with dimensions <= 16, but got ", size.size(), ".");
+
     check_size_nonnegative(size);
 
     auto* allocator = at::mps::GetMPSAllocator();
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
+    TORCH_CHECK_TYPE(!c10::isComplexType(dtype), "Complex types are unsupported on MPS");
+    TORCH_CHECK_TYPE(dtype != ScalarType::BFloat16, "BFloat16 is not supported on MPS");
 
     auto dtype_meta = scalarTypeToTypeMeta(dtype);
     int64_t size_bytes = nelements * dtype_meta.itemsize();

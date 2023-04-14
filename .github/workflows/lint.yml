@@ -25,6 +25,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -71,6 +72,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -124,6 +126,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -158,6 +161,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -196,6 +200,7 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       fetch-depth: 0
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")

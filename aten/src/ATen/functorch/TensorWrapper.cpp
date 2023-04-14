@@ -134,7 +134,7 @@ c10::intrusive_ptr<TensorImpl> TensorWrapper::shallow_copy_and_detach(
 }
 
 void TensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
-  TORCH_INTERNAL_ASSERT(false, "NYI");
+  TORCH_CHECK(false, "mutating directly with `.data` inside functorch transform is not allowed.");
 }
 
 TensorWrapper::TensorWrapper(
@@ -191,7 +191,16 @@ void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Sta
     if (!wrapped) {
       return tensor;
     }
-    if (wrapped->is_alive()) {
+
+    // NOTE: We need to test for both is_alive and functorch mode dispatch keys
+    //       being active because certain ops may disable the keys but not set
+    //       the relevant tensor's state to dead.
+    //       Example: torch.tensor([x, y, z]) - variant which accepts list of scalars
+    //       leads to the above case.
+    constexpr auto functorch_mode_ks = DispatchKeySet(
+        {DispatchKey::FuncTorchDynamicLayerFrontMode,
+         DispatchKey::FuncTorchDynamicLayerBackMode});
+    if (wrapped->is_alive() && wrapped->key_set().has_any(functorch_mode_ks)) {
       return tensor;
     }
     unwrapped_count++;

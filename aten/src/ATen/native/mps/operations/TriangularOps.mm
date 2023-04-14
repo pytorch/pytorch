@@ -14,34 +14,24 @@
 namespace at::native {
 
 TORCH_IMPL_FUNC(triu_mps_out)
-(const Tensor& self,
- int64_t k,
- const Tensor &output) {
-
+(const Tensor& self, int64_t k, const Tensor& output) {
   using namespace mps;
+  using CachedGraph = MPSUnaryCachedGraph;
 
   if (self.numel() == 0) {
     return;
   }
   MPSStream* stream = getCurrentMPSStream();
 
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *outputTensor_ = nil;
-  };
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
     string key = "triu_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
 
-    if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
+    if (!cachedGraph) {
+      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
@@ -50,12 +40,10 @@ TORCH_IMPL_FUNC(triu_mps_out)
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* outputTensor = nil;
 
-          MPSGraphTensor* minusOneTensor = [mpsGraph constantWithScalar:-1
-                                                               dataType:MPSDataTypeInt32];
+          MPSGraphTensor* minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
 
-          if(k > 0) {
-            MPSGraphTensor* diagMinusOneTensor = [mpsGraph constantWithScalar:(k-1)
-                                                                     dataType:MPSDataTypeInt32];
+          if (k > 0) {
+            MPSGraphTensor* diagMinusOneTensor = [mpsGraph constantWithScalar:(k - 1) dataType:MPSDataTypeInt32];
             MPSGraphTensor* complementTensor = [mpsGraph bandPartWithTensor:inputTensor
                                                              numLowerTensor:minusOneTensor
                                                              numUpperTensor:diagMinusOneTensor
@@ -63,10 +51,8 @@ TORCH_IMPL_FUNC(triu_mps_out)
             outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                   secondaryTensor:complementTensor
                                                              name:nil];
-          }
-          else {
-            MPSGraphTensor* minusDiagTensor = [mpsGraph constantWithScalar:(-k)
-                                                                  dataType:MPSDataTypeInt32];
+          } else {
+            MPSGraphTensor* minusDiagTensor = [mpsGraph constantWithScalar:(-k) dataType:MPSDataTypeInt32];
             outputTensor = [mpsGraph bandPartWithTensor:inputTensor
                                          numLowerTensor:minusDiagTensor
                                          numUpperTensor:minusOneTensor
@@ -78,53 +64,40 @@ TORCH_IMPL_FUNC(triu_mps_out)
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
+        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-
 }
 
 TORCH_IMPL_FUNC(tril_mps_out)
-(const Tensor& self,
- int64_t k,
- const Tensor &output) {
-
+(const Tensor& self, int64_t k, const Tensor& output) {
   using namespace mps;
+  using CachedGraph = MPSUnaryCachedGraph;
 
   if (self.numel() == 0) {
     return;
   }
+
   MPSStream* stream = getCurrentMPSStream();
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *outputTensor_ = nil;
-  };
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
     string key = "tril_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
 
-    if(!cachedGraph) {
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
+    if (!cachedGraph) {
+      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
@@ -133,20 +106,16 @@ TORCH_IMPL_FUNC(tril_mps_out)
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* outputTensor = nil;
 
-          MPSGraphTensor* minusOneTensor = [mpsGraph constantWithScalar:-1
-                                                               dataType:MPSDataTypeInt32];
+          MPSGraphTensor* minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
 
-          if(k >= 0) {
-            MPSGraphTensor* diagTensor = [mpsGraph constantWithScalar:k
-                                                             dataType:MPSDataTypeInt32];
+          if (k >= 0) {
+            MPSGraphTensor* diagTensor = [mpsGraph constantWithScalar:k dataType:MPSDataTypeInt32];
             outputTensor = [mpsGraph bandPartWithTensor:inputTensor
                                          numLowerTensor:minusOneTensor
                                          numUpperTensor:diagTensor
                                                    name:nil];
-          }
-          else {
-            MPSGraphTensor* negDiagMinusOneTensor = [mpsGraph constantWithScalar:(-k-1)
-                                                                        dataType:MPSDataTypeInt32];
+          } else {
+            MPSGraphTensor* negDiagMinusOneTensor = [mpsGraph constantWithScalar:(-k - 1) dataType:MPSDataTypeInt32];
             MPSGraphTensor* complementTensor = [mpsGraph bandPartWithTensor:inputTensor
                                                              numLowerTensor:negDiagMinusOneTensor
                                                              numUpperTensor:minusOneTensor
@@ -161,22 +130,19 @@ TORCH_IMPL_FUNC(tril_mps_out)
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
+        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-
 }
 
 } // namespace at::native

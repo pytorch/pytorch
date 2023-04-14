@@ -424,16 +424,15 @@ VaryingShape<int64_t> TensorType::strides() const {
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    SymbolicShape sizes,
+    VaryingShape<Stride> strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
     : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
-      sizes_(sizes),
-      strides_(strides),
+      sizes_(std::move(sizes)),
+      strides_(std::move(strides)),
       requires_grad_(requires_grad),
       undefined_(undefined) {}
 

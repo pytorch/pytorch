@@ -24,15 +24,6 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-if [[ $PARALLEL == 1 ]]; then
-    pip install pytest-xdist
-fi
-
-# pytest, scipy, hypothesis: these may not be necessary
-# pytest-cov: installing since `coverage run -m pytest ..` doesn't work
-# pytest-subtests: unittest subtests support for pytest
-# parameterized: parameterizing test class
-pip install pytest scipy hypothesis pytest-cov pytest-subtests parameterized
 # allows coverage to run w/o failing due to a missing plug-in
 pip install -e tools/coverage_plugins_package
 
@@ -89,6 +80,9 @@ if [[ "${SHARD_NUMBER}" == "2" ]]; then
 
   pytest "${args[@]}" "${args_parallel[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
+
+  # xdoctests on onnx
+  xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/

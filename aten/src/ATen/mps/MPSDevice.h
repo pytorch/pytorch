@@ -1,9 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
 
 
 #ifdef __OBJC__

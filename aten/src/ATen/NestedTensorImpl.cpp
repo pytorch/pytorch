@@ -16,7 +16,7 @@ namespace {
 inline void validate_nested_tensor_metadata(
     const at::Tensor& nested_sizes,
     const at::Tensor& nested_strides,
-    const std::vector<int64_t>& offsets) {
+    const at::Tensor& offsets) {
   TORCH_INTERNAL_ASSERT(nested_sizes.is_contiguous());
   int64_t size_dim = nested_sizes.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
@@ -24,8 +24,8 @@ inline void validate_nested_tensor_metadata(
   TORCH_INTERNAL_ASSERT(nested_strides.dim() == size_dim);
   TORCH_INTERNAL_ASSERT(nested_sizes.sizes() == nested_strides.sizes());
   TORCH_INTERNAL_ASSERT(
-      (size_dim == 0 && (int64_t)offsets.empty()) ||
-      (size_dim == 2 && nested_sizes.size(0) == (int64_t)offsets.size()));
+      (size_dim == 0 && offsets.size(0) == 0) ||
+      (size_dim == 2 && nested_sizes.size(0) == offsets.size(0)));
 }
 
 /**
@@ -101,7 +101,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
 }
 
 // assume contiguous, we can construct stride from size
-inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
+inline at::Tensor construct_nested_strides(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return sizes;
@@ -130,32 +130,33 @@ inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
 }
 
 /**
-   * Create a vector of offsets assuming the nested tensor is contiguous
+   * Create a tensor of offsets assuming the nested tensor is contiguous
    *
    * This function iterates over the implicit ntensor outer dimension
-   * populating a vector with the num_elements in each implicit tensor.
-   * The first element is always 0 and the length of the returned vector
+   * populating a tensor with the num_elements in each implicit tensor.
+   * The first element is always 0 and the length of the returned tensor
    * is n_tensor.
    *
-   * @return A vector of offsets
+   * @return A tensor of offsets
   */
-inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
+inline at::Tensor construct_offsets(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
-    return std::vector<int64_t>();
+    return at::empty({0}, sizes.options().dtype(kLong));
   }
   int64_t ntensors = sizes.size(0), orig_dim = sizes.size(1);
-  std::vector<int64_t> offsets(ntensors);
+  auto offsets = at::empty({ntensors}, sizes.options());
+  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
   // nesting scalars has easy offsets
   if (orig_dim == 0) {
-    std::iota(offsets.begin(), offsets.end(), 0);
+    std::iota(offsets_ptr, offsets_ptr + ntensors, 0);
     return offsets;
   }
   const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
-  offsets[0] = 0;
+  offsets_ptr[0] = 0;
   for (const auto i : c10::irange(ntensors - 1)) {
     const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<int64_t>());
-    offsets[i + 1] = offsets[i] + row_product;
+    offsets_ptr[i + 1] = offsets_ptr[i] + row_product;
     sizes_ptr += orig_dim;
   }
   return offsets;
@@ -165,14 +166,14 @@ NestedTensorImpl::NestedTensorImpl(
     Storage storage,
     c10::DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets)
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets)
     : TensorImpl(std::move(storage), key_set, data_type),
-      nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(std::move(nested_stride_tensor)),
-      storage_offsets_(std::move(offsets)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+      nested_sizes_(std::move(nested_sizes)),
+      nested_strides_(std::move(nested_strides)),
+      storage_offsets_(std::move(storage_offsets)),
+      opt_sizes_(c10::nullopt) {
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
@@ -182,23 +183,23 @@ NestedTensorImpl::NestedTensorImpl(
       storage_device.is_cpu() || storage_device.is_cuda(),
       "NestedTensorImpl storage must be either CUDA or CPU but got ",
       storage_device);
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
+  validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets)
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets)
     : NestedTensorImpl(
           buffer.storage(),
           generate_nested_key_set_from_buffer(buffer),
           buffer.dtype(),
-          nested_size_tensor,
-          nested_stride_tensor,
-          std::move(offsets)) {
+          nested_sizes,
+          nested_strides,
+          storage_offsets) {
 
   TORCH_INTERNAL_ASSERT(
       buffer.dim() == 1,
@@ -207,36 +208,48 @@ NestedTensorImpl::NestedTensorImpl(
       " dimensions.");
 }
 
-// assume contiguous, `nested_stride_tensor` and `offsets`
-// can be infered from `nested_size_tensor`
+// assume contiguous, `nested_strides` and `offsets`
+// can be infered from `nested_sizes`
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor)
+    at::Tensor nested_sizes)
     : NestedTensorImpl(
           buffer,
-          nested_size_tensor,
-          construct_nested_stride_tensor(nested_size_tensor),
-          construct_offsets(nested_size_tensor))
+          nested_sizes,
+          construct_nested_strides(nested_sizes),
+          construct_offsets(nested_sizes))
 {}
 
 NestedTensorImpl::NestedTensorImpl(
     c10::TensorImpl::ImplType impl_type,
     const at::Tensor& base_tensor,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets)
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets)
     : TensorImpl(impl_type, Storage(base_tensor.storage()), get_view_key_set(base_tensor), base_tensor.dtype()),
-      nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(std::move(nested_stride_tensor)),
-      storage_offsets_(std::move(offsets)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
+      nested_sizes_(std::move(nested_sizes)),
+      nested_strides_(std::move(nested_strides)),
+      storage_offsets_(std::move(storage_offsets)),
+      opt_sizes_(c10::nullopt) {
+  validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
+c10::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
+  if (C10_UNLIKELY(!opt_sizes_.has_value())) {
+    // Cache the metadata to avoid recomputing it each time.
+    opt_sizes_ = c10::make_optional(construct_opt_sizes(nested_sizes_));
+  }
+  d = at::maybe_wrap_dim(d, dim(), false);
+  if ((*opt_sizes_)[d] == -1) {
+    return c10::nullopt;
+  }
+  return (*opt_sizes_)[d];
+}
+
 void NestedTensorImpl::refresh_dim() {
-  const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
+  const auto my_dim = nested_sizes_.dim() ? nested_sizes_.sizes()[1] + 1 : 1;
   sizes_and_strides_.resize(my_dim);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
@@ -247,18 +260,18 @@ int64_t NestedTensorImpl::dim_custom() const {
 
 // Currently sizes and strides assume contiguous
 int64_t NestedTensorImpl::numel_custom() const {
-  if (nested_size_tensor_.dim() == 0) {
+  if (nested_sizes_.dim() == 0) {
     return 0;
   }
   constexpr auto numel_max = std::min(
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
       static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
 
-  const auto nt_dim = nested_size_tensor_.size(1);
-  const int64_t* sizes_ptr = nested_size_tensor_.data_ptr<int64_t>();
+  const auto nt_dim = nested_sizes_.size(1);
+  const int64_t* sizes_ptr = nested_sizes_.data_ptr<int64_t>();
   uint64_t num_elements{0};
 
-  for (const auto i : c10::irange(nested_size_tensor_.size(0))) {
+  for (const auto i : c10::irange(nested_sizes_.size(0))) {
     uint64_t n = 1;
     const auto start{sizes_ptr + i * nt_dim};
     const auto end{start + nt_dim};
@@ -317,9 +330,9 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       storage_,
       key_set_,
       data_type_,
-      nested_size_tensor_,
-      nested_stride_tensor_,
-      std::vector<int64_t>(storage_offsets_));
+      nested_sizes_,
+      nested_strides_,
+      storage_offsets_);
 
       copy_tensor_metadata(
           /*src_impl=*/this,

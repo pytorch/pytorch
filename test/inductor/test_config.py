@@ -1,11 +1,9 @@
 # Owner(s): ["module: inductor"]
-import logging
 import math
 import unittest
 
 import torch
 
-import torch._dynamo.config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 
 from torch._inductor import config
@@ -16,6 +14,7 @@ def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
 
+@unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -86,14 +85,6 @@ class TestInductorConfig(TestCase):
             with config.patch("cpp.threads", 8999):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
-
-    def test_log_level_property(self):
-        old = dynamo_config.log_level
-        try:
-            dynamo_config.log_level = logging.CRITICAL
-            self.assertEqual(logging.getLogger("torch._dynamo").level, logging.CRITICAL)
-        finally:
-            dynamo_config.log_level = old
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_compile_api(self):
@@ -176,6 +167,29 @@ class TestInductorConfig(TestCase):
 
         # only warn once
         a(torch.randn(10))
+
+    def test_api_options(self):
+        reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
+        self.assertEqual(reduce_overhead_opts["triton.cudagraphs"], True)
+        self.assertEqual(reduce_overhead_opts.get("max_autotune", False), False)
+
+        max_autotune_opts = torch._inductor.list_mode_options("max-autotune")
+        self.assertEqual(max_autotune_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
+
+        max_autotune_no_cudagraphs_opts = torch._inductor.list_mode_options(
+            "max-autotune-no-cudagraphs"
+        )
+        self.assertEqual(max_autotune_no_cudagraphs_opts["max_autotune"], True)
+        self.assertEqual(
+            max_autotune_no_cudagraphs_opts.get("triton.cudagraphs", False), False
+        )
+
+    def test_invalid_backend(self):
+        self.assertRaises(
+            torch._dynamo.exc.InvalidBackend,
+            lambda: torch.compile(dummy_fn, backend="does_not_exist")(torch.randn(10)),
+        )
 
 
 if __name__ == "__main__":
