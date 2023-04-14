@@ -254,11 +254,6 @@ struct Block {
   }
 };
 
-#if !defined(USE_ROCM) && !defined(USE_BAZEL) && !defined(FBCODE_CAFFE2) && \
-    !defined(OVRSOURCE)
-#define EXPANDABLE_SEGMENTS_SUPPORTED
-#endif
-
 struct SegmentRange {
   char* ptr;
   size_t size;
