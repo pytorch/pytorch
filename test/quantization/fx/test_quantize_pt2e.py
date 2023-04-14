@@ -334,9 +334,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             tracing_mode="real",
         )
 
-        # Note: this currently fails due to a torchdynamo bug where exporting the fused
-        # QAT conv + bn pattern leads to an internal assertion failure. For more detail,
-        # see https://github.com/pytorch/pytorch/issues/98531.
         m = prepare_qat_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
 
@@ -351,9 +348,9 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.randn(1),           # bn_running_mean
             torch.randn(1),           # bn_running_var
         )
+        check_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
         obs0 = copy.deepcopy(m.activation_post_process_0)
         obs1 = copy.deepcopy(m.activation_post_process_1)
-        check_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
         for node in check_pattern.graph.nodes:
             named_modules = dict(check_pattern.named_modules(remove_duplicate=False))
             graph = check_pattern.graph

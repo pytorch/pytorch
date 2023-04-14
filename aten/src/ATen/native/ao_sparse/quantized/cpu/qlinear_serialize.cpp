@@ -170,8 +170,8 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
     w_zero_points_compact =
         at::empty({1}, at::device(c10::kCPU).dtype(c10::kChar));
 
-    w_scales_compact.data_ptr<float>()[0] = w_scales_data_ptr[0];
-    w_zero_points_compact.data_ptr<int8_t>()[0] =
+    w_scales_compact.mutable_data_ptr<float>()[0] = w_scales_data_ptr[0];
+    w_zero_points_compact.mutable_data_ptr<int8_t>()[0] =
         static_cast<int8_t>(static_cast<int16_t>(w_zero_points_[0]) - 128);
   } else if (q_scheme_ == at::kPerChannelAffine) {
     w_scales_compact =
@@ -183,7 +183,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_scales_data_ptr,
         w_scales_data_ptr +
             output_channels_, // Don't go to the end because of padding
-        w_scales_compact.data_ptr<float>());
+        w_scales_compact.mutable_data_ptr<float>());
 
     // Subtract 128 from each zero point, to reverse addition done during
     // prepacking
@@ -191,7 +191,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_zero_points_.begin(),
         w_zero_points_.begin() +
             output_channels_, // Don't go to the end because of padding
-        w_zero_points_compact.data_ptr<int8_t>(),
+        w_zero_points_compact.mutable_data_ptr<int8_t>(),
         std::move(subtract_128));
   } else {
     TORCH_CHECK(false, "Unsupported quantization scheme.");
