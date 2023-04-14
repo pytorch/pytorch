@@ -83,7 +83,7 @@ class DataParallelStrategy(StrategyList):
     def __init__(
         self,
         node_type: NodeType,
-        startegy_list: StrategyList,
+        startegy_list: List[PlacementStrategy],
         reduction_over_batch: bool = False,
     ):
         super().__init__(startegy_list)
@@ -184,7 +184,7 @@ class BatchDimAnalyzer(object):
         reduction_over_batch = False
         reduction_ops = [aten.sum.default, aten.mean.default]
         if node.target in reduction_ops and len(shape) == 0:
-            operand = node.args[0]
+            operand = node.all_input_nodes[0]
             if operand in self.batch_dim_map:
                 operand_batch_dim = self.get_batch_dim(operand)
                 if operand_batch_dim == 0:
@@ -195,7 +195,7 @@ class BatchDimAnalyzer(object):
                 raise RuntimeError(f"batch dim analysis failed on node: {node}!")
         elif input_full_reduction:
             # the first consumer node that consumes the full reduction
-            operand = node.args[0]
+            operand = node.all_input_nodes[0]
             assert (
                 operand in self.batch_dim_map
             ), "input have full reduction but not in dim map!"
@@ -316,7 +316,7 @@ def build_data_parallel_strategies(
                 # creating a NON_TENSOR stratgy for those cases.
                 if "val" not in node.meta:
                     dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.NON_TENSOR, [None]
+                        NodeType.NON_TENSOR, []
                     )
                 else:
                     shard_sig = _gen_shard_strategy(mesh, 0)
@@ -330,7 +330,7 @@ def build_data_parallel_strategies(
                 # strategy for those cases.
                 if "val" not in node.meta:
                     dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.NON_TENSOR, [None]
+                        NodeType.NON_TENSOR, []
                     )
                 else:
                     activation_batch_dim_size = node.meta["val"].shape[batch_dim]
@@ -501,7 +501,7 @@ def build_data_parallel_strategies(
                     )
 
         elif node.op == "output":
-            dp_strategy_map[node] = DataParallelStrategy(NodeType.NON_TENSOR, [None])
+            dp_strategy_map[node] = DataParallelStrategy(NodeType.NON_TENSOR, [])
         else:
             raise RuntimeError(f"op code {node.op} not supported")
 
@@ -690,7 +690,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
 def partition_data_parallel(
     graph: GraphModule,
     model: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    optimizer: Optional[torch.optim.Optimizer],
     params_buffers: Dict[str, torch.Tensor],
     named_states: Dict[str, Any],
     args: Tuple[Any, ...],
@@ -743,6 +743,7 @@ def partition_data_parallel(
 
         # update the optimizer state key and values to DTensor
         if param_key in named_states:
+            assert optimizer is not None, "Can't find optimizer!"
             assert (
                 param in optimizer.state
             ), f"param {param_key} not in optimizer state!"
