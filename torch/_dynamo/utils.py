@@ -1176,7 +1176,13 @@ def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
     """
-    from .exc import TorchRuntimeError, unimplemented, Unsupported
+    from .exc import (
+        TorchRuntimeError,
+        unimplemented,
+        Unsupported,
+        UserError,
+        UserErrorType,
+    )
 
     op = node.op
 
@@ -1237,6 +1243,8 @@ def get_fake_value(node, tx):
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
             unimplemented("guard on data-dependent symbolic int/float")
+        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError() from e
 
 
