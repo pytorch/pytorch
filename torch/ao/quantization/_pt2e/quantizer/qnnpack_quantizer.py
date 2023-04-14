@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import operator
-import types
 from dataclasses import asdict
 from typing import Callable, Dict, List, Optional, Set
 
