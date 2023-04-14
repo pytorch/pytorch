@@ -9,7 +9,6 @@ from torch.distributed._spmd.graph_optimization import (
 )
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
-from torch.distributed._spmd.partial_lower import partial_lower
 
 
 class GraphModuleTransformation:
@@ -33,12 +32,12 @@ class GraphModuleTransformation:
             )
             enable_graph_optimization_dump(graph_folder)
 
-        iter_gm = IterGraphModule(gm)
+        iter_gm = IterGraphModule(gm, enable_inductor=self.enable_inductor)
         if self.enable_graph_optimization:
             comm_fusion_with_concat(iter_gm, 100)
             schedule_comm_wait(iter_gm)
             remove_copy_from_optimizer(iter_gm)
-        iter_gm.freeze_cross_iter_movement()
+        # Must be called after we are not going to move the graphs
         iter_gm.setup(self.num_iters)
 
         if self.dump_graphs:
@@ -50,8 +49,5 @@ class GraphModuleTransformation:
                 },
                 graph_folder,
             )
-
-        if self.enable_inductor:
-            iter_gm.main_gm = partial_lower(iter_gm.main_gm)
 
         return iter_gm
