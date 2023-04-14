@@ -4813,6 +4813,20 @@ def fn():
 
         torch._dynamo.testing.standard_test(self, int_neg, 2)
 
+    def test_format(self):
+        def foo(x):
+            c = 3
+            return len(f"tensor={x}, constant={c}, list={[x, c]}") + x
+
+        x = torch.ones(6)
+        gm, _ = torch._dynamo.export(
+            foo,
+            x,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        self.assertTrue(torch._dynamo.utils.same(gm(x), foo(x)))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod

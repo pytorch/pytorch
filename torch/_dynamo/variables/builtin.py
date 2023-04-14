@@ -1172,6 +1172,25 @@ class BuiltinVariable(VariableTracker):
         else:
             unimplemented(f"call_id with args {args}")
 
+    def _raw_value_to_format(self, value):
+        if value.is_python_constant():
+            return value.as_python_constant()
+        elif isinstance(value, variables.TensorVariable):
+            return value.get_real_value()
+        elif isinstance(value, variables.BaseListVariable):
+            return value.python_type()([self._raw_value_to_format(x) for x in value.items])
+        else:
+            unimplemented(f"call_format with value {value}")
+
+    def call_format(self, tx, fmt_var, value):
+        assert isinstance(fmt_var, ConstantVariable) and fmt_var.python_type() == str
+        fmt_var = fmt_var.as_python_constant()
+        # NOTE(avik): We are potentially burning in tensor values here, so this is unsound.
+        # Because the primary use case is printing during export, this may be OK.
+        value = self._raw_value_to_format(value)
+        result = str.format(fmt_var, value)
+        return ConstantVariable(value=result)
+
     def _comparison(self, tx, left, right):
         """
         Used to implement comparison operators for different types.
