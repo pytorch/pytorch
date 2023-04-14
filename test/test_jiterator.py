@@ -8,8 +8,7 @@ from itertools import product
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA, NoTest
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_device_type import (
-    skipCUDAIfRocm, skipCUDAIfVersionLessThan, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+    skipCUDAIfVersionLessThan, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
