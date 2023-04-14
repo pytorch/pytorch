@@ -147,25 +147,25 @@ def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> Non
     return None
 
 
+def _remap_arg(node_to_obj: Dict[fx.Node, object], arg: object) -> object:
+    if isinstance(arg, torch.fx.Node):
+        obj = node_to_obj[arg]
+        if _get_tracer():
+            # This is a shared arg, already has a tracer from previous
+            # tracing. Delete the tracer.
+            del cast(Dict[object, object], obj.__dict__)[proxy_slot]
+        return obj
+    else:
+        return arg
+
+
 def _get_dtensor_dispatch_graph(
     node: fx.Node, node_to_obj: Dict[fx.Node, object], force_make_fx: bool = False
 ) -> Optional[fx.GraphModule]:
-    def _remap_arg(arg: object) -> object:
-        if isinstance(arg, torch.fx.Node):
-            obj = node_to_obj[arg]
-            if _get_tracer():
-                # This is a shared arg, already has a tracer from previous
-                # tracing. Delete the tracer.
-                del cast(Dict[object, object], obj.__dict__)[proxy_slot]
-            return obj
-        else:
-            return arg
-
     with torch.no_grad():
         # Args should be a list of objects post remapping.
-        args = tree_map(_remap_arg, node.args)
-        # kwargs in this set of tests are all constants
-        kwargs = cast(Dict[str, object], node.kwargs)
+        args = tree_map(partial(_remap_arg, node_to_obj), node.args)
+        kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
 
         op_overload = cast(torch._ops.OpOverload, node.target)
 
@@ -529,27 +529,12 @@ def _convert_to_distributed(
                         )
 
         elif node.op == OP.CALL_FUNCTION:
-
-            def _remap_arg(arg: object) -> object:
-                if isinstance(arg, torch.fx.Node):
-                    obj = node_to_obj[arg]
-                    if _get_tracer():
-                        # This is a shared arg, already has a tracer from previous
-                        # tracing. Delete the tracer.
-                        del cast(Dict[object, object], obj.__dict__)[proxy_slot]
-                    return obj
-                else:
-                    return arg
-
-            args = tree_map(_remap_arg, node.args)
             if node.target == torch.ops.aten.sym_numel:
-                node_to_obj[node] = args[0].numel()
+                node_to_obj[node] = args[0].numel()  # type: ignore[has-type]
             else:
-                assert (
-                    len(args) >= 2
-                ), f"Expected number of args for call function to be at least 2, found {len(args)} {node}"
-                # TODO(anj): Why do we assume this is only 2?
-                node_to_obj[node] = node.target(args[0], args[1])
+                args = tree_map(partial(_remap_arg, node_to_obj), node.args)
+                kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
+                node_to_obj[node] = node.target(*args, **kwargs)
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
 

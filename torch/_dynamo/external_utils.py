@@ -2,8 +2,6 @@
 
 import functools
 
-import torch.nn
-
 
 def is_compiling():
     return False
