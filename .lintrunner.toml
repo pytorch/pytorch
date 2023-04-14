@@ -623,6 +623,7 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
+    'c10/cuda/CUDACachingAllocator.cpp',
 ]
 command = [
     'python3',
