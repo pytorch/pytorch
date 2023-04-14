@@ -3,7 +3,7 @@
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.ao.pruning import WeightNormSparsifier
+from torch.ao.pruning import WeightNormPruner
 from itertools import product
 from torch.profiler import profile, record_function, ProfilerActivity
 from torch.ao.nn.sparse.cutlass_linear import CUTLASSLinear
@@ -75,7 +75,7 @@ if __name__ == "__main__":
             model.cuda()
             model.eval()
 
-            pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2)
+            pruner = WeightNormPruner(sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2)
             pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
             pruner.step()
             sparse_linear = pruner.convert(model, mapping={nn.Linear: CUTLASSLinear})
