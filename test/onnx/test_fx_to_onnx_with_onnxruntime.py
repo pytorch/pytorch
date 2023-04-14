@@ -410,7 +410,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_fx_exporters(
         {
-            DynamoExporter: "RuntimeError: Unknown call_function target: aten.stack.default",
             DynamoOptimizeExporter: "Unhandled unused argument.",
         }
     )
