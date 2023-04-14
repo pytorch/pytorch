@@ -1475,6 +1475,12 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
         return src
 
 
+class _IllegalWork(Work):
+    def __getattribute__(self, name):
+        if name in ["is_success", "exception", "wait", "source_rank", "_source_rank", "result", "synchronize"]:
+            raise RuntimeError(f"Illegal to call {name} on IllegalWork object")
+
+
 class _CoalescingManager:
     def __init__(self):
         self.works: List[Work] = []
@@ -1843,7 +1849,10 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         # We are in coalescing context, do not issue single operation, just append a collective representation
         coll = _CollOp(all_reduce, tensor, None, op, None)
         _world.pg_coalesce_state[group].append(coll)
-        return None
+        if async_op:
+            return _IllegalWork()
+        else:
+            return None
 
     work = group.allreduce([tensor], opts)
 
