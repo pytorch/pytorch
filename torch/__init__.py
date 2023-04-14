@@ -343,7 +343,10 @@ class SymBool:
         self.node = node
 
     def __bool__(self):
-        return self.node.bool_()
+        try:
+            return self.node.bool_()
+        except:
+            return True
 
     def __int__(self):
         return builtins.int(self.node.bool_())
@@ -1367,6 +1370,7 @@ def _assert(condition, message):
 # side effect of adding to the imported module's members for other users.
 from torch import cuda as cuda
 from torch import cpu as cpu
+from torch import mps as mps
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,

@@ -247,24 +247,32 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             # Manually insert torch._assert_async instead of python assert and jump over
             # assert related instructions as we don't need them anymore.
-            scalar_to_tensor_proxy = self.output.create_proxy(
-                "call_function",
-                torch.scalar_tensor,
-                *proxy_args_kwargs((value,), {})
-            )
+            if not isinstance(value, TensorVariable):
+                scalar_to_tensor_proxy = self.output.create_proxy(
+                    "call_function",
+                    torch.scalar_tensor,
+                    *proxy_args_kwargs((value,), {})
+                )
 
-            scalar_to_tensor = wrap_fx_proxy(
-                self,
-                scalar_to_tensor_proxy,
-                example_value=get_fake_value(scalar_to_tensor_proxy.node, self),
-                **VariableTracker.propagate([value]),
-            )
+                scalar_to_tensor = wrap_fx_proxy(
+                    self,
+                    scalar_to_tensor_proxy,
+                    example_value=get_fake_value(scalar_to_tensor_proxy.node, self),
+                    **VariableTracker.propagate([value]),
+                )
 
-            self.output.create_proxy(
-                "call_function",
-                torch.ops.aten._assert_async.msg,
-                *proxy_args_kwargs((scalar_to_tensor, error_msg), {}),
-            )
+                self.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten._assert_async.msg,
+                    *proxy_args_kwargs((scalar_to_tensor, error_msg), {}),
+                )
+            else:
+                self.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten._assert_async.msg,
+                    *proxy_args_kwargs((value, error_msg), {}),
+                )
+
             self.jump(inst)
             return
 
@@ -578,10 +586,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(
+            TracingContext.set_current_loc(
                 self.f_code.co_filename, self.lineno, self.f_code.co_name
-            ):
-                getattr(self, inst.opname)(inst)
+            )
+            getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -2027,6 +2035,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+            )
+
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented(
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
     @staticmethod
