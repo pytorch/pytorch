@@ -11,7 +11,7 @@ class Net(torch.nn.Module):
         self.weight = torch.ones(32, 64)
 
     def forward(self, x):
-        x = torch.relu(x + self.weight)
+        x = torch.relu(x - self.weight)
         return x
 
 

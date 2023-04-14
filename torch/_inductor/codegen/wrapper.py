@@ -737,7 +737,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_header(self):
         if V.graph.aot_mode:
-            self.header.splice("\n#include <ATen/ATen.h>")
+            self.header.splice(
+                """
+                #include <ATen/ScalarOps.h>
+                """
+            )
         else:
             self.header.splice(
                 """
@@ -881,6 +885,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, f"{codegen_reference}")
         self.writeline(self.wrap_kernel_call(kernel, args))
 
+    def add_benchmark_harness(self, output):
+        if V.graph.aot_mode:
+            return
+        super().add_benchmark_harness(output)
+
     def codegen_sizevar(self, x: Expr) -> str:
         from .cpp import cexpr
 
@@ -972,7 +981,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
     def write_prefix(self):
         self.prefix.splice(
             """
-            #include <ATen/ATen.h>
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 

@@ -251,6 +251,14 @@ test_inductor() {
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+
+  # smoke test the AOTInductor flow
+  pushd test/inductor/aot/cpp
+  ./test.sh
+  popd
+  pushd test/inductor/aot/cuda
+  ./test.sh
+  popd
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
