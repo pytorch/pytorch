@@ -13,7 +13,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Un
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer
+from sympy import Expr, Integer, simplify
 
 import torch._dynamo.config as dynamo_config
 import torch._logging
@@ -201,7 +201,9 @@ class ModularIndexing(sympy.Function):
         if divisor != 1:
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
-                return ModularIndexing(base / gcd, divisor / gcd, modulus)
+                return ModularIndexing(
+                    simplify(base / gcd), simplify(divisor / gcd), modulus
+                )
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -2604,7 +2606,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, int)):
+        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
