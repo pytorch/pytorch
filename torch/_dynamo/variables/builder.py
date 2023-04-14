@@ -922,8 +922,6 @@ class VariableBuilder:
                 options = {"guards": guards}
             else:
                 options = {}
-                # Rip the value out the tensor, we don't want to call rand with an example value of a tensor.c
-                wrapped_value = wrapped_value.item()
             options.update({"source": self.get_source()})
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
