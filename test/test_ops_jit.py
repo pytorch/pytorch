@@ -373,11 +373,9 @@ class TestJit(TestJitOpInfoParent):
                         out = variant(
                             *clone_inputs([sample.input, *sample.args]), **sample.kwargs
                         )
-                        '''
                         out_traced = traced_fn(
                             *clone_inputs([sample.input, *sample.args]), **sample.kwargs
                         )
-                        '''
 
                         # right now, tuple of outputs and tensor output supported
                         # TODO: list of tensor outputs
