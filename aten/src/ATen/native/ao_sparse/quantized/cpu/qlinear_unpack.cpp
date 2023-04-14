@@ -35,12 +35,12 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
     at::Tensor scales = at::empty(
         {static_cast<long>(w_scale.size())},
         at::device(c10::kCPU).dtype(c10::kFloat));
-    std::copy(w_scale.begin(), w_scale.end(), scales.data_ptr<float>());
+    std::copy(w_scale.begin(), w_scale.end(), scales.mutable_data_ptr<float>());
 
     at::Tensor zero_points = at::empty(
         {static_cast<long>(w_zp.size())},
         at::device(c10::kCPU).dtype(c10::kInt));
-    std::copy(w_zp.begin(), w_zp.end(), zero_points.data_ptr<int>());
+    std::copy(w_zp.begin(), w_zp.end(), zero_points.mutable_data_ptr<int>());
 
     weight_origin = at::_empty_per_channel_affine_quantized(
         {N, K},
@@ -85,7 +85,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
     std::copy(
         w_scales_ptr,
         w_scales_ptr + output_channels_,
-        scales.data_ptr<float>());
+        scales.mutable_data_ptr<float>());
 
     at::Tensor zero_points = at::empty(
         {static_cast<long>(output_channels_)},

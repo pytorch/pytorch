@@ -55,7 +55,13 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
-assume_static_by_default = False
+assume_static_by_default = True
+
+# This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
+# with assume_static_by_default=True.
+# With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
+# any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
+automatic_dynamic_shapes = True
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
@@ -100,9 +106,6 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
-
-# Print guards
-print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
 
 # Show a warning for every specialization
 print_specializations = False
