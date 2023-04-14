@@ -5,13 +5,11 @@ import re
 import types
 from typing import Dict, List
 
-import torch_np._helpers
-
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value
+from torch._dynamo.utils import get_fake_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 

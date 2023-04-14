@@ -4,10 +4,10 @@ import os
 import sys
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, NamedTuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -592,3 +592,18 @@ class TestTyping(JitTestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
             out = foo(_GoogLeNetOutputs(logits="3", aux_logits2="4", aux_logits1="5"))
+
+    def test_namedtuple_error_source_attribution(self):
+        class _NamedTupleBadMemberType(NamedTuple):
+            f1: torch.Tensor
+            f2: "ABadForwardRefType"
+
+        make_global(_NamedTupleBadMemberType)  # see [local resolution in python]
+
+        def fn(x: _NamedTupleBadMemberType) -> torch.Tensor:
+            return x.f1.relu()
+
+        # assert that this has a location associated with the error.
+        # note the " +" is regex (i.e. "at least one space")
+        with self.assertRaisesRegex(ValueError, "at +File"):
+            torch.jit.script(fn)

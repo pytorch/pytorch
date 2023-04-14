@@ -26,8 +26,8 @@ using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
-static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
-static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
+static constexpr const char* kNumBackwardPasses = "num_current_backward_passes";
+static constexpr const char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
 //   1. Call pre hooks of the original AccumulateGrad to modify the input grad.

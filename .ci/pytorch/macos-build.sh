@@ -40,6 +40,16 @@ cross_compile_arm64() {
   USE_DISTRIBUTED=0 CMAKE_OSX_ARCHITECTURES=arm64 MACOSX_DEPLOYMENT_TARGET=11.0 USE_MKLDNN=OFF USE_QNNPACK=OFF WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
 }
 
+compile_arm64() {
+  # Compilation for arm64
+  # TODO: Compile with OpenMP support (but this causes CI regressions as cross-compilation were done with OpenMP disabled)
+  USE_DISTRIBUTED=0 USE_OPENMP=0 MACOSX_DEPLOYMENT_TARGET=11.0 WERROR=1 BUILD_TEST=OFF USE_PYTORCH_METAL=1 python setup.py bdist_wheel
+}
+
+compile_x86_64() {
+  USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel
+}
+
 compile_x86_64() {
   USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel
 }
@@ -63,7 +73,11 @@ build_lite_interpreter() {
 }
 
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
-  cross_compile_arm64
+  if [[ $(uname -m) == "arm64" ]]; then
+    compile_arm64
+  else
+    cross_compile_arm64
+  fi
 elif [[ ${BUILD_ENVIRONMENT} = *lite-interpreter* ]]; then
   export BUILD_LITE_INTERPRETER=1
   build_lite_interpreter

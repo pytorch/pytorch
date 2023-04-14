@@ -1396,8 +1396,7 @@ if(USE_GLOO)
         # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
         set(NCCL_EXTERNAL ON)
       endif()
-      # gloo uses cuda_add_library
-      torch_update_find_cuda_flags()
+      set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
       add_library(gloo SHARED IMPORTED)

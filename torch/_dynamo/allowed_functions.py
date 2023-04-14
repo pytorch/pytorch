@@ -225,7 +225,7 @@ def _builtin_function_ids():
 def _numpy_function_ids():
     rv = dict()
     if HAS_NUMPY:
-        for mod in (np, np.random, np.meshgrid):
+        for mod in (np, np.random):
             rv.update(
                 {
                     id(v): f"{mod.__name__}.{k}"

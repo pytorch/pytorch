@@ -3,8 +3,29 @@
 import json
 
 from functools import lru_cache
-from typing import List, Any, Tuple
+from typing import List, Any, Tuple, TYPE_CHECKING, Union
 from urllib.request import urlopen, Request
+
+from github_utils import (
+    GitHubComment,
+    gh_fetch_json,
+)
+
+# TODO: this is a temp workaround to avoid circular dependencies,
+#       and should be removed once GitHubPR is refactored out of trymerge script.
+if TYPE_CHECKING:
+    from trymerge import GitHubPR
+
+BOT_AUTHORS = ["github-actions", "pytorchmergebot", "pytorch-bot"]
+
+LABEL_ERR_MSG_TITLE = "This PR needs a label"
+LABEL_ERR_MSG = f"""# {LABEL_ERR_MSG_TITLE}
+    If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.
+
+    If not, please add the `topic: not user facing` label.
+    For more information, see
+    https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.
+"""
 
 # Modified from https://github.com/pytorch/pytorch/blob/b00206d4737d1f1e7a442c9f8a1cadccd272a386/torch/hub.py#L129
 def _read_url(url: Request) -> Tuple[Any, Any]:
@@ -45,3 +66,28 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
         update_labels(labels, info)
 
     return labels
+
+
+def gh_add_labels(org: str, repo: str, pr_num: int, labels: Union[str, List[str]]) -> None:
+    gh_fetch_json(
+        f'https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels',
+        data={"labels": labels},
+    )
+
+
+def get_release_notes_labels(org: str, repo: str) -> List[str]:
+    return [label for label in gh_get_labels(org, repo) if label.lstrip().startswith("release notes:")]
+
+
+def has_required_labels(pr: "GitHubPR") -> bool:
+    pr_labels = pr.get_labels()
+    # Check if PR is not user facing
+    is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
+    return (
+        is_not_user_facing_pr or
+        any(label.strip() in get_release_notes_labels(pr.org, pr.project) for label in pr_labels)
+    )
+
+
+def is_label_err_comment(comment: GitHubComment) -> bool:
+    return comment.body_text.lstrip(" #").startswith(LABEL_ERR_MSG_TITLE) and comment.author_login in BOT_AUTHORS

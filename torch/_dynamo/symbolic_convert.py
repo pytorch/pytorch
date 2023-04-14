@@ -1941,7 +1941,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.output.compile_subgraph(
             self, reason=GraphCompileReason("return_value", [self.frame_summary()])
         )
-
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 

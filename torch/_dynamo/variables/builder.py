@@ -34,7 +34,6 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
-
 from ..utils import (
     clone_input,
     get_fake_value,
@@ -48,7 +47,7 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
-    tensor_shape_should_be_static,
+    tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     torch_np,
     tuple_iterator,
@@ -321,6 +320,10 @@ class VariableBuilder:
         id_dispatch = self._id_dispatch().get(id(value))
         if id_dispatch is not None:
             return id_dispatch(self, value)
+
+        # Note - There are some nested values where types mismatch!
+        # We want to get those out and wrap those.
+        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if istype(value, config.traceable_tensor_subclasses):
@@ -1075,7 +1078,7 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_shape_should_be_static(e, source, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

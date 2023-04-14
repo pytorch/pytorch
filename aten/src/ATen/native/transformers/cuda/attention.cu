@@ -568,7 +568,11 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
     sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
-    if (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention) {
+    // strides from packed projection for nested tensors when seq_len is 1 will be
+    // and will trigger a contiguous call in the kernel, so we prevent this
+    bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
+    if (no_seq_len_1_nested &&
+        (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
       auto x_size_0 = x.size(0);

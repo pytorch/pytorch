@@ -585,12 +585,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(create_instruction("POP_TOP"))
             self.add_output_instructions(output + pass2.get_instructions())
 
-        from .variables.tensor import NumpyTensorVariable
-
-        if stack_values and isinstance(stack_values[-1], NumpyTensorVariable):
-            self.add_output_instructions(
-                stack_values[-1].reconstruct_ndarray(stack_values, tx)
-            )
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
@@ -715,8 +709,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            compiled_fn = gm.forward
-            raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                e.__traceback__
+            ) from None
         return compiled_fn
 
     def fake_example_inputs(self) -> List[torch.Tensor]:

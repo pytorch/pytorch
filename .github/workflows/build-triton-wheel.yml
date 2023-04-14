@@ -9,11 +9,13 @@ on:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

@@ -24,7 +24,7 @@ output_code = False
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
+verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
 # If true, traced graph outputs will be outputted as Python GraphModule code.
 # If false, traced graph outputs will be outputted in tabular form.

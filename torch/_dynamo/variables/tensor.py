@@ -2,7 +2,6 @@ import inspect
 import itertools
 import operator
 import types
-
 from typing import Dict, List
 
 import torch.fx
@@ -23,8 +22,6 @@ from ..utils import (
     fqn,
     get_fake_value,
     get_real_value,
-    HAS_NUMPY,
-    np,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -348,7 +345,7 @@ class TensorVariable(VariableTracker):
                 unimplemented(
                     f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor to support tensor.numpy()."
                 )
-            from torch_np import array
+            from torch_np import ndarray
 
             from .builder import wrap_fx_proxy_cls
 
@@ -361,7 +358,7 @@ class TensorVariable(VariableTracker):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    array,
+                    ndarray,
                     *proxy_args_kwargs([self], {}),
                 ),
                 example_value=None,
@@ -703,21 +700,6 @@ class NumpyTensorVariable(TensorVariable):
             raise NotImplementedError()
         return result
 
-    def reconstruct_ndarray(self, stack_values, tx):
-        # returns bytecode to actually convert NumpyTensorVariable to np.ndarray
-        return [
-            # TODO: LOAD_ATTR "tensor" doesn't work yet because tensor is not in co_names of the code.
-            create_instruction("LOAD_ATTR", argval="tensor"),
-            create_instruction(
-                name="LOAD_METHOD", arg=len(stack_values) + 1, argval="numpy"
-            ),
-            create_instruction(
-                name="CALL_METHOD",
-                arg=0,
-                argval=0,
-            ),
-        ]
-
     def call_method(
         self,
         tx,
@@ -735,8 +717,6 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
-        if HAS_NUMPY and isinstance(raw_value, np.number):
-            raw_values = raw_value.item()
         need_unwrap = kwargs.pop("need_unwrap", True)
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value

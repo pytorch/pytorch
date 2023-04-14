@@ -1,1 +1,1 @@
-pytorch-triton-rocm>=2.0.0.dev
+pytorch-triton-rocm>=2.0.0,<2.1

@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# limit lines of inner_fn() when printing IR
+debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -81,6 +84,8 @@ max_fusion_size = 64
 unroll_reductions_threshold = 8
 
 comment_origin = False
+
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 
 def is_fbcode():

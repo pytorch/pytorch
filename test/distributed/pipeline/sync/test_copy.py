@@ -11,6 +11,7 @@ import torch
 
 from torch.distributed.pipeline.sync.copy import Copy, Wait
 from torch.distributed.pipeline.sync.stream import CPUStream, current_stream, get_device, is_cuda, new_stream, use_stream
+from torch.testing._internal.common_utils import run_tests
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
@@ -68,3 +69,7 @@ def test_wait_multiple_tensors():
 
     assert a.grad_fn is b.grad_fn
     assert a.grad_fn.__class__ is Wait._backward_cls
+
+
+if __name__ == "__main__":
+    run_tests()
