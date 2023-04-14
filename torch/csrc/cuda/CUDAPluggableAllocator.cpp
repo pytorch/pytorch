@@ -98,7 +98,7 @@ void* CUDAPluggableAllocator::malloc(
 
 c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
   int device;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
   void* r =
       const_cast<CUDAPluggableAllocator*>(this)->malloc(size, device, stream);
@@ -113,7 +113,7 @@ c10::DeleterFnPtr CUDAPluggableAllocator::raw_deleter() const {
 
 void* CUDAPluggableAllocator::raw_alloc(size_t nbytes) {
   int device;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
   return malloc(nbytes, device, stream);
 }
@@ -122,7 +122,7 @@ void* CUDAPluggableAllocator::raw_alloc_with_stream(
     size_t nbytes,
     cudaStream_t stream) {
   int device;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  C10_CUDA_CHECK(cudaGetDevice(&device));
   return malloc(nbytes, device, stream);
 }
 
