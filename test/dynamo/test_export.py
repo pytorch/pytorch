@@ -15,6 +15,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
+from torch._export.constraints import constrain_as_size
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -2527,10 +2528,35 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.target == torch.ops.aten._assert_async.msg:
                 count += 1
 
-        # Each dynamic dimension has two asserts
-        self.assertEqual(count, 6)
+        # Dim constraints are too wide so we don't asserts in this case
+        self.assertEqual(count, 0)
         test_inps = (torch.randn(3, 4, 5), torch.randn(6, 4, 7))
         self.assertEqual(gm(*test_inps), f(*test_inps))
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_assert_with_inline_constraint(self):
+        def f(x):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.full((b, 1), 1)
+
+        gm, _ = torch._dynamo.export(
+            f, torch.tensor(4), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten._assert_async.msg:
+                count += 1
+        self.assertEqual(count, 2)
+
+        with self.assertRaisesRegex(RuntimeError, "max_val"):
+            gm(torch.tensor(9))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
