@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
-
 namespace at::native {
 
 Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tensor& output) {
