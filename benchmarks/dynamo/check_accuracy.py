@@ -13,27 +13,26 @@ def get_field(csv, model_name: str, field: str):
         return None
 
 
-def check_graph_breaks(actual_csv, expected_csv, expected_filename):
+def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
 
     for model in actual_csv["name"]:
-        graph_breaks = get_field(actual_csv, model, "graph_breaks")
-        expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
+        accuracy = get_field(actual_csv, model, "accuracy")
+        expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if graph_breaks == expected_graph_breaks:
-            status = "PASS"
+        if accuracy == expected_accuracy:
+            status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
-
-        elif graph_breaks > expected_graph_breaks:
+        elif accuracy != "pass":
             status = "FAIL:"
             failed.append(model)
-        elif graph_breaks < expected_graph_breaks:
+        else:
             status = "IMPROVED:"
             improved.append(model)
         print(
-            f"{model:34}  {status:9} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
+            f"{model:34}  {status:9} accuracy={accuracy}, expected={expected_accuracy}"
         )
 
     msg = ""
@@ -41,7 +40,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         if failed:
             msg += textwrap.dedent(
                 f"""
-            Error: {len(failed)} models have new dynamo graph breaks:
+            Error: {len(failed)} models have accuracy status regressed:
                 {' '.join(failed)}
 
             """
@@ -49,7 +48,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         if improved:
             msg += textwrap.dedent(
                 f"""
-            Improvement: {len(improved)} models have fixed dynamo graph breaks:
+            Improvement: {len(improved)} models have accuracy status improved:
                 {' '.join(improved)}
 
             """
@@ -75,7 +74,7 @@ def main():
     actual = pd.read_csv(args.actual)
     expected = pd.read_csv(args.expected)
 
-    failed, msg = check_graph_breaks(actual, expected, args.expected)
+    failed, msg = check_accuracy(actual, expected, args.expected)
     if failed:
         print(msg)
         sys.exit(1)
