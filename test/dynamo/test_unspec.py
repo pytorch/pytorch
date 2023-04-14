@@ -221,7 +221,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(20)
         opt_fn = torch._dynamo.optimize("eager")(fn)
-        torch._dynamo.mark_dynamic(x, 0)
         opt_fn(x)
 
 

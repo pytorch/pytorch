@@ -858,6 +858,7 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
+                and not isinstance(self.get_source(), RandomValueSource)
             ):
                 if value < 0 or torch._dynamo.config.specialize_int:
                     # Negative values don't create_symbol correctly,
@@ -921,6 +922,8 @@ class VariableBuilder:
                 options = {"guards": guards}
             else:
                 options = {}
+                # Rip the value out the tensor, we don't want to call rand with an example value of a tensor.c
+                wrapped_value = wrapped_value.item()
             options.update({"source": self.get_source()})
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
