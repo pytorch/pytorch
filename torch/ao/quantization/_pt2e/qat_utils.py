@@ -9,6 +9,17 @@ from torch.fx.subgraph_rewriter import _replace_pattern
 import torch.nn.functional as F
 
 
+# Example inputs for both `_conv_bn_pattern` and `_fused_qat_conv_bn_pattern`
+_conv_bn_pattern_example_inputs = (
+    torch.randn(1, 1, 3, 3),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
+)
+
 def _conv_bn_pattern(
     x,
     conv_weight,
@@ -21,7 +32,6 @@ def _conv_bn_pattern(
     x = F.conv2d(x, conv_weight, conv_bias)
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
     return x
-
 
 def _fused_qat_conv_bn_pattern(
     x,
@@ -78,15 +88,7 @@ def _fuse_conv_bn_qat(m: GraphModule):
     """
     m.graph.eliminate_dead_code()
     m.recompile()
-    example_inputs = (
-        torch.randn(1, 1, 3, 3),  # x
-        torch.randn(1, 1, 1, 1),  # conv_weight
-        torch.randn(1),           # conv_bias
-        torch.randn(1),           # bn_weight
-        torch.randn(1),           # bn_bias
-        torch.randn(1),           # bn_running_mean
-        torch.randn(1),           # bn_running_var
-    )
+    example_inputs = _conv_bn_pattern_example_inputs
     match_pattern = _get_aten_graph_module(_conv_bn_pattern, example_inputs)
     replacement_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
     match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern)

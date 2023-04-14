@@ -27,6 +27,7 @@ from torch.ao.quantization.backend_config._x86_inductor_pt2e import get_x86_indu
 from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx, convert_fx
 from torch.ao.quantization._pt2e.qat_utils import (
+    _conv_bn_pattern_example_inputs,
     _fused_qat_conv_bn_pattern,
     _get_aten_graph_module,
 )
@@ -323,7 +324,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
         quantizer = QNNPackQuantizer()
-        quantizer.set_global(qq.get_default_per_channel_symmetric_qnnpack_operator_spec())
+        quantizer.set_global(qq.get_default_per_channel_symmetric_qnnpack_operator_spec(is_qat=True))
         m = M()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
@@ -338,19 +339,12 @@ class TestQuantizePT2E(QuantizationTestCase):
         m = prepare_qat_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
 
-        # Verify that the subgraph was replaced successfully with observers inserted
-        # Do this by matching against the fused QAT pattern with observers manually inserted
-        # TODO: insert fake quantizes, not observers
-        fused_pattern_example_inputs = (
-            torch.randn(1, 1, 3, 3),  # x
-            torch.randn(1, 1, 1, 1),  # conv_weight
-            torch.randn(1),           # conv_bias
-            torch.randn(1),           # bn_weight
-            torch.randn(1),           # bn_bias
-            torch.randn(1),           # bn_running_mean
-            torch.randn(1),           # bn_running_var
+        # Verify that the subgraph was replaced successfully with fake quantizes inserted
+        # Do this by matching against the fused QAT pattern with fake quantizes manually inserted
+        check_pattern = _get_aten_graph_module(
+            _fused_qat_conv_bn_pattern,
+            _conv_bn_pattern_example_inputs,
         )
-        check_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, fused_pattern_example_inputs)
         obs0 = copy.deepcopy(m.activation_post_process_0)
         obs1 = copy.deepcopy(m.activation_post_process_1)
         obs2 = copy.deepcopy(m.activation_post_process_2)
