@@ -706,7 +706,7 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
                 )
                 self.tracer.create_proxy(
                     "call_function",
-                    torch.ops.aten._assert_async.msg,
+                    torch._assert_async,
                     (tensor_gt, assert_msg),
                     {},
                 )
@@ -720,7 +720,7 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
                 )
                 self.tracer.create_proxy(
                     "call_function",
-                    torch.ops.aten._assert_async.msg,
+                    torch._assert_async,
                     (tensor_lt, assert_msg),
                     {},
                 )
@@ -750,14 +750,14 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
 
             self.tracer.create_proxy(
                 "call_function",
-                torch.ops.aten._assert_async.msg,
+                torch._assert_async,
                 (tensor_gt, "min_val"),
                 {},
             )
 
             self.tracer.create_proxy(
                 "call_function",
-                torch.ops.aten._assert_async.msg,
+                torch._assert_async,
                 (tensor_lt, "max_val"),
                 {},
             )
