@@ -63,7 +63,7 @@ class BindInputStep:
     def __init__(self, model_signature: inspect.Signature):
         self._model_signature = model_signature
 
-    def format(
+    def adapt(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Bind the input arguments to the model signature.
@@ -96,7 +96,7 @@ class BindInputStep:
 class MergeKwargsIntoArgsStep:
     """Merge the input kwargs into the input args."""
 
-    def format(
+    def adapt(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Merge the input kwargs into the input args.
@@ -114,11 +114,11 @@ class MergeKwargsIntoArgsStep:
 class RemoveNoneInputStep:
     """Remove `None` from arguments.
 
-    This format step assumes ``model_kwargs`` is empty. It also assumes ``model_args``
+    This adapt step assumes ``model_kwargs`` is empty. It also assumes ``model_args``
     is flattened, i.e. it does not check `None` inside nested collections.
     """
 
-    def format(
+    def adapt(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove `None` from arguments.
@@ -143,13 +143,13 @@ class FlattenInputWithTreeSpecValidationStep:
     ONNX can't represent collection types (e.g., dictionary, tuple of tuple of tensor,
     etc).
 
-    This class stores the `SpecTree` output produced when `format` was called the first
-    time. It then validates the `SpecTree` output produced from later `format` calls.
+    This class stores the `SpecTree` output produced when `adapt` was called the first
+    time. It then validates the `SpecTree` output produced from later `adapt` calls.
     """
 
     _spec: Optional[pytree.TreeSpec] = None
 
-    def format(
+    def adapt(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Flatten the model args and kwargs and validate the `SpecTree` output.
@@ -193,7 +193,7 @@ class FlattenOutputStep:
     depending on the tracing strategy.
     """
 
-    def format(self, model_outputs: Any) -> Sequence[Any]:
+    def adapt(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs."""
         flattened_outputs, _ = pytree.tree_flatten(model_outputs)
         return flattened_outputs
@@ -202,13 +202,13 @@ class FlattenOutputStep:
 class FlattenOutputWithTreeSpecValidationStep:
     """Same as ``FlattenOutputStep``, with additional `TreeSpec` validation.
 
-    This class stores the `SpecTree` output produced when `format` was called the first
-    time. It then validates the `SpecTree` output produced from later `format` calls.
+    This class stores the `SpecTree` output produced when `adapt` was called the first
+    time. It then validates the `SpecTree` output produced from later `adapt` calls.
     """
 
     _spec: Optional[pytree.TreeSpec] = None
 
-    def format(self, model_outputs: Any) -> Sequence[Any]:
+    def adapt(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.
 
         Args:
@@ -239,55 +239,55 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
     def decomposition_table(self) -> Mapping[torch._ops.OpOverload, Callable]:
         return function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE
 
-    def _apply_input_format_step(
+    def _apply_input_adapt_step(
         self,
-        format_step_cls: Type[exporter.InputFormatStep],
+        adapt_step_cls: Type[exporter.InputAdaptStep],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
         step_init_args: Optional[Sequence[Any]] = None,
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        """Apply an input format step to the model args and kwargs.
+        """Apply an input adapt step to the model args and kwargs.
 
-        An input format step object is initialized, applied and recorded as part of
-        ``self._input_formatter`.
+        An input adapt step object is initialized, applied and recorded as part of
+        ``self._input_adapter`.
 
         Args:
-            format_step_cls: The input format step class.
+            adapt_step_cls: The input adapt step class.
             model_args: The model args.
             model_kwargs: The model kwargs.
-            step_init_args: The input format step initialization arguments.
+            step_init_args: The input adapt step initialization arguments.
 
         Returns:
-            The formatted model args and kwargs.
+            The adapted model args and kwargs.
         """
         step_init_args = step_init_args or ()
-        format_step = format_step_cls(*step_init_args)
-        self._input_formatter.append_step(format_step)
-        return format_step.format(model_args, model_kwargs)
+        adapt_step = adapt_step_cls(*step_init_args)
+        self._input_adapter.append_step(adapt_step)
+        return adapt_step.adapt(model_args, model_kwargs)
 
-    def _apply_output_format_step(
+    def _apply_output_adapt_step(
         self,
-        format_step_cls: Type[exporter.OutputFormatStep],
+        adapt_step_cls: Type[exporter.OutputAdaptStep],
         model_outputs: Any,
         step_init_args: Optional[Sequence[Any]] = None,
     ) -> Any:
-        """Apply an output format step to the model outputs.
+        """Apply an output adapt step to the model outputs.
 
-        An output format step object is initialized, applied and recorded as part of
-        ``self._output_formatter`.
+        An output adapt step object is initialized, applied and recorded as part of
+        ``self._output_adapter`.
 
         Args:
-            format_step_cls: The output format step class.
+            adapt_step_cls: The output adapt step class.
             model_outputs: The model outputs.
-            step_init_args: The input format step initialization arguments.
+            step_init_args: The input adapt step initialization arguments.
 
         Returns:
-            The formatted model outputs.
+            The adapted model outputs.
         """
         step_init_args = step_init_args or ()
-        format_step = format_step_cls(*step_init_args)
-        self._output_formatter.append_step(format_step)
-        return format_step.format(model_outputs)
+        adapt_step = adapt_step_cls(*step_init_args)
+        self._output_adapter.append_step(adapt_step)
+        return adapt_step.adapt(model_outputs)
 
     @_beartype.beartype
     def export_fx_to_onnx(
@@ -326,14 +326,14 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         with torch.utils._mode_utils.no_dispatch():
             onnxscript_graph = passes.export_fx_to_onnxscript(module, self.options)
             # ONNX does not support None inputs. During graph building, all None inputs
-            # are removed. Here we register this step to input formatter.
-            self._apply_input_format_step(RemoveNoneInputStep, fx_module_args, {})
+            # are removed. Here we register this step to input adapter.
+            self._apply_input_adapt_step(RemoveNoneInputStep, fx_module_args, {})
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
-            self._output_formatter.append_step(FlattenOutputStep())
+            self._output_adapter.append_step(FlattenOutputStep())
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
         return torch.onnx.ExportOutput(
-            onnx_model, self._input_formatter, self._output_formatter
+            onnx_model, self._input_adapter, self._output_adapter
         )

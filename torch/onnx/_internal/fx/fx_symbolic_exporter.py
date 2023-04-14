@@ -132,7 +132,7 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
     ) -> Tuple[torch.fx.GraphModule, Sequence[Any]]:
         # Bind model args and kwargs with model signature to retrieve default values
         # of unprovided arguments. These are then used to construct ``concrete_args``.
-        _, named_args = self._apply_input_format_step(
+        _, named_args = self._apply_input_adapt_step(
             fx_exporter.BindInputStep,
             self.model_args,
             self.model_kwargs,
@@ -154,7 +154,7 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
                 concrete_args[param_name] = param_value
 
         # Merge kwargs back into args since that is the format FX graph expects.
-        bound_args, _ = self._apply_input_format_step(
+        bound_args, _ = self._apply_input_adapt_step(
             fx_exporter.MergeKwargsIntoArgsStep, [], named_args
         )
 

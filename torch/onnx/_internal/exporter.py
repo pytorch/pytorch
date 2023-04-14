@@ -156,12 +156,12 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
-# TODO(bowbao): Add diagnostics for IO formatters.
+# TODO(bowbao): Add diagnostics for IO adapters.
 @runtime_checkable
-class InputFormatStep(Protocol):
-    """A protocol that defines a step in the input formatting process.
+class InputAdaptStep(Protocol):
+    """A protocol that defines a step in the input adapting process.
 
-    The input formatting process is a sequence of steps that are applied to the
+    The input adapting process is a sequence of steps that are applied to the
     PyTorch model inputs to transform them into the inputs format expected by the
     exported ONNX model. Each step takes the PyTorch model inputs as arguments and
     returns the transformed inputs.
@@ -169,28 +169,29 @@ class InputFormatStep(Protocol):
     This serves as a base formalized construct for the transformation done to model
     input signature by any individual component in the exporter.
     """
-    def format(
+
+    def adapt(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         ...
 
 
-class InputFormatter:
-    """A class that formats the PyTorch model inputs to exported ONNX model inputs format."""
+class InputAdapter:
+    """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
 
-    _input_format_steps: List[InputFormatStep]
+    _input_adapt_steps: List[InputAdaptStep]
 
-    def __init__(self, input_format_steps: Optional[List[InputFormatStep]] = None):
-        self._input_format_steps = input_format_steps or []
+    def __init__(self, input_adapt_steps: Optional[List[InputAdaptStep]] = None):
+        self._input_adapt_steps = input_adapt_steps or []
 
     @_beartype.beartype
-    def append_step(self, step: InputFormatStep) -> None:
-        """Appends a step to the input format steps.
+    def append_step(self, step: InputAdaptStep) -> None:
+        """Appends a step to the input adapt steps.
 
         Args:
             step: The step to append.
         """
-        self._input_format_steps.append(step)
+        self._input_adapt_steps.append(step)
 
     @_beartype.beartype
     def to_onnx(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
@@ -205,17 +206,17 @@ class InputFormatter:
         """
         args: Sequence[Any] = model_args
         kwargs: Mapping[str, Any] = model_kwargs
-        for step in self._input_format_steps:
-            args, kwargs = step.format(args, kwargs)
+        for step in self._input_adapt_steps:
+            args, kwargs = step.adapt(args, kwargs)
         assert not kwargs
         return args
 
 
 @runtime_checkable
-class OutputFormatStep(Protocol):
-    """A protocol that defines a step in the output formatting process.
+class OutputAdaptStep(Protocol):
+    """A protocol that defines a step in the output adapting process.
 
-    The output formatting process is a sequence of steps that are applied to the
+    The output adapting process is a sequence of steps that are applied to the
     PyTorch model outputs to transform them into the outputs format produced by the
     exported ONNX model. Each step takes the PyTorch model outputs as arguments and
     returns the transformed outputs.
@@ -223,26 +224,27 @@ class OutputFormatStep(Protocol):
     This serves as a base formalized construct for the transformation done to model
     output signature by any individual component in the exporter.
     """
-    def format(self, model_outputs: Any) -> Any:
+
+    def adapt(self, model_outputs: Any) -> Any:
         ...
 
 
-class OutputFormatter:
-    """A class that formats the PyTorch model outputs to exported ONNX model outputs format."""
+class OutputAdapter:
+    """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
 
-    _output_format_steps: List[OutputFormatStep]
+    _output_adapt_steps: List[OutputAdaptStep]
 
-    def __init__(self, output_format_steps: Optional[List[OutputFormatStep]] = None):
-        self._output_format_steps = output_format_steps or []
+    def __init__(self, output_adapt_steps: Optional[List[OutputAdaptStep]] = None):
+        self._output_adapt_steps = output_adapt_steps or []
 
     @_beartype.beartype
-    def append_step(self, step: OutputFormatStep) -> None:
+    def append_step(self, step: OutputAdaptStep) -> None:
         """Appends a step to the output format steps.
 
         Args:
             step: The step to append.
         """
-        self._output_format_steps.append(step)
+        self._output_adapt_steps.append(step)
 
     @_beartype.beartype
     def to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
@@ -254,8 +256,8 @@ class OutputFormatter:
         Returns:
             PyTorch model outputs in exported ONNX model outputs format.
         """
-        for step in self._output_format_steps:
-            model_outputs = step.format(model_outputs)
+        for step in self._output_adapt_steps:
+            model_outputs = step.adapt(model_outputs)
         return model_outputs
 
 
@@ -263,19 +265,19 @@ class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
     _model_proto: Final[onnx.ModelProto]
-    _input_formatter: Final[InputFormatter]
-    _output_formatter: Final[OutputFormatter]
+    _input_adapter: Final[InputAdapter]
+    _output_adapter: Final[OutputAdapter]
 
     @_beartype.beartype
     def __init__(
         self,
         model_proto: onnx.ModelProto,
-        input_formatter: InputFormatter,
-        output_formatter: OutputFormatter,
+        input_adapter: InputAdapter,
+        output_adapter: OutputAdapter,
     ):
         self._model_proto = model_proto
-        self._input_formatter = input_formatter
-        self._output_formatter = output_formatter
+        self._input_adapter = input_adapter
+        self._output_adapter = output_adapter
 
     @property
     def model_proto(self) -> onnx.ModelProto:
@@ -294,11 +296,11 @@ class ExportOutput:
         not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
         but only flattened tensors are supported by ONNX, etc.
 
-        The actual formatting steps are associated with each individual export. It
+        The actual adapting steps are associated with each individual export. It
         depends on the PyTorch model, the particular set of model_args and model_kwargs
         used for the export, and export options.
 
-        This method replays the formatting steps recorded during export.
+        This method replays the adapting steps recorded during export.
 
         Args:
             model_args: The PyTorch model inputs.
@@ -340,7 +342,7 @@ class ExportOutput:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_formatter.to_onnx(*model_args, **model_kwargs)
+        return self._input_adapter.to_onnx(*model_args, **model_kwargs)
 
     @_beartype.beartype
     def format_torch_outputs_to_onnx(
@@ -353,11 +355,11 @@ class ExportOutput:
         not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
         but only flattened tensors are supported by ONNX, etc.
 
-        The actual formatting steps are associated with each individual export. It
+        The actual adapting steps are associated with each individual export. It
         depends on the PyTorch model, the particular set of model_args and model_kwargs
         used for the export, and export options.
 
-        This method replays the formatting steps recorded during export.
+        This method replays the adapting steps recorded during export.
 
         Args:
             model_outputs: The PyTorch model outputs.
@@ -389,7 +391,7 @@ class ExportOutput:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_formatter.to_onnx(model_outputs)
+        return self._output_adapter.to_onnx(model_outputs)
 
     @_beartype.beartype
     def save(
@@ -411,8 +413,8 @@ class ExportOutput:
 
 
 class Exporter(abc.ABC):
-    _input_formatter: InputFormatter
-    _output_formatter: OutputFormatter
+    _input_adapter: InputAdapter
+    _output_adapter: OutputAdapter
 
     @_beartype.beartype
     def __init__(
@@ -432,8 +434,8 @@ class Exporter(abc.ABC):
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        self._input_formatter = InputFormatter()
-        self._output_formatter = OutputFormatter()
+        self._input_adapter = InputAdapter()
+        self._output_adapter = OutputAdapter()
 
     @abc.abstractmethod
     def export(self) -> ExportOutput:

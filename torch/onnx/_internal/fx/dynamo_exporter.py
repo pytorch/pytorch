@@ -18,13 +18,13 @@ class DynamoOptimizeExporter(fx_exporter.FXGraphModuleExporter):
         # Fill in default values for optional args and kwargs. The goal is to preserve
         # them as inputs in `dynamo.optimize` produced FX graph. Otherwise, they will
         # be traced as constants.
-        _, named_args = self._apply_input_format_step(
+        _, named_args = self._apply_input_adapt_step(
             fx_exporter.BindInputStep,
             self.model_args,
             self.model_kwargs,
             step_init_args=(self.model_signature,),
         )
-        model_args, _ = self._apply_input_format_step(
+        model_args, _ = self._apply_input_adapt_step(
             fx_exporter.MergeKwargsIntoArgsStep,
             [],
             named_args,
@@ -57,25 +57,25 @@ class DynamoOptimizeExporter(fx_exporter.FXGraphModuleExporter):
         assert compiler.captured_graph
 
         # Outputs are flattened by `dynamo.optimize`.
-        # Apply and record this output format step.
-        self._output_formatter.append_step(DynamoFlattenOutputStep())
+        # Apply and record this output adapt step.
+        self._output_adapter.append_step(DynamoFlattenOutputStep())
         # TODO: `dynamo.optimize` does not capture non computation part of the graph.
         # Hence any tensor that is returned multiple times will only appear once
         # in the return statement of `dynamo.optimize` traced graph. A specialized
-        # output formatter is required to map this gap between PyTorch model.
+        # output adapter is required to map this gap between PyTorch model.
 
         # Export FX graph to ONNX ModelProto.
         #
-        # Apply and record the following input format steps.
+        # Apply and record the following input adapt steps.
         # `args` and `kwargs` are merged and flattened by `dynamo.optimize`.
-        model_args, _ = self._apply_input_format_step(
+        model_args, _ = self._apply_input_adapt_step(
             fx_exporter.FlattenInputWithTreeSpecValidationStep, model_args, {}
         )
         # `None` inputs are removed by `dynamo.optimize`.
-        model_args, _ = self._apply_input_format_step(
+        model_args, _ = self._apply_input_adapt_step(
             fx_exporter.RemoveNoneInputStep, model_args, {}
         )
-        # TODO: needs additional input format step to remove unused arguments.
+        # TODO: needs additional input adapt step to remove unused arguments.
         # `dynamo.optimize` drops unused arguments.
         return self.export_fx_to_onnx(compiler.captured_graph, model_args)
 
@@ -173,27 +173,27 @@ class DynamoFlattenOutputStep(fx_exporter.FlattenOutputStep):
             pytree_extension_context or _PyTreeExtensionContext()
         )
 
-    def format(self, model_outputs: Any) -> Sequence[Any]:
+    def adapt(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs, under the context of pytree extension."""
         with self._pytree_extension_context:
-            return super().format(model_outputs)
+            return super().adapt(model_outputs)
 
 
-def _wrap_model_with_output_formatter(
+def _wrap_model_with_output_adapter(
     model: Union[torch.nn.Module, Callable],
-    output_formatter: DynamoFlattenOutputStep,
+    output_adapter: DynamoFlattenOutputStep,
 ) -> Callable:
-    """Wrap model with output formatter.
+    """Wrap model with output adapter.
 
     This is a helper function to enable :func:`dynamo.export` on models that produce
-    custom user defined types outputs. It wraps the model with an output formatter to
+    custom user defined types outputs. It wraps the model with an output adapter to
     convert the outputs to :func:`dynamo.export` compatible types, i.e. :class:`torch.Tensor`.
 
-    The formatting logic is controlled by ``output_formatter``.
+    The adapting logic is controlled by ``output_adapter``.
 
     Args:
         model: PyTorch model or function.
-        output_formatter: Output formatter to apply to model output.
+        output_adapter: Output adapter to apply to model output.
     Returns:
         Wrapped model.
     """
@@ -202,7 +202,7 @@ def _wrap_model_with_output_formatter(
     # Preserve original function signature.
     @functools.wraps(model_func)
     def wrapped(*args, **kwargs):
-        return output_formatter.format(model_func(*args, **kwargs))
+        return output_adapter.adapt(model_func(*args, **kwargs))
 
     return wrapped
 
@@ -214,14 +214,14 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
         kwargs = copy.deepcopy(self.model_kwargs)
 
         # `dynamo.export` does not recognize custom user defined classes as output type.
-        # Apply wrapper to format the outputs back to `dynamo.export` compatible types,
+        # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
         dynamo_flatten_output_step = DynamoFlattenOutputStep()
-        wrapped_model = _wrap_model_with_output_formatter(
+        wrapped_model = _wrap_model_with_output_adapter(
             self.model, dynamo_flatten_output_step
         )
-        # Record the output formatter step.
-        self._output_formatter.append_step(dynamo_flatten_output_step)
+        # Record the output adapter step.
+        self._output_adapter.append_step(dynamo_flatten_output_step)
 
         # Translate callable to FX graph.
         #
@@ -238,8 +238,8 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
         # Export FX graph to ONNX ModelProto.
         #
         # `args` and `kwargs` are merged and flattened by `dynamo.export`.
-        # Apply and record this input format step.
-        merged_args, _ = self._apply_input_format_step(
+        # Apply and record this input adapt step.
+        merged_args, _ = self._apply_input_adapt_step(
             fx_exporter.FlattenInputWithTreeSpecValidationStep, args, kwargs
         )
         return self.export_fx_to_onnx(graph_module, merged_args)
