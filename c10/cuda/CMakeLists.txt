@@ -57,7 +57,7 @@ endif()
 # ---[ Dependency of c10_cuda
 target_link_libraries(c10_cuda PUBLIC c10 torch::cudart)
 
-if (NOT WIN32)
+if(NOT WIN32)
 target_link_libraries(c10_cuda PRIVATE dl)
 endif()
 
