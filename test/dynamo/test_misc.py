@@ -3313,7 +3313,7 @@ def fn():
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         opt_fn(x, y)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 5)
+        self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
@@ -4464,25 +4464,27 @@ def fn():
             dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
             self.assertEqual(dummy_opt(), test[3])
 
-    def test_encode_varint(self):
+    def test_exception_table_encode_varint(self):
         nums = [
             0b111_101010_000000,
             0b1100_111000_010101_101010,
         ]
-        b = bytecode_transformation.encode_exn_tab_varint(
+        b = bytecode_transformation.encode_exception_table_varint(
             nums[0]
-        ) + bytecode_transformation.encode_exn_tab_varint(nums[1])
+        ) + bytecode_transformation.encode_exception_table_varint(nums[1])
         nums_new = []
         b_iter = iter(bytes(b))
         while True:
             try:
-                nums_new.append(bytecode_transformation.decode_exn_tab_varint(b_iter))
+                nums_new.append(
+                    bytecode_transformation.decode_exception_table_varint(b_iter)
+                )
             except StopIteration:
                 break
         self.assertEqual(nums, nums_new)
 
     @skipIfNotPy311
-    def test_exceptiontable_parsing(self):
+    def test_exception_table_parsing(self):
         def fn():
             try:
                 with a():
@@ -4501,7 +4503,7 @@ def fn():
         self.assertEqual(b, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
-    def test_exceptiontable_e2e(self):
+    def test_exception_table_e2e(self):
         def fn():
             try:
                 with a():
@@ -4520,8 +4522,9 @@ def fn():
         self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
 
     @skipIfNotPy311
-    def test_exceptiontable_e2e_2(self):
-        # last instructions of an exn_table entry is a large instruction,
+    def test_exception_table_e2e_2(self):
+        # last instructions of an exn_table entry is a large instruction
+        # i.e., LOAD_GLOBAL a
         def fn():
             try:
                 return a
@@ -4557,7 +4560,7 @@ def fn():
         insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
             insts[7], insts[9], insts[5], 0, True
         )
-        bytecode_transformation.propagate_exn_table_entries(insts)
+        bytecode_transformation.propagate_inst_exn_table_entries(insts)
         expected = [1, 2, 2, 0, 3, 3, 3, 5, 5, 4]
         for inst, exp in zip(insts, expected):
             self.assertIsNotNone(inst.exn_tab_entry)
@@ -4631,7 +4634,7 @@ def fn():
         exn_start.exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
             exn_start, exn_end, target2, 0, True
         )
-        bytecode_transformation.propagate_exn_table_entries(insts)
+        bytecode_transformation.propagate_inst_exn_table_entries(insts)
         insts = bytecode_analysis.remove_dead_code(insts)
         self.assertEquals(len(insts), 5)
         self.assertNotIn(exn_start, insts)

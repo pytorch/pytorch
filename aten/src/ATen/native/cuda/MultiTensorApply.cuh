@@ -32,7 +32,7 @@ static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
 
 template<int n> struct TensorListMetadata
 {
-  void* addresses[n][depth_to_max_tensors[n-1]];
+  const void* addresses[n][depth_to_max_tensors[n-1]];
   int numel_for_tensor[depth_to_max_tensors[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
@@ -43,9 +43,9 @@ template<int n> struct TensorListMetadata
 // whose each element is `at::Tensor` of 1 element representing the number of `step`s called so far.
 template<int n> struct FusedOptimizerTensorListMetadata
 {
-  void* addresses[n][depth_to_max_tensors[n-1]];
+  const void* addresses[n][depth_to_max_tensors[n-1]];
   int numel_for_tensor[depth_to_max_tensors[n-1]];
-  void* state_steps_addresses[depth_to_max_tensors_scalarlist[n-1]];
+  const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
   int start_tensor_this_launch;
@@ -53,7 +53,7 @@ template<int n> struct FusedOptimizerTensorListMetadata
 
 template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata
 {
-  void* addresses[n][depth_to_max_tensors_scalarlist[n-1]];
+  const void* addresses[n][depth_to_max_tensors_scalarlist[n-1]];
   int numel_for_tensor[depth_to_max_tensors_scalarlist[n-1]];
   scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
@@ -65,7 +65,7 @@ template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata
 // 80 is a number that does not violate this limitation.
 template<> struct TensorListScalarListMetadata<c10::complex<double>, 1>
 {
-  void* addresses[1][80];
+  const void* addresses[1][80];
   int numel_for_tensor[80];
   c10::complex<double> scalar_vals[80];
   unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
@@ -105,7 +105,7 @@ void multi_tensor_apply(
 
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
-                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
+                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].const_data_ptr();
             }
             loc_tensor_info++;
 
@@ -164,7 +164,7 @@ void multi_tensor_apply(
             }
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
-                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
+                tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].const_data_ptr();
             }
             loc_tensor_info++;
 
@@ -221,10 +221,10 @@ void multi_tensor_apply_for_fused_optimizer(
     if (tensor_lists[0][tensor_index].numel() == 0) {
       continue;
     }
-    tensorListMeta.state_steps_addresses[loc_tensor_info] = state_steps[tensor_index].data_ptr();
+    tensorListMeta.state_steps_addresses[loc_tensor_info] = state_steps[tensor_index].const_data_ptr();
     tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][tensor_index].numel();
     for (const auto & d : c10::irange(depth)) {
-      tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][tensor_index].data_ptr();
+      tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][tensor_index].const_data_ptr();
     }
     loc_tensor_info++;
 

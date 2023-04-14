@@ -1,4 +1,3 @@
-import bisect
 import copy
 import dataclasses
 import dis
@@ -332,9 +331,10 @@ class ExceptionTableEntry:
     lasti: bool
 
 
-def encode_exn_tab_varint(n):
-    # unfortunately cannot use encode_varint since the order of
-    # the bytes is reversed for exception tables.
+def encode_exception_table_varint(n):
+    """
+    Similar to `encode_varint`, but the 6-bit chunks are ordered in reverse.
+    """
     assert n >= 0
     b = [n & 63]
     n >>= 6
@@ -347,7 +347,10 @@ def encode_exn_tab_varint(n):
     return b
 
 
-def decode_exn_tab_varint(bytes_iter):
+def decode_exception_table_varint(bytes_iter):
+    """
+    Inverse of `encode_exception_table_varint`.
+    """
     b = next(bytes_iter)
     val = b & 63
     while b & 64:
@@ -358,6 +361,10 @@ def decode_exn_tab_varint(bytes_iter):
 
 
 def check_exception_table(tab: List[ExceptionTableEntry]):
+    """
+    Verifies that a list of ExceptionTableEntries will make a well-formed
+    jump table: entries are non-empty, sorted, and do not overlap.
+    """
     for i in range(len(tab) - 1):
         assert tab[i].start <= tab[i].end < tab[i + 1].start <= tab[i + 1].end
 
@@ -371,11 +378,11 @@ def parse_exception_table(exntab: bytes):
     tab = []
     try:
         while True:
-            start = decode_exn_tab_varint(exntab_iter) * 2
-            length = decode_exn_tab_varint(exntab_iter) * 2
+            start = decode_exception_table_varint(exntab_iter) * 2
+            length = decode_exception_table_varint(exntab_iter) * 2
             end = start + length - 2
-            target = decode_exn_tab_varint(exntab_iter) * 2
-            dl = decode_exn_tab_varint(exntab_iter)
+            target = decode_exception_table_varint(exntab_iter) * 2
+            dl = decode_exception_table_varint(exntab_iter)
             depth = dl >> 1
             lasti = bool(dl & 1)
             tab.append(ExceptionTableEntry(start, end, target, depth, lasti))
@@ -385,16 +392,20 @@ def parse_exception_table(exntab: bytes):
 
 
 def assemble_exception_table(tab: List[ExceptionTableEntry]):
+    """
+    Inverse of parse_exception_table - encodes list of exception
+    table entries into bytes.
+    """
     b = []
     for entry in tab:
-        first_entry = encode_exn_tab_varint(entry.start // 2)
+        first_entry = encode_exception_table_varint(entry.start // 2)
         first_entry[0] |= 1 << 7
         b.extend(first_entry)
         length = entry.end - entry.start + 2
-        b.extend(encode_exn_tab_varint(length // 2))
-        b.extend(encode_exn_tab_varint(entry.target // 2))
+        b.extend(encode_exception_table_varint(length // 2))
+        b.extend(encode_exception_table_varint(entry.target // 2))
         dl = (entry.depth << 1) + entry.lasti
-        b.extend(encode_exn_tab_varint(dl))
+        b.extend(encode_exception_table_varint(dl))
     return bytes(b)
 
 
@@ -436,6 +447,9 @@ def assemble(instructions: List[Instruction], firstlineno):
 
 
 def _get_instruction_by_offset(offset_to_inst: Dict[int, Instruction], offset: int):
+    """
+    Get the instruction located at a given offset, accounting for EXTENDED_ARGs
+    """
     for n in (0, 2, 4, 6):
         if offset_to_inst[offset + n].opcode != dis.EXTENDED_ARG:
             return offset_to_inst[offset + n]
@@ -468,6 +482,10 @@ def flip_jump_direction(instruction):
 
 
 def _get_instruction_front(instructions: List[Instruction], idx: int):
+    """
+    i.e. get the first EXTENDED_ARG instruction (if any) when targetting
+    instructions[idx] with a jump.
+    """
     target = instructions[idx]
     for offset in (1, 2, 3):
         if idx >= offset and instructions[idx - offset].opcode == dis.EXTENDED_ARG:
@@ -520,15 +538,22 @@ def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruct
     exn_tab = parse_exception_table(exn_tab_bytes)
     offset_to_inst = {inst.offset: inst for inst in instructions}
     offsets = sorted(offset_to_inst.keys())
+    end_offset_idx = 0
     exn_tab_iter = iter(exn_tab)
     try:
         entry, inst_entry = None, None
 
         def step():
-            nonlocal entry, inst_entry
+            nonlocal entry, inst_entry, end_offset_idx
             entry = next(exn_tab_iter)
-            # find rightmost offset <= entry.end
-            end_offset_idx = bisect.bisect_right(offsets, entry.end)
+            # find rightmost offset <= entry.end, since entry.end may not be
+            # an actual instruction, e.g. if the end instruction is LOAD_GLOBAL,
+            # which takes more than 2 bytes, then entry.end points to the end
+            # of the LOAD_GLOBAL instruction, not the beginning.
+            while (
+                end_offset_idx < len(offsets) and offsets[end_offset_idx] <= entry.end
+            ):
+                end_offset_idx += 1
             assert end_offset_idx > 0
             end_offset = offsets[end_offset_idx - 1]
             inst_entry = InstructionExnTabEntry(
@@ -552,15 +577,17 @@ def virtualize_exception_table(exn_tab_bytes: bytes, instructions: List[Instruct
 def compute_exception_table(
     instructions: List[Instruction],
 ) -> List[ExceptionTableEntry]:
-    """Compute pythonic exception table from instructions with exn_tab_entry's"""
+    """Compute exception table in list format from instructions with exn_tab_entries"""
     exn_dict = {}
     indexof = get_indexof(instructions)
 
     for inst in instructions:
         if inst.exn_tab_entry:
+            # account for prefixed EXTENDED_ARGS
             start = _get_instruction_front(
                 instructions, indexof[id(inst.exn_tab_entry.start)]
             ).offset
+            # point to the last 2 bytes of the end instruction
             end = (
                 inst.exn_tab_entry.end.offset
                 + instruction_size(inst.exn_tab_entry.end)
@@ -575,15 +602,24 @@ def compute_exception_table(
                 assert exn_dict[key] == val
             exn_dict[key] = val
 
-    # sort by ascending start, then descending end
+    # Dynamo may construct nested exception table entries for convenience,
+    # but Python expects exception table entries to not overlap.
+    # NOTE: below, "keys" refer to old instruction entries' starts and ends,
+    # and "entries" refer to the generated exception table entries.
+
+    # Sort keys by increasing start, then decreasing end
     keys_sorted = sorted(exn_dict.keys(), key=lambda t: (t[0], -t[1]))
-    # break down nested entries
+    # smallest byte that the next exception table entry can start at
     nexti = 0
+    # stack of current nested keys
     key_stack = []
     exn_tab = []
 
     def pop():
-        nonlocal nexti, key_stack, exn_tab
+        """
+        Pop the key_stack and append an exception table entry if possible.
+        """
+        nonlocal nexti
         if key_stack:
             key = key_stack.pop()
             if nexti <= key[1]:
@@ -593,9 +629,11 @@ def compute_exception_table(
                 nexti = key[1] + 2
 
     for key in keys_sorted:
+        # pop keys that are no longer nested over the current key
         while key_stack and key_stack[-1][1] < key[0]:
             pop()
         if key_stack:
+            # create an entry covering to the current key, if possible
             assert key_stack[-1][0] <= key[0] <= key[1] <= key_stack[-1][1]
             left = max(nexti, key_stack[-1][0])
             if left < key[0]:
@@ -610,12 +648,12 @@ def compute_exception_table(
     return exn_tab
 
 
-def check_exception_table_nested(tab: List[InstructionExnTabEntry], indexof):
+def check_inst_exn_tab_entries_nested(tab: List[InstructionExnTabEntry], indexof):
     """
-    Checks `tab` is a properly sorted list of nested exception table entries;
+    Checks `tab` is a properly sorted list of nested InstructionExnTabEntry's,
     i.e. no entries partially overlap.
-    "Properly sorted" means starts are sorted in increasing order, ties are
-    broken by ends, in decreasing order.
+    "Properly sorted" means entries are sorted by increasing starts, then
+    decreasing ends.
     """
     entry_stack = []
     for entry in tab:
@@ -627,7 +665,7 @@ def check_exception_table_nested(tab: List[InstructionExnTabEntry], indexof):
         entry_stack.append(key)
 
 
-def propagate_exn_table_entries(instructions: List[Instruction]):
+def propagate_inst_exn_table_entries(instructions: List[Instruction]):
     """
     Copies exception table entries to all instructions in an entry's range.
     Supports nested exception table entries.
@@ -646,22 +684,31 @@ def propagate_exn_table_entries(instructions: List[Instruction]):
     sorted_entries = [
         entries[key] for key in sorted(entries.keys(), key=lambda t: (t[0], -t[1]))
     ]
-    check_exception_table_nested(sorted_entries, indexof)
+    check_inst_exn_tab_entries_nested(sorted_entries, indexof)
+    # Propagation of nested entries works since nested entries come later
+    # in sorted order.
     for entry in sorted_entries:
         for i in range(indexof[id(entry.start)], indexof[id(entry.end)] + 1):
             instructions[i].exn_tab_entry = copy.copy(entry)
 
 
-def check_exn_tab_entries(instructions: List[Instruction]):
+def check_inst_exn_tab_entries_valid(instructions: List[Instruction]):
     """
-    Checks that exn_tab_entry's of instructions are valid.
+    Checks that exn_tab_entries of instructions are valid.
     An entry's start, end, and target must be in instructions.
-    Instructions with exn_tab_entry's are located within
+    Instructions with an exn_tab_entry are located within
     the entry's start and end instructions.
+    Instructions do not share exn_tab_entries.
+
+    Implicitly checks for no duplicate instructions.
     """
     indexof = get_indexof(instructions)
+    exn_tab_entry_set = set()
     for i, inst in enumerate(instructions):
         if inst.exn_tab_entry:
+            assert sys.version_info >= (3, 11)
+            assert id(inst.exn_tab_entry) not in exn_tab_entry_set
+            exn_tab_entry_set.add(id(inst.exn_tab_entry))
             entry = inst.exn_tab_entry
             assert id(entry.start) in indexof
             assert id(entry.end) in indexof
@@ -955,7 +1002,7 @@ def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
     # also implicitly checks for no duplicate instructions
-    check_exn_tab_entries(instructions)
+    check_inst_exn_tab_entries_valid(instructions)
 
     code_options["co_nlocals"] = len(code_options["co_varnames"])
     varname_from_oparg = None

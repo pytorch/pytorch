@@ -26,8 +26,14 @@ stack_effect = dis.stack_effect
 
 
 def get_indexof(insts):
+    """
+    Get a mapping from instruction memory address to index in instruction list.
+    Additionally checks that each instruction only appears once in the list.
+    """
     indexof = {}
     for i, inst in enumerate(insts):
+        if id(inst) in indexof:
+            breakpoint()
         assert id(inst) not in indexof
         indexof[id(inst)] = i
     return indexof
@@ -54,18 +60,19 @@ def remove_dead_code(instructions):
     find_live_code(0)
 
     # change exception table entries if start/end instructions are dead
-    # assumes that exception table entries have been propagated, e.g. with
-    # bytecode_transformation.propagate_exn_table_entries
+    # assumes that exception table entries have been propagated,
+    # e.g. with bytecode_transformation.propagate_inst_exn_table_entries,
+    # and that instructions with an exn_tab_entry lies within its start/end.
     if sys.version_info >= (3, 11):
         live_idx = sorted(live_code)
         for i, inst in enumerate(instructions):
             if i in live_code and inst.exn_tab_entry:
-                # find leftmost >=
+                # find leftmost live instruction >= start
                 start_idx = bisect.bisect_left(
                     live_idx, indexof[id(inst.exn_tab_entry.start)]
                 )
                 assert start_idx < len(live_idx)
-                # find rightmost <=
+                # find rightmost live instruction <= end
                 end_idx = (
                     bisect.bisect_right(live_idx, indexof[id(inst.exn_tab_entry.end)])
                     - 1

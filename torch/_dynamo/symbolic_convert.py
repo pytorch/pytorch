@@ -567,7 +567,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
 
-        # Handle blocks in Python 3.11
+        # 3.11 no longer uses a block stack, but we still keep track of one
+        # so that we know which contexts are currently active.
+        # For our purposes, all exception table entries with the same target
+        # are considered to be part of the same "block".
         if sys.version_info >= (3, 11):
             entry = inst.exn_tab_entry
             if not (
@@ -578,18 +581,25 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ):
                 if not entry:
                     # no longer in any block
-                    # It is possible for NOPs to be in a block but not
-                    # be covered by an exception table entry.
+                    # It is possible for NOPs to be between two instructions
+                    # in the same block, but the NOPs are not covered by an
+                    # exception table entry. In this case, assume that we
+                    # are still in the same block.
                     if self.block_stack and inst.opname != "NOP":
+                        # If we really escape from a block and the current
+                        # instruction is not in another block, then there
+                        # should be no other nested blocks that we are in.
                         assert len(self.block_stack) == 1
                         self.block_stack.pop()
                 elif (
+                    # current instruction is in the previous block
                     len(self.block_stack) > 1
                     and self.block_stack[-2].target is entry.target
                 ):
-                    # inst in previous block
+                    # exit the current block
                     self.block_stack.pop()
                 else:
+                    # current instruction is in a new block
                     # push block to stack - note, BEFORE_WITH blocks won't
                     # be pushed here since BEFORE_WITH pushes the block, and
                     # the current instruction would be counted as being in that block.
@@ -1651,8 +1661,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inst.target,
             **VariableTracker.propagate(ctx),
         )
-        # 3.11 no longer uses a block stack, but we still keep track of one
-        # so that we know which contexts are currently active.
+        # see create_call_resume_at for block stack details
         assert self.next_instruction
         assert self.next_instruction.exn_tab_entry
         target = self.next_instruction.exn_tab_entry.target
@@ -1834,6 +1843,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
     ):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
         super().__init__(
             output=OutputGraph(
                 f_globals,
@@ -1921,7 +1931,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
     def match_nested_cell(self, name, cell):
