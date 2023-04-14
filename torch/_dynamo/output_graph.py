@@ -8,17 +8,7 @@ import re
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Union,
-)
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch._guards
 
@@ -700,7 +690,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         return cg.get_instructions()
 
     @property
-    def placeholders(self) -> Iterator[fx.Node]:
+    def placeholders(self) -> List[fx.Node]:
         r = []
         for node in self.graph.nodes:
             if node.op == "placeholder":
