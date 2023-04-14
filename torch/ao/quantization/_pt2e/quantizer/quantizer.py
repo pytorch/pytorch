@@ -64,6 +64,12 @@ QuantizationConfig = NamedTuple(
     ],
 )
 
+OperatorPatternType = Union[
+    Type[torch.nn.Module],
+    types.FunctionType,
+    types.BuiltinFunctionType,
+]
+
 OperatorConfig = NamedTuple(
     "OperatorConfig",
     # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
@@ -78,15 +84,7 @@ OperatorConfig = NamedTuple(
         ("config", QuantizationConfig),
         (
             "operators",
-            List[
-                List[
-                    Union[
-                        Type[torch.nn.Module],
-                        types.FunctionType,
-                        types.BuiltinFunctionType,
-                    ]
-                ]
-            ],
+            List[List[OperatorPatternType]],
         ),
     ],
 )
