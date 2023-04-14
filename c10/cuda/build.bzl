@@ -34,6 +34,7 @@ def define_targets(rules):
         # This library uses registration. Don't let registered
         # entities be removed.
         alwayslink = True,
+        copts = ["-DUSE_BAZEL"],
     )
 
     rules.cc_library(
