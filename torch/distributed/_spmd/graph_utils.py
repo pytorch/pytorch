@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 from enum import Enum
-from typing import Callable, Dict, List, Set, Tuple, Union
+from typing import Callable, cast, Dict, Iterable, List, Set, Tuple, Union
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -111,10 +111,9 @@ def find_node(
     Take a predicate and return all the nodes in the `graph` where the predicate
     holds.
     """
-    nodes = graph.nodes
+    nodes = cast(Iterable[fx.Node], graph.nodes)
     if reverse_order:
-        nodes = reversed(nodes)
-
+        nodes = cast(Iterable[fx.Node], reversed(nodes))
     return [node for node in nodes if predicate(node)]
 
 
