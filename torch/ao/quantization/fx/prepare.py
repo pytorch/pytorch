@@ -804,7 +804,6 @@ def _maybe_insert_output_observer_for_node(
 
     output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
     target_dtype, is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
-    should_insert_observer = (target_dtype is not None)
     should_insert_observer = target_dtype not in _DO_NOT_OBS_DTYPE_LIST + [torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
