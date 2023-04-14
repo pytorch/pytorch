@@ -1652,7 +1652,14 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"{load_dtype} not loaded as float")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes:
+            buffer = V.graph.get_buffer(name)
+            if (
+                load_dtype in [torch.int32, torch.int64]
+                and (buffer.data.layout.size.__len__() == 0)
+                and (index == 0)
+            ):
+                opt_ctx.is_load_int_scalar_tensor = True
+            elif load_dtype not in self.load_supported_dtypes:
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -1954,6 +1961,14 @@ class CppVecKernelChecker(CppVecKernel):
                                 opt_ctx.is_load_uint8_as_float = True
                             elif dtype == torch.float:
                                 pass
+                            elif dtype in [torch.int32, torch.int64] and (
+                                input_value.target == "load"
+                                and V.graph.get_buffer(
+                                    input_value.args[1]
+                                ).data.layout.size.__len__()
+                                == 0
+                            ):
+                                opt_ctx.is_load_int_scalar_tensor = True
                             else:
                                 self.disable_vec(f"to_dtype: dtype {dtype}")
                     elif dtype == torch.bfloat16:

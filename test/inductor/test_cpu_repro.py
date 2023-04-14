@@ -208,6 +208,93 @@ class CPUReproTests(TestCase):
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_dequant_quant_lowering(self):
+        def fn(x, scale, zero_point, use_dequant, use_quant):
+            if use_dequant:
+                x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                    x, scale, zero_point, 0, 255, torch.uint8
+                )
+
+            x = torch.relu(x)
+
+            if use_quant:
+                x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, scale, zero_point, 0, 255, torch.uint8
+                )
+            return x
+
+        use_dequant_list = [False, True]
+        use_quant_list = [False, True]
+        use_tensor_overload_list = [False, True]
+        for use_dequant, use_quant, use_tensor_overload in itertools.product(
+            use_dequant_list, use_quant_list, use_tensor_overload_list
+        ):
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+            )
+            if use_dequant:
+                x = x.to(torch.uint8)
+            zero_point = 100
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point, dtype=torch.int64)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point, use_dequant, use_quant)
+
+                real_out = fn(x, scale, zero_point, use_dequant, use_quant)
+                compiled_out = opt_fn(x, scale, zero_point, use_dequant, use_quant)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_dequant_maxpool2d_lowering(self):
+        def fn(x, scale, zero_point):
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, scale, zero_point, 0, 255, torch.uint8
+            )
+            max_pool2d_with_indices_default = (
+                torch.ops.aten.max_pool2d_with_indices.default(
+                    x, [3, 3], [2, 2], [1, 1]
+                )[0]
+            )
+            return max_pool2d_with_indices_default
+
+        use_tensor_overload_list = [False, True]
+        for use_tensor_overload in use_tensor_overload_list:
+            x = (
+                torch.clamp(
+                    torch.randn((1, 3, 112, 112), dtype=torch.float32) * 100, 0, 255
+                )
+                .to(torch.uint8)
+                .contiguous(memory_format=torch.channels_last)
+            )
+            zero_point = 100
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point, dtype=torch.int64)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point)
+
+                real_out = fn(x, scale, zero_point)
+                compiled_out = opt_fn(x, scale, zero_point)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
     def test_inplace_add_alpha(self):
         def fn(x, y):
             aten.add_.Tensor(x, y, alpha=0.55)
