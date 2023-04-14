@@ -61,7 +61,7 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # control store vs recompute heuristic
-# For fanouts, rematearialization can lead to exponential blowup. So, have
+# For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
@@ -200,7 +200,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = False
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = False

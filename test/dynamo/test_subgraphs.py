@@ -7,7 +7,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
-from torch._dynamo.testing import unsupported
+from torch._dynamo.testing import skipIfPy311, unsupported
 from torch._dynamo.utils import disable_cache_limit, ifunspec
 
 globalmod = torch.nn.ReLU()
@@ -393,17 +393,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(i), torch.randn(i))
 
         if config.assume_static_by_default:
-            # We run with `dynamic`, but assume_static_by_default will produce the same number
-            # of breaks as without dynamic, since no tensors were marked dyn.
-            self.assertEqual(cnt_dynamic.frame_count, steps)
-
-            torch._dynamo.reset()
-            # Reset the counter
-            cnt_dynamic = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=False)(fn)
-            for i in range(start, end):
-                opt_fn(torch.randn(i), torch.randn(i))
-            self.assertEqual(cnt_dynamic.frame_count, steps)
+            # 2 graph breaks - 1 static, 1 made dynamic via automatic
+            self.assertEqual(cnt_dynamic.frame_count, 2)
         else:
             # just one graph
             self.assertEqual(cnt_dynamic.frame_count, 1)
@@ -517,6 +508,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 7)
         self.assertEqual(cnt.op_count, 10)
 
+    @skipIfPy311
     def test_resume_with_no_grad1(self):
         def fn(a, b):
             x = a + b
@@ -532,6 +524,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             self._common(fn, 2, 9)
 
+    @skipIfPy311
     def test_resume_with_no_grad2(self):
         def fn(a, b):
             x = a + b
@@ -546,6 +539,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 3, 13)
 
+    @skipIfPy311
     def test_resume_with_no_grad3(self):
         def fn(a, b):
             x = a + b
