@@ -2471,6 +2471,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         capture_scalar_outputs=True,
+        assume_static_by_default=True,
     )
     def test_sym_contains(self):
         def f(x, y):
