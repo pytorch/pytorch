@@ -40,15 +40,6 @@ class FXGraphModuleExporter(torch.onnx._internal.exporter.Exporter, abc.ABC):
         # Remove them since ONNX inference does not need them.
         module = passes.RemoveInputMutation(module).run(*fx_module_args)
 
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        module = passes.Functionalize(
-            module, enable_dynamic_axes=self.options.dynamic_shapes
-        ).run(*fx_module_args)
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(module).run(*fx_module_args)
-
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes.
         # The pass added nodes with static shape into original node metadata:
         # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
