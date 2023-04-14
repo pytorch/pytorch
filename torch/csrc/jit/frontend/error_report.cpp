@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch::jit {
@@ -11,42 +9,17 @@ namespace torch::jit {
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
 thread_local std::vector<Call> calls;
-
-namespace {
-std::string unwrap_backtrace(const c10::optional<std::string>& backtrace) {
-  if (backtrace.has_value()) {
-    return backtrace.value();
-  }
-  return c10::get_backtrace(/*frames_to_skip=*/1);
-}
-} // namespace
-#else // defined c10_MOBILE
-
-namespace {
-std::string unwrap_backtrace(const c10::optional<std::string>& backtrace) {
-  if (backtrace.has_value()) {
-    return backtrace.value();
-  }
-  return std::string("");
-}
-} // namespace
-
 #endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
       context(e.context),
       the_message(e.the_message),
-      error_stack(e.error_stack.begin(), e.error_stack.end()),
-      backtrace_(e.backtrace_) {}
+      error_stack(e.error_stack.begin(), e.error_stack.end()) {}
 
 #ifndef C10_MOBILE
-ErrorReport::ErrorReport(
-    SourceRange r,
-    const c10::optional<std::string>& backtrace)
-    : context(std::move(r)),
-      error_stack(calls.begin(), calls.end()),
-      backtrace_(unwrap_backtrace(backtrace)) {}
+ErrorReport::ErrorReport(SourceRange r)
+    : context(std::move(r)), error_stack(calls.begin(), calls.end()) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
@@ -62,10 +35,7 @@ ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
 #else // defined C10_MOBILE
-ErrorReport::ErrorReport(
-    SourceRange r,
-    const c10::optional<std::string>& backtrace)
-    : context(std::move(r)), backtrace_(unwrap_backtrace(backtrace)) {}
+ErrorReport::ErrorReport(SourceRange r) : context(std::move(r)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {}
 
@@ -106,10 +76,6 @@ const char* ErrorReport::what() const noexcept {
   context.highlight(msg);
 
   msg << get_stacked_errors(error_stack);
-
-  if (get_cpp_stacktraces_enabled()) {
-    msg << "\n" << backtrace_;
-  }
 
   the_message = msg.str();
   return the_message.c_str();

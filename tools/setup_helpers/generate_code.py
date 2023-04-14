@@ -54,7 +54,6 @@ def generate_code(
         operator_selector = SelectiveBuilder.get_nop_selector()
 
     if subset == "libtorch" or not subset:
-
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,
@@ -86,7 +85,7 @@ def get_selector_from_legacy_operator_selection_list(
     # Internal build doesn't use this flag any more. Only used by OSS
     # build now. Every operator should be considered a root operator
     # (hence generating unboxing code for it, which is consistent with
-    # the current behaviour), and also be considered as used for
+    # the current behavior), and also be considered as used for
     # training, since OSS doesn't support training on mobile for now.
     #
     is_root_operator = True

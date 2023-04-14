@@ -125,7 +125,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     void wait(const std::vector<std::string>& keys) override {
-      store_->wait(keys, Store::kDefaultTimeout);
+      store_->wait(keys, ::c10d::Store::kDefaultTimeout);
     }
 
     void wait(

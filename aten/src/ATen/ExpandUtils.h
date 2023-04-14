@@ -21,6 +21,9 @@
 namespace at {
 
 TORCH_API std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b);
+TORCH_API std::vector<SymInt> infer_size_symint(
+    SymIntArrayRef a,
+    SymIntArrayRef b);
 TORCH_API DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b);
 TORCH_API SymDimVector
 infer_size_symdimvector(SymIntArrayRef a, SymIntArrayRef b);

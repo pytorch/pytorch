@@ -120,7 +120,7 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depricated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
@@ -130,19 +130,15 @@ class TracerBase:
         if fx_traceback.has_preserved_node_meta():
             current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
 
-            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
-            # If other meta fields are needed, they can be added here
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
                 node.stack_trace = stack_trace
-
-            nn_module_stack = current_meta.get("nn_module_stack")
-            if nn_module_stack:
-                node.meta["nn_module_stack"] = nn_module_stack
-
-            source_fn = current_meta.get("source_fn")
-            if source_fn:
-                node.meta["source_fn"] = source_fn
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten"]
+            for field in copy_meta_fields:
+                if field in current_meta:
+                    node.meta[field] = current_meta[field]
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
@@ -205,7 +201,8 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py'
+                    'torch/_refs/nn/functional/__init__.py',
+                    'torch/utils/_stats.py',
                     ]
         while frame:
             frame = frame.f_back
@@ -444,9 +441,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            if isinstance(orig_method, torch._ops.PyOperator):
-                # TODO: Define how to symbolically trace PyOperators
-                raise RuntimeError("Unable to symbolically trace PyOperators")
+            if isinstance(orig_method, torch._ops.HigherOrderOperator):
+                # TODO: Define how to symbolically trace HigherOrderOperators
+                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 

@@ -1,23 +1,23 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorIndexing.h>
-#include <ATen/TensorIterator.h>
-#include <ATen/TensorOperators.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -1416,21 +1416,37 @@ static void addmm_impl_cpu_(
   // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
-  // Apply BLAS routine
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
-      result.scalar_type(), "addmm_impl_cpu_",
-      [&]{
-        using opmath_t = at::opmath_type<scalar_t>;
-        at::native::cpublas::gemm(
-            transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
-            transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
-            m, n, k,
-            alpha.to<opmath_t>(),
-            a.data_ptr<scalar_t>(), lda,
-            b.data_ptr<scalar_t>(), ldb,
-            beta.to<opmath_t>(),
-            c.data_ptr<scalar_t>(), ldc);
-      });
+  bool dispatched = false;
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+  // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
+  // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
+  // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
+  // additionally have support for running kernel with BF16 instructions
+  if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+      // We have dispatched to ACL GEMM for single precision float
+      // so do not need to dispatch to BLAS GEMM below
+      dispatched = true;
+  }
+#endif
+
+  if(!dispatched) {
+    // Apply BLAS routine
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+        result.scalar_type(), "addmm_impl_cpu_",
+        [&]{
+          using opmath_t = at::opmath_type<scalar_t>;
+          at::native::cpublas::gemm(
+              transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+              transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+              m, n, k,
+              alpha.to<opmath_t>(),
+              a.data_ptr<scalar_t>(), lda,
+              b.data_ptr<scalar_t>(), ldb,
+              beta.to<opmath_t>(),
+              c.data_ptr<scalar_t>(), ldc);
+        });
+  }
 
   if (!c.is_same(result)) {
     result.copy_(c);
@@ -1533,14 +1549,16 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   int64_t js = result.size(2);
   int64_t ks = self.size(2);
 
-  scalar_t alpha = alpha_.to<scalar_t>();
-  scalar_t beta = beta_.to<scalar_t>();
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t alpha = alpha_.to<opmath_t>();
+  opmath_t beta = beta_.to<opmath_t>();
 
   auto r0 = result.accessor<scalar_t, 3>();
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {
         auto r1 = r0[b];
@@ -1550,16 +1568,19 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
           auto r2 = r1[i];
           auto s2 = s1[i];
           for (const auto j : c10::irange(js)) {
-            scalar_t &r = r2[j];
+            opmath_t acc_value = 0;//is_bmm ? opmath_t(0) : opmath_t(r2[j]);
+            for (const auto k : c10::irange(ks)) {
+              acc_value += static_cast<opmath_t>(s2[k]) *
+                  static_cast<opmath_t>(m1[k][j]);
+            }
             if (is_bmm) {
-              r = 0;
-              for (const auto k : c10::irange(ks)) {
-                r += s2[k] * m1[k][j];
-              }
+              r2[j] = acc_value;
             } else {
-              r *= beta;
-              for (const auto k : c10::irange(ks)) {
-                r += alpha * s2[k] * m1[k][j];
+              // For beta == 0, the r's value will be ignored, especially for nan value.
+              if (beta == opmath_t{0}) {
+                r2[j] = alpha * acc_value;
+              } else {
+                r2[j] = static_cast<opmath_t>(r2[j]) * beta + alpha * acc_value;
               }
             }
           }

@@ -9,6 +9,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/FbcodeMaps.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/Export.h>
 
 namespace torch {
@@ -190,9 +192,7 @@ class TORCH_API Pickler {
       const IValue& ivalue,
       const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
-  void pushGlobal(
-      const std::string& module_name,
-      const std::string& class_name);
+  void pushGlobal(c10::string_view module_name, c10::string_view class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
@@ -251,7 +251,7 @@ class TORCH_API Pickler {
 
   // Memoization of IValues that have been written (index in table is used for
   // BINPUT opcodes) to enable shared references
-  std::unordered_map<const void*, uint32_t> memoized_ivalue_map_;
+  c10::FastMap<const void*, uint32_t> memoized_ivalue_map_;
 
   // because we de-dup ivalues based on their raw pointer address in the above
   // map we need to keep all the memoized values alive during the pickle.
@@ -271,11 +271,11 @@ class TORCH_API Pickler {
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;
-  std::unordered_map<const void*, uint32_t> memoized_storage_map_;
+  c10::FastMap<const void*, uint32_t> memoized_storage_map_;
 
-  std::unordered_map<std::string, uint32_t> memoized_globals_map_;
-  std::unordered_map<std::string, uint32_t> memoized_strings_map_;
-  std::unordered_map<std::string, uint32_t> memoized_devices_map_;
+  c10::FastMap<std::string, uint32_t> memoized_globals_map_;
+  c10::FastMap<std::string, uint32_t> memoized_strings_map_;
+  c10::FastMap<std::string, uint32_t> memoized_devices_map_;
   // when true, List and Dict objects will be wrapped in a
   // torch.jit._pickle.restore_type_tag call to correctly set the dynamic
   // TorchScript type for the object. When true the thing unpickling must have

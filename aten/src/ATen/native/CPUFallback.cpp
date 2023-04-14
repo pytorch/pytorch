@@ -65,7 +65,7 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
 }
 
 
-void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views) {
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
@@ -176,9 +176,15 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
             } else {
                 dev_str << "<none>";
             }
-            TORCH_WARN(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
-                        "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
-                        "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            if (error_on_views) {
+                TORCH_CHECK(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                            "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
+                            "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            } else {
+                TORCH_WARN(false, "The operator ", op.schema().operator_name(), " appears to be a view operator, ",
+                            "but it has no implementation for the backend \"", dev_str.str(), "\". View operators don't support ",
+                            "falling back to run on the CPU, since the tensor's storage cannot be shared across devices.");
+            }
           }
           // Case (2): copy case. Copy the cpu output tensor to the original device.
 

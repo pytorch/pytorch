@@ -25,19 +25,34 @@ class TestPaternMatcher(TestCase):
 
     def test_addmm(self):
         def fn(a, b, c):
-            return torch.add(a, torch.mm(b, c)), torch.mm(a, b) + c
+            return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
 
-        args = [
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
+        args_list = [
+            (
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+            ),
+            (
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(1, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+            ),
+            (
+                torch.randn(1, 16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+            ),
+            (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
         ]
-        e1, e2 = fn(*args)
-        a1, a2 = torch.compile(fn)(*args)
-        torch.testing.assert_close(a1, e1)
-        torch.testing.assert_close(a2, e2)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        for args in args_list:
+            counters.clear()
+            e1, e2 = fn(*args)
+            a1, a2 = torch.compile(fn)(*args)
+            torch.testing.assert_close(a1, e1)
+            torch.testing.assert_close(a2, e2)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
     def test_cat_mm(self):
         def fn(a, b, c):
@@ -110,6 +125,61 @@ class TestPaternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
+    def test_splitwithsizes_cat(self):
+        # Good case
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        counters.clear()
+
+        # Not all getitems are passed to cat
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 8, 16], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            getitem_2 = split_with_sizes[2]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2 + getitem_2
+
+        args = [
+            torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        counters.clear()
+
+        # Different dimensions  (TODO this case should be handled by replacing with a reshape)
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                a, [8, 8, 8, 8], 1
+            )
+            cat = torch.ops.aten.cat.default(split_with_sizes, 0)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
 
 
 if __name__ == "__main__":

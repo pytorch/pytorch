@@ -18,7 +18,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
       std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
       rpc::ProfilingId profilingId);
 
-  // For receving RPCs. Used in from message when converting a message received
+  // For receiving RPCs. Used in from message when converting a message received
   // over the wire.
   RpcWithProfilingResp(
       rpc::MessageType messageType,

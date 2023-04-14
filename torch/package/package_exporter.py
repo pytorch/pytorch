@@ -670,6 +670,7 @@ class PackageExporter:
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"
+                        or opcode.name == "BINUNICODE"
                         or opcode.name == "BINUNICODE8"
                     ):
                         assert isinstance(arg, str)
@@ -916,7 +917,6 @@ class PackageExporter:
 
     def _persistent_id(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-
             storage: Storage
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can

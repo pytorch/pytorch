@@ -3,9 +3,8 @@
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
 #include <c10/util/Optional.h>
-
+#include <torch/library.h>
 
 // Steps to add op for MPS backend:
 // 1. Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
@@ -29,7 +28,6 @@
 //    g) Then call runMPSGraph() with input params and return the result.
 //
 
-
 namespace at::native {
 
 Tensor& eye_out_mps(int64_t n, Tensor& result) {
@@ -38,7 +36,6 @@ Tensor& eye_out_mps(int64_t n, Tensor& result) {
 }
 
 Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
-
   // This is one example of boiler-plate error checking, taking after CPU/CUDA counterparts
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
@@ -47,33 +44,42 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   result.zero_();
 
   // Handle empty outputs
-  if(result.numel() == 0)
+  if (result.numel() == 0)
     return result;
 
   // Get MPS stream
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
 
+  auto outputDataType = result.scalar_type();
+  ScalarType inputDataType = outputDataType;
+  if (!is_macos_13_or_newer() && outputDataType == kBool) {
+    // workaround for unsupported bool constant on macOS 12.
+    inputDataType = kByte;
+  }
+
   // Derive from MPSCachedGraph
-  // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph time and time again for the same operation
-  // The keys of this structure are based on the inputs and outputs needed for the operation
-  // Here, we don't have any input tensors, just an output tensor
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph
+  // time and time again for the same operation The keys of this structure are based on the inputs and outputs needed
+  // for the operation here, we don't have any input tensors, just an output tensor.
+  // If the operator to be added is unary or binary, instead of creating a new CachedGraph struct yourself, please
+  // consider using `MPSUnaryCachedGraph` or `MPSBinaryCachedGraph` and their corresponding Grad versions in
+  // `OperationUtils.h`.
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* outputTensor_ = nil;
   };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
+    // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types
+    // etc match the earlier created MPSGraph
     string key = "eye_out_mps:" + getTensorsStringKey({result});
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    if(!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
-
-        CachedGraph *newCachedGraph = nil;
+    if (!cachedGraph) {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
         @autoreleasepool {
           // Initialize graph
@@ -81,14 +87,16 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
           newCachedGraph = new CachedGraph(mpsGraph);
           MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
                                                               shape:getMPSShape(result)
-                                                           dataType:getMPSDataType(result.scalar_type())];
+                                                           dataType:getMPSDataType(inputDataType)];
 
           // Here we can call the MPSGraph API needed to execute the operation.
-          // The API details can be found here: https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph
-          MPSGraphTensor* outputTensor = [mpsGraph bandPartWithTensor:onesTensor
-                                                             numLower:0
-                                                             numUpper:0
-                                                                 name:nil];
+          // The API details can be found here:
+          // https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph
+          MPSGraphTensor* outputTensor = [mpsGraph bandPartWithTensor:onesTensor numLower:0 numUpper:0 name:nil];
+
+          if ([outputTensor dataType] != getMPSDataType(outputDataType)) {
+            outputTensor = castMPSTensor(mpsGraph, outputTensor, outputDataType);
+          }
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;
@@ -102,9 +110,8 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     // In this case, there are no inputs, so the feeds are nil
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
     // Run the graph
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
@@ -112,6 +119,5 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
   return result;
 }
-
 
 } // namespace at::native
