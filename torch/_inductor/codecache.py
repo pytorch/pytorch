@@ -496,14 +496,18 @@ def use_custom_generated_macros():
 
 
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
+    pytorch_only=False,
+    gomp=True,
+    macros=True,
+    vec_isa: VecISA = invalid_vec_isa,
+    cuda=False,
 ):
     macros = ""
     if sys.platform == "linux" and (
-        include_pytorch
-        or vec_isa != invalid_vec_isa
+        vec_isa != invalid_vec_isa
         or cuda
         or config.cpp.enable_kernel_profile
+        or pytorch_only
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
@@ -516,10 +520,12 @@ def get_include_and_linking_paths(
         if cuda:
             libs += ["c10_cuda", "cuda", "torch_cuda"]
         else:
-            libs += ["gomp"]
-            macros = vec_isa.build_macro()
+            if gomp:
+                libs += ["gomp"]
             if macros:
-                macros = f"-D{macros}"
+                macros = vec_isa.build_macro()
+                if macros:
+                    macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -555,12 +561,14 @@ def cpp_compile_command(
     output,
     warning_all=True,
     shared=True,
-    include_pytorch=False,
+    pytorch_only=False,
+    gomp=True,
+    macros=True,
     vec_isa: VecISA = invalid_vec_isa,
     cuda=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa, cuda
+        pytorch_only, gomp, macros, vec_isa, cuda
     )
 
     return re.sub(
@@ -662,12 +670,14 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load(cls, source_code, include_pytorch=False):
+    def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
         key, input_path = write(
             source_code,
             "cpp",
-            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+            extra=code_hash(
+                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+            ),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -681,7 +691,7 @@ class CppCodeCache:
                         input=input_path,
                         output=output_path,
                         vec_isa=picked_vec_isa,
-                        include_pytorch=include_pytorch,
+                        pytorch_only=pytorch_only,
                     ).split(" ")
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
@@ -692,6 +702,28 @@ class CppCodeCache:
                 cls.cache[key].key = key
 
         return cls.cache[key]
+
+
+class CppGuardCodeGen(CppCodeCache):
+    @classmethod
+    def load(cls, source_code):
+        key, input_path = write(source_code, "cpp", "")
+        output_path = input_path[:-3] + "so"
+
+        cmd = cpp_compile_command(
+            input=input_path,
+            output=output_path,
+            vec_isa=invalid_vec_isa,
+            pytorch_only=True,
+            gomp=False,
+            macros=False,
+        ).split(" ")
+        try:
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
+
+        return cls._load_library(output_path)
 
 
 class PyCodeCache:

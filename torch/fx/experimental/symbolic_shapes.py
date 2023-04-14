@@ -1903,6 +1903,7 @@ class ShapeEnv:
                     ))
 
         def track_tensor_property(source, val, name = None):
+            # log.info("Registering source", source, val, name)
             guard_compiler.register_source(source, name=name)
             track_symint(source, val)
 
@@ -2003,7 +2004,7 @@ class ShapeEnv:
         if not _simplified:
 
             for symbol, sources in symbol_to_source.items():
-                names_to_sources = [guard_compiler.get_source_info(source).name for source in sources]
+                names_to_sources = [guard_compiler.flat_source_ref(source) for source in sources]
                 r = self.var_to_range[symbol]
 
                 for c in symbol_to_constraints[symbol]:
@@ -2635,9 +2636,44 @@ class GuardCompiler:
         #         - 'modi': implicitly converts the arguments to integer
         #         - 'pydiv': implicitly converts the arguments to double, also returning a double
         cpp_code = f"""\
-#include <torch/python.h>
-#include <torch/csrc/utils/python_numbers.h>
-#include <cmath>
+
+#include <torch/csrc/python_headers.h>
+#include <ATen/core/Tensor.h>
+
+// Python object that backs torch.autograd.Variable
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+struct THPVariable {{
+  PyObject_HEAD;
+  // Payload
+  c10::MaybeOwned<at::Tensor> cdata;
+  // Hooks to be run on backwards pass (corresponds to Python attr
+  // '_backwards_hooks', set by 'register_hook')
+  PyObject* backward_hooks = nullptr;
+}};
+
+extern PyObject *THPVariableClass;
+extern PyObject *ParameterClass;
+
+PyObject * THPVariable_Wrap(at::TensorBase var);
+
+inline bool THPVariable_Check(PyObject *obj)
+{{
+  if (!THPVariableClass)
+      return false;
+
+  const auto result = PyObject_IsInstance(obj, THPVariableClass);
+  AT_ASSERT(result != -1);
+  return result;
+}}
+
+inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {{
+  return *var->cdata;
+}}
+
+inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {{
+  return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
+}}
+
 static int64_t floordiv(double a, double b) {{
     return floor(a / b);
 }}
@@ -2655,10 +2691,10 @@ extern "C" int guard(PyObject** inputs) {{
 
         #     d) Compile the generated C++ source and cache it
         try:
-            from torch._inductor.codecache import CppCodeCache
+            from torch._inductor.codecache import CppGuardCodeGen
             with no_conda_cpp_compiler():
                 start = time.time_ns()
-                fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
+                fn = CppGuardCodeGen.load(cpp_code).guard
                 end = time.time_ns()
                 print("Compile took", (end-start)/ 1_000_000_000, "s")
         except Exception:
