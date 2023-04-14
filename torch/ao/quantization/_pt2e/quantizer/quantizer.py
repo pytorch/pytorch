@@ -1,4 +1,3 @@
-import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, List, NamedTuple, Optional
@@ -103,5 +102,5 @@ class Quantizer(ABC):
     # to convey the desired way of quantization
     @classmethod
     @abstractmethod
-    def get_supported_operators(self) -> List[OperatorConfig]:
+    def get_supported_operators(cls) -> List[OperatorConfig]:
         pass
