@@ -325,29 +325,49 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
+        def generic_call_method_helper(name):
+            # Helper function to put a `call_method` node in FX graph,
+            # with nn.Module as the first arg.
+            mod_proxy = tx.output.create_proxy(
+                "get_attr",
+                self.module_key,
+                tuple(),
+                {},
+            )
+            mod_proxy.node.meta["example_value"] = module
+
+            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    args=(mod_proxy, *proxy_args),
+                    kwargs=proxy_kwargs,
+                ),
+                **options,
+            )
+
         if name == "_call_impl":
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
-        elif name == "forward" and is_allowed(module.__class__):
+        elif name == "forward":
+            assert is_allowed(
+                module.__class__
+            ), "Expected only allowed module forward to call here"
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function,
             # and self.layer is allowed module.
-            # Dynamo puts `call_module` node in FX, doesn't trigger hooks.
-            # For not allowed module, it has been inlined before getting here.
-            from .builder import wrap_fx_proxy
-
+            # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
+            # For not allowed module, it has been inlined before getting here,
+            # see `UserMethodVariable.call_function`.
             with self.record_nn_module_stack(tx, module):
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_module",
-                        self.module_key,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                    **options,
-                )
+                return generic_call_method_helper(name)
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
@@ -573,42 +593,7 @@ class NNModuleVariable(VariableTracker):
                 for x in itertools.chain(args, kwargs.values())
             )
         ):
-            # TODO(voz): Refactor this into a generic as_proxy() for nn module
-            # We use variations of this pattern in a few places now.
-            def make_attr(name):
-                node = tx.output.create_proxy(
-                    "get_attr",
-                    name,
-                    tuple(),
-                    {},
-                )
-                return node
-
-            # Bind in self
-            tx.output.register_attr_or_module(
-                module,
-                self.module_key,
-                self.module_key,
-                source=NNModuleSource(GetItemSource(self.source, self.module_key)),
-                **options,
-            )
-            proxy_for_mod = make_attr(self.module_key)
-            proxy_for_mod.node.meta["example_value"] = module
-
-            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    args=(proxy_for_mod, *proxy_args),
-                    kwargs=proxy_kwargs,
-                ),
-                **options,
-            )
+            return generic_call_method_helper(name)
         else:
             return super().call_method(tx, name, args, kwargs)
 
