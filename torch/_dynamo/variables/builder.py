@@ -839,11 +839,7 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                # TODO: This should be dynamic, as we in general do not
-                # know if bare integers are actually going to be sizevars
-                # and it is inappropriate to eagerly duck size them with
-                # real sizevars
-                dynamic_dim = DimDynamic.DUCK
+                dynamic_dim = DimDynamic.DYNAMIC
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -1130,7 +1126,9 @@ def wrap_to_fake_tensor_and_record(
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(
+            e, is_tensor, guard_source=source.guard_source()
+        )
 
         name = source.name()
 

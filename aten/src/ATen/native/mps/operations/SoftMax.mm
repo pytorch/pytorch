@@ -1,16 +1,18 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
 #endif
 
 namespace at::native {
