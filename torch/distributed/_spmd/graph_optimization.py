@@ -879,7 +879,7 @@ def _split_fused_adam(
     # This is not required but calling this for consistency.
     gm.graph.eliminate_dead_code()
 
-    return tuple(results)
+    return results[0], results[1]
 
 
 def split_fused_optimizer(
