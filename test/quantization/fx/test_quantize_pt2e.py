@@ -41,7 +41,6 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import xfailIfPython311
 
 
 @skipIfNoQNNPACK
