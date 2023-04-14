@@ -30,6 +30,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._spmd.data_parallel import gradients_tagging
 from torch.distributed._spmd.distribute import distribute, Schema
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.parallel_mode import (
@@ -37,7 +38,6 @@ from torch.distributed._spmd.parallel_mode import (
     DTensorExpandMode,
     ParallelMode,
 )
-from torch.distributed._spmd.data_parallel import gradients_tagging
 from torch.distributed._tensor import Placement, Replicate
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
