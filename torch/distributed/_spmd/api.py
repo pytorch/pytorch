@@ -523,9 +523,9 @@ def compile(
             compiled and distributed (usually after the first iteration) to
             transform the compiled GraphModule into a new optimized one.
         parallel_mode (Optional[ParallelMode]): a :class:`ParallelMode` object
-            that specifies how to parallel the callable. Each ParallelMode would
-            has its own strategy to partition the model and the captured graph
-            (Default: ``None``)
+            that specifies how to parallelize the callable. Each ParallelMode
+            would have its own strategy to partition the model and the captured
+            graph (Default: ``None``)
     """
 
     def inner(func: Callable):
@@ -537,11 +537,10 @@ def compile(
             compiled_obj = wrapper.__dict__.get(COMPILED_OBJECT_KEY, None)
             if compiled_obj is None:
                 first_iter = True
-                if parallel_mode is None:
-                    global dtensor_expand_mode
-                    mode: ParallelMode = dtensor_expand_mode
-                else:
-                    mode: ParallelMode = parallel_mode
+                global dtensor_expand_mode
+                mode: ParallelMode = (
+                    dtensor_expand_mode if parallel_mode is None else parallel_mode
+                )
 
                 compiled_obj = _compile(func, module_override, mode, *args, **kwargs)
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
