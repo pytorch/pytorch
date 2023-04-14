@@ -563,6 +563,7 @@ AdamArgs = collections.namedtuple(
 )
 
 
+# TODO(fegin): Have a template class for all Block class.
 @dataclass(unsafe_hash=True)
 class FusedAdamBlock:
     optim_node: fx.Node
@@ -572,6 +573,8 @@ class FusedAdamBlock:
     grad_outputs: List[fx.Node] = field(default_factory=list)
     exp_avgs_outputs: List[fx.Node] = field(default_factory=list)
     exp_avg_sqs_outputs: List[fx.Node] = field(default_factory=list)
+    # TODO(fegin): populate/generate the max_exp_avg_sqs if exists
+    max_exp_avg_sqs: List[fx.Node] = field(default_factory=list)
 
     def generate_outputs(self):
         # Iterate all the args and generate the corresponding output lists.
@@ -652,16 +655,13 @@ class ForeachAddBlock:
         # Iterate all the args and generate the corresponding output lists
         # Assuming the corrsesponding output nodes are not created yet.
         graph = self.add_node.graph
-        with graph.inserting_after(self.add_node):
-            for i, arg in enumerate(cast(Tuple[Any, ...], self.add_node.args[0])):
-                with graph.inserting_after(self.add_node):
-                    updated_arg = graph.call_function(
-                        operator.getitem, (self.add_node, i)
-                    )
-                with graph.inserting_after(updated_arg):
-                    output_copy = graph.call_function(aten.copy_, (arg, updated_arg))
-                self.outputs.append(output_copy)
-            assert self.outputs, f"The output for {self.add_node} is empty."
+        for i, arg in enumerate(cast(Tuple[Any, ...], self.add_node.args[0])):
+            with graph.inserting_after(self.add_node):
+                updated_arg = graph.call_function(operator.getitem, (self.add_node, i))
+            with graph.inserting_after(updated_arg):
+                output_copy = graph.call_function(aten.copy_, (arg, updated_arg))
+            self.outputs.append(output_copy)
+        assert self.outputs, f"The output for {self.add_node} is empty."
 
     def populate_outputs(self):
         # Populate the existing output lists from the graph.
@@ -713,20 +713,22 @@ def get_fused_optimizer_block(optim_node: fx.Node) -> FusedOptimizerBlock:
             if nodes:
                 nodes.append(None)
             continue
-        if node.op == OP.CALL_FUNCTION and str(node.target).startswith(
+        elif node.op == OP.CALL_FUNCTION and str(node.target).startswith(
             "aten._foreach_add"
         ):
             step_node = node
             break
         else:
-            flatten_args, _ = tree_flatten((node.args, node.kwargs))
-            for ancestor in flatten_args:
-                if isinstance(ancestor, fx.Node):
-                    nodes.append(ancestor)
+            nodes.extend(
+                a
+                for a in tree_flatten((node.args, node.kwargs))[0]
+                if isinstance(a, fx.Node)
+            )
     if step_node == optim_node:
         raise RuntimeError(
             "Cannot find step node (foreach_add) for the optimizer node "
-            f"{optim_node}. The API design does not match the tracing graph."
+            f"{optim_node} with {MAX_STEP_DISTANCE} BFS distance. "
+            "The API design does not match the tracing graph."
         )
 
     step = ForeachAddBlock(step_node, generate_output=False)
@@ -779,22 +781,22 @@ def _split_fused_adam(
         # If argument order of step is the same as optimizer, nothing has to be
         # done. However, it is risky to rely on this assumption so we populate
         # the orig_step_indices.
-        old_step_output = optim_args[group_idx].state_steps[-1]
-        assert str(old_step_output.target).startswith(
+        orig_step_output = optim_args[group_idx].state_steps[-1]
+        assert str(orig_step_output.target).startswith(
             "aten.copy_"
-        ), f"The copy output is {old_step_output.target}, expect aten.copy_"
-        old_step_getitem = old_step_output.args[1]
+        ), f"The copy output is {orig_step_output.target}, expect aten.copy_"
+        orig_step_getitem = orig_step_output.args[1]
         assert "getitem" in str(
-            old_step_getitem.target
-        ), f"The copy getitem is {old_step_getitem.target}, expect operator.getitem"
-        old_step_idx = old_step_getitem.args[1]
-        orig_step_indices[group_idx].append(old_step_idx)
+            orig_step_getitem.target
+        ), f"The copy getitem is {orig_step_getitem.target}, expect operator.getitem"
+        orig_step_idx = orig_step_getitem.args[1]
+        orig_step_indices[group_idx].append(orig_step_idx)
 
     if not all(l for l in (orig_step_indices + orig_optim_indices)):
         raise ValueError("At least one split optimizer does not have input.")
 
     output = get_output(gm.graph)
-    result: List[FusedOptimizerBlock] = []
+    results: List[FusedOptimizerBlock] = []
     flatten_output_args, spec = tree_flatten((output.args, output.kwargs))
     flatten_output_args_indices: DefaultDict[
         fx.Node, Set[int]
@@ -854,7 +856,7 @@ def _split_fused_adam(
                 curr_list = getattr(optim_block, name)
                 replace_flatten_output_args(orig_list[orig_idx], curr_list[curr_idx])
 
-        result.append(FusedOptimizerBlock(step_block, optim_block))
+        results.append(FusedOptimizerBlock(step_block, optim_block))
 
     # Optimizer is used as the output of the train_step. Therefore, we have to
     # update the output node of the graph.
@@ -876,7 +878,7 @@ def _split_fused_adam(
     # This is not required but calling this for consistency.
     gm.graph.eliminate_dead_code()
 
-    return result[0], result[1]
+    return tuple(results)
 
 
 def split_fused_optimizer(
