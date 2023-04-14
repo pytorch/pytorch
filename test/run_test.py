@@ -237,6 +237,7 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ]
 
+# The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
@@ -253,6 +254,8 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
+# Test files that should always be run serially with other test files, 
+# but it's okay if the tests inside them are run in parallel with each other.
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
@@ -822,7 +825,7 @@ def get_pytest_args(options):
     pytest_args.extend(rerun_options)
     return pytest_args
 
-
+# What are these for? We need to run them serially for some reason
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
