@@ -313,8 +313,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.bn = torch.nn.BatchNorm2d(1)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -325,7 +325,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         quantizer = QNNPackQuantizer()
         quantizer.set_global(qq.get_default_per_channel_symmetric_qnnpack_operator_spec())
         m = M()
-        example_inputs = (torch.randn(1, 1, 3, 3),)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
         m, guards = torchdynamo.export(
@@ -368,7 +368,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         check_pattern.graph.eliminate_dead_code()
         check_pattern.recompile()
         matcher = SubgraphMatcher(check_pattern.graph)
-        self.assertEquals(len(matcher.match(m.graph)), 1)
+        self.assertEqual(len(matcher.match(m.graph)), 1)
 
     def test_rearrange_weight_observer_for_decomposed_linear(self):
         """
