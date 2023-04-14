@@ -6,7 +6,6 @@
 using namespace c10;
 #ifndef C10_MOBILE
 void check(int64_t value) {
-  EXPECT_TRUE(SymInt::check_range(value));
   const auto i = SymInt(value);
   EXPECT_EQ(i.maybe_as_int(), c10::make_optional(value));
 }

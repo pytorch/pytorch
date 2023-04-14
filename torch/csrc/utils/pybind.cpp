@@ -33,8 +33,8 @@ py::handle type_caster<c10::SymInt>::cast(
   if (auto m = si.maybe_as_int()) {
     return py::cast(*m).release();
   } else {
-    auto* py_node =
-        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImplUnowned());
+    auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(
+        si.toSymNodeImplUnowned());
     if (py_node) {
       // Return the Python directly (unwrap)
       return torch::get_symint_class()(py_node->getPyObj()).release();

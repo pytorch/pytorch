@@ -222,12 +222,18 @@ class C10_API SymInt {
     return c10::nullopt;
   }
 
-  // Return whether the integer is representable as a SymInt.
+  // Return whether the integer is directly coercible to a SymInt
+  // without requiring heap allocation.  You don't need to use this
+  // to check if you can pass an integer to SymInt; this is guaranteed
+  // to work (it just might heap allocate!)
   static bool check_range(int64_t i) {
     return i > MAX_UNREPRESENTABLE_INT;
   }
 
-  // Return the min representable integer as a SymInt
+  // Return the min representable integer as a SymInt without
+  // heap allocation.  For quantities that count bytes (or larger),
+  // this is still much larger than you need, so you may consider
+  // using this as a more efficient version of MIN_INT
   static constexpr int64_t min_representable_int() {
     return MAX_UNREPRESENTABLE_INT + 1;
   }

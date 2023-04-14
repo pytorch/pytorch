@@ -60,19 +60,18 @@ bool SymInt::has_hint() const {
     }                                                                \
   }
 
-// NB: functional deduction is C++14
 // clang-format off
-DEFINE_BINARY(operator+, std::plus<int64_t>(), add, SymInt)
-DEFINE_BINARY(operator-, std::minus<int64_t>(), sub, SymInt)
-DEFINE_BINARY(operator*, std::multiplies<int64_t>(), mul, SymInt)
-DEFINE_BINARY(operator/, std::divides<int64_t>(), floordiv, SymInt)
-DEFINE_BINARY(operator%, std::modulus<int64_t>(), mod, SymInt)
-DEFINE_BINARY(sym_eq, std::equal_to<int64_t>(), eq, SymBool)
-DEFINE_BINARY(sym_ne, std::not_equal_to<int64_t>(), ne, SymBool)
-DEFINE_BINARY(sym_lt, std::less<int64_t>(), lt, SymBool)
-DEFINE_BINARY(sym_le, std::less_equal<int64_t>(), le, SymBool)
-DEFINE_BINARY(sym_gt, std::greater<int64_t>(), gt, SymBool)
-DEFINE_BINARY(sym_ge, std::greater_equal<int64_t>(), ge, SymBool)
+DEFINE_BINARY(operator+, std::plus<>(), add, SymInt)
+DEFINE_BINARY(operator-, std::minus<>(), sub, SymInt)
+DEFINE_BINARY(operator*, std::multiplies<>(), mul, SymInt)
+DEFINE_BINARY(operator/, std::divides<>(), floordiv, SymInt)
+DEFINE_BINARY(operator%, std::modulus<>(), mod, SymInt)
+DEFINE_BINARY(sym_eq, std::equal_to<>(), eq, SymBool)
+DEFINE_BINARY(sym_ne, std::not_equal_to<>(), ne, SymBool)
+DEFINE_BINARY(sym_lt, std::less<>(), lt, SymBool)
+DEFINE_BINARY(sym_le, std::less_equal<>(), le, SymBool)
+DEFINE_BINARY(sym_gt, std::greater<>(), gt, SymBool)
+DEFINE_BINARY(sym_ge, std::greater_equal<>(), ge, SymBool)
 DEFINE_BINARY(min, std::min, sym_min, SymInt)
 DEFINE_BINARY(max, std::max, sym_max, SymInt)
 // clang-format on
