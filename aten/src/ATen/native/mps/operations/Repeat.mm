@@ -1,9 +1,9 @@
 //  Copyright © 2022 Apple Inc.
-#include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Repeat.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
 #ifdef __OBJC__
