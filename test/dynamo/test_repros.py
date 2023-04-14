@@ -15,6 +15,7 @@ import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
+from functools import wraps
 from typing import List
 
 import numpy as np
@@ -53,6 +54,20 @@ requires_cuda = functools.partial(
 
 
 _GLOBAL_CPU_TENSOR = torch.randn(3)
+
+
+def exists(val):
+    return val is not None
+
+
+def maybe(fn):
+    @wraps(fn)
+    def inner(x, *args, **kwargs):
+        if not exists(x):
+            return x
+        return fn(x, *args, **kwargs)
+
+    return inner
 
 
 def is_fx_tracing_test() -> bool:
@@ -2743,6 +2758,37 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
         opt_fn(torch.randn(3, 1, 1, 1, 1))
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_dalle2_maybe(self):
+        def normalize(x):
+            return x.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, normalize_img):
+            lowres_cond_img = x.sin()
+            lowres_cond_img = maybe(normalize_img)(lowres_cond_img)
+            return lowres_cond_img
+
+        self.assertEqual(fn(torch.ones([]), normalize), torch.ones([]).sin().cos())
+
+    @skipIfPy311
+    def test_functools_wraps(self):
+        def cool_name(x):
+            return x.sin()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = x.cos()
+
+            @functools.wraps(cool_name)
+            def uncool_name():
+                return cool_name(y)
+
+            return uncool_name
+
+        result = fn(torch.ones([]))
+        self.assertEqual(result.__name__, "cool_name")
+        self.assertEqual(result(), torch.ones([]).cos().sin())
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_float_guard(self):
