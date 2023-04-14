@@ -81,7 +81,8 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             opt_ctx.dtype = _node.args[-1]
         elif _node.target == "reduction":
             reduction_type = _node.args[4]
-            opt_ctx.dtype = reduction_to_dtype[reduction_type]
+            if reduction_type in reduction_to_dtype:
+                opt_ctx.dtype = reduction_to_dtype[reduction_type]
         elif _node.target == "load":
             opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
         if opt_ctx.dtype is not None:
