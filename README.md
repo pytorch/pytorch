@@ -62,6 +62,8 @@ Usually, PyTorch is used either as:
 
 Elaborating Further:
 
+
+
 ### A GPU-Ready Tensor Library
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
