@@ -28,7 +28,12 @@ def supported_symmetric_quantized_operators() -> Dict[
     str,
     List[List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]],
 ]:
-    supported_operators = {
+    supported_operators: Dict[
+        str,
+        List[
+            List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]
+        ],
+    ] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -58,7 +63,9 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     ]:
         ops = supported_symmetric_quantized_operators()
         for op_string, pattern_list in ops.items():
-            supported_config_and_operators.append(OperatorConfig(quantization_config, pattern_list))
+            supported_config_and_operators.append(
+                OperatorConfig(quantization_config, pattern_list)
+            )
     return copy.deepcopy(supported_config_and_operators)
 
 
@@ -128,7 +135,10 @@ def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     assert quantization_config is not None
     quantization_spec: QuantizationSpec = quantization_config.activation
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
-    assert quantization_spec.qscheme in [torch.per_tensor_affine, torch.per_tensor_symmetric]
+    assert quantization_spec.qscheme in [
+        torch.per_tensor_affine,
+        torch.per_tensor_symmetric,
+    ]
     if not quantization_spec.is_dynamic:
         return HistogramObserver.with_args(
             dtype=qdtype,
@@ -167,7 +177,9 @@ def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig])
             eps=2**-12,
         )
     else:
-        raise Exception("Unsupported quantization_spec for weight: {}".format(quantization_spec))
+        raise Exception(
+            "Unsupported quantization_spec for weight: {}".format(quantization_spec)
+        )
 
 
 def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
@@ -218,7 +230,9 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_quantization_config(
         cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[str]:
+    ) -> List[
+        List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]
+    ]:
         if quantization_config is None:
             all_ops = []
             for _, ops in cls.supported_config_and_operators:
@@ -238,7 +252,7 @@ class QNNPackQuantizer(Quantizer):
     def set_global(
         self, quantization_config: Optional[QuantizationConfig]
     ) -> QNNPackQuantizer:
-        self.global_config : Optional[QuantizationConfig] = quantization_config
+        self.global_config = quantization_config
         return self
 
     def set_config_for_operator_type(
@@ -415,7 +429,10 @@ class QNNPackQuantizer(Quantizer):
         }
 
     def _annotate_input_out_obs_sharing_op(
-        self, op: Callable, node: Node, quantization_config: Optional[QuantizationConfig]
+        self,
+        op: Callable,
+        node: Node,
+        quantization_config: Optional[QuantizationConfig],
     ) -> None:
         io_obs_sharing_node = node
         if (
