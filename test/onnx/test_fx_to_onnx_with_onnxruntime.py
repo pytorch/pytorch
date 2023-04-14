@@ -618,9 +618,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.skip_fx_exporters(
         {
-            DynamoExporter: (
-                "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
-            ),
             DynamoOptimizeExporter: (
                 "RuntimeError: The two modules have different number of arguments. "
                 "module: 1, reference_module: 0"
