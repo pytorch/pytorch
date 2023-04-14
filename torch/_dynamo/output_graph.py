@@ -213,7 +213,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state['_id'],
+                frame_id=frame_state["_id"],
             )
             if config.dynamic_shapes
             else None,

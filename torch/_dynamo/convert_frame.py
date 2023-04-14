@@ -223,8 +223,8 @@ def convert_frame_assert(
     ):
         increment_frame()
         global FRAME_COUNTER
-        if '_id' not in frame_state:
-            frame_state['_id'] = FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
             FRAME_COUNTER += 1
 
         code = frame.f_code
