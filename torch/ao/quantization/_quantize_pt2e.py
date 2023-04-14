@@ -13,7 +13,7 @@ from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization._pt2e.quantizer import Quantizer
 from torch.ao.quantization.backend_config import BackendConfig
 
-from typing import Tuple, Any, Dict
+from typing import Any, Tuple
 
 def prepare_pt2e(
     model: GraphModule,
@@ -21,8 +21,7 @@ def prepare_pt2e(
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
 ):
-    # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, Tuple[str, type]] = _build_node_name_to_scope(model)
+    node_name_to_scope = _build_node_name_to_scope(model)
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -48,13 +47,14 @@ def prepare_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
 ):
+    node_name_to_scope = _build_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    model = prepare(model, is_qat=False)
+    model = prepare(model, node_name_to_scope, is_qat=False)
     # TODO: remove hack when we have better support for pattern matching
     # move around the observer for addmm
     _rearrange_weight_observer_for_decomposed_linear(model)
@@ -65,13 +65,14 @@ def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
 ):
+    node_name_to_scope = _build_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
-    model = prepare(model, is_qat=True)
+    model = prepare(model, node_name_to_scope, is_qat=True)
     # TODO: remove hack when we have better support for pattern matching
     # move around the observer for addmm
     _rearrange_weight_observer_for_decomposed_linear(model)
