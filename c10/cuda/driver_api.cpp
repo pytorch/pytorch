@@ -1,4 +1,4 @@
-#ifndef _WIN32
+#if !defined(USE_ROCM) && !defined(_WIN32)
 
 #include <c10/cuda/driver_api.h>
 #include <c10/util/Exception.h>
