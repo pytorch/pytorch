@@ -1,12 +1,9 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import itertools
 from typing import List
 
 import torch
 import torch._dynamo as torchdynamo
-import torch.nn as nn
-from torch._inductor.compile_fx import compile_fx
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import observer, QConfigMapping
 from torch.ao.quantization._pt2e.quantizer import (
@@ -14,21 +11,12 @@ from torch.ao.quantization._pt2e.quantizer import (
     QNNPackQuantizer,
     Quantizer,
 )
-from torch.ao.quantization._quantize_pt2e import (
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_pt2e_quantizer,
-)
+from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 
-from torch.ao.quantization.qconfig import (
-    default_per_channel_symmetric_qnnpack_qconfig,
-)
-from torch.ao.quantization.quantize_fx import (
-    convert_to_reference_fx,
-    prepare_fx,
-)
+from torch.ao.quantization.qconfig import default_per_channel_symmetric_qnnpack_qconfig
+from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
