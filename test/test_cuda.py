@@ -1703,8 +1703,7 @@ except RuntimeError as e:
     def test_get_set_rng_state_offset(self):
         before = torch.cuda.get_rng_state()
         torch.cuda.set_rng_state_offset(100)
-        after = torch.cuda.get_rng_state()
-        offset = after[8:].view(dtype=torch.int64)
+        offset = torch.cuda.get_rng_state_offset()
         torch.cuda.set_rng_state(before)
         self.assertEqual(offset, 100)
 
