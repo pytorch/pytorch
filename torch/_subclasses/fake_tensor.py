@@ -15,9 +15,9 @@ from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
-    is_boolean_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
