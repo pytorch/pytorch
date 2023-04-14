@@ -941,7 +941,7 @@ class TestTensorCreation(TestCase):
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
 
-   def _float_to_int_conversion_helper(self, vals, device, dtype, refs=None):
+    def _float_to_int_conversion_helper(self, vals, device, dtype, refs=None):
         if refs is None:
             a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
             refs = torch.from_numpy(a)
