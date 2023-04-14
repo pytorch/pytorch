@@ -7,6 +7,7 @@
 #include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
+#include <ATen/native/vulkan/ops/Register.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -14,6 +15,26 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
+
+int register_vulkan_conv2d_packed_context() {
+  static auto register_vulkan_conv2d_context =
+      torch::selective_class_<Conv2dPackedContext>(
+          "vulkan", TORCH_SELECTIVE_CLASS("Conv2dPackedContext"))
+          .def_pickle(
+              // __getstate__
+              [](const c10::intrusive_ptr<Conv2dPackedContext>& context) {
+                // context is packed
+                return context->unpack();
+              },
+              // __setstate__
+              [](c10::impl::GenericList state) {
+                // state is unpacked
+                return c10::make_intrusive<Conv2dPackedContext>(
+                    Conv2dPackedContext::pack(state));
+              });
+  return 0;
+}
+
 namespace {
 
 TORCH_LIBRARY(vulkan, m) {
@@ -69,19 +90,7 @@ TORCH_LIBRARY(vulkan, m) {
             return c10::make_intrusive<LstmPackedContext>(
                 LstmPackedContext::pack(state));
           });
-  m.class_<Conv2dPackedContext>("Conv2dPackedContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<Conv2dPackedContext>& context) {
-            // context is packed
-            return context->unpack();
-          },
-          // __setstate__
-          [](c10::impl::GenericList state) {
-            // state is unpacked
-            return c10::make_intrusive<Conv2dPackedContext>(
-                Conv2dPackedContext::pack(state));
-          });
+  register_vulkan_conv2d_packed_context();
   // To maintain backwards compatibility.
   m.class_<Conv2dOpContext>("Conv2dOpContext")
       .def_pickle(
