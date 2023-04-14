@@ -32,9 +32,7 @@ computation and vmap rules.
 __all__ = ["custom_op", "CustomOp"]
 
 
-SUPPORTED_DEVICE_TYPES = ("cpu", "cuda")
-
-DEVICE_TYPE_TO_KEY = {
+SUPPORTED_DEVICE_TYPE_TO_KEY = {
     "cpu": "CPU",
     "cuda": "CUDA",
 }
@@ -116,6 +114,7 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
         schema_str = f"{func.__name__}{schema}"
         function_schema = FunctionSchema.parse(schema_str)
         validate_schema(function_schema)
+        validate_function_matches_schema(function_schema, func)
 
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
@@ -166,7 +165,7 @@ class CustomOp:
         self.__name__ = None  # mypy requires this
 
     def __repr__(self):
-        raise RuntimeError("Please don't call this")
+        return f'<CustomOp(op="{self._namespaced_opname}")>'
 
     def __call__(self, *args, **kwargs):
         # Bypass torch.ops.* and directly do OperatorHandle::callBoxed.
@@ -221,7 +220,7 @@ class CustomOp:
 
         def inner(f):
             for device_type in set(device_types):
-                dispatch_key = DEVICE_TYPE_TO_KEY[device_type]
+                dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
 
@@ -290,8 +289,8 @@ def validate_schema(schema: FunctionSchema) -> None:
     # Coming in the future. Requires us to have correct logic for
     # the ADInplaceOrView key
     if schema.kind() != SchemaKind.functional:
-        raise NotImplementedError(
-            f"NYI: custom_op does not support non-functional function schema. Got: {schema}"
+        raise ValueError(
+            f"custom_op does not support non-functional function schema. Got: {schema}"
         )
 
     rets = schema.returns
@@ -299,19 +298,26 @@ def validate_schema(schema: FunctionSchema) -> None:
         r.annotation is not None and not r.annotation.is_write for r in rets
     )
     if is_non_mutating_view:
-        raise NotImplementedError(
-            f"NYI: custom_op does not support view functions. Got: {schema}"
+        raise ValueError(
+            f"custom_op does not support view functions. Got: {schema}"
         )
 
     # Requires us to have handling for factory functions
     if not schema.arguments.has_tensor_arg():
-        raise NotImplementedError(
-            f"NYI: custom_op does not support function schema with no Tensor inputs. Got: {schema}"
+        raise ValueError(
+            f"custom_op does not support function schema with no Tensor inputs. Got: {schema}"
         )
     # Just seems weird so banning for now
     if not schema.returns:
-        raise NotImplementedError(
-            f"NYI: custom_op does not support function schema with no outputs. Got: {schema}"
+        raise ValueError(
+            f"custom_op does not support function schema with no outputs. Got: {schema}"
+        )
+
+    # For simplicity: don't allow self arguments
+    if schema.arguments.self_arg is not None:
+        raise ValueError(
+            f"custom_op does not support arguments named 'self'. Please "
+            f"rename your argument. Got: {schema}"
         )
 
 
@@ -323,10 +329,10 @@ def parse_namespace(namespaced_entity: str) -> typing.Tuple[str, str]:
 
 
 def validate_device_type(device_type: str) -> None:
-    if device_type not in SUPPORTED_DEVICE_TYPES:
+    if device_type not in SUPPORTED_DEVICE_TYPE_TO_KEY:
         raise ValueError(
             f"CustomOp.impl(device_types=[{device_type}, ...]): we only support device_type "
-            f"in {SUPPORTED_DEVICE_TYPES}."
+            f"in {SUPPORTED_DEVICE_TYPE_TO_KEY.keys()}."
         )
 
 
@@ -336,7 +342,6 @@ def get_autograd_not_implemented_kernel(custom_op) -> typing.Callable:
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
         ):
             raise RuntimeError("Autograd has not been implemented for operator")
-        # TODO(rzou): RAII guard should be contextmanager, or else bad things will happen
         guard = _C._AutoDispatchBelowAutograd()
         try:
             return custom_op(*args, **kwargs)
@@ -344,3 +349,20 @@ def get_autograd_not_implemented_kernel(custom_op) -> typing.Callable:
             del guard
 
     return autograd_not_implemented
+
+
+def validate_function_matches_schema(schema: FunctionSchema, func: typing.Callable) -> None:
+    arg_spec = inspect.getfullargspec(func)
+
+    arg_names = tuple(arg.name for arg in schema.arguments.post_self_positional)
+    if arg_names != tuple(arg_spec.args):
+        raise ValueError(
+            f"custom_op: Expected the schema to match the signature of `func`. "
+            f"Schema has arg names {arg_names} but function has {arg_spec.args}.")
+
+    kwonlyarg_names = tuple(arg.name for arg in schema.arguments.pre_tensor_options_kwarg_only)
+    if kwonlyarg_names != tuple(arg_spec.kwonlyargs):
+        raise ValueError(
+            f"custom_op: Expected the schema to match the signature of `func`. "
+            f"Schema has kwonlyarg names {kwonlyarg_names} but function has "
+            f"{arg_spec.kwonlyargs}.")

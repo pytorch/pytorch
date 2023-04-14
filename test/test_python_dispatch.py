@@ -373,26 +373,61 @@ class TestCustomOp(TestCase):
             def foo(x):
                 ...
 
-    def test_not_yet_supported_schemas(self):
+    def test_unsupported_schemas(self):
         def foo(x):
             ...
 
-        with self.assertRaisesRegex(NotImplementedError, 'does not support non-functional'):
+        with self.assertRaisesRegex(ValueError, 'does not support non-functional'):
             custom_op('(Tensor(a!) x) -> Tensor(a)', ns='_torch_testing')(foo)
-        with self.assertRaisesRegex(NotImplementedError, 'does not support view functions'):
+        with self.assertRaisesRegex(ValueError, 'does not support view functions'):
             custom_op('(Tensor(a) x) -> Tensor(a)', ns='_torch_testing')(foo)
-        with self.assertRaisesRegex(NotImplementedError, 'no Tensor inputs'):
+        with self.assertRaisesRegex(ValueError, 'no Tensor inputs'):
             custom_op('() -> Tensor', ns='_torch_testing')(foo)
-        with self.assertRaisesRegex(NotImplementedError, 'no Tensor inputs'):
+        with self.assertRaisesRegex(ValueError, 'no Tensor inputs'):
             custom_op('(int[] shape) -> Tensor', ns='_torch_testing')(foo)
-        with self.assertRaisesRegex(NotImplementedError, 'no outputs'):
+        with self.assertRaisesRegex(ValueError, 'no outputs'):
             custom_op('(Tensor x) -> ()', ns='_torch_testing')(foo)
+        with self.assertRaisesRegex(ValueError, 'self'):
+            custom_op('(Tensor self) -> ()', ns='_torch_testing')(foo)
+
+    def test_schema_matches_signature(self):
+        with self.assertRaisesRegex(ValueError, 'match the signature'):
+            @custom_op('(Tensor y) -> Tensor', ns='_torch_testing')
+            def blah(x):
+                pass
+
+        with self.assertRaisesRegex(ValueError, 'match the signature'):
+            @custom_op('(Tensor x, *, Tensor y) -> Tensor', ns='_torch_testing')
+            def blah2(x, y):
+                pass
+
+        with self.assertRaisesRegex(ValueError, 'match the signature'):
+            @custom_op('(Tensor x, *, Tensor w, Tensor z) -> Tensor', ns='_torch_testing')
+            def blah3(x, *, y, z):
+                pass
+
+        with self.assertRaisesRegex(ValueError, 'match the signature'):
+            @custom_op('(Tensor x, *, Tensor z, Tensor y) -> Tensor', ns='_torch_testing')
+            def blah4(x, *, y, z):
+                pass
+
+        # kwonly-arg works
+        @custom_op('(Tensor x, *, Tensor y) -> Tensor', ns='_torch_testing')
+        def blah5(x, *, y):
+            pass
+
+        del blah5
 
     def test_custom_op_behaves_like_function(self):
         from torch.testing._internal.custom_op_db import numpy_mul
         self.assertEqual(numpy_mul.__name__, 'numpy_mul')
         self.assertEqual(numpy_mul.__module__, 'torch.testing._internal.custom_op_db')
         self.assertTrue(callable(numpy_mul))
+
+    def test_custom_op_repr(self):
+        from torch.testing._internal.custom_op_db import numpy_mul
+        expected = '<CustomOp(op="_torch_testing::numpy_mul")>'
+        self.assertEqual(repr(numpy_mul), expected)
 
     def test_supported_schemas(self):
         # All of these should already be tested by PyTorch codegen
@@ -404,6 +439,8 @@ class TestCustomOp(TestCase):
             '(Tensor x) -> (Tensor, Tensor)',
             '(Tensor x) -> (Tensor y, Tensor z)',
             '(Tensor x) -> (Tensor y, Tensor z)',
+        ]
+        other_schemas = [
             '(Tensor x, Tensor w) -> (Tensor y, Tensor z)',
             '(Tensor x, Tensor w) -> (Tensor, Tensor)',
             '(Tensor x, Tensor w) -> Tensor',
@@ -417,11 +454,17 @@ class TestCustomOp(TestCase):
             '(Tensor x, bool[] w) -> Tensor',
         ]
 
-        def foo(*args, **kwargs):
+        def foo(x):
+            ...
+
+        def bar(x, w):
             ...
 
         for schema in schemas:
             op = custom_op(schema, ns='_torch_testing')(foo)
+            del op
+        for schema in other_schemas:
+            op = custom_op(schema, ns='_torch_testing')(bar)
             del op
 
     def test_reserved_ns(self):
@@ -483,7 +526,7 @@ class TestCustomOp(TestCase):
         del foo
 
         @custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
-        def foo(x):
+        def foo(x, y):
             ...
 
         x = torch.randn(3, requires_grad=True)
@@ -515,9 +558,9 @@ class TestCustomOp(TestCase):
         def foo_impl(x):
             return x.sin()
 
-        from torch._custom_op import SUPPORTED_DEVICE_TYPES
+        from torch._custom_op import SUPPORTED_DEVICE_TYPE_TO_KEY
 
-        for device_type in SUPPORTED_DEVICE_TYPES:
+        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
             # Smoke test: should not raise error
             foo.impl(device_type)(foo_impl)
 

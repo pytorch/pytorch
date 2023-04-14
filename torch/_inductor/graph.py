@@ -248,7 +248,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     def disable_cpp_wrapper(self, cond):
         self.cpp_wrapper = False
-        assert not self.aot_mode, "AOT compilation failed"
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -428,6 +427,7 @@ class GraphLowering(torch.fx.Interpreter):
                     type(None),
                     ir.ConstantBuffer,
                     sympy.Expr,
+                    sympy.Rel,
                     int,
                 ),
             )
@@ -603,6 +603,9 @@ class GraphLowering(torch.fx.Interpreter):
             cuda = device == "cuda"
             self.check_cpp_wrapper(cuda)
             # Re-check self.cpp_wrapper because it might be disabled due to failed checking
+            if cuda:
+                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
+
             if self.cpp_wrapper:
                 self.wrapper_code = (
                     CudaWrapperCodeGen() if cuda else CppWrapperCodeGen()
