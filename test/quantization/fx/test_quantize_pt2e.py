@@ -340,6 +340,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         # Verify that the subgraph was replaced successfully with observers inserted
         # Do this by matching against the fused QAT pattern with observers manually inserted
+        # TODO: insert fake quantizes, not observers
         fused_pattern_example_inputs = (
             torch.randn(1, 1, 3, 3),  # x
             torch.randn(1, 1, 1, 1),  # conv_weight
