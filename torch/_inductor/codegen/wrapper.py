@@ -198,8 +198,11 @@ class WrapperCodeGen(CodeGen):
         self.need_seed = False
         self.declare = ""
         self.ending = ""
+        self.open_bracket = "["
+        self.closed_bracket = "]"
         self.comment = "#"
         self.namespace = ""
+        self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
 
@@ -326,9 +329,12 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
-    def generate_extern_kernel_out(
-        self, output_view, codegen_reference, args, kernel, cpp_kernel
-    ):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+        self.writeline(
+            f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
+        )
+
+    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
             args.append(f"out={output_view.codegen_reference()}")
         else:
@@ -339,7 +345,6 @@ class WrapperCodeGen(CodeGen):
         self,
         name,
         kernel,
-        cpp_kernel,
         codegen_args,
         cpp_op_schema,
         cpp_kernel_key,
@@ -562,7 +567,7 @@ class WrapperCodeGen(CodeGen):
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def wrap_kernel_call(self, name, call_args):
-        return "{}({})".format(name, ", ".join(call_args))
+        return f"{name}({', '.join(call_args)}){self.ending}"
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
@@ -585,6 +590,9 @@ class WrapperCodeGen(CodeGen):
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
+
+    def val_to_str(self, s):
+        return repr(s)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
@@ -706,8 +714,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         super().__init__()
         self.declare = "auto "
         self.ending = ";"
+        self.open_bracket = "{"
+        self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
+        self.none_str = "at::Tensor()"
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
@@ -737,17 +748,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 '''
                 """
             )
-
-    @cache_on_self
-    def get_output_refs(self):
-        from ..ir import NoneAsConstantBuffer
-
-        return [
-            "at::Tensor()"
-            if isinstance(x, NoneAsConstantBuffer)
-            else x.codegen_reference()
-            for x in V.graph.graph_outputs
-        ]
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
@@ -806,9 +806,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
         self.header.splice(f"\n{kernel}\n")
-
-    def wrap_kernel_call(self, name, call_args):
-        return f"{name}({', '.join(call_args)});"
 
     def generate_return(self, output_refs):
         self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -873,9 +870,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
 
-    def generate_extern_kernel_out(
-        self, output_view, codegen_reference, args, kernel, cpp_kernel
-    ):
+    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
             output_as_strided = f"{output_view.codegen_reference()}"
             output_name = f"{output_view.get_name()}_as_strided"
@@ -884,7 +879,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, output_name)
         else:
             args.insert(0, f"{codegen_reference}")
-        self.writeline(f"{cpp_kernel}({', '.join(args)});")
+        self.writeline(self.wrap_kernel_call(kernel, args))
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .cpp import cexpr
@@ -927,7 +922,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self,
         name,
         kernel,
-        cpp_kernel,
         codegen_args,
         cpp_op_schema,
         cpp_kernel_key,
@@ -939,7 +933,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     static auto op_{cpp_kernel_key} =
     c10::Dispatcher::singleton()
         .findSchemaOrThrow(
-            \"{cpp_kernel}\",
+            \"{kernel}\",
             \"{cpp_kernel_overload_name}\")
         .typed<{cpp_op_schema}>();
             """
@@ -949,6 +943,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
+
+    def val_to_str(self, s):
+        if s is None:
+            return self.none_str
+        elif isinstance(s, bool):
+            return "true" if s else "false"
+        elif isinstance(s, str):
+            return f'"{s}"'
+        elif isinstance(s, (List, Tuple)):
+            vals = ", ".join(list(map(self.val_to_str, s)))
+            return f"{{{vals}}}"
+        else:
+            return repr(s)
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):
@@ -969,12 +976,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 
-            #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                                     \
-            do {                                                                            \
-                CUresult __err = EXPR;                                                      \
-                if (__err != CUDA_SUCCESS) {                                                \
-                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));               \
-                }                                                                           \
+            #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                         \\
+            do {                                                                \\
+                CUresult __err = EXPR;                                          \\
+                if (__err != CUDA_SUCCESS) {                                    \\
+                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));   \\
+                }                                                               \\
             } while (0)
 
             static inline CUfunction loadKernel(const std::string &filePath,

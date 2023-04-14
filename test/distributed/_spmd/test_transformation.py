@@ -243,9 +243,7 @@ class TransformationTest(DTensorTestBase):
 
         def my_transformation(gm):
             gm = IterGraphModule(gm)
-            # We have to set this to num_iters - 1 to trigger cleanup graph.
-            # The first iteration is used for compilation and expansion.
-            gm.setup(num_iters - 1)
+            gm.setup(num_iters)
             comm_fusion_with_concat(gm, 100)
             schedule_comm_wait(gm)
             remove_copy_from_optimizer(gm)

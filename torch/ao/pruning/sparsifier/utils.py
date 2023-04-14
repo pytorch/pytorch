@@ -115,7 +115,7 @@ def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str,
 # Parametrizations
 class FakeSparsity(nn.Module):
     r"""Parametrization for the weights. Should be attached to the 'weight' or
-    any other parmeter that requires a mask applied to it.
+    any other parameter that requires a mask applied to it.
 
     Note::
 
