@@ -2022,10 +2022,9 @@ class BufferList(IRNode):
         super().__init__()
         self.name = V.graph.register_buffer(self)
         self.buffers = [
-            ListElemBuffer(layout, self, i)
-            for i, layout in enumerate(self.data.layouts)
+            ListElemBuffer(layout, self, i) for i, layout in enumerate(data.layouts)
         ]
-        names = [t.name for t in self.data.buffers]
+        names = [t.name for t in self.buffers]
         self.list_name = V.graph.register_list(names)
         self.data = data
 
@@ -2088,7 +2087,7 @@ class BufferList(IRNode):
             # write out intermediate, so that we properly support
             # returning an intermediate but fusing the rest of
             # the foreach computation
-            ops.store(self.list_name, result)
+            ops.store(self.list_name, None, result)
             return result
 
         return fn
@@ -3988,67 +3987,74 @@ class StorageBox(MutableBox):
         return len(read_writes.reads)
 
 
+class TensorListInputsWrapper:
+    def __init__(self, tensor_boxes: List[TensorBox]):
+        self.list_name = V.graph.register_list([t.data.realize() for t in tensor_boxes])
+        self.tensor_boxes = tensor_boxes
+
+    def make_loader(self):
+        def fn():
+            return ops.load(self.list_name, sympy.Symbol("fake"))
+
+        return fn
+
+    def __getitem__(self, ind):
+        return self.tensor_boxes[ind]
+
+    def get_layouts(self):
+        return [t.data.get_layout() for t in self.tensor_boxes]
+
+    def realize(self):
+        return self.list_name
+
+
 # This class is used to represent a list of tensors
 # Since each list provided as args to a kernel is a
 # different immmutable list object of tensors
 # this is used to track which lists are passed to foreach ops
 # and ensure the same list of args is mapped to the same TensorList
 class TensorList(IRNode):
-    def __init__(self, tensor_boxes, name=None):
-        self.data: Union[ForeachPointwise, list[TensorBox], BufferList] = tensor_boxes
-        self.name = name
+    def __init__(self, tensor_boxes):
+        self.data: Union[
+            ForeachPointwise, TensorListInputsWrapper, BufferList
+        ] = tensor_boxes
 
     @classmethod
     def create(cls, tensor_boxes):
+        assert isinstance(tensor_boxes, (list, TensorList, ForeachPointwise))
+        # if upstream is a foreach op, we don't need to wrap it
         if isinstance(tensor_boxes, TensorList):
             return tensor_boxes
 
-        if not isinstance(tensor_boxes, ForeachPointwise):
-            names = [t.data.realize() for t in tensor_boxes]
-            cls(tensor_boxes, V.graph.register_list(names))
-        else:
-            return cls(tensor_boxes)
+        if isinstance(tensor_boxes, list):
+            tensor_boxes = TensorListInputsWrapper(tensor_boxes)
+
+        return cls(tensor_boxes)
 
     def __getitem__(self, ind):
         self.realize()
         assert isinstance(self.data, BufferList)
         return self.data[ind]
 
-    def is_realized(self):
-        return isinstance(self.data, (BufferList, list))
-
     def make_loader(self):
-        has_loader = not isinstance(self.data, list)
-        if has_loader:
-            return self.data.make_loader()
-        else:
-
-            def fn():
-                return ops.load(self.name, sympy.Symbol("fake"))
-
-            return fn
+        return self.data.make_loader()
 
     def get_layouts(self):
-        if isinstance(self.data, list):
-            return [t.data.get_layout() for t in self.data]
-        else:
-            return self.data.get_layouts()
-
-    def get_names(self):
-        assert isinstance(self.data, list)
-        return [t.data.get_name() for t in self.data]
+        return self.data.get_layouts()
 
     def realize(self):
-        if not self.is_realized():
+        if not isinstance(self.data, (BufferList, TensorListInputsWrapper)):
             self.data = BufferList(self.data)
             self.name = self.data.list_name
+
+        return self.data.name
 
 
 # This will have some other metadata and stuffs
 class ForeachPointwise(IRNode):
     def __init__(self, left_arg, right_arg, op_fn):
         super().__init__()
-        self.data.layouts = left_arg.get_layouts()
+        self.layouts = left_arg.get_layouts()
         self.left_inputs = left_arg
         self.right_inputs = right_arg
         self.op_fn = op_fn
@@ -4068,9 +4074,6 @@ class ForeachPointwise(IRNode):
             return self.op_fn(left_loader(), right_loader())
 
         return fn
-
-    def _create_compute_fn(self):
-        pass
 
     def get_layouts(self):
         return self.layouts

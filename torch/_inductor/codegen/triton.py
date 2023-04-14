@@ -1511,24 +1511,15 @@ class TritonKernel(Kernel):
 class ForeachKernel(Kernel):
     overrides = TritonOverrides
 
-    def __init__(self, input_names, output_names, layouts):
+    def __init__(self, layouts):
         super().__init__()
-        self.list_name_to_buffernames = {}
         self.list_name_to_var_name = {}
+        self.arg_name_to_list_var = {}
+        self.buffer_name_to_arg_name = {}
         self.tensor_elem_counts = [
             int(sympy_product(layout.size)) for layout in layouts
         ]
-        self.input_vars = []
-        self.output_vars = []
         self.block_size = 1024
-
-        for name in input_names:
-            self.input_vars.append(self.args.input(name))
-
-        for name in output_names:
-            self.output_vars.append(self.args.output(name))
-
-        self.compute_output_var = None
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -1538,8 +1529,8 @@ class ForeachKernel(Kernel):
 
         return num_blocks
 
-    @staticmethod
-    def _gen_tile_loads(
+    def _gen_tile_ptrs(
+        self,
         arg_names,
         block_ind,
         num_elems,
@@ -1550,26 +1541,48 @@ class ForeachKernel(Kernel):
         upper_bound_pid = block_ind + num_blocks
         last_block_elem_count = block_size - (num_blocks * block_size - num_elems)
 
-        code.writeline(f"if pid >= {block_ind} and pid < {upper_bound_pid}:")
+        code.splice(f"if pid >= {block_ind} and pid < {upper_bound_pid}:")
         with code.indent():
-            code.writeline(f"elem_ind_offset = (pid - {block_ind}) * BLOCK_SIZE")
+            code.splice(f"elem_ind_offset = (pid - {block_ind}) * BLOCK_SIZE")
             for name in arg_names:
-                code.writeline(f"{name}_ptr = {name} + elem_ind_offset")
-            code.writeline(f"if pid == {upper_bound_pid - 1}:")
+                code.splice(
+                    f"{self.arg_name_to_list_var[name]}_tile_ptr = {name} + elem_ind_offset"
+                )
+            code.splice(f"if pid == {upper_bound_pid - 1}:")
             with code.indent():
-                code.writeline(f"elem_count = {last_block_elem_count}")
+                code.splice(f"elem_count = {last_block_elem_count}")
 
         return block_ind + num_blocks
 
-    def load(self, name: str, _):
-        if name not in self.list_name_to_var_name:
+    def load(self, list_name: str, _):
+        if list_name not in self.list_name_to_var_name:
             var = self.cse.newvar()
-            self.list_name_to_var_name[name] = var
+            self.list_name_to_var_name[list_name] = var
 
-        return self.list_name_to_var_name[name]
+            for buffer_name in V.graph.lists[list_name]:
+                arg_name = self.args.input(buffer_name)
+                self.arg_name_to_list_var[arg_name] = var
+                self.buffer_name_to_arg_name[buffer_name] = arg_name
 
-    def store(self, _: str, value):
-        self.compute_output_var = value
+            self.loads.writeline(
+                f"{var} = tl.load({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), mask=mask)"
+            )
+
+        return self.list_name_to_var_name[list_name]
+
+    def store(self, list_name: str, _, value, mode=None):
+        if list_name not in self.list_name_to_var_name:
+            var = self.cse.newvar()
+            self.list_name_to_var_name[list_name] = var
+
+            for buffer_name in V.graph.lists[list_name]:
+                arg_name = self.args.output(buffer_name)
+                self.arg_name_to_list_var[arg_name] = var
+                self.buffer_name_to_arg_name[buffer_name] = arg_name
+
+            self.stores.writeline(
+                f"tl.store({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), {var}, mask=mask)"
+            )
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -1595,38 +1608,33 @@ class ForeachKernel(Kernel):
                 """
             )
 
-        def pairwise(a):
-            a, b = itertools.tee(a)
-            next(b, None)
-            return zip(a, b)
-
-        partitioned_args = []
-        for lower, upper in pairwise(
-            range(0, len(argdefs) + 1, len(self.tensor_elem_counts))
-        ):
-            partitioned_args.append(argdefs[lower:upper])
-
-        lefts, rights, outs = partitioned_args
-
         block_ind = 0
         with code.indent():
-            for left, right, out in zip(lefts, rights, outs):
-                block_ind = ForeachKernel._gen_tile_loads(
-                    [left, right, out],
+
+            def map_to_arg_names(buffer_names):
+                return [self.buffer_name_to_arg_name[name] for name in buffer_names]
+
+            arg_lists = [
+                map_to_arg_names(V.graph.lists[list_name])
+                for list_name in self.list_name_to_var_name.keys()
+            ]
+
+            code.splice("pid = tl.program_id(0)")
+            code.splice(f"BLOCK_SIZE = {self.block_size}")
+
+            for elem_count, arg_names in zip(self.tensor_elem_counts, zip(*arg_lists)):
+                block_ind = self._gen_tile_ptrs(
+                    arg_names,
                     block_ind,
-                    self.tensor_elem_counts[0],
+                    elem_count,
                     self.block_size,
                     code,
                 )
 
-            code.writeline(
-                "left = tl.load(left_ptr + tl.arange(0, BLOCK_SIZE), mask=elem_count)"
-            )
-            code.writeline(
-                "right = tl.load(right_ptr + tl.arange(0, BLOCK_SIZE), mask=elem_count)"
-            )
+            code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
+            code.splice(self.loads)
             code.splice(self.compute)
-            code.writeline("tl.store(out_ptr, tmp, mask=elem_count)")
+            code.splice(self.stores)
 
         return code.getvalue()
 
@@ -1988,11 +1996,7 @@ class TritonScheduling:
         if isinstance(foreach_node.node, ir.ListElemBuffer):
             return
 
-        kernel = ForeachKernel(
-            [r.name for r in foreach_node.read_writes.reads],
-            [b.name for b in foreach_node.node.buffers],
-            foreach_node.node.layouts,
-        )
+        kernel = ForeachKernel(foreach_node.node.get_layouts())
 
         with kernel:
             foreach_node.mark_run()
