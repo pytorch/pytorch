@@ -396,7 +396,7 @@ def _flatten_optim_state_dict(
     # Construct the "param_groups" part -- copy as is since it will be
     # rekeyed later according to the target rank's optimizer
     # Only copy param_groups if it exists in unflat_osd
-    if unflat_osd.get("param_groups"):
+    if "param_groups" in unflat_osd:
         flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
         return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
     else:
@@ -752,7 +752,7 @@ def _process_pos_dim_tensor_state(
             no_tensor_osd["state"][key][state_name] = info
 
     # Only return no_tensor_osd with param_groups if it exists in flat_osd
-    if flat_osd.get("param_groups"):
+    if "param_groups" in flat_osd:
         no_tensor_osd["param_groups"] = flat_osd["param_groups"]
     return no_tensor_osd
 
@@ -1012,7 +1012,7 @@ def _rekey_sharded_optim_state_dict(
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
-    if sharded_osd.get("param_groups"):
+    if "param_groups" in sharded_osd:
         rekeyed_osd_param_groups: List[Dict[str, Any]] = []
         for unflat_param_group in sharded_osd["param_groups"]:
             flat_param_group = copy.deepcopy(unflat_param_group)
@@ -1420,7 +1420,7 @@ def _optim_state_dict(
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
-    if not optim_state_dict.get("param_groups"):
+    if "param_groups" not in optim_state_dict:
         fsdp_osd.pop("param_groups")
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
@@ -1526,7 +1526,7 @@ def _optim_state_dict(
             )
             fsdp_osd_state[key] = value
 
-        if optim_state_dict.get("param_groups"):
+        if "param_groups" in optim_state_dict:
             fsdp_osd["param_groups"] = _unflatten_param_groups(
                 optim_state_dict, param_key_to_param, param_to_fqns
             )

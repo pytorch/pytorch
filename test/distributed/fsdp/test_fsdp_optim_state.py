@@ -1669,7 +1669,7 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_load_osd_without_param_groups(self):
+    def test_optim_state_without_param_groups(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
