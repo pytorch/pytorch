@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
@@ -21,8 +21,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
   auto input_size = input.sizes();
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight.size(0));
-  Tensor output = at::native::empty_mps(
-      output_size, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, input.suggest_memory_format());
+  Tensor output =
+      at::empty(output_size, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, input.suggest_memory_format());
 
   TORCH_CHECK(output.is_mps());
 
@@ -140,7 +140,7 @@ Tensor _mps_linear_backward_input(IntArrayRef input_size, const Tensor& grad_out
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  Tensor output = at::native::empty_mps(
+  Tensor output = at::empty(
       input_size, grad_output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
   if (grad_output.numel() == 0) {
@@ -221,18 +221,18 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& grad_outpu
   TORCH_CHECK(grad_output_reshaped.is_mps());
   TORCH_CHECK(input_reshaped.is_mps());
 
-  Tensor output = at::native::empty_mps({grad_output_reshaped.size(1), input_reshaped.size(1)},
-                                        grad_output.scalar_type(),
-                                        c10::nullopt,
-                                        kMPS,
-                                        c10::nullopt,
-                                        grad_output.suggest_memory_format());
-  Tensor bias = at::native::empty_mps({grad_output_reshaped.size(1)},
-                                      grad_output.scalar_type(),
-                                      c10::nullopt,
-                                      kMPS,
-                                      c10::nullopt,
-                                      grad_output.suggest_memory_format());
+  Tensor output = at::empty({grad_output_reshaped.size(1), input_reshaped.size(1)},
+                            grad_output.scalar_type(),
+                            c10::nullopt,
+                            kMPS,
+                            c10::nullopt,
+                            grad_output.suggest_memory_format());
+  Tensor bias = at::empty({grad_output_reshaped.size(1)},
+                          grad_output.scalar_type(),
+                          c10::nullopt,
+                          kMPS,
+                          c10::nullopt,
+                          grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(bias.is_mps());
 
