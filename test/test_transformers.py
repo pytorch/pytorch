@@ -1412,7 +1412,7 @@ class TestSDPA(NNTestCase):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        # See check_requires_grad_and_head_dim_gt64_and_sm_gt80 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
         size = (2, 2, 4, 128)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
