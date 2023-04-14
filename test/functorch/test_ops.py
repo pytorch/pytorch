@@ -2219,6 +2219,21 @@ class TestOperators(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             jvp(fn, (t,), (torch.randn_like(t),))
 
+    def test_tensor_with_scalar_list(self, device):
+        x = torch.randn((), device=device)
+
+        def func_list_of_scalar(x):
+            return torch.tensor([x], device=device)
+
+        def func(x):
+            return torch.tensor(x, device=device).view(1)
+
+        actual_o, actual_fn = vjp(func_list_of_scalar, x)
+        expected_o, expected_fn = vjp(func, x)
+
+        self.assertEqual(actual_o, expected_o)
+        self.assertEqual(expected_fn(torch.ones_like(expected_o)), actual_fn(torch.ones_like(actual_o)))
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
