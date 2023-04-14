@@ -11,9 +11,9 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     KeywordArg,
-    register_lowering_pattern,
 )
 from ..virtualized import ops
+from .post_grad import register_lowering_pattern
 
 
 if torch._C.has_mkldnn:
