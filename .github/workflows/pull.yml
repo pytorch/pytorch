@@ -23,7 +23,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm89
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
-      cuda-arch-list: '8.9'
+      cuda-arch-list: 8.6
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.gcp.l4" },
