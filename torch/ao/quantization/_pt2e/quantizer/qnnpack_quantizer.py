@@ -288,14 +288,18 @@ class QNNPackQuantizer(Quantizer):
 
     # Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
     def _annotate_conv2d_bn(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
-        if node.op != "call_function" or node.target != torch.ops.aten._native_batch_norm_legit.default:
+        if node.op != "call_function" or node.target != operator.getitem or node.args[1] != 0:
             return
-        bn_node = node
+        getitem_node = node
+        bn_node = getitem_node.args[0]
+        assert isinstance(bn_node, Node)
+        if bn_node.op != "call_function" or bn_node.target != torch.ops.aten._native_batch_norm_legit.default:
+            return
         conv_node = bn_node.args[0]
         assert isinstance(conv_node, Node)
         if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             return
-        if _is_annotated([bn_node, conv_node]):
+        if _is_annotated([getitem_node, bn_node, conv_node]):
             return
 
         conv_node.meta["target_dtype_info"] = {
@@ -311,9 +315,16 @@ class QNNPackQuantizer(Quantizer):
         }
         bn_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
+            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
             "bias_index": 2,
+            "_annotated": True,
+        }
+        getitem_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
             "_annotated": True,
         }
 

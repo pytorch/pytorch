@@ -46,6 +46,7 @@ from torch.ao.ns.fx.utils import (
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 import copy
 import itertools
+import operator
 from torch._inductor.compile_fx import compile_fx
 
 
@@ -308,7 +309,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
 
-    def test_qat_conv_bn_fusion(self):
+    def test_prepare_qat_conv_bn_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -339,7 +340,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         # Verify that the subgraph was replaced successfully with observers inserted
         # Do this by matching against the fused QAT pattern with observers manually inserted
-        example_inputs = (
+        fused_pattern_example_inputs = (
             torch.randn(1, 1, 3, 3),  # x
             torch.randn(1, 1, 1, 1),  # conv_weight
             torch.randn(1),           # conv_bias
@@ -348,9 +349,10 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.randn(1),           # bn_running_mean
             torch.randn(1),           # bn_running_var
         )
-        check_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
+        check_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, fused_pattern_example_inputs)
         obs0 = copy.deepcopy(m.activation_post_process_0)
         obs1 = copy.deepcopy(m.activation_post_process_1)
+        obs2 = copy.deepcopy(m.activation_post_process_2)
         for node in check_pattern.graph.nodes:
             named_modules = dict(check_pattern.named_modules(remove_duplicate=False))
             graph = check_pattern.graph
@@ -359,7 +361,10 @@ class TestQuantizePT2E(QuantizationTestCase):
                 obs1_node = _insert_observer(node.args[1], obs1, check_pattern, named_modules, graph)
                 node.replace_input_with(node.args[0], obs0_node)
                 node.replace_input_with(node.args[1], obs1_node)
-            # TODO: insert output observer after BN
+            if node.target == operator.getitem:
+                output_node = list(node.users.keys())[0]
+                obs2_node = _insert_observer(node, obs2, check_pattern, named_modules, graph)
+                output_node.replace_input_with(node, obs2_node)
         check_pattern.graph.eliminate_dead_code()
         check_pattern.recompile()
         matcher = SubgraphMatcher(check_pattern.graph)
