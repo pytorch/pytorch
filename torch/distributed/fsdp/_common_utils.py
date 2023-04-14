@@ -58,8 +58,10 @@ class _FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._fully_sharded_module_to_handles: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
+            nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
+        # All the sharded submodule names under the 'root_module' that is passed to 'fully_shard()'
+        self._fully_sharded_submodule_names: List[str] = []
         self.compute_device: Optional[torch.device] = None
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
@@ -85,6 +87,21 @@ def _get_module_fsdp_state_if_fully_sharded_module(
     if module in state._fully_sharded_module_to_handles:  # fully_shard case.
         return state
     return None
+
+
+# Get all the sharded submodule names under the 'root_module' that is usually passed to 'fully_shard()'
+def _get_fully_sharded_submodule_names(module: nn.Module) -> List[str]:
+    state = _get_module_fsdp_state(module)
+    return state._fully_sharded_submodule_names if state is not None else []
+
+
+# Get all the param names that are managed by sharded submodules under the 'root_module' that is usually
+# passed to 'fully_shard()'
+def _get_managed_param_names(module: nn.Module) -> List[List[str]]:
+    state = _get_module_fsdp_state(module)
+    flat_param_to_fqns = _get_handles_to_fqns(module)
+    managed_param_names = list(flat_param_to_fqns.values())
+    return managed_param_names
 
 
 class TrainingState(Enum):
@@ -182,6 +199,47 @@ def _set_fsdp_flattened(tensor: torch.Tensor) -> None:
 def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     """Returns if ``tensor`` has been marked as flattened by FSDP."""
     return getattr(tensor, FSDP_FLATTENED, False)
+
+
+def _get_handles_to_fqns(
+    model: torch.nn.Module,
+) -> Dict[nn.Parameter, List[str]]:
+    """
+    It is used for composable fully_shard() code path, constructs a mapping from
+    flat_param in the FlatParamHandle to a list of its FQNs. Each
+    ``FlatParameter`` maps to a list of its original parameter FQNs, which may
+    have length greater than one. All FQNs are prefixed starting from
+    ``model``.
+
+    Args:
+        model (torch.nn.Module): Root module (which may or may not be passed to
+                                 composable `fully_shard()`).
+    """
+
+    def module_fn(module, prefix, param_to_fqns):
+        state = _get_module_fsdp_state(module)
+        if state is None:
+            return
+        handles = state._fully_sharded_module_to_handles.get(module, [])
+        for handle in handles:
+            param = handle.flat_param
+            assert type(param) is flat_param_file.FlatParameter
+            global_fqns = [
+                clean_tensor_name(prefix + name) for name in param._fqns
+            ]  # prefixed from the top level `model` (i.e. including `prefix`)
+            param_to_fqns[param] = global_fqns
+
+    def return_fn(param_to_fqns):
+        return param_to_fqns
+
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+    return _apply_to_modules(
+        model,
+        module_fn,
+        return_fn,
+        [key for key, _ in model.named_parameters()],
+        param_to_unflat_param_names,
+    )
 
 
 def _get_param_to_fqns(
