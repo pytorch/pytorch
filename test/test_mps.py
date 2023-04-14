@@ -77,13 +77,13 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
-        'trace': [torch.float32],  # missing in place aten::index_fill_.int_Tensor
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
+        'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -426,7 +426,6 @@ def mps_ops_modifier(ops):
         'igamma': None,
         'igammac': None,
         'index_copy': None,
-        'index_fill': None,
         'index_reduce': None,
         'isin': None,
         'isneginf': None,
@@ -3014,8 +3013,9 @@ class TestMPS(TestCaseMPS):
 
     def test_repeat_interleave(self, device="mps"):
         x = torch.tensor([0, 1, 2, 3], device=device)
-        expected = torch.tensor([1, 2, 2, 3, 3, 3], dtype=torch.int32, device=device)
-        self.assertEqual(torch.repeat_interleave(x), expected)
+        expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
+        # Prior to macos 13.3, input of dtype=torch.int64 returns dtype=torch.int32
+        self.assertEqual(torch.repeat_interleave(x), expected, exact_dtype=product_version >= 13.3)
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.arange(4, device=device).reshape(2, 2))
