@@ -23,6 +23,7 @@ from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
+    config,
     exc,
     logging as torchdynamo_logging,
     side_effects,
@@ -41,7 +42,6 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -565,10 +565,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(
+            TracingContext.set_current_loc(
                 self.f_code.co_filename, self.lineno, self.f_code.co_name
-            ):
-                getattr(self, inst.opname)(inst)
+            )
+            getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -1806,10 +1806,18 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
+        frame_state,
     ):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
         super().__init__(
             output=OutputGraph(
-                f_globals, code_options, compiler_fn, self, export, export_constraints
+                f_globals,
+                code_options,
+                compiler_fn,
+                self,
+                export,
+                export_constraints,
+                frame_state,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -1888,7 +1896,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
     def match_nested_cell(self, name, cell):
@@ -2014,6 +2021,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+            )
+
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented(
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
     @staticmethod

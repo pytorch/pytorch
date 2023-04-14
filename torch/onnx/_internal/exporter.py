@@ -170,7 +170,7 @@ class InputAdaptStep(Protocol):
     input signature by any individual component in the exporter.
     """
 
-    def adapt(
+    def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         ...
@@ -194,7 +194,7 @@ class InputAdapter:
         self._input_adapt_steps.append(step)
 
     @_beartype.beartype
-    def to_onnx(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
+    def apply(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -207,7 +207,7 @@ class InputAdapter:
         args: Sequence[Any] = model_args
         kwargs: Mapping[str, Any] = model_kwargs
         for step in self._input_adapt_steps:
-            args, kwargs = step.adapt(args, kwargs)
+            args, kwargs = step.apply(args, kwargs)
         assert not kwargs
         return args
 
@@ -225,7 +225,7 @@ class OutputAdaptStep(Protocol):
     output signature by any individual component in the exporter.
     """
 
-    def adapt(self, model_outputs: Any) -> Any:
+    def apply(self, model_outputs: Any) -> Any:
         ...
 
 
@@ -247,7 +247,7 @@ class OutputAdapter:
         self._output_adapt_steps.append(step)
 
     @_beartype.beartype
-    def to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
+    def apply(self, model_outputs: Any) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -257,7 +257,7 @@ class OutputAdapter:
             PyTorch model outputs in exported ONNX model outputs format.
         """
         for step in self._output_adapt_steps:
-            model_outputs = step.adapt(model_outputs)
+            model_outputs = step.apply(model_outputs)
         return model_outputs
 
 
@@ -342,7 +342,7 @@ class ExportOutput:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._input_adapter.to_onnx(*model_args, **model_kwargs)
+        return self._input_adapter.apply(*model_args, **model_kwargs)
 
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
@@ -389,7 +389,7 @@ class ExportOutput:
             This API is experimental and is *NOT* backward-compatible.
 
         """
-        return self._output_adapter.to_onnx(model_outputs)
+        return self._output_adapter.apply(model_outputs)
 
     @_beartype.beartype
     def save(

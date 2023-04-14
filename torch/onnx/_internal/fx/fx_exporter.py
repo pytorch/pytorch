@@ -63,7 +63,7 @@ class BindInputStep:
     def __init__(self, model_signature: inspect.Signature):
         self._model_signature = model_signature
 
-    def adapt(
+    def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Bind the input arguments to the model signature.
@@ -96,7 +96,7 @@ class BindInputStep:
 class MergeKwargsIntoArgsStep:
     """Merge the input kwargs into the input args."""
 
-    def adapt(
+    def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Merge the input kwargs into the input args.
@@ -118,7 +118,7 @@ class RemoveNoneInputStep:
     is flattened, i.e. it does not check `None` inside nested collections.
     """
 
-    def adapt(
+    def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove `None` from arguments.
@@ -149,7 +149,7 @@ class FlattenInputWithTreeSpecValidationStep:
 
     _spec: Optional[pytree.TreeSpec] = None
 
-    def adapt(
+    def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
         """Flatten the model args and kwargs and validate the `SpecTree` output.
@@ -193,7 +193,7 @@ class FlattenOutputStep:
     depending on the tracing strategy.
     """
 
-    def adapt(self, model_outputs: Any) -> Sequence[Any]:
+    def apply(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs."""
         flattened_outputs, _ = pytree.tree_flatten(model_outputs)
         return flattened_outputs
@@ -208,7 +208,7 @@ class FlattenOutputWithTreeSpecValidationStep:
 
     _spec: Optional[pytree.TreeSpec] = None
 
-    def adapt(self, model_outputs: Any) -> Sequence[Any]:
+    def apply(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.
 
         Args:
@@ -266,7 +266,7 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         step_init_args = step_init_args or ()
         adapt_step = adapt_step_cls(*step_init_args)
         self._input_adapter.append_step(adapt_step)
-        return adapt_step.adapt(model_args, model_kwargs)
+        return adapt_step.apply(model_args, model_kwargs)
 
     def _apply_output_adapt_step(
         self,
@@ -290,7 +290,7 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         step_init_args = step_init_args or ()
         adapt_step = adapt_step_cls(*step_init_args)
         self._output_adapter.append_step(adapt_step)
-        return adapt_step.adapt(model_outputs)
+        return adapt_step.apply(model_outputs)
 
     @_beartype.beartype
     def export_fx_to_onnx(
@@ -314,10 +314,9 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         # Remove them since ONNX inference does not need them.
         module = passes.RemoveInputMutation(module).run(*fx_module_args)
 
-        # Run ShapeInferenceWithFakeTensor  to get static shape of nodes for op_level_debug purposes.
+        # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
         # The pass added nodes with static shape into original node metadata:
-        # node.meta["node_with_static_shape"]: torch.fx.Node
-        # TODO(titaiwang): refactor the pass to stop relying on Transformer.transform()
+        # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
         if self.options.op_level_debug:
             module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
 

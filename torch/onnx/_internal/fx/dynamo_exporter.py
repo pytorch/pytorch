@@ -176,10 +176,10 @@ class DynamoFlattenOutputStep(fx_exporter.FlattenOutputStep):
             pytree_extension_context or _PyTreeExtensionContext()
         )
 
-    def adapt(self, model_outputs: Any) -> Sequence[Any]:
+    def apply(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs, under the context of pytree extension."""
         with self._pytree_extension_context:
-            return super().adapt(model_outputs)
+            return super().apply(model_outputs)
 
 
 def _wrap_model_with_output_adapter(
@@ -205,7 +205,7 @@ def _wrap_model_with_output_adapter(
     # Preserve original function signature.
     @functools.wraps(model_func)
     def wrapped(*args, **kwargs):
-        return output_adapter.adapt(model_func(*args, **kwargs))
+        return output_adapter.apply(model_func(*args, **kwargs))
 
     return wrapped
 

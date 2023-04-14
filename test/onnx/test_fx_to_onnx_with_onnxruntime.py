@@ -409,7 +409,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_fx_exporters(
-        {DynamoOptimizeExporter: "Unhandled used argument."}
+        {
+            DynamoExporter: "RuntimeError: Unknown call_function target: aten.stack.default",
+            DynamoOptimizeExporter: "Unhandled unused argument.",
+        }
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
