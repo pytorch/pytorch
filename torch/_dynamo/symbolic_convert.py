@@ -258,7 +258,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if isinstance(value, TensorVariable):
                 self.output.create_proxy(
                     "call_function",
-                    torch.ops.aten._assert_async.msg,
+                    torch._assert_async,
                     *proxy_args_kwargs((value, error_msg), {}),
                 )
                 self.jump(inst)
@@ -277,7 +277,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             self.output.create_proxy(
                 "call_function",
-                torch.ops.aten._assert_async.msg,
+                torch._assert_async,
                 *proxy_args_kwargs((scalar_to_tensor, error_msg), {}),
             )
             self.jump(inst)
