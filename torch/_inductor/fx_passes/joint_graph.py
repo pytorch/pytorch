@@ -5,6 +5,7 @@ import torch
 from .. import config
 from ..pattern_matcher import PatternMatcherPass
 
+
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 
