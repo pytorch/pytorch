@@ -191,7 +191,6 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     TemporaryFileName,
     IS_ARM64,
-    IS_WINDOWS,
 )
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
