@@ -12,9 +12,6 @@ log = logging.getLogger(__name__)
 
 __all__ = ["ValueRanges", "ValueRangeAnalysis"]
 
-class ValueRangeError(RuntimeError):
-    pass
-
 
 # Like sympify, but supports less stuff, and also ensures that direct
 # sympy expressions don't have free variables
@@ -70,8 +67,7 @@ class ValueRanges:
         upper = simple_sympify(upper)
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
-        if not sympy_generic_le(lower, upper):
-            raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
+        assert sympy_generic_le(lower, upper)
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
