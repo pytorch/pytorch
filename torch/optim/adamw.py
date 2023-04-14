@@ -385,7 +385,7 @@ def _single_tensor_adamw(
         step_t += 1
 
         # Perform stepweight decay
-        param.mul_(1 - lr * weight_decay)
+        param.sub_(param * lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
