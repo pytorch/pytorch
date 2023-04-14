@@ -28,7 +28,7 @@ mnasnet1_0,0
 mobilenet_v2,0
 mobilenet_v3_large,0
 nvidia_deeprecommender,0
-opacus_cifar10,44
+opacus_cifar10,0
 phlippe_densenet,0
 phlippe_resnet,0
 pyhpc_isoneutral_mixing,0

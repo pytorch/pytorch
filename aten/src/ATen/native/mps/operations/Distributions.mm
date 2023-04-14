@@ -1,11 +1,23 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/argmax.h>
+#include <ATen/ops/div.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/randperm.h>
+#include <ATen/ops/topk.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -226,12 +238,12 @@ Tensor& normal_mps_(Tensor& self, double mean, double std, c10::optional<Generat
 }
 
 Tensor normal_mps(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  Tensor self = empty_mps(mean.sizes(), mean.scalar_type(), c10::nullopt, kMPS);
+  Tensor self = at::empty(mean.sizes(), mean.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, __func__);
 }
 
 Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor self = empty_mps(std.sizes(), std.scalar_type(), c10::nullopt, kMPS);
+  Tensor self = at::empty(std.sizes(), std.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
   // multiply/add ops in random computation. So we create a mean tensor instead.
   Tensor mean_t = at::full_like(self, Scalar(mean));
@@ -240,7 +252,7 @@ Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) 
 
 Tensor normal_mps(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   auto shape = at::infer_size(mean.sizes(), std.sizes());
-  Tensor self = empty_mps(shape, mean.scalar_type(), c10::nullopt, kMPS);
+  Tensor self = at::empty(shape, mean.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, __func__);
 }
 
