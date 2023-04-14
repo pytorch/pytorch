@@ -1,7 +1,7 @@
 import types
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Callable, List, NamedTuple, Optional, Union, NoneType
+from typing import Callable, List, NamedTuple, Optional, Union
 
 import torch
 
@@ -43,17 +43,16 @@ class QuantizationSpec:
         if self.dtype not in SUPPORTED_DTYPES:
             raise TypeError(f"Unsupported dtype {self.dtype}.")
 
+        if self.dtype in [torch.float16, torch.float32, torch.float64]:
+            raise ValueError(
+                f"Unsupported dtype {self.dtype}. Quantizer only supports integer types."
+            )
+
         if self.quant_max is None:
-            if self.dtype in [torch.float16, torch.float32]:
-                self.quant_max = torch.finfo(self.dtype).max
-            else:
-                self.quant_max = torch.iinfo(self.dtype).max
+            self.quant_max = torch.iinfo(self.dtype).max
 
         if self.quant_min is None:
-            if self.dtype in [torch.float16, torch.float32]:
-                self.quant_max = torch.finfo(self.dtype).min
-            else:
-                self.quant_max = torch.iinfo(self.dtype).min
+            self.quant_max = torch.iinfo(self.dtype).min
 
         # quant_min must be less than quant_max
         if (
@@ -81,13 +80,14 @@ def get_observer_kwargs(quant_spec: QuantizationSpec):
     return kwargs_dict
 
 
+nonetype = type(None)
 # In the absence of better name, just winging it with QuantizationConfig
 QuantizationConfig = NamedTuple(
     "QuantizationConfig",
     [
-        ("activation", Union[QuantizationSpec, NoneType]),
-        ("weight", Union[QuantizationSpec, NoneType]),
-        ("bias", Union[QuantizationSpec, NoneType]),
+        ("activation", Union[QuantizationSpec, nonetype]),
+        ("weight", Union[QuantizationSpec, nonetype]),
+        ("bias", Union[QuantizationSpec, nonetype]),
     ],
 )
 
