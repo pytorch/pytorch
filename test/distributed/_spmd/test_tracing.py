@@ -863,6 +863,29 @@ class CoverageTest(DTensorTestBase):
 
         self._test_train_step(train_step, mod, ids, tgt)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_full(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.full(x.shape, 7, device=x.device)
+                return y + self.fc(x)
+
+        torch.manual_seed(0)
+        mod = Model().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        inp = torch.randn(2, 10).cuda(self.rank)
+        self._test_train_step(train_step, mod, inp)
+
 
 if __name__ == "__main__":
     run_tests()
