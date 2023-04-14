@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 from enum import Enum
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Set
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
