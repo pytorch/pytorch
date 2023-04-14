@@ -533,15 +533,21 @@ inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_requires_grad_and_head_dim_gt64_and_sm_gt80(
+inline bool check_requires_grad_and_head_dim_gt64_and_sm_gt86(
     sdp_params params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is 128 And the device is not sm80, the other head_dim check catches
   // everything but sm86
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm86_or_newer = ((dprops->major == 8) && (dprops->minor > 0)) || (dprops->major > 8);
-  if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
+  bool is_sm86_or_newer =
+      ((dprops->major == 8) && (dprops->minor >= 6)) || (dprops->major > 8);
+  const bool any_inputs_require_grad =
+      (params.query.requires_grad() || params.key.requires_grad() ||
+       params.value.requires_grad());
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  if (any_inputs_require_grad && gradmode_enabled && is_sm86_or_newer &&
+      (params.query.sym_size(-1) > 64)) {
     if (debug) {
       TORCH_WARN(
           "Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
@@ -587,7 +593,7 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
-      check_requires_grad_and_head_dim_gt64_and_sm_gt80,
+      check_requires_grad_and_head_dim_gt64_and_sm_gt86,
       check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
