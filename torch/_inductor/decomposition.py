@@ -41,7 +41,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning(f"duplicate decomp: {ops}")
+            log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
 
 
