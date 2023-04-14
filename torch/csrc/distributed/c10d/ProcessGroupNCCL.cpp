@@ -1388,10 +1388,12 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
     : Backend::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
+static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
+
 void ProcessGroupNCCL::startCoalescing() {
   coalescedDevices_.clear();
   coalescedComms_.clear();
-  coalescing_active_ = true;
+  coalescing_state_ |= CoalActive;
   groupStart();
 }
 
@@ -1420,7 +1422,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
       devices, rank_, OpType::COALESCED, "nccl:coalesced", c10::nullopt);
 
   // Record stream event
-  // @lint-ignore CLANGTIDY
+  // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
+  // (as opposed to )
   const auto key = getKeyFromDevices(devices);
   auto& ncclStreams = ncclStreams_[key];
   for (const auto i : c10::irange(devices.size())) {
@@ -1434,7 +1437,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
-  workEnqueue(work);
+  if (coalescing_state_ & CoalColl) {
+    workEnqueue(work);
+    // TODO: it seems we never enqueue work for single send/recv or batch P2P,
+    // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
+    // not being able to abort hanged P2P ops.
+  }
+
+  coalescing_state_ = 0;
   return work;
 }
 
@@ -1469,7 +1479,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
 
-  if (coalescing_active_) {
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
     coalescedDevices_.push_back(devices);
     coalescedComms_.push_back(ncclComms);
   }
@@ -1557,7 +1568,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(devices.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
-    if (!coalescing_active_) {
+    if (!coalescing_state_) {
       (*work->ncclEndEvents_)[i].record(ncclStream);
     }
     work->ncclComms_[i] = ncclComms[i];
@@ -1585,7 +1596,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
-  if (!coalescing_active_) {
+  if (!coalescing_state_) {
     workEnqueue(work);
   }
 
@@ -1635,7 +1646,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
   auto& ncclComms = getNCCLComm(key, devices, opType, p2pRank, isSendRecvSelf);
 
-  if (coalescing_active_) {
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalP2P;
     coalescedDevices_.push_back(devices);
     coalescedComms_.push_back(ncclComms);
   }
@@ -1720,7 +1732,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(tensors.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    if (!coalescing_active_) {
+    if (!coalescing_state_) {
       (*work->ncclEndEvents_)[i].record(ncclStream);
     }
     work->ncclComms_[i] = ncclComms[i];

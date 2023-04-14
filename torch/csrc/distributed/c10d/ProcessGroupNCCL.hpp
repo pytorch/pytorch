@@ -648,7 +648,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::set<int> usedDeviceIdxs_;
 
   // Flag to denote if a coalescing groupStart/groupEnd block is active
-  bool coalescing_active_ = false;
+  int coalescing_state_ = 0;
 
   // Stores device indexes for all collectives run inside a coalescing block
   std::vector<std::vector<at::Device>> coalescedDevices_;
