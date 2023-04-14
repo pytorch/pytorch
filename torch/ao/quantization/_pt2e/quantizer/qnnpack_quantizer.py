@@ -28,7 +28,12 @@ def supported_symmetric_quantized_operators() -> Dict[
     str,
     List[List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]],
 ]:
-    supported_operators = {
+    supported_operators: Dict[
+        str,
+        List[
+            List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]
+        ],
+    ] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -211,7 +216,9 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_quantization_config(
         cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[str]:
+    ) -> List[
+        List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]
+    ]:
         if quantization_config is None:
             all_ops = []
             for _, ops in cls.supported_config_and_operators:
@@ -231,7 +238,7 @@ class QNNPackQuantizer(Quantizer):
     def set_global(
         self, quantization_config: Optional[QuantizationConfig]
     ) -> QNNPackQuantizer:
-        self.global_config: Optional[QuantizationConfig] = quantization_config
+        self.global_config = quantization_config
         return self
 
     def set_config_for_operator_type(
