@@ -745,8 +745,7 @@ class TraceTrainStepTest(DTensorTestBase):
         opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
         inp = torch.randn(2, 10).cuda(self.rank)
         train_step(mod, opt, inp)
-        gm = train_step.__dict__[COMPILED_OBJECT_KEY].gm
-        for node in gm.graph.nodes:
+        for node in train_step._compiled_obj.gm.graph.nodes:
             if node.target == torch.ops.aten.expand.default:
                 # backward grad expandion op should match local batch size
                 # instead of global batch size.

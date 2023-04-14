@@ -177,8 +177,17 @@ def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[object, ...]) -> DTen
     assert isinstance(args[1], list), f"Expect 2nd argument as list but got {args[1]}"
 
     local_sizes = [a.size if isinstance(a, DSize) else a for a in args[1]]
-    placements = [a.placement if isinstance(a, DSize) else Replicate() for a in args[1]]
-    assert len([p for p in placements if p.is_shard()]) == args[0].device_mesh.ndim
+    # extract sharded dimensions in the size list, the output DTensor should
+    # follow these placements.
+    sharded_placements = [
+        Shard(i)
+        for i, a in enumerate(args[1])
+        if (isinstance(a, DSize) and a.placement.is_shard())
+    ]
+    assert len(sharded_placements) == args[0].device_mesh.ndim, (
+        f"The number of sharded dimensions ({len(sharded_placements)}) must "
+        f"match number of dimensions in device mesh ({args[0].device_mesh.ndim})."
+    )
 
     # set node args to real int sizes.
     node.args = (node.args[0], local_sizes)
@@ -186,12 +195,13 @@ def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[object, ...]) -> DTen
     return DTensor.from_local(
         local_tensor=op(args[0]._local_tensor, local_sizes),
         device_mesh=args[0].device_mesh,
-        placements=[Shard(i) for i, p in enumerate(placements) if p.is_shard()],
+        placements=sharded_placements,
         run_check=False,
     )
 
 
-# Dispatch override for
+# Dispatch override for ops that consume SymInt arguments, where the output
+# spec should follow dimension placement where the SymInt comes from.
 SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
     aten.expand.default: binop_sym_int_consumer_rule,
     aten.view.default: binop_sym_int_consumer_rule,
@@ -558,7 +568,7 @@ def _convert_to_distributed(
                 else Replicate()
             )
             node_to_obj[node] = DSize(
-                size=dtensor._local_tensor.size(dim), placement=placement
+                size=dtensor.to_local().size(dim), placement=placement
             )
         elif isinstance(node.target, torch._ops.OpOverload):
             if node.target == torch.ops.aten.scalar_tensor.default:
