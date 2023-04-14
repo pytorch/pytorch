@@ -1,7 +1,7 @@
 import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Union
+from typing import Callable, List, NamedTuple, Optional
 
 import torch
 
@@ -64,6 +64,8 @@ QuantizationConfig = NamedTuple(
     ],
 )
 
+OperatorPatternType = List[Callable]
+
 OperatorConfig = NamedTuple(
     "OperatorConfig",
     # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
@@ -78,13 +80,7 @@ OperatorConfig = NamedTuple(
         ("config", QuantizationConfig),
         (
             "operators",
-            List[
-                List[
-                    Union[
-                        torch.nn.Module, types.FunctionType, types.BuiltinFunctionType
-                    ]
-                ]
-            ],
+            List[OperatorPatternType],
         ),
     ],
 )
