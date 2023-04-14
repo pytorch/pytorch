@@ -328,7 +328,7 @@ def _flatten_optim_state_dict(
     if "state" not in unflat_osd:
         raise ValueError(
             '`optim_state_dict` must have the keys "state"'
-            'to be a valid optimizer state dict'
+            "to be a valid optimizer state dict"
         )
     param_to_fqns = _get_param_to_fqns(model)
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
@@ -396,7 +396,7 @@ def _flatten_optim_state_dict(
     # Construct the "param_groups" part -- copy as is since it will be
     # rekeyed later according to the target rank's optimizer
     # Only copy param_groups if it exists in unflat_osd
-    if unflat_osd.get('param_groups'):
+    if unflat_osd.get("param_groups"):
         flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
         return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
     else:
@@ -1526,7 +1526,7 @@ def _optim_state_dict(
             )
             fsdp_osd_state[key] = value
 
-        if fsdp_osd.get('param_groups'):
+        if optim_state_dict.get("param_groups"):
             fsdp_osd["param_groups"] = _unflatten_param_groups(
                 optim_state_dict, param_key_to_param, param_to_fqns
             )

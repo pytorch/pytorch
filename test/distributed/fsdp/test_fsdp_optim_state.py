@@ -1695,13 +1695,17 @@ class TestFSDPOptimState(FSDPTest):
         original_osd = deepcopy(optim.state_dict())
         original_osd_no_param_groups = deepcopy(original_osd)
         # manually remove param_groups from optimizer state dict
-        original_param_groups = deepcopy(original_osd_no_param_groups.pop("param_groups"))
+        original_param_groups = deepcopy(
+            original_osd_no_param_groups.pop("param_groups")
+        )
         # passing the osd without param_groups to FSDP
-        original_FSDP_state_dict = deepcopy(
-            FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd_no_param_groups)
+        original_fsdp_state_dict = deepcopy(
+            FSDP.optim_state_dict(
+                model, optim, optim_state_dict=original_osd_no_param_groups
+            )
         )
         # check the state_dict sharded by FSDP does not contain param_groups.
-        self.assertEqual(None, original_FSDP_state_dict.get("param_groups"))
+        self.assertEqual(None, original_fsdp_state_dict.get("param_groups"))
 
         # train another step to make optim a different state.
         for param in model.parameters():
@@ -1712,11 +1716,18 @@ class TestFSDPOptimState(FSDPTest):
         loss = model(batch).sum()
         loss.backward()
 
-        state_dict_to_load = FSDP.optim_state_dict_to_load(model, optim, original_FSDP_state_dict)
+        state_dict_to_load = FSDP.optim_state_dict_to_load(
+            model, optim, original_fsdp_state_dict
+        )
         # manually add param_groups to state_dict_to_load before loading the optimizer state
         state_dict_to_load["param_groups"] = original_param_groups
         optim.load_state_dict(state_dict_to_load)
         self.assertEqual(original_osd, optim.state_dict())
+
+        fsdp_optim_state = FSDP.optim_state_dict(model, optim)
+        self._check_same_state(
+            original_fsdp_state_dict, fsdp_optim_state, check_same_param_keys=True
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_with_empty_optimizer_state(self):
