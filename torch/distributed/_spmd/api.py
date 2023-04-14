@@ -26,6 +26,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
+
 from torch import fx
 from torch._subclasses import FakeTensorMode
 from torch.distributed._spmd.distribute import (
@@ -188,10 +189,10 @@ def _override_placements(t: torch.Tensor, placements: List[Placement]):
 
 def _dtensor_expand(
     gm: fx.GraphModule,
+    params_and_buffers: Dict[str, Any],
+    named_states: Dict[str, Any],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    named_states: Dict[str, Any],
-    params_and_buffers: Dict[str, Any],
 ) -> fx.GraphModule:
     flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
 
@@ -202,6 +203,11 @@ def _dtensor_expand(
 
     inps, schemas = [], []
 
+    for p in pytree.tree_flatten(params_and_buffers)[0]:
+        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
+        inps.append(p)
+        schemas.append(replicate_schema)
+
     for o in pytree.tree_flatten(named_states)[0]:
         if isinstance(o, torch.Tensor):
             inps.append(o)
@@ -209,11 +215,6 @@ def _dtensor_expand(
         else:
             inps.append(torch.empty(0))
             schemas.append(replicate_schema)
-
-    for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
-        inps.append(p)
-        schemas.append(replicate_schema)
 
     for a in flat_args:
         if isinstance(a, torch.Tensor):
@@ -425,7 +426,7 @@ class _CompiledResult:
 
 def _compile(
     func: Callable,
-    module_override: Optional[Dict[Type[Any], Override]],
+    module_override: Optional[Dict[Union[Type[Any], str], Override]],
     *args: Any,
     **kwargs: Any,
 ) -> _CompiledResult:
@@ -448,9 +449,15 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
-        for typ, override in module_override.items():
+        # FIXME(@mrshenli): type might overlap with fqns
+        for typ_or_fqn, override in module_override.items():
             for name, submodule in mod.named_modules():
-                if isinstance(submodule, typ):
+                if (
+                    isinstance(typ_or_fqn, str)
+                    and typ_or_fqn == name
+                    or isinstance(typ_or_fqn, type)
+                    and isinstance(submodule, typ_or_fqn)
+                ):
                     accessor.swap_submodule(name, override.replacement(submodule))
 
     # 3. Trace statelss version of the train_step
@@ -459,8 +466,6 @@ def _compile(
 
     named_states = {}
     if opt is not None:
-        opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
@@ -472,7 +477,7 @@ def _compile(
 
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, named_states, params, buffers, args, kwargs):
+    def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
             cast(nn.Module, mod), {**params, **buffers}
         ), _rematerialize_optimizer(
@@ -480,7 +485,7 @@ def _compile(
         ) if opt else nullcontext():
             ret = func(*args, **kwargs)
             # make sure updated parameters are returned
-            return ret, list(mod.parameters())  # type: ignore[union-attr]
+            return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
 
     # FIXME: Using symbolic tracing to work around. Otherwise it hits
     # shape mismatch error, as we use local inputs to trace local graph
@@ -496,7 +501,7 @@ def _compile(
             tracing_mode="symbolic",
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
-        )(named_states, params, buffers, args, kwargs)
+        )(params, buffers, named_states, args, kwargs)
 
     params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
         **params,
@@ -504,7 +509,7 @@ def _compile(
     }
 
     # 4. Use DTensor to insert collectives
-    gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
+    gm = _dtensor_expand(gm, params_and_buffers, named_states, args, kwargs)
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
@@ -512,7 +517,7 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
+    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
     # 6. dedup comm operators.
@@ -542,7 +547,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
 def compile(
-    module_override: Optional[Dict[Type[Any], Override]] = None,
+    module_override: Optional[Dict[Union[Type[Any], str], Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ):
     r"""
@@ -552,9 +557,10 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Type[Any], Override]]): a dictionary maps
-            from target :class:`nn.Module` types to :class:`Override` objects.
-            The :class:`Override` objects provide :class:`nn.Module` replacements
+        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a
+            dictionary maps from target :class:`nn.Module` types or
+            fully-qualified names to :class:`Override` objects. The
+            :class:`Override` objects provide :class:`nn.Module` replacements
             during tracing and a graph transformation function after tracing.
             (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
