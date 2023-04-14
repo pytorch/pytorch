@@ -63,7 +63,7 @@ shape_analysis_jit_failures = {
     xfail("squeeze", "multiple"),
     xfail("zeros"),
     # super slow
-    skip("nn.functional.adaptive_max_pool2d"),
+    skip("nn.functional.max_pool2d"),
 }
 
 # Allows super() calls on TestJit.
