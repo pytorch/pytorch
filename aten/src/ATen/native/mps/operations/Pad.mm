@@ -2,6 +2,22 @@
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/constant_pad_nd_native.h>
+#include <ATen/ops/reflection_pad1d_backward_native.h>
+#include <ATen/ops/reflection_pad1d_native.h>
+#include <ATen/ops/reflection_pad3d_backward_native.h>
+#include <ATen/ops/reflection_pad3d_native.h>
+#include <ATen/ops/replication_pad1d_backward_native.h>
+#include <ATen/ops/replication_pad1d_native.h>
+#include <ATen/ops/replication_pad2d_native.h>
+#include <ATen/ops/replication_pad3d_backward_native.h>
+#include <ATen/ops/replication_pad3d_native.h>
+#endif
+
 namespace at::native {
 namespace mps {
 

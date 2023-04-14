@@ -6,6 +6,13 @@
 #include <ATen/native/Resize.h>
 #include <fmt/format.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/view_as_real.h>
+#endif
+
 namespace at::native {
 namespace mps {
 

@@ -8,7 +8,12 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/addr_native.h>
+#include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/triangular_solve_native.h>
 #endif
 
 namespace at::native {
