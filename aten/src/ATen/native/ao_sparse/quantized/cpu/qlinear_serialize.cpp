@@ -23,7 +23,7 @@ at::Tensor wrap_vector(T& vec, c10::ScalarType dtype) {
   at::Tensor t = at::empty(
       {static_cast<long>(vec.size())}, at::device(c10::kCPU).dtype(dtype));
   std::copy(
-      vec.data(), vec.data() + vec.size(), t.data_ptr<UNDERLYING_DTYPE>());
+      vec.data(), vec.data() + vec.size(), t.mutable_data_ptr<UNDERLYING_DTYPE>());
   return t;
 }
 
