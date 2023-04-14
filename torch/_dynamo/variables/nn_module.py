@@ -325,14 +325,28 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "__call__" or name == "forward" and is_allowed(module.__class__):
-            # This is used for explicit calling:
-            #   name == "__call__": (rare case) - inline __call__;
-            #   name == "forward" and is allowed:
-            #       PyTorch builtin module - put `call_module` node in FX.
-            # For name == "forward" and is not allowed, it has been inlined
-            # before getting here.
+        if name == "_call_impl":
+            # Example: `self.layer.__call__(x)`
+            # This is used for explicit calling `__call__` in a forward function.
+            # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
+        elif name == "forward" and is_allowed(module.__class__):
+            # Example: `self.layer.forward(x)`
+            # This is used for explicit calling `forward` in a forward function,
+            # and self.layer is allowed module.
+            # Dynamo puts `call_module` node in FX, doesn't trigger hooks.
+            # For not allowed module, it has been inlined before getting here.
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_module",
+                    self.module_key,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                **options,
+            )
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
