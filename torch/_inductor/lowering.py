@@ -1462,6 +1462,7 @@ make_fallback(aten.zeros.names)
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
 
+
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=0):
     # TODO(jansel): memory format
