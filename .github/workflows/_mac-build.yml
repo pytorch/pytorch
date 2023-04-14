@@ -86,7 +86,7 @@ jobs:
 
       - name: Setup miniconda
         if: inputs.environment-file == ''
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
@@ -96,7 +96,7 @@ jobs:
       # environment even though the arch is x86-64
       - name: Setup miniconda using the provided environment file
         if: inputs.environment-file != ''
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
           environment-file: ${{ inputs.environment-file }}

@@ -84,7 +84,7 @@ jobs:
           use-gha: true
 
       - name: Setup miniconda
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@debug-macos-flaky-deps
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
