@@ -1292,12 +1292,12 @@ class TritonKernel(Kernel):
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
             result.writeline("from torch._inductor.utils import get_num_bytes")
-            result.writeline("from triton.testing import do_bench")
+            result.writeline("from triton.testing import run_benchmark")
             result.writeline("")
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
+                "ms = run_benchmark(lambda: call(args), rep=40)"
             )
             result.writeline(
                 f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"

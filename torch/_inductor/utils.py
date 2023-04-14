@@ -33,9 +33,19 @@ VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 try:
     from triton.testing import do_bench
+
+    def run_benchmark(fn, warmup=25, rep=100, fast_flush=True):
+        return do_bench(
+            fn,
+            warmup=warmup,
+            rep=rep,
+            fast_flush=fast_flush,
+            quantiles=(0.5,)
+        )
+
 except ImportError:
 
-    def do_bench(*args, **kwargs):
+    def run_benchmark(*args, **kwargs):
         raise NotImplementedError("requires Triton")
 
 
@@ -822,7 +832,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            ms = run_benchmark(lambda: kernel_mod.call(args), rep=40)
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
