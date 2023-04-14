@@ -1,7 +1,7 @@
 import types
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import List, NamedTuple, Optional, Union
+from typing import Callable, List, NamedTuple, Optional, Union, NoneType
 
 import torch
 
@@ -85,11 +85,13 @@ def get_observer_kwargs(quant_spec: QuantizationSpec):
 QuantizationConfig = NamedTuple(
     "QuantizationConfig",
     [
-        ("activation", QuantizationSpec),
-        ("weight", QuantizationSpec),
-        ("bias", QuantizationSpec),
+        ("activation", Union[QuantizationSpec, NoneType]),
+        ("weight", Union[QuantizationSpec, NoneType]),
+        ("bias", Union[QuantizationSpec, NoneType]),
     ],
 )
+
+OperatorPatternType = List[Callable]
 
 OperatorConfig = NamedTuple(
     "OperatorConfig",
@@ -105,13 +107,7 @@ OperatorConfig = NamedTuple(
         ("config", QuantizationConfig),
         (
             "operators",
-            List[
-                List[
-                    Union[
-                        torch.nn.Module, types.FunctionType, types.BuiltinFunctionType
-                    ]
-                ]
-            ],
+            List[OperatorPatternType],
         ),
     ],
 )
