@@ -1372,19 +1372,20 @@ class TestNestedTensorDeviceType(TestCase):
             return torch.nested.nested_tensor(out_ts)
 
         # [N, n_head, *, head_dim], [N, n_head, head_dim, *]
-        N = np.random.randint(2, 5)
+        Ns = [1, 2, 5]
         n_heads = np.random.randint(2, 5)
         head_dim = 3
         t1s = []
         t2s = []
-        for _ in range(N):
-            seq_len1 = np.random.randint(2, 5)
-            seq_len2 = np.random.randint(2, 5)
-            t1s.append(torch.randn(n_heads, seq_len1, head_dim))
-            t2s.append(torch.randn(n_heads, head_dim, seq_len2))
-        nt1 = torch.nested.nested_tensor(t1s, device=device, dtype=dtype)
-        nt2 = torch.nested.nested_tensor(t2s, device=device, dtype=dtype)
-        self.assertEqual(torch.matmul(nt1, nt2), unbind_rebind_matmul(nt1, nt2))
+        for N in Ns:
+            for _ in range(N):
+                seq_len1 = np.random.randint(2, 5)
+                seq_len2 = np.random.randint(2, 5)
+                t1s.append(torch.randn(n_heads, seq_len1, head_dim))
+                t2s.append(torch.randn(n_heads, head_dim, seq_len2))
+            nt1 = torch.nested.nested_tensor(t1s, device=device, dtype=dtype)
+            nt2 = torch.nested.nested_tensor(t2s, device=device, dtype=dtype)
+            self.assertEqual(torch.matmul(nt1, nt2), unbind_rebind_matmul(nt1, nt2))
 
         # test with noncontiguous
         t3s = []

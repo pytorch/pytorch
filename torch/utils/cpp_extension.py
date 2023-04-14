@@ -1734,9 +1734,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Maxwell+Tegra', '5.3'),
         ('Maxwell', '5.0;5.2+PTX'),
         ('Pascal', '6.0;6.1+PTX'),
+        ('Volta+Tegra', '7.2'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
-        ('Ampere', '8.0;8.6+PTX;8.7+PTX'),
+        ('Ampere+Tegra', '8.7'),
+        ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
     ])

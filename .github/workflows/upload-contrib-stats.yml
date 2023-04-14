@@ -1,0 +1,27 @@
+name: Upload contribution stats
+
+on:
+  schedule:
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
+    - cron:  37 7 * * *
+
+jobs:
+
+  upload-contribution-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - run: |
+          pip3 install requests==2.26
+          pip3 install rockset==1.0.3
+          pip3 install boto3==1.19.12
+
+      - name: Upload external contribution stats
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Uploading external contribution stats for $(date -v-1d +%F)"
+          python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -v-1d +%F)"

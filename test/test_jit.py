@@ -9164,6 +9164,15 @@ dedent """
         dims = 2
         self.checkScript(tensordot_dims_int, (a, b, dims))
 
+        for dims in [-1, 5]:
+            try:
+                tensordot_dims_int(a, b, dims)
+            except RuntimeError as error:
+                if dims < 0:
+                    self.assertEqual(str(error), "tensordot expects dims >= 0, but got dims=" + str(dims))
+                if dims > min(a.dim(), b.dim()):
+                    self.assertEqual(str(error), "tensordot expects dims < ndim_a or ndim_b, but got dims=" + str(dims))
+
     def test_torch_functional_tensordot_tensor(self):
         def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
             return torch.tensordot(a, b, dims=dims)

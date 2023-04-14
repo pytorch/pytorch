@@ -11,6 +11,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
+#include <ATen/native/cpu/LogAddExp.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/copysign.h>
@@ -893,6 +894,14 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
               (a1 == b1) & (a1.abs() == inf));
           return convert_float_bfloat16(a0, a1);
         });
+  } else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return _log_add_exp_helper(a, b);
+        });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
       cpu_kernel_vec(

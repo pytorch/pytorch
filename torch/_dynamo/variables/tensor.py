@@ -17,8 +17,6 @@ from ..utils import (
     fqn,
     get_fake_value,
     get_real_value,
-    HAS_NUMPY,
-    np,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -611,8 +609,6 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
-        if HAS_NUMPY and isinstance(raw_value, np.number):
-            raw_values = raw_value.item()
         need_unwrap = kwargs.pop("need_unwrap", True)
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value

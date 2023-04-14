@@ -300,9 +300,7 @@ def adamw(
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
     # bake-in time before making it the default, even if it is typically faster.
     if fused is None and foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
     if fused is None:
         fused = False
     if foreach is None:

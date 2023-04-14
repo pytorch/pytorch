@@ -439,7 +439,6 @@ function(torch_compile_options libname)
       -Wno-unused-function
       -Wno-unused-result
       -Wno-missing-field-initializers
-      -Wno-write-strings
       -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds

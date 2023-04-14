@@ -14,7 +14,7 @@ worlds — usability and performance.
 
 TorchDynamo makes it easy to experiment with different compiler
 backends to make PyTorch code faster with a single line decorator
-``torch._dynamo.optimize()``
+``torch._dynamo.optimize()`` which is wrapped for convenience by ``torch.compile()``
 
 .. image:: ../_static/img/dynamo/TorchDynamo.png
 

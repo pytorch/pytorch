@@ -1346,7 +1346,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
     raise AssertionError(f"Illegal reason {reason}")
 
 
-def tensor_shape_should_be_static(
+def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
 ) -> Tuple[bool, TensorStaticReason]:
     """

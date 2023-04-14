@@ -2142,19 +2142,15 @@ class TestCase(expecttest.TestCase):
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
+        super_run = super().run
         # TODO remove version check once dynamo supports 3.11
-        if TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
+        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+            super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
-            super_run(result=result)
+            super_run = torch._dynamo.optimize("eager")(super_run)
 
-            # TODO - Reset for each test slows down testing significantly.
-            # torch._dynamo.reset()
-        else:
-            super().run(result=result)
+        super_run(result=result)
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():

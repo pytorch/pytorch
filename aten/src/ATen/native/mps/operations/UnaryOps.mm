@@ -75,15 +75,20 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)
     return inputTensor;
   }
 
-  MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
-                                                   dataType:inputTensor.dataType];
-  MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                        secondaryTensor:zeroTensor
-                                                                    name:nil];
-  return [mpsGraph selectWithPredicateTensor:predicateTensor
-                         truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
-                        falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
-                                        name:nil];
+  if(!is_macos_13_or_newer()) {
+    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                    dataType:inputTensor.dataType];
+    MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                          secondaryTensor:zeroTensor
+                                                                      name:nil];
+    return [mpsGraph selectWithPredicateTensor:predicateTensor
+                          truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
+                          falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
+                                          name:nil];
+  } else {
+    return [mpsGraph truncateWithTensor:inputTensor
+                                   name:nil];
+  }
 };
 
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -413,6 +418,7 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
  c10::optional<ScalarType> dtype,
  const Tensor& result) {
 
+  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   auto nDims = self.dim();
   auto wrapped_dim = maybe_wrap_dim(dim, nDims);
   TORCH_CHECK(wrapped_dim >=0 && wrapped_dim < std::max(1LL, self.ndimension()), "Expected wrapped dim to be between 0 and ", self.ndimension(), " but got ", wrapped_dim , "(original dim is ", dim, ")");
@@ -423,18 +429,26 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
     return;
   }
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
-  TORCH_CHECK(input.scalar_type() != ScalarType::Long, "MPS does not support cumsum op with int64 input");
+
+  // issue #103810551: cumsum is horribly broken for int8, int16 and as chances for overflow is pretty high, cast to int32
+  // fixed in macOS 13.3
+  bool castInputData = (isIntegralType(input.scalar_type()) &&
+                        input.scalar_type() != ScalarType::Int &&
+                        input.scalar_type() != ScalarType::Long);
+
+  TORCH_CHECK(macOS13_3_plus || input.scalar_type() != ScalarType::Long,
+              "MPS does not support cumsum op with int64 input. Support has been added in macOS 13.3");
+
   mps::unary_op(input, result, "cumsum_out_mp" + std::to_string(dim),
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-       // cumsum is horribly broken for int8, int16 and as chances for overflow is pretty high, cast to int32
-       if (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int) {
+
+       if (castInputData) {
            inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, ScalarType::Int);
        }
        auto rc = [mpsGraph cumulativeSumWithTensor: inputTensor
                                               axis: dim
                                               name: nil];
-       if (result.scalar_type()!= input.scalar_type() ||
-           (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int)) {
+       if ((mps::getMPSDataType(result.scalar_type()) != [rc dataType]) || castInputData) {
          return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
        }
        return rc;

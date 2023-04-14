@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Backtrace.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
 
@@ -14,9 +15,17 @@ struct Call {
 struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
-  explicit ErrorReport(SourceRange r);
-  explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
-  explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
+  explicit ErrorReport(
+      SourceRange r,
+      const c10::optional<std::string>& backtrace = c10::nullopt);
+  explicit ErrorReport(
+      const TreeRef& tree,
+      const c10::optional<std::string>& backtrace = c10::nullopt)
+      : ErrorReport(tree->range(), backtrace) {}
+  explicit ErrorReport(
+      const Token& tok,
+      const c10::optional<std::string>& backtrace = c10::nullopt)
+      : ErrorReport(tok.range, backtrace) {}
 
   const char* what() const noexcept override;
 
@@ -42,6 +51,7 @@ struct TORCH_API ErrorReport : public std::exception {
   OwnedSourceRange context;
   mutable std::string the_message;
   std::vector<Call> error_stack;
+  std::string backtrace_;
 };
 
 template <typename T>
