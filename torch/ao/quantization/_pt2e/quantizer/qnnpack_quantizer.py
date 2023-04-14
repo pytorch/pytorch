@@ -4,7 +4,7 @@ import copy
 import operator
 import types
 from dataclasses import asdict
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, List, Optional, Set
 
 import torch
 import torch.nn.functional as F
@@ -16,7 +16,13 @@ from torch.ao.quantization.observer import (
 )
 from torch.fx import Node
 
-from .quantizer import OperatorConfig, QuantizationConfig, QuantizationSpec, Quantizer
+from .quantizer import (
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
+    QuantizationSpec,
+    Quantizer,
+)
 
 __all__ = [
     "QNNPackQuantizer",
@@ -25,15 +31,9 @@ __all__ = [
 
 
 def supported_symmetric_quantized_operators() -> Dict[
-    str,
-    List[List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]],
+    str, List[List[OperatorPatternType]]
 ]:
-    supported_operators: Dict[
-        str,
-        List[
-            List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]
-        ],
-    ] = {
+    supported_operators: Dict[str, List[List[OperatorPatternType]]] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -216,9 +216,7 @@ class QNNPackQuantizer(Quantizer):
     @classmethod
     def get_supported_operator_for_quantization_config(
         cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[
-        List[Union[torch.nn.Module, types.FunctionType, types.BuiltinFunctionType]]
-    ]:
+    ) -> List[List[OperatorPatternType]]:
         if quantization_config is None:
             all_ops = []
             for _, ops in cls.supported_config_and_operators:
