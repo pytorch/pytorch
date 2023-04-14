@@ -5,13 +5,7 @@ import torch
 from .. import ir
 
 from ..lowering import lowerings as L
-from ..pattern_matcher import (
-    Arg,
-    CallFunction,
-    filter_nodes,
-    get_arg_value,
-    KeywordArg,
-)
+from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
 from ..virtualized import ops
 from .post_grad import register_lowering_pattern
 
