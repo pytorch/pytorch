@@ -2158,6 +2158,47 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
+        x = torch.ones(6, 4, 4)
+        with self.assertRaisesRegex(TypeError, "Cannot determine truth value"):
+            4 < dynamic_dim(x, 0) <= 6  # noqa: B015
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_range_constraint(self):
+        x = torch.ones(6, 4, 4)
+        constraints = [
+            4 < dynamic_dim(x, 0),
+            dynamic_dim(x, 0) <= 6,
+        ]
+
+        def foo(x):
+            if x.shape[0] > 3:  # ok
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(
+            foo,
+            x,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        def bar(x):
+            if x.shape[0] > 5:  # error
+                return x.sin()
+            return x.cos()
+
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(
+                bar,
+                x,
+                constraints=constraints,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    @config.patch(dynamic_shapes=True)
     def test_list_contains(self):
         def func(x):
             assert x.size(-1) in [4, 5, 6], "bad"
@@ -2399,6 +2440,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
+
+    def test_cond_supported_pred_types(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            return x.sin()
+
+        def f_pred_traced_as_constant_var(x):
+            return cond(x.dim() > 2, true_fn, false_fn, [x])
+
+        def f_pred_traced_as_symnode_var(x):
+            return cond(x.shape[0] > 10, true_fn, false_fn, [x])
+
+        def f_pred_traced_as_tensor_var(x):
+            return cond(x.all(), true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        for f in [
+            f_pred_traced_as_constant_var,
+            f_pred_traced_as_symnode_var,
+            f_pred_traced_as_tensor_var,
+        ]:
+            gm, _ = torch._dynamo.export(f, *example_inputs)
+            self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
