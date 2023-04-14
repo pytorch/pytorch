@@ -2546,6 +2546,44 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.export(f_branch_return_multiple_tensors, *example_inputs)
 
+    def test_cond_raise_user_error_on_mismatch_return_length(self):
+        def true_fn(x):
+            return x
+
+        def false_fn(x):
+            return (x, x)
+
+        def f_mismatch_return_length(x):
+            return cond(torch.tensor(100), true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected branch out type to be a single tensor",
+        ):
+            torch._dynamo.export(
+                f_mismatch_return_length, *example_inputs, aten_graph=True
+            )
+
+    def test_cond_raise_user_error_on_mismatch_return_tensor_meta(self):
+        def true_fn(x):
+            return torch.tensor([[3], [2]])
+
+        def false_fn(x):
+            return torch.tensor([3.14])
+
+        def f_return_tensor_mismatch(x):
+            return cond(x.shape[0] < 3, true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected each tensor to have same metadata but got",
+        ):
+            torch._dynamo.export(
+                f_return_tensor_mismatch, *example_inputs, aten_graph=True
+            )
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

@@ -56,20 +56,22 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
     flat_false_outs, _ = pytree.tree_flatten(false_outs)
-    assert len(flat_true_outs) == len(flat_false_outs), f"""
-    Expected to return same number of outputs but got
-        {true_fn.__name__} returns {flat_true_outs}
-        {false_fn.__name__} returns {flat_false_outs}
-    """
+    if len(flat_true_outs) != len(flat_false_outs):
+        raise TypeError(
+            f"Expected to return same number of outputs but got:"
+            f"\n  {true_fn.__name__} returns {flat_true_outs}"
+            f"\n  {false_fn.__name__} returns {flat_false_outs}"
+        )
 
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        assert true_out.meta['tensor_meta'] == false_out.meta['tensor_meta'], f"""
-        Expected each tensor to have same metadata but got
-          {true_fn.__name__} returns {true_out.meta['tensor_meta']}
-          {false_fn.__name__} returns {false_out.meta['tensor_meta']}
-        """
+        if true_out.meta['tensor_meta'] != false_out.meta['tensor_meta']:
+            raise TypeError(
+                f"Expected each tensor to have same metadata but got:"
+                f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
+                f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
+            )
 
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,

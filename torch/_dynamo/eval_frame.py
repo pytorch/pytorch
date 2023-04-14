@@ -46,7 +46,7 @@ else:
 
 from . import convert_frame, skipfiles, utils
 from .config_utils import config
-from .exc import ResetRequired
+from .exc import ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -837,12 +837,15 @@ def export(
                 break
 
         with enable_python_dispatcher(), fake_tensor_mode:
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-                tracing_mode="real",
-                _allow_non_fake_inputs=True,
-            )(*example_fake_inputs)
+            try:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="real",
+                    _allow_non_fake_inputs=True,
+                )(*example_fake_inputs)
+            except TypeError as e:
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
         graph,
