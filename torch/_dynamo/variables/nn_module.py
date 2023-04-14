@@ -216,6 +216,15 @@ class NNModuleVariable(VariableTracker):
 
         return variables.GetAttrVariable(self, name, **options)
 
+    @contextmanager
+    def record_nn_module_stack(self, tx, mod):
+        fully_qualified_name = self.source.name()
+        try:
+            tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
+            yield
+        finally:
+            del tx.nn_module_stack[self.module_key]
+
     def call_function(
         self,
         tx,
@@ -225,16 +234,7 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
 
-        @contextmanager
-        def record_nn_module_stack():
-            fully_qualified_name = self.source.name()
-            try:
-                tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
-                yield
-            finally:
-                del tx.nn_module_stack[self.module_key]
-
-        with record_nn_module_stack():
+        with self.record_nn_module_stack(tx, mod):
             is_lazy = is_lazy_module(mod)
             if (
                 isinstance(mod, torch.nn.Sequential)
@@ -338,15 +338,16 @@ class NNModuleVariable(VariableTracker):
             # For not allowed module, it has been inlined before getting here.
             from .builder import wrap_fx_proxy
 
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_module",
-                    self.module_key,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                **options,
-            )
+            with self.record_nn_module_stack(tx, module):
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_module",
+                        self.module_key,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
