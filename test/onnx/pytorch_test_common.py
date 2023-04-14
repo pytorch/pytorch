@@ -232,6 +232,7 @@ def skip_fx_exporters(
                     raise unittest.SkipTest(
                         f"Skip verify test for '{exporter_name}'. {reason}"
                     )
+            return func(self, *args, **kwargs)
 
         return wrapper
 
