@@ -1601,20 +1601,15 @@ def batch_isend_irecv(p2p_op_list):
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
-    reqs = []
-    with _coalescing_manager(group, device, reqs):
+    with _coalescing_manager(group, device, async_ops=True) as cm:
         for p2p_op in p2p_op_list:
-            op = p2p_op.op
-            tensor = p2p_op.tensor
-            peer = p2p_op.peer
-            curr_group = p2p_op.group
-            tag = p2p_op.tag
-
-            ret = op(tensor, peer, curr_group, tag)
-
-            if ret is not None:
-                reqs.append(ret)
-    return reqs
+            p2p_op.op(
+                p2p_op.tensor,
+                p2p_op.peer,
+                p2p_op.group,
+                p2p_op.tag,
+            )
+    return cm.works
 
 
 @exception_handler

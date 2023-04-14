@@ -2180,7 +2180,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
     }
     auto work = endCoalescing();
     return work;
-    //return initCoalescedWork(works, rank_, OpType::BROADCAST);
   }
 }
 
@@ -2305,7 +2304,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       works.push_back(work);
     }
     auto work = endCoalescing();
-    //return initCoalescedWork(works, rank_, OpType::REDUCE);
     return work;
   }
 }
