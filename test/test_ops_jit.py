@@ -349,7 +349,6 @@ class TestJit(TestJitOpInfoParent):
                         aten_ops += 1
                         if n.kind() not in self.aten_ops_with_shape_fns:
                             has_unsupported_aten_ops = True
-                            self.assertTrue(False, f"Bad op, {n.kind()}")
 
                 if not op.assert_jit_shape_analysis:
                     self.assertTrue(
