@@ -1,11 +1,17 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/view_as_real.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -803,7 +809,7 @@ static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   Tensor output = dst;
   if (!dst.has_storage()) {
-    output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
+    output = at::empty(src.sizes(), src.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   }
 
   if (src.numel() == 0 || output.numel() == 0) {

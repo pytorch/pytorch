@@ -7,14 +7,85 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.exc import IncorrectUsage
+
+
+def my_custom_function(x):
+    return x + 1
 
 
 class DecoratorTests(torch._dynamo.test_case.TestCase):
+    def test_disallow_in_graph(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = torch.sub(x, 1)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        torch._dynamo.disallow_in_graph(torch.sub)
+        fn(torch.randn(10))
+        torch._dynamo.allow_in_graph(torch.sub)
+
+        # check for graph break on sub
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+    def test_allow_in_graph(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = my_custom_function(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        torch._dynamo.allow_in_graph(my_custom_function)
+        fn(torch.randn(10))
+        torch._dynamo.disallow_in_graph(my_custom_function)
+
+        # check for no graph break
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 5)
+
+    def test_incorrect_usage_disallow_in_graph(self):
+        with self.assertRaises(IncorrectUsage):
+
+            @torch._dynamo.disallow_in_graph
+            def fn1(x):
+                return x.cos()
+
+    def test_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts)
+        def fn(x):
+            x = torch.cos(x)
+            x = torch.cos(x)
+            torch._dynamo.graph_break()
+            x = torch.cos(x)
+            x = torch.cos(x)
+            torch._dynamo.graph_break()
+            x = torch.cos(x)
+            x = torch.cos(x)
+            return x
+
+        fn(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.op_count, 6)
+
     def test_skip(self):
         def fn2(x):
             return x.sin()
 
-        @torch._dynamo.skip
+        @torch._dynamo.disable(recursive=False)
         def fn1(x):
             x = x.sigmoid()
             return fn2(x.cos())
