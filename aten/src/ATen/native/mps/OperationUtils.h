@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>

@@ -6,6 +6,13 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/native_batch_norm.h>
+#endif
+
 namespace at::native {
 namespace mps {
 void get_shapes(MPSShape* input_shape_readonly,
@@ -925,40 +932,40 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::native::empty_like(*X,
-                                        c10::nullopt /* dtype */,
-                                        c10::nullopt /* layout */,
-                                        kMPS /* device */,
-                                        c10::nullopt /* pin_memory */,
-                                        at::MemoryFormat::Contiguous);
+    grad_input = at::empty_like(*X,
+                                c10::nullopt /* dtype */,
+                                c10::nullopt /* layout */,
+                                kMPS /* device */,
+                                c10::nullopt /* pin_memory */,
+                                at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    grad_weight = M > 0 ? at::native::empty_like(*gamma,
-                                                 c10::nullopt /* dtype */,
-                                                 c10::nullopt /* layout */,
-                                                 kMPS /* device */,
-                                                 c10::nullopt /* pin_memory */,
-                                                 at::MemoryFormat::Contiguous)
-                        : at::native::zeros_like(*gamma,
-                                                 c10::nullopt /* dtype */,
-                                                 c10::nullopt /* layout */,
-                                                 kMPS /* device */,
-                                                 c10::nullopt /* pin_memory */,
-                                                 at::MemoryFormat::Contiguous);
+    grad_weight = M > 0 ? at::empty_like(*gamma,
+                                         c10::nullopt /* dtype */,
+                                         c10::nullopt /* layout */,
+                                         kMPS /* device */,
+                                         c10::nullopt /* pin_memory */,
+                                         at::MemoryFormat::Contiguous)
+                        : at::zeros_like(*gamma,
+                                         c10::nullopt /* dtype */,
+                                         c10::nullopt /* layout */,
+                                         kMPS /* device */,
+                                         c10::nullopt /* pin_memory */,
+                                         at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = M > 0 ? at::native::empty_like(*beta,
-                                               c10::nullopt /* dtype */,
-                                               c10::nullopt /* layout */,
-                                               kMPS /* device */,
-                                               c10::nullopt /* pin_memory */,
-                                               at::MemoryFormat::Contiguous)
-                      : at::native::zeros_like(*beta,
-                                               c10::nullopt /* dtype */,
-                                               c10::nullopt /* layout */,
-                                               kMPS /* device */,
-                                               c10::nullopt /* pin_memory */,
-                                               at::MemoryFormat::Contiguous);
+    grad_bias = M > 0 ? at::empty_like(*beta,
+                                       c10::nullopt /* dtype */,
+                                       c10::nullopt /* layout */,
+                                       kMPS /* device */,
+                                       c10::nullopt /* pin_memory */,
+                                       at::MemoryFormat::Contiguous)
+                      : at::zeros_like(*beta,
+                                       c10::nullopt /* dtype */,
+                                       c10::nullopt /* layout */,
+                                       kMPS /* device */,
+                                       c10::nullopt /* pin_memory */,
+                                       at::MemoryFormat::Contiguous);
   }
   if (M > 0) {
     namespace native_mps = at::native::mps;

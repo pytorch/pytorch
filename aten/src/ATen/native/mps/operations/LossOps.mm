@@ -2,6 +2,16 @@
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/nll_loss_backward_native.h>
+#include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/smooth_l1_loss_native.h>
+#endif
+
 namespace at::native {
 namespace mps {
 
@@ -206,9 +216,9 @@ Tensor& bce_loss_out_impl(const Tensor& input,
   loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
 
-  Tensor loss_squeezed = at::squeeze(loss);
-  Tensor input_squeezed = at::squeeze(input);
-  Tensor target_squeezed = at::squeeze(target);
+  Tensor loss_squeezed = loss.squeeze();
+  Tensor input_squeezed = input.squeeze();
+  Tensor target_squeezed = target.squeeze();
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 

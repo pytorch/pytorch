@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
@@ -13,7 +14,8 @@
 #else
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/div.h>
-#include <ATen/ops/empty.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/randperm.h>
 #include <ATen/ops/topk.h>
 #endif
 

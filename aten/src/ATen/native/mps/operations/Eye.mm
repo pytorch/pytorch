@@ -1,6 +1,11 @@
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/eye_native.h>
+#endif
 // Steps to add op for MPS backend:
 // 1. Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
 // 2. Define the function interface for the MPS backend similar to other
@@ -27,7 +32,7 @@ namespace at::native {
 
 Tensor& eye_out_mps(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return at::native::eye_out_mps(n, n, result);
+  return eye_out_mps(n, n, result);
 }
 
 Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {

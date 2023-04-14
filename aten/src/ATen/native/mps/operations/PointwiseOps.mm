@@ -2,6 +2,13 @@
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addcdiv_native.h>
+#include <ATen/ops/addcmul_native.h>
+#endif
 namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {

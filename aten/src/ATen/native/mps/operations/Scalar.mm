@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/native/mps/Copy.h>
 
 #ifdef __OBJC__

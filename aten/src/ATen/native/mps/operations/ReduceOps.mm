@@ -1,11 +1,32 @@
 //  Copyright © 2022 Apple Inc.
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/all_native.h>
+#include <ATen/ops/amax_native.h>
+#include <ATen/ops/amin_native.h>
+#include <ATen/ops/any_native.h>
+#include <ATen/ops/argmax_native.h>
+#include <ATen/ops/argmin_native.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/mean_native.h>
+#include <ATen/ops/median.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/norm_native.h>
+#include <ATen/ops/prod_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sum_native.h>
+#endif
 
 namespace at::native {
 namespace mps {

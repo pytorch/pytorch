@@ -1,8 +1,18 @@
 //  Copyright © 2022 Apple Inc.
 #include <ATen/native/mps/OperationUtils.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/clamp_max_native.h>
+#include <ATen/ops/clamp_min_native.h>
+#include <ATen/ops/clamp_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
