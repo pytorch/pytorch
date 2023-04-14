@@ -5743,7 +5743,7 @@
 - func: flipud(Tensor self) -> Tensor
   variants: function, method
 
-- func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
+- func: roll(Tensor self, SymInt[1] shifts, int[1] dims=[]) -> Tensor
   variants: function, method
   dispatch:
     CPU, MPS: roll

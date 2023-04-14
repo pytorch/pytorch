@@ -3291,7 +3291,9 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 def roll(
-    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
+    a: TensorLikeType,
+    shifts: Sequence[Union[int, torch.types.SymInt]],
+    dims: DimsType = tuple(),
 ) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
@@ -3327,7 +3329,7 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
