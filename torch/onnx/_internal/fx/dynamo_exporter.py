@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 from typing import Optional
 
@@ -39,7 +41,9 @@ class DynamoOptimizeExporter(torch.onnx._internal.fx.fx_exporter.FXGraphModuleEx
 
         compiler = GraphCaptureCompiler()
         torch._dynamo.reset()
-        torch._dynamo.optimize(compiler.compile, nopython=True)(self.model)(*bound_args)
+        torch._dynamo.optimize(
+            compiler.compile, nopython=True, dynamic=self.options.dynamic_shapes
+        )(self.model)(*bound_args)
         torch._dynamo.reset()
         assert compiler.captured_graph
         # Export FX graph to ONNX ModelProto.

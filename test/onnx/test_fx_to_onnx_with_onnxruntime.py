@@ -434,11 +434,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "AssertionError: The values for attribute 'shape' do not match:"
-        " torch.Size([5, 6, 2]) != torch.Size([4, 4, 2]). Even symbolic "
-        "fx.graph can't get dynamic arguments from this Module."
-    )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
