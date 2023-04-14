@@ -44,8 +44,7 @@ else:
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
-from . import convert_frame, skipfiles, utils
-from .config_utils import config
+from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
@@ -369,7 +368,9 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size):
+    def catch_errors(frame, cache_size, frame_state):
+        assert frame_state is not None
+
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -395,10 +396,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks)
+                    return hijacked_callback(frame, cache_size, hooks, frame_state)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks)
+            return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
@@ -613,7 +614,8 @@ class Constraint:
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
-            self.constraint_range.vr & ValueRanges(lower=lower, upper=upper)
+            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
+            warn_only=False,
         )
         return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
 
@@ -988,13 +990,24 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None):
-    """Decorator and context manager to disable TorchDynamo"""
-    if fn is not None:
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        return DisableContext()(fn)
-    return DisableContext()
+def disable(fn=None, recursive=True):
+    """
+    Decorator and context manager to disable TorchDynamo
+
+    If recursive=True, Dynamo is completely skipped on the decorated function
+    frame as well as the recursively invoked functions.
+
+    If recursive=False, Dynamo skips frames associated with the function code,
+    but still process recursively invoked frames.
+    """
+    if recursive:
+        if fn is not None:
+            fn = innermost_fn(fn)
+            assert callable(fn)
+            return DisableContext()(fn)
+        return DisableContext()
+    else:
+        return skip(fn)
 
 
 def skip(fn=None):
@@ -1038,8 +1051,8 @@ class TorchPatcher:
 
         # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
         if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
-            DistributedDataParallel._inside_ddp_forward = skip(
-                DistributedDataParallel._inside_ddp_forward
+            DistributedDataParallel._inside_ddp_forward = disable(
+                DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
         from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd

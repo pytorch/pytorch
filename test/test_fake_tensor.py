@@ -673,6 +673,17 @@ class FakeTensorConverterTest(TestCase):
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.device.type, "cpu")
 
+    def test_multiple_modes(self):
+        t = torch.rand(([4]))
+        t2 = torch.rand([4])
+        with FakeTensorMode() as m:
+            with FakeTensorMode() as m2:
+                t_fake = m.from_tensor(t)
+                t2_fake = m2.from_tensor(t2)
+
+                with self.assertRaisesRegex(Exception, "Mixing fake modes"):
+                    t_fake + t2_fake
+
     def test_separate_mode_error(self):
         with FakeTensorMode():
             x = torch.empty(2, 2, device="cpu")
