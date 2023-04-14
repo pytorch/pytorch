@@ -19626,6 +19626,10 @@ python_ref_db = [
         torch_opinfo_name="contiguous",
         supports_nvfuser=False,
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.deg2rad",
+        torch_opinfo_name="deg2rad",
+    ),
     PythonRefInfo(
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
@@ -19739,6 +19743,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.rad2deg",
+        torch_opinfo_name="rad2deg",
     ),
     PythonRefInfo(
         "_refs.ravel",
@@ -19886,6 +19894,10 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.count_nonzero",
+        torch_opinfo_name="count_nonzero",
     ),
     ReductionPythonRefInfo(
         "_refs.mean",
