@@ -839,7 +839,6 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-<<<<<<< HEAD
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
                     curr_size = value
