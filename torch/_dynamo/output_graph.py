@@ -8,17 +8,7 @@ import re
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Union,
-)
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch._guards
 
@@ -558,6 +548,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for block in reversed(tx.block_stack):
             block.exit(tx)
 
+        self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
         assert self.nn_modules is not None
@@ -654,6 +645,30 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
 
+    def cleanup_graph(self):
+        """
+        Remove this pattern from the graph:
+            torch._C._set_grad_enabled(False)
+            torch._C._set_grad_enabled(True)
+        """
+        nodes = list(self.graph.nodes)
+        grad_enabled = torch.is_grad_enabled()
+        for node1, node2 in zip(nodes, nodes[1:]):
+            if (
+                node1.target is torch._C._set_grad_enabled
+                and tuple(node1.args) == (not grad_enabled,)
+                and not node1._erased
+            ):
+                grad_enabled = node1.args[0]
+                if (
+                    node2.target is torch._C._set_grad_enabled
+                    and tuple(node2.args) == (not grad_enabled,)
+                    and not node2._erased
+                ):
+                    grad_enabled = node2.args[0]
+                    self.graph.erase_node(node1)
+                    self.graph.erase_node(node2)
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -700,7 +715,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         return cg.get_instructions()
 
     @property
-    def placeholders(self) -> Iterator[fx.Node]:
+    def placeholders(self) -> List[fx.Node]:
         r = []
         for node in self.graph.nodes:
             if node.op == "placeholder":
