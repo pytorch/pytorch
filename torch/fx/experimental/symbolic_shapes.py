@@ -1755,7 +1755,7 @@ class ShapeEnv:
         assert len(placeholders) == len(sources)
 
         guard_compiler = GuardCompiler(source_ref)
-        
+
         # Expand optional inputs, or verify invariants are upheld
         if constraint_inputs is None:
             constraint_inputs = [
@@ -1924,9 +1924,9 @@ class ShapeEnv:
 
             tensor_size_name = guard_compiler.namespace.generate()
 
-            for i, ss in enumerate(t.size()):    
+            for i, ss in enumerate(t.size()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.SIZE, i), ss, tensor_size_name)
-            
+
             tensor_stride_name = guard_compiler.namespace.generate()
             for i, ss in enumerate(t.stride()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.STRIDE, i), ss, tensor_stride_name)

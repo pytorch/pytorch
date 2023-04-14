@@ -63,12 +63,6 @@ assume_static_by_default = True
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = True
 
-# This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
-# with assume_static_by_default=True.
-# With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
-# any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = False
-
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
 # that we don't error at all.  This is helpful for our CI where I'm using a
