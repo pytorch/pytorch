@@ -1393,7 +1393,7 @@ class BenchmarkRunner:
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
             except Exception:
-                log.exception(f"Backend {mode} failed in warmup()")
+                log.exception("Backend %s failed in warmup()", mode)
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)

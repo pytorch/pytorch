@@ -2,6 +2,7 @@ import functools
 import itertools
 import logging
 import os
+import random
 import types
 import weakref
 from typing import Dict, Optional, Set
@@ -95,15 +96,17 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 def wrap_convert_context(fn):
     """
     Context manager to:
-        1) Save/restore torch random state
-        2) Save/restore torch.is_grad_enabled() state
-        3) Monkey patch torch.fx.graph_module._forward_from_src
+        1) Save/restore torch.is_grad_enabled() state
+        2) Save/restore python random state
+        3) Save/restore torch random state
+        4) Monkey patch torch.fx.graph_module._forward_from_src
     """
 
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
-        rng_state = torch.random.get_rng_state()
+        py_rng_state = random.getstate()
+        torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
@@ -114,7 +117,8 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
-            torch.random.set_rng_state(rng_state)
+            random.setstate(py_rng_state)
+            torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
@@ -275,10 +279,14 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                f"   function: {format_func_info(code)}\n"
-                f"   reasons:  {format_guard_failures(code)}\n"
-                f"to diagnose recompilation issues, see {troubleshooting_url}."
+                "torch._dynamo hit config.cache_size_limit (%s)\n"
+                "   function: %s\n"
+                "   reasons:  %s\n"
+                "to diagnose recompilation issues, see %s.",
+                config.cache_size_limit,
+                format_func_info(code),
+                format_guard_failures(code),
+                troubleshooting_url,
             )
             unimplemented("cache_size_limit reached")
 
