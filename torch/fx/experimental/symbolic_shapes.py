@@ -171,9 +171,9 @@ def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
-    if isinstance(val, SymInt):
+    if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
-    elif isinstance(val, int):
+    elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
         r = set()
