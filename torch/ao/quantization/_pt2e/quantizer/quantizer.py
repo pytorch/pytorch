@@ -1,7 +1,7 @@
 import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Type, Union
 
 import torch
 
@@ -81,7 +81,9 @@ OperatorConfig = NamedTuple(
             List[
                 List[
                     Union[
-                        torch.nn.Module, types.FunctionType, types.BuiltinFunctionType
+                        Type[torch.nn.Module],
+                        types.FunctionType,
+                        types.BuiltinFunctionType,
                     ]
                 ]
             ],
