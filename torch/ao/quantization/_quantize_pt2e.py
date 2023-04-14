@@ -1,15 +1,17 @@
 from torch.fx import GraphModule
 
 from ._pt2e.prepare import prepare
-from .quantize_fx import _convert_to_reference_decomposed_fx
-from .fx.prepare import prepare as fx_prepare
+from ._pt2e.qat_utils import _fuse_conv_bn_qat
 from ._pt2e.utils import (
+    _build_node_name_to_scope,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
+from .fx.prepare import prepare as fx_prepare
+from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization._pt2e.quantizer import Quantizer
+from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Tuple, Any, Dict
 
@@ -20,14 +22,7 @@ def prepare_pt2e(
     backend_config: BackendConfig,
 ):
     # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, Tuple[str, type]] = {}
-    for n in model.graph.nodes:
-        nn_module_stack = n.meta.get("nn_module_stack", None)
-        current_scope = ("", type(None))
-        if nn_module_stack:
-            bt = list(nn_module_stack.values())[-1]
-            current_scope = (bt[0].split(".")[-1], bt[1])
-        node_name_to_scope[n.name] = current_scope
+    node_name_to_scope: Dict[str, Tuple[str, type]] = _build_node_name_to_scope(model)
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -52,29 +47,14 @@ def prepare_pt2e(
 def prepare_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-    is_qat: bool = False,
 ):
-    # TODO: move this information to fx node itself
-    node_name_to_scope: Dict[str, Tuple[str, type]] = {}
-    for n in model.graph.nodes:
-        nn_module_stack = n.meta.get("nn_module_stack", None)
-        current_scope = ("", type(None))
-        if nn_module_stack:
-            bt = list(nn_module_stack.values())[-1]
-            current_scope = (bt[0].split(".")[-1], bt[1])
-        node_name_to_scope[n.name] = current_scope
-
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
     _fuse_conv_bn_(model)
-    model = prepare(
-        model,
-        quantizer,
-        is_qat,
-        node_name_to_scope,
-    )
-
+    quantizer.annotate(model)
+    quantizer.validate(model)
+    model = prepare(model, is_qat=False)
     # TODO: remove hack when we have better support for pattern matching
     # move around the observer for addmm
     _rearrange_weight_observer_for_decomposed_linear(model)
@@ -85,7 +65,17 @@ def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
 ):
-    return prepare_pt2e_quantizer(model, quantizer, is_qat=True)
+    quantizer.annotate(model)
+    quantizer.validate(model)
+    # Perform fusion after annotate to avoid quantizing ops in the new
+    # subgraph that don't need to be quantized
+    # TODO: only fuse if conv and bn are both configured to be quantized
+    _fuse_conv_bn_qat(model)
+    model = prepare(model, is_qat=True)
+    # TODO: remove hack when we have better support for pattern matching
+    # move around the observer for addmm
+    _rearrange_weight_observer_for_decomposed_linear(model)
+    return model
 
 def convert_pt2e(
     model: GraphModule

@@ -1,6 +1,5 @@
 import torch
-from .qat_utils import _fuse_conv_bn_qat
-from .quantizer import Quantizer
+from .utils import _build_node_name_to_scope
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (
     _maybe_insert_input_observers_for_node,
@@ -86,17 +85,8 @@ def _maybe_insert_input_and_output_observers_for_node(
         if not _maybe_make_input_output_share_observers(node, model, named_modules):
             _remove_output_observer(node, model, named_modules)
 
-def prepare(
-        model: GraphModule,
-        quantizer: Quantizer,
-        is_qat: bool,
-        node_name_to_scope: Dict[str, Tuple[str, type]],
-) -> GraphModule:
-    quantizer.annotate(model)
-    quantizer.validate(model)
-
-    if is_qat:
-        _fuse_conv_bn_qat(model)
+def prepare(model: GraphModule, is_qat: bool) -> GraphModule:
+    node_name_to_scope: Dict[str, Tuple[str, type]] = _build_node_name_to_scope(model)
 
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
