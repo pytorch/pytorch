@@ -531,7 +531,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
           if (need_columns) {
             // Extract columns:
             at::native::vol2col<scalar_t>(
-                grad_output_n.data_ptr<scalar_t>(),
+                grad_output_n.const_data_ptr<scalar_t>(),
                 n_output_plane,
                 output_depth,
                 output_height,
@@ -551,7 +551,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
                 dilation_depth,
                 dilation_height,
                 dilation_width,
-                grad_columns.data_ptr<scalar_t>());
+                grad_columns.mutable_data_ptr<scalar_t>());
           }
 
           // M,N,K are dims of matrix A and B
@@ -752,7 +752,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
             if (need_columns) {
               // Extract columns:
               at::native::vol2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_depth,
                   output_height,
@@ -772,7 +772,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
                   dilation_depth,
                   dilation_height,
                   dilation_width,
-                  columns.data_ptr<scalar_t>());
+                  columns.mutable_data_ptr<scalar_t>());
             }
 
             // M,N,K are dims of matrix A and B
