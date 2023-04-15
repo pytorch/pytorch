@@ -244,14 +244,6 @@ class QNNPackQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        # initialize default target_dtype_info
-        _DEFAULT_TARGET_DTYPE_INFO = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-        }
-        for node in model.graph.nodes:
-            node.meta["target_dtype_info"] = copy.deepcopy(_DEFAULT_TARGET_DTYPE_INFO)
-
         global_config = self.global_config
         ops = self.get_supported_operator_for_quantization_config(global_config)
         # annotate the nodes from last to first since the matching is in the reversed order
