@@ -8,17 +8,7 @@ import re
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Union,
-)
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import sympy
 
