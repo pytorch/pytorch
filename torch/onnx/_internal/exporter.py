@@ -9,11 +9,13 @@ from typing import (
     Any,
     Callable,
     Final,
+    List,
     Mapping,
     Optional,
     Protocol,
     runtime_checkable,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -23,7 +25,6 @@ import torch
 import torch._ops
 
 from torch.onnx._internal import _beartype
-from torch.utils import _pytree
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
@@ -55,8 +56,7 @@ class ExportOptions:
 
     op_level_debug: Optional[bool] = None
     """Whether to export the model with op-level debug information by evaluating
-    ops through ONNX Runtime. Note: ``op_level_debug`` is not supported when
-    ``dynamic_shapes`` is ``True``."""
+    ops through ONNX Runtime."""
 
     logger: Optional[logging.Logger] = None
     """The logger for the ONNX exporter to use. Defaults to creating a child
@@ -100,13 +100,6 @@ class ResolvedExportOptions:
         self.logger = resolve(
             options.logger, lambda: logging.getLogger().getChild("torch.onnx")
         )
-
-        if self.dynamic_shapes and self.op_level_debug:
-            raise RuntimeError(
-                "Both ExportOptions.op_level_debug and ExportOptions.dynamic_shapes "
-                + "are True but these options are mutually exclusive. Please set only "
-                + "one of them to True.",
-            )
 
         for key in dir(options):
             if not key.startswith("_"):  # skip private attributes
@@ -163,20 +156,240 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
+# TODO(bowbao): Add diagnostics for IO adapters.
+@runtime_checkable
+class InputAdaptStep(Protocol):
+    """A protocol that defines a step in the input adapting process.
+
+    The input adapting process is a sequence of steps that are applied to the
+    PyTorch model inputs to transform them into the inputs format expected by the
+    exported ONNX model. Each step takes the PyTorch model inputs as arguments and
+    returns the transformed inputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    input signature by any individual component in the exporter.
+    """
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        ...
+
+
+class InputAdapter:
+    """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
+
+    _input_adapt_steps: List[InputAdaptStep]
+
+    def __init__(self, input_adapt_steps: Optional[List[InputAdaptStep]] = None):
+        self._input_adapt_steps = input_adapt_steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: InputAdaptStep) -> None:
+        """Appends a step to the input adapt steps.
+
+        Args:
+            step: The step to append.
+        """
+        self._input_adapt_steps.append(step)
+
+    @_beartype.beartype
+    def apply(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
+
+        Args:
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
+
+        Returns:
+            A sequence of tensors converted from PyTorch model inputs.
+        """
+        args: Sequence[Any] = model_args
+        kwargs: Mapping[str, Any] = model_kwargs
+        for step in self._input_adapt_steps:
+            args, kwargs = step.apply(args, kwargs)
+        assert not kwargs
+        return args
+
+
+@runtime_checkable
+class OutputAdaptStep(Protocol):
+    """A protocol that defines a step in the output adapting process.
+
+    The output adapting process is a sequence of steps that are applied to the
+    PyTorch model outputs to transform them into the outputs format produced by the
+    exported ONNX model. Each step takes the PyTorch model outputs as arguments and
+    returns the transformed outputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    output signature by any individual component in the exporter.
+    """
+
+    def apply(self, model_outputs: Any) -> Any:
+        ...
+
+
+class OutputAdapter:
+    """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
+
+    _output_adapt_steps: List[OutputAdaptStep]
+
+    def __init__(self, output_adapt_steps: Optional[List[OutputAdaptStep]] = None):
+        self._output_adapt_steps = output_adapt_steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: OutputAdaptStep) -> None:
+        """Appends a step to the output format steps.
+
+        Args:
+            step: The step to append.
+        """
+        self._output_adapt_steps.append(step)
+
+    @_beartype.beartype
+    def apply(self, model_outputs: Any) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
+
+        Args:
+            model_outputs: The PyTorch model outputs.
+
+        Returns:
+            PyTorch model outputs in exported ONNX model outputs format.
+        """
+        for step in self._output_adapt_steps:
+            model_outputs = step.apply(model_outputs)
+        return model_outputs
+
+
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
     _model_proto: Final[onnx.ModelProto]
+    _input_adapter: Final[InputAdapter]
+    _output_adapter: Final[OutputAdapter]
 
     @_beartype.beartype
-    def __init__(self, model_proto: onnx.ModelProto):
+    def __init__(
+        self,
+        model_proto: onnx.ModelProto,
+        input_adapter: InputAdapter,
+        output_adapter: OutputAdapter,
+    ):
         self._model_proto = model_proto
+        self._input_adapter = input_adapter
+        self._output_adapter = output_adapter
 
     @property
     def model_proto(self) -> onnx.ModelProto:
         """The exported ONNX model as an ``onnx.ModelProto``."""
 
         return self._model_proto
+
+    @_beartype.beartype
+    def adapt_torch_inputs_to_onnx(
+        self, *model_args, **model_kwargs
+    ) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
+
+        Due to design differences, input/output format between PyTorch model and exported
+        ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
+        not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
+        but only flattened tensors are supported by ONNX, etc.
+
+        The actual adapting steps are associated with each individual export. It
+        depends on the PyTorch model, the particular set of model_args and model_kwargs
+        used for the export, and export options.
+
+        This method replays the adapting steps recorded during export.
+
+        Args:
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
+
+        Returns:
+            A sequence of tensors converted from PyTorch model inputs.
+
+        Example::
+
+            # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+            >>> import torch
+            >>> import torch.onnx
+            >>> from typing import Dict, Tuple
+            >>> def func_with_nested_input_structure(
+            ...     x_dict: Dict[str, torch.Tensor],
+            ...     y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+            ... ):
+            ...     if "a" in x_dict:
+            ...         x = x_dict["a"]
+            ...     elif "b" in x_dict:
+            ...         x = x_dict["b"]
+            ...     else:
+            ...         x = torch.randn(3)
+            ...
+            ...     y1, (y2, y3) = y_tuple
+            ...
+            ...     return x + y1 + y2 + y3
+            >>> x_dict = {"a": torch.tensor(1.)}
+            >>> y_tuple = (torch.tensor(2.), (torch.tensor(3.), torch.tensor(4.)))
+            >>> export_output = torch.onnx.dynamo_export(func_with_nested_input_structure, x_dict, y_tuple)
+            >>> print(x_dict, y_tuple)
+            {'a': tensor(1.)}
+            (tensor(2.), (tensor(3.), tensor(4.)))
+            >>> print(export_output.adapt_torch_inputs_to_onnx(x_dict, y_tuple))
+            (tensor(1.), tensor(2.), tensor(3.), tensor(4.))
+
+        .. warning::
+            This API is experimental and is *NOT* backward-compatible.
+
+        """
+        return self._input_adapter.apply(*model_args, **model_kwargs)
+
+    @_beartype.beartype
+    def adapt_torch_outputs_to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
+
+        Due to design differences, input/output format between PyTorch model and exported
+        ONNX model are often not the same. E.g., None is allowed for PyTorch model, but are
+        not supported by ONNX. Nested constructs of tensors are allowed for PyTorch model,
+        but only flattened tensors are supported by ONNX, etc.
+
+        The actual adapting steps are associated with each individual export. It
+        depends on the PyTorch model, the particular set of model_args and model_kwargs
+        used for the export, and export options.
+
+        This method replays the adapting steps recorded during export.
+
+        Args:
+            model_outputs: The PyTorch model outputs.
+
+        Returns:
+            PyTorch model outputs in exported ONNX model outputs format.
+
+        Example::
+
+            # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+            >>> import torch
+            >>> import torch.onnx
+            >>> def func_returning_tuples(x, y, z):
+            ...     x = x + y
+            ...     y = y + z
+            ...     z = x + y
+            ...     return (x, (y, z))
+            >>> x = torch.tensor(1.)
+            >>> y = torch.tensor(2.)
+            >>> z = torch.tensor(3.)
+            >>> export_output = torch.onnx.dynamo_export(func_returning_tuples, x, y, z)
+            >>> pt_output = func_returning_tuples(x, y, z)
+            >>> print(pt_output)
+            (tensor(3.), (tensor(5.), tensor(8.)))
+            >>> print(export_output.adapt_torch_outputs_to_onnx(pt_output))
+            [tensor(3.), tensor(5.), tensor(8.)]
+
+        .. warning::
+            This API is experimental and is *NOT* backward-compatible.
+
+        """
+        return self._output_adapter.apply(model_outputs)
 
     @_beartype.beartype
     def save(
@@ -198,15 +411,6 @@ class ExportOutput:
 
 
 class Exporter(abc.ABC):
-    class WrappedFuncModule(torch.nn.Module):
-        def __init__(self, forward: Callable):
-            super().__init__()
-            self.actual_forward = forward
-
-        def forward(self, *args, **kwargs):
-            result, _ = _pytree.tree_flatten(self.actual_forward(*args, **kwargs))
-            return result
-
     @_beartype.beartype
     def __init__(
         self,
@@ -221,11 +425,7 @@ class Exporter(abc.ABC):
             self.options = options
         assert self.options is not None
 
-        self.model: torch.nn.Module = (
-            model
-            if isinstance(model, torch.nn.Module)
-            else Exporter.WrappedFuncModule(model)
-        )
+        self.model = model
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
@@ -242,9 +442,9 @@ class Exporter(abc.ABC):
     @property
     def model_signature(self) -> inspect.Signature:
         return inspect.signature(
-            self.model.actual_forward
-            if isinstance(self.model, Exporter.WrappedFuncModule)
-            else self.model.forward
+            self.model.forward
+            if isinstance(self.model, torch.nn.Module)
+            else self.model
         )
 
 
@@ -256,15 +456,10 @@ class UnsatisfiedDependencyError(RuntimeError):
         self.package_name = package_name
 
 
-def _assert_dependencies(export_options: ExportOptions):
-    T = TypeVar("T")
-
-    def assert_not_optional(value: Optional[T]) -> T:
-        assert value is not None
-        return value
-
-    logger = assert_not_optional(export_options.logger)
-    opset_version = assert_not_optional(export_options.opset_version)
+@_beartype.beartype
+def _assert_dependencies(export_options: ResolvedExportOptions):
+    logger = export_options.logger
+    opset_version = export_options.opset_version
 
     def missing_package(package_name: str, exc_info: logging._ExcInfoType):
         message = (
@@ -342,9 +537,11 @@ def dynamo_export(
 
     _assert_dependencies(resolved_export_options)
 
-    from torch.onnx._internal.fx.dynamo_exporter import DynamoOptimizeExporter
+    # Import inside to avoid introducing the dependencies on `onnx` and `onnxscript` for
+    # this file (exporter.py).
+    from torch.onnx._internal.fx.dynamo_exporter import DynamoExporter
 
-    return DynamoOptimizeExporter(
+    return DynamoExporter(
         options=resolved_export_options,
         model=model,
         model_args=model_args,

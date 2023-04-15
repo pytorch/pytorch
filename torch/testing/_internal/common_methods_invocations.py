@@ -3165,7 +3165,6 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
 
 
 def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    xfail_mode = kwargs.pop('xfail_mode', False)
     layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
     op_supports_layout = getattr(op_info, 'supports_' + layout_name)
     if not op_supports_layout:
@@ -3213,7 +3212,6 @@ def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout
 
 
 def sample_inputs_reduction_sparse_sum(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    xfail_mode = kwargs.get('xfail_mode', False)
     for sample in sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=blocksize, **kwargs):
         t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
         if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
@@ -3221,26 +3219,22 @@ def sample_inputs_reduction_sparse_sum(op_info, device, dtype, requires_grad, la
                 or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
                     ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
                 if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                    if xfail_mode:
-                        yield (sample, RuntimeError,
-                               "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
-                               " layout but got Sparse(Bsr|Bsc)")
-                    continue
+                    yield ErrorInput(sample,
+                                     error_regex=("empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
+                                                  " layout but got Sparse(Bsr|Bsc)"))
                 else:
-                    if xfail_mode:
-                        yield (sample, RuntimeError,
-                               "Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend")
-                    continue
+                    yield ErrorInput(
+                        sample,
+                        error_regex="Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend")
+                continue
             elif t_kwargs and not t_kwargs.get('keepdim'):
                 # reductions on sparse compressed tensors require
                 # keepdim==True when reduction is over sparse dimensions
-                if xfail_mode:
-                    yield (sample, RuntimeError,
-                           # FIXME: raise a better exception message
-                           "torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported")
+                yield ErrorInput(sample,
+                                 # FIXME: raise a better exception message
+                                 error_regex="torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported")
                 continue
-        if not xfail_mode:
-            yield sample
+        yield sample
 
 
 class _TestParamsMaxPoolBase:
@@ -6977,6 +6971,29 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
     for input_t, as_tuple in product(inputs, [False, True]):
         yield SampleInput(input_t.clone().requires_grad_(requires_grad),
                           kwargs=dict(as_tuple=as_tuple))
+
+def sample_inputs_nonzero_static(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+
+    inputs = []
+    for shape in sizes:
+        # construct input without any non-zero elements
+        zeros = torch.zeros(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+        inputs.append(zeros)
+
+        # construct input with mixed zero and non-zero elements
+        mixed = make_arg(shape).requires_grad_(False)
+        mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
+        mixed[mask_t] = 0
+        inputs.append(mixed)
+
+    nonzero_sizes = [0, 1, XS, S, M]
+
+    for input_t, nonzero_size in product(inputs, nonzero_sizes):
+        yield SampleInput(input_t.clone().requires_grad_(requires_grad),
+                          kwargs=dict(size=nonzero_size))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -14783,6 +14800,10 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -16837,6 +16858,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
+    OpInfo('nonzero_static',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_nonzero_static,
+           supports_out=False,
+           supports_autograd=False,
+           decorators=[onlyCPU],
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
     # Following tests are for jiterator's python interface
     # Jiterator can be used to author elementwise CUDA kernel
     # jiterator._create_jit_fn returns a callable that behaves like a regular pytorch op
@@ -17031,7 +17067,11 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatches in Python to matrix_norm. Not sure how to make this test happy
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),)
+                            dtypes=(torch.complex64, torch.float32,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),)
            ),
     OpInfo('norm',
            variant_test_name='fro',
@@ -19639,6 +19679,10 @@ python_ref_db = [
         torch_opinfo_name="contiguous",
         supports_nvfuser=False,
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.deg2rad",
+        torch_opinfo_name="deg2rad",
+    ),
     PythonRefInfo(
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
@@ -19752,6 +19796,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.rad2deg",
+        torch_opinfo_name="rad2deg",
     ),
     PythonRefInfo(
         "_refs.ravel",
@@ -19901,6 +19949,10 @@ python_ref_db = [
         torch_opinfo_name="any",
     ),
     ReductionPythonRefInfo(
+        "_refs.count_nonzero",
+        torch_opinfo_name="count_nonzero",
+    ),
+    ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
@@ -19924,6 +19976,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cumsum",
         torch_opinfo_name="cumsum",
+        supports_out=True,
+        supports_nvfuser=False,  # arange not supported
+    ),
+    PythonRefInfo(
+        "_refs.cumprod",
+        torch_opinfo_name="cumprod",
         supports_out=True,
         supports_nvfuser=False,  # arange not supported
     ),
