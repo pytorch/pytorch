@@ -13,7 +13,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Un
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer
+from sympy import Expr, Integer, simplify
 
 import torch._dynamo.config as dynamo_config
 import torch._logging
@@ -201,7 +201,9 @@ class ModularIndexing(sympy.Function):
         if divisor != 1:
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
-                return ModularIndexing(base / gcd, divisor / gcd, modulus)
+                return ModularIndexing(
+                    simplify(base / gcd), simplify(divisor / gcd), modulus
+                )
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -2604,7 +2606,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, int)):
+        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -4174,15 +4176,18 @@ class AllGatherIntoTensor(CollectiveKernel):
 
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op):
+    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
+        # TODO support dim
+        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
         cls,
         x: "TensorBox",
         reduce_op: str,
+        scatter_dim: int,
         tag: str,
         ranks: List[int],
         group_size: int,
@@ -4192,7 +4197,7 @@ class ReduceScatterTensor(CollectiveKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_size = x.get_size()
-        new_size[0] /= group_size
+        new_size[scatter_dim] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
         return ReduceScatterTensor(
@@ -4200,6 +4205,7 @@ class ReduceScatterTensor(CollectiveKernel):
             inputs=[x],
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
