@@ -350,6 +350,10 @@ PickleOpCode Unpickler::readInstruction() {
       uint32_t length = from_le32(read<uint32_t>());
       stack_.emplace_back(readBytes(length));
     } break;
+    case PickleOpCode::BINUNICODE8: {
+      int64_t length = from_le64(read<int64_t>());
+      stack_.emplace_back(readBytes(length));
+    } break;
     case PickleOpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
       break;
