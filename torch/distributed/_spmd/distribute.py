@@ -255,7 +255,7 @@ def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[object, ...]) -> DTen
     )
 
 
-def factory_sym_int_consumer_rule(
+def factory_with_sizes_rule(
     node: fx.Node,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
@@ -281,7 +281,7 @@ def factory_sym_int_consumer_rule(
     )
 
 
-def factory_op_replicate_rule(
+def factory_arange_rule(
     node: fx.Node,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
@@ -297,6 +297,21 @@ def factory_op_replicate_rule(
     )
 
 
+def default_factory_op_rule(
+    node: fx.Node,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    default_mesh: DeviceMesh,
+) -> DTensor:
+    node.args, node.kwargs = args, kwargs
+    return DTensor.from_local(
+        local_tensor=node.target(*node.args, **node.kwargs),
+        device_mesh=default_mesh,
+        placements=[Replicate()],
+        run_check=False,
+    )
+
+
 # Dispatch override for ops that consume SymInt arguments, where the output
 # spec should follow dimension placement where the SymInt comes from.
 SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
@@ -305,9 +320,13 @@ SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
 }
 
 FACTORY_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
-    aten.full.default: factory_sym_int_consumer_rule,
-    aten.arange.default: factory_op_replicate_rule,
-    aten.arange.start: factory_op_replicate_rule,
+    aten.full.default: factory_with_sizes_rule,
+    aten.arange.default: factory_arange_rule,
+    aten.arange.start: factory_arange_rule,
+}
+
+FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
+    aten.scalar_tensor.default: default_factory_op_rule,
 }
 
 
@@ -355,6 +374,15 @@ def _get_dtensor_dispatch_graph(
         # DSymInt args are not sharded on any dimension, local value and global
         # value should be the same
         args = tree_map(lambda a: a.local_value if isinstance(a, DSymInt) else a, args)
+        kwargs = tree_map(
+            lambda a: a.local_value if isinstance(a, DSymInt) else a, kwargs
+        )
+
+        if node.target in FACTORY_OPS:
+            node_to_obj[node] = FACTORY_OPS[node.target](
+                node, args, kwargs, default_mesh
+            )
+            return None
 
         # run dispatch once to get the real DTensor output.
         out, op_schema, output_sharding = _operator_dispatch(
@@ -676,24 +704,11 @@ def _convert_to_distributed(
             dtensor = cast(DTensor, node_to_obj[node.args[0]])
             node_to_obj[node] = DSymInt.from_node(node, dtensor)
         elif isinstance(node.target, torch._ops.OpOverload):
-            if node.target == torch.ops.aten.scalar_tensor.default:
-                node_to_obj[node] = DTensor.from_local(
-                    torch.ops.aten.scalar_tensor(
-                        node.args[0],
-                        dtype=node.kwargs["dtype"],
-                        device=node.kwargs["device"],
-                    ),
-                    schemas[0].mesh,
-                    [Replicate()],
-                    # prevent running this collective in backwards pass
-                    run_check=False,
-                )
-            else:
-                replacement = _get_dtensor_dispatch_graph(
-                    node, node_to_obj, default_mesh=default_mesh
-                )
-                if replacement is not None:
-                    node_replacements[node] = replacement
+            replacement = _get_dtensor_dispatch_graph(
+                node, node_to_obj, default_mesh=default_mesh
+            )
+            if replacement is not None:
+                node_replacements[node] = replacement
         elif node.op == OP.OUTPUT:
             if not _allow_partial:
                 # Returns an expanded dummy add node that ensures
