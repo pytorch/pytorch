@@ -156,9 +156,12 @@ class SideEffects:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
 
-    def load_attr(self, item, name):
+    def load_attr(self, item, name, deleted_ok=False):
         assert self.is_attribute_mutation(item)
-        return self.store_attr_mutations[item.mutable_local][name]
+        result = self.store_attr_mutations[item.mutable_local][name]
+        if not deleted_ok and isinstance(result, variables.DeletedVariable):
+            unimplemented("read deleted attribute")
+        return result
 
     def store_cell(self, cellvar, value):
         assert isinstance(cellvar, variables.NewCellVariable)
@@ -190,7 +193,7 @@ class SideEffects:
 
     def has_pending_mutation(self, item):
         return self.is_attribute_mutation(item) and bool(
-            self.store_attr_mutations[item.mutable_local]
+            self.store_attr_mutations.get(item.mutable_local)
         )
 
     def is_modified(self, item):
