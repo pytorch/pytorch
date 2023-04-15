@@ -553,7 +553,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.c10d_functional.all_reduce.default
+                            if n.target == torch.ops.aten.all_reduce.default
                         ]
                     ),
                     1,
@@ -596,9 +596,7 @@ class TraceTrainStepTest(DTensorTestBase):
     def test_adam_fused(self):
         self._test_adam(foreach=False, fused=True)
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_train_step_override(self):
+    def _test_train_step_override(self, module_override_key):
         transform_targets = []
 
         class DDMOverride(Override):
@@ -629,7 +627,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={DataDependentModule: DDMOverride()})
+        @compile(module_override={module_override_key: DDMOverride()})
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -645,6 +643,16 @@ class TraceTrainStepTest(DTensorTestBase):
             transform_targets,
             [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default],
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_type_override(self):
+        self._test_train_step_override(module_override_key=DataDependentModule)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_fqn_override(self):
+        self._test_train_step_override(module_override_key="ddm")
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -724,6 +732,24 @@ class TraceTrainStepTest(DTensorTestBase):
 
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
         self.assertEqual(mod.dummy_buffer, ddp_mod.module.dummy_buffer)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_expand_dimension(self):
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = nn.Linear(10, 10, bias=True).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+        for node in train_step._compiled_obj.gm.graph.nodes:
+            if node.target == torch.ops.aten.expand.default:
+                # backward grad expandion op should match local batch size
+                # instead of global batch size.
+                self.assertEqual(node.args[1], [2, 10])
 
 
 class CoverageTest(DTensorTestBase):
