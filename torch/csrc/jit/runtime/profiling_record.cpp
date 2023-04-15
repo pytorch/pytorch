@@ -266,7 +266,7 @@ bool needsProfiledOutput(Node* n) {
 void ProfilingRecord::removeProfileCounter(Block* b) {
   for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
     auto n = *it;
-    if (n->kind() == prim::profile && n->inputs().size() == 0) {
+    if (n->kind() == prim::profile && n->inputs().empty()) {
       it.destroyCurrent();
       // there is only one counter node
       return;

@@ -20,6 +20,8 @@
 
 #include <ATen/core/List.h>
 
+#include <utility>
+
 namespace at {
 namespace indexing {
 
@@ -109,15 +111,12 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct TORCH_API TensorIndex final {
   // Case 1: `at::indexing::None`
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
 
   // Case 2: "..." / `at::indexing::Ellipsis`
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(at::indexing::EllipsisIndexType)
       : type_(TensorIndexType::Ellipsis) {}
   TensorIndex(const char* str) : TensorIndex(at::indexing::Ellipsis) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
     TORCH_CHECK_VALUE(
         strcmp(str, "...") == 0,
         "Expected \"...\" to represent an ellipsis index, but got \"",
@@ -126,26 +125,21 @@ struct TORCH_API TensorIndex final {
   }
 
   // Case 3: Integer value
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int64_t integer)
       : integer_(integer), type_(TensorIndexType::Integer) {}
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
 
   // Case 4: Boolean value
   template <
       class T,
       class = typename std::enable_if<std::is_same<bool, T>::value>::type>
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Slice slice)
       : slice_(std::move(slice)), type_(TensorIndexType::Slice) {}
 
   // Case 6: Tensor value
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   TensorIndex(Tensor tensor)
       : tensor_(std::move(tensor)), type_(TensorIndexType::Tensor) {}
 
@@ -230,7 +224,7 @@ static inline Tensor applySlice(
       return self;
     }
   }
-  return self.slice_symint(dim, start, stop, step);
+  return self.slice_symint(dim, start, stop, std::move(step));
 }
 
 static inline Tensor applySelect(
@@ -243,7 +237,7 @@ static inline Tensor applySelect(
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     TORCH_CHECK_INDEX(
-        !(index == 0 && dim == 0 && self_sizes->size() == 0),
+        !(index == 0 && dim == 0 && self_sizes->empty()),
         "invalid index of a 0-dim tensor. ",
         "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
@@ -388,7 +382,10 @@ static inline Tensor scalarToTensor(
 static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] != 1) {
+    // Unbacked SymInt has different behavior, but this is sound because
+    // failing to slice will only ever cause an error, not divergent
+    // behavior
+    if (!sizes[i].has_hint() || sizes[i] != 1) {
       first_non1_src = i;
       break;
     }

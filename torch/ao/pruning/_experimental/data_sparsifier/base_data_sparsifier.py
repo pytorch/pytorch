@@ -29,8 +29,7 @@ SUPPORTED_TYPES = {
 
 
 class _Container(nn.Module):
-    def __init__(self):
-        super().__init__()
+    pass
 
 
 class BaseDataSparsifier(base_sparsifier.BaseSparsifier):

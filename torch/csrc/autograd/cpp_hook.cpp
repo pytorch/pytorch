@@ -3,6 +3,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <utility>
+
 namespace {
 using torch::autograd::Variable;
 void check_single_result(
@@ -13,18 +15,17 @@ void check_single_result(
     throw std::runtime_error(
         "can't replace a empty gradient with a non-empty value");
   }
-  torch::autograd::check_variable_result(value, result, hook_name);
+  torch::autograd::check_variable_result(value, result, std::move(hook_name));
 }
 } // namespace
 
 namespace torch {
 namespace autograd {
 
-// NOLINTNEXTLINE(modernize-pass-by-value)
 CppFunctionTensorPreHook::CppFunctionTensorPreHook(
-    const std::shared_ptr<hooks_list>& hooks,
+    std::shared_ptr<hooks_list> hooks,
     int value_idx)
-    : hooks_(hooks), value_idx_(value_idx) {}
+    : hooks_(std::move(hooks)), value_idx_(value_idx) {}
 
 variable_list CppFunctionTensorPreHook::operator()(
     const variable_list& values) {
@@ -48,15 +49,14 @@ variable_list CppFunctionTensorPreHook::operator()(
   return results;
 }
 
-// NOLINTNEXTLINE(modernize-pass-by-value)
 CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
     std::function<at::TensorBase(const at::TensorBase&)> hook,
     int value_idx)
-    : hook_(hook), value_idx_(value_idx) {}
+    : hook_(std::move(hook)), value_idx_(value_idx) {}
 
 variable_list CppFunctionSingleTensorPreHook::operator()(
     const variable_list& values) {
-  auto value = values[value_idx_];
+  const auto& value = values[value_idx_];
   auto res = hook_(value);
   TORCH_INTERNAL_ASSERT(
       !res.defined(),

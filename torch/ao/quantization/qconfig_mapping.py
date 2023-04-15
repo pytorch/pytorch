@@ -18,6 +18,7 @@ from .observer import (
 from .qconfig import (
     default_reuse_input_qconfig,
     default_symmetric_qnnpack_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
     QConfig,
@@ -106,15 +107,8 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
 
-    # QConfig for fused ops for onednn backend
-    # Separate ops are required to have the same qconfig as fused ops
-    # TODO: we should be able to configure qconfig for patterns
-    if backend == 'onednn':
-        qconfig_mapping.set_object_type(torch.nn.Linear, qconfig) \
-                       .set_object_type(torch.nn.LeakyReLU, qconfig) \
-                       .set_object_type(torch.nn.functional.leaky_relu, qconfig) \
-                       .set_object_type(torch.nn.Tanh, qconfig) \
-                       .set_object_type(torch.nn.functional.tanh, qconfig)
+    # TODO Currently it's required that separate ops in a fused op/module have the same qconfig.
+    #      Need to be able to support fusion of ops with different qconfigs
 
     return qconfig_mapping
 
@@ -152,6 +146,19 @@ def _get_symmetric_qnnpack_qconfig_mapping():
         if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
             qconfig_mapping.set_object_type(pattern, default_symmetric_qnnpack_qconfig)
     return qconfig_mapping
+
+def _get_symmetric_qnnpack_qat_qconfig_mapping():
+    """
+    Return a QConfigMapping that uses `torch.ao.quantization.default_symmetric_qnnpack_qat_qconfig`
+    as the default QConfig.
+    """
+    qconfig_mapping = get_default_qconfig_mapping("qnnpack") \
+        .set_global(default_symmetric_qnnpack_qat_qconfig)
+    for pattern in qconfig_mapping.object_type_qconfigs.keys():
+        if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
+            qconfig_mapping.set_object_type(pattern, default_symmetric_qnnpack_qat_qconfig)
+    return qconfig_mapping
+
 
 _QCONFIG_STYLE_ORDER: List[str] = [
     "global_qconfig",

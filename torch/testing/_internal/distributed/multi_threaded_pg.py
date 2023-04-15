@@ -1,14 +1,17 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from functools import partial, reduce
 
 import torch
 import torch.distributed as dist
+import weakref
 from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
     AllreduceOptions,
+    AllToAllOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
@@ -38,27 +41,57 @@ def ret_work(ret):
     fut.set_result(ret)
     return _create_work_from_future(fut)
 
+def binop_reduce(tensors, op):
+    res = op(torch.stack(tensors), dim=0)
+    if isinstance(res, torch.Tensor):
+        return res
+    # min/max return a namedtuple
+    return res.values
+
+def bitwise_reduce(tensors, op):
+    return reduce(op, tensors)
+
+_reduce_ops = {
+    ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.AVG: partial(binop_reduce, op=torch.mean),
+    ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
+    ReduceOp.MIN: partial(binop_reduce, op=torch.min),
+    ReduceOp.MAX: partial(binop_reduce, op=torch.max),
+    ReduceOp.BAND: partial(bitwise_reduce, op=torch.bitwise_and),
+    ReduceOp.BOR: partial(bitwise_reduce, op=torch.bitwise_or),
+    ReduceOp.BXOR: partial(bitwise_reduce, op=torch.bitwise_xor),
+}
+
+class AllToAll:
+    @torch.no_grad()
+    def work(self, data):
+        world_size = len(data)
+        for dest_rank in range(world_size):
+            output_tensor_list, _ = data[dest_rank]
+            for src_rank in range(world_size):
+                _, input_tensor_list = data[src_rank]
+                output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
 
 class AllReduce:
     def __init__(self, op):
-        if op != ReduceOp.SUM:
+        if op.op not in _reduce_ops:
             raise NotImplementedError(
-                "AllReduce only supports SUM on threaded pg for now."
+                f"AllReduce op {op.op} not supported on multithreaded pg for now."
             )
-        self.op = op
+        self.op = op.op
 
+    @torch.no_grad()
     def work(self, data):
-        # data: List[List[Tensor]]
-        res = data[0][0]
-        for src_rank in range(1, len(data)):
-            in_tensor_list = data[src_rank]
-            res.add_(in_tensor_list[0])  # Hardcoded
-        with torch.no_grad():
-            for src_rank in range(len(data)):
-                data[src_rank][0].copy_(res)
+        tensors = []
+        for src_rank in range(0, len(data)):
+            tensors.append(data[src_rank][0])
+        res = _reduce_ops[self.op](tensors)
+        for src_rank in range(len(data)):
+            data[src_rank][0].copy_(res)
 
 
 class AllGather:
+    @torch.no_grad()
     def work(self, data):
         for src_rank in range(len(data)):
             in_tensor_list = data[src_rank][1]
@@ -68,13 +101,13 @@ class AllGather:
 
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
-                with torch.no_grad():
-                    dest_tensor.copy_(src_tensor)
+                dest_tensor.copy_(src_tensor)
 
 class Scatter:
     def __init__(self, src):
         self.src = src
 
+    @torch.no_grad()
     def work(self, data):
         src_in_tensor_list = data[self.src][1]
         # Can't handle scatter with multiple input tensor list
@@ -86,8 +119,24 @@ class Scatter:
             # Can't handle scatter with multiple output tensor
             assert len(out_tensor_list) == 1
             dest_tensor = out_tensor_list[0]
-            with torch.no_grad():
-                dest_tensor.copy_(src_in_tensors[rank])
+            dest_tensor.copy_(src_in_tensors[rank])
+
+
+class Gather:
+    def __init__(self, dst):
+        self.dst = dst
+
+    @torch.no_grad()
+    def work(self, data):
+        # Can't handle gather with multiple tensor lists
+        assert len(data[self.dst][0]) == 1
+        out_tensor_list = data[self.dst][0][0]
+        for rank, each_rank_data in enumerate(data):
+            src_in_tensor_list = each_rank_data[1]
+            # Can't handle gather with multiple tensor lists
+            assert len(src_in_tensor_list) == 1
+            dest_tensor = out_tensor_list[rank]
+            dest_tensor.copy_(src_in_tensor_list[0])
 
 class ReduceScatter:
     def __init__(self, op):
@@ -95,6 +144,7 @@ class ReduceScatter:
             raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
         self.op = op
 
+    @torch.no_grad()
     def work(self, data):
         start_reduction = [False for _ in range(len(data))]
         for each_rank_data in data:
@@ -106,24 +156,22 @@ class ReduceScatter:
                 # Can't handle reduce_scatter with multiple output tensor
                 assert len(dest_tensor_on_rank_i) == 1
                 if not start_reduction[i]:
-                    with torch.no_grad():
-                        dest_tensor_on_rank_i[0].copy_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].copy_(to_scatter[i])
                     start_reduction[i] = True
                 else:
-                    with torch.no_grad():
-                        dest_tensor_on_rank_i[0].add_(to_scatter[i])
+                    dest_tensor_on_rank_i[0].add_(to_scatter[i])
 
 class Broadcast:
     def __init__(self, src):
         self.src = src
 
+    @torch.no_grad()
     def work(self, data):
         in_tensor_list = flatten_list(data[self.src])
         for i in range(len(data)):
             out_tensor_list = flatten_list(data[i])
             for j in range(len(in_tensor_list)):
-                with torch.no_grad():
-                    out_tensor_list[j].copy_(in_tensor_list[j])
+                out_tensor_list[j].copy_(in_tensor_list[j])
 
 
 class Collective:
@@ -229,6 +277,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):
+        coll = ProcessLocalGroup._start_coll(AllToAll(), self)
+        res = coll.join(self._rank, (output_tensor_list, input_tensor_list))
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
@@ -240,6 +294,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll, self)
         return res
+
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(output_tensor, self._world_size))
+        return self.allgather([tensor_list], [input_tensor], opts)
 
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
@@ -253,6 +311,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def gather(self, output_tensors, input_tensors, opts=ScatterOptions()):
+        coll = ProcessLocalGroup._start_coll(Gather(opts.rootRank), self)
+        res = coll.join(self._rank, (output_tensors, input_tensors))
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
         coll = ProcessLocalGroup._start_coll(ReduceScatter(opts.reduceOp), self)
         res = coll.join(self._rank, (output_tensor, scatter_list))
@@ -260,9 +324,13 @@ class ProcessLocalGroup(dist.ProcessGroup):
         return res
 
     def __init__(self, rank, world_size):
-        super(ProcessLocalGroup, self).__init__(rank, world_size)
+        super().__init__(rank, world_size)
         self._rank = rank
         self._world_size = world_size
+        world = dist.distributed_c10d._world
+        if isinstance(world, ThreadLocalWorld):
+            world = world._get_world()
+        self._world = weakref.ref(world)
         ProcessLocalGroup._register(self)
 
     def size(self):
@@ -273,7 +341,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         """
         return the global registered name of the current pg in the world
         """
-        return dist.distributed_c10d._world.pg_names[self]
+        return self._world().pg_names[self]
 
     def getBackendName(self):
         return "threaded"
@@ -295,15 +363,17 @@ class WorldData:
     pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
     pg_names: Dict[dist.ProcessGroup, str]
     pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
+    pg_backend_config: Dict[dist.ProcessGroup, str]
     group_count: int
-
+    tags_to_pg: Dict[str, List[dist.ProcessGroup]]
+    pg_to_tag: Dict[dist.ProcessGroup, str]
 
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0)
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -327,12 +397,24 @@ class ThreadLocalWorld:
         return self._get_world().pg_group_ranks
 
     @property
+    def pg_backend_config(self):
+        return self._get_world().pg_backend_config
+
+    @property
     def group_count(self) -> int:
         return self._get_world().group_count
 
     @group_count.setter
     def group_count(self, value):
         self._get_world().group_count = value
+
+    @property
+    def tags_to_pg(self):
+        return self._get_world().tags_to_pg
+
+    @property
+    def pg_to_tag(self):
+        return self._get_world().pg_to_tag
 
 
 _old_pg_world = None

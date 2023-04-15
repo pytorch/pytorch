@@ -175,7 +175,7 @@ struct BoxedProxy<void, Func> {
     constexpr size_t num_ivalue_args =
         c10::guts::infer_function_traits_t<Func>::number_of_parameters;
     torch::jit::drop(stack, num_ivalue_args);
-    stack.emplace_back(c10::IValue());
+    stack.emplace_back();
   }
 };
 

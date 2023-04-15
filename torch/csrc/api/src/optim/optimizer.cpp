@@ -121,12 +121,15 @@ void Optimizer::add_parameters(const std::vector<Tensor>& parameters) {
   parameters_.insert(parameters_.end(), parameters.begin(), parameters.end());
 }
 
-void Optimizer::zero_grad() {
+void Optimizer::zero_grad(bool set_to_none) {
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
-      if (p.grad().defined()) {
-        p.grad().detach_();
-        p.grad().zero_();
+      if (p.mutable_grad().defined()) {
+        p.mutable_grad().detach_();
+        if (set_to_none)
+          p.mutable_grad().reset();
+        else
+          p.mutable_grad().zero_();
       }
     }
   }

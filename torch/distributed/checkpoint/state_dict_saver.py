@@ -30,17 +30,17 @@ def save_state_dict(
     ``ShardedTensor`` by having each rank only save their local shards.
 
     .. warning::
-    There is no guarantees of Backwards Compatibility across PyTorch versions
-    for saved state_dicts.
+        There is no guarantees of Backwards Compatibility across PyTorch versions
+        for saved state_dicts.
 
     .. warning::
-    If using the `process_group` argument, make sure that only its ranks
-    call `save_state_dict` and that all data in state_dict belong to it.
+        If using the `process_group` argument, make sure that only its ranks
+        call `save_state_dict` and that all data in state_dict belong to it.
 
-    .. note:
-    This function can be used to save a state_dict with an intialized process
-    group by passing ``no_dist=True``. This can be used to produce a checkpoint
-    that can consumed by load_state_dict is a SPMD fashion.
+    .. note::
+        This function can be used to save a state_dict with an initialized process
+        group by passing ``no_dist=True``. This can be used to produce a checkpoint
+        that can consumed by load_state_dict is a SPMD fashion.
 
     Args:
         state_dict (Dict[str, Any]): A state_dict
@@ -65,7 +65,7 @@ def save_state_dict(
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
         >>> torch.distributed.checkpoint.save_state_dict(
         >>>     state_dict=model_state_dict,
-        >>>     storage_writer=fs_stroage_writer,
+        >>>     storage_writer=fs_storage_writer,
         >>> )
 
     .. note::
@@ -85,8 +85,8 @@ def save_state_dict(
 
     def local_step():
         assert planner is not None
-        planner.init(state_dict, distW.is_coordinator)
-        storage_writer.init(distW.is_coordinator)
+        planner.set_up_planner(state_dict, distW.is_coordinator)
+        storage_writer.set_up_storage_writer(distW.is_coordinator)
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan

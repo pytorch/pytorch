@@ -12,7 +12,7 @@ import numpy as np
 from caffe2.python import core, workspace
 
 
-class StoreOpsTests(object):
+class StoreOpsTests:
     @classmethod
     def _test_set_get(cls, queue, create_store_handler_fn, index, num_procs):
         store_handler = create_store_handler_fn()

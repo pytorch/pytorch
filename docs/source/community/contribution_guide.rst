@@ -2,7 +2,7 @@ PyTorch Contribution Guide
 ==========================
 
 PyTorch is a GPU-accelerated Python tensor computation package for
-building deep neural networks using a on tape-based autograd systems.
+building deep neural networks using a tape-based autograd systems.
 
 Contribution Process
 --------------------
@@ -129,7 +129,7 @@ proposed solution. The PyTorch team can provide guidance that saves you
 time.
 
 Issues that are labeled first-new-issue, low, or medium priority provide
-the best entrance point are great places to start.
+the best entrance points and are great places to start.
 
 Adding Tutorials
 ~~~~~~~~~~~~~~~~

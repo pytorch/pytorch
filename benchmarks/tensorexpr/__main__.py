@@ -67,30 +67,35 @@ Works only with Python3.\n A few examples:
         help="the underlying tensor engine. only pt for now",
     )
     parser.add_argument(
+        "--jit-mode",
         "--jit_mode",
         type=str,
         default="trace",
         help="the jit mode to use: one of {trace, none}",
     )
     parser.add_argument(
+        "--cuda-pointwise-loop-levels",
         "--cuda_pointwise_loop_levels",
         type=int,
         default=None,
         help="num of loop levesl for Cuda pointwise operations: 2 or 3",
     )
     parser.add_argument(
+        "--cuda-pointwise-block-count",
         "--cuda_pointwise_block_count",
         type=int,
         default=None,
         help="num of block for Cuda pointwise operations",
     )
     parser.add_argument(
+        "--cuda-pointwise-block-size",
         "--cuda_pointwise_block_size",
         type=int,
         default=None,
         help="num of blocks for Cuda pointwise operations",
     )
     parser.add_argument(
+        "--cuda-fuser",
         "--cuda_fuser",
         type=str,
         default="te",
@@ -118,12 +123,14 @@ Works only with Python3.\n A few examples:
         help="Disable shape randomization in dynamic benchmarks.",
     )
     parser.add_argument(
+        "--cpu-fusion",
         "--cpu_fusion",
         default=False,
         action='store_true',
         help="Enable CPU fusion.",
     )
     parser.add_argument(
+        "--cat-wo-conditionals",
         "--cat_wo_conditionals",
         default=False,
         action='store_true',

@@ -30,37 +30,32 @@ void THCPGraph_init(PyObject* module) {
       // docs aren't clear. But it works.
       .def(
           "capture_begin",
-          torch::wrap_pybind_function(&at::cuda::CUDAGraph::capture_begin),
-          py::call_guard<py::gil_scoped_release>(),
+          torch::wrap_pybind_function_no_gil(
+              &at::cuda::CUDAGraph::capture_begin),
           py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
       .def(
           "capture_end",
-          torch::wrap_pybind_function(&at::cuda::CUDAGraph::capture_end),
-          py::call_guard<py::gil_scoped_release>())
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
       .def(
           "replay",
-          torch::wrap_pybind_function(&at::cuda::CUDAGraph::replay),
-          py::call_guard<py::gil_scoped_release>())
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))
       .def(
           "reset",
-          torch::wrap_pybind_function(&at::cuda::CUDAGraph::reset),
-          py::call_guard<py::gil_scoped_release>())
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::reset))
       .def(
           "pool",
-          torch::wrap_pybind_function(&at::cuda::CUDAGraph::pool),
-          py::call_guard<py::gil_scoped_release>())
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::pool))
       .def(
           "debug_dump",
-          torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
-          py::call_guard<py::gil_scoped_release>())
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::debug_dump))
       .def(
           "enable_debug_mode",
-          torch::wrap_pybind_function(
-              &::at::cuda::CUDAGraph::enable_debug_mode),
-          py::call_guard<py::gil_scoped_release>())
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::enable_debug_mode))
       .def(
           "debug_dump",
-          torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
-          py::call_guard<py::gil_scoped_release>(),
+          torch::wrap_pybind_function_no_gil(
+              &::at::cuda::CUDAGraph::debug_dump),
           py::arg("debug_path"));
 }

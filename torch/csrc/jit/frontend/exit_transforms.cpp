@@ -125,7 +125,7 @@ struct ExitTransformer {
   }
 
   static void removeOutputs(Block* b) {
-    while (b->outputs().size() > 0) {
+    while (!b->outputs().empty()) {
       b->eraseOutput(0);
     }
   }
@@ -347,7 +347,7 @@ struct ExitTransformer {
       new_if->addOutput()->setType(block->outputs().at(i)->type());
     }
 
-    while (block->outputs().size() > 0) {
+    while (!block->outputs().empty()) {
       block->eraseOutput(0);
     }
     for (auto out : new_if->outputs()) {
@@ -368,7 +368,7 @@ struct ExitTransformer {
   // never be used, it is safe to replace them with unitialized value
   void destroyNodeAfterExit(Node* n) {
     for (auto output : n->outputs()) {
-      if (output->uses().size() > 0) {
+      if (!output->uses().empty()) {
         output->replaceAllUsesWith(getUnitValue(output->type()));
       }
     }

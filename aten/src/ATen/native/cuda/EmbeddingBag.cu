@@ -67,7 +67,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
     index_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     index_t *bag_size, index_t *max_indices,
-    index_t padding_idx) {
+    index_t padding_idx, int64_t numRows) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -89,6 +89,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       int64_t maxWord = -1;
       for (int64_t emb = begin; emb < end; emb++) {
         bool pad = (input[emb] == padding_idx);
+        CUDA_KERNEL_ASSERT(input[emb] < numRows);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         if (bag_size_ == 0 || weightValue > weightFeatMax) {
@@ -117,7 +118,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, index_t *bag_size,
     scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    index_t padding_idx) {
+    index_t padding_idx, int64_t numRows) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -139,6 +140,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
         bool pad = (input[emb] == padding_idx);
+        CUDA_KERNEL_ASSERT(input[emb] < numRows);
         const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         weightValue = pad ? static_cast<scalar_t>(0) : weightValue;
@@ -343,6 +345,9 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
         "offsets has to be a 1D Tensor, but got Tensor of dimension ",
         offsets_.dim());
   }
+  TORCH_CHECK(weight.dim() == 2,
+      "weight has to be a 2D Tensor, but got Tensor of dimension ",
+      weight.dim());
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
@@ -403,7 +408,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             offset2bag.data_ptr<index_t>(), numIndices, numBags, featureSize,
             weight.stride(0), weight.stride(1), bag_size.data_ptr<index_t>(),
             max_indices.data_ptr<index_t>(),
-            padding_idx);
+            padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t><<<grid, block, 0, stream>>>(
@@ -413,7 +418,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<index_t>(),
             per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-            padding_idx);
+            padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });

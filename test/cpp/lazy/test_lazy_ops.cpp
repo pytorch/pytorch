@@ -956,7 +956,7 @@ TEST_F(LazyOpsTest, TestIntegerAdd) {
       torch::Tensor b =
           torch::randint(0, 63, {2, 2}, torch::TensorOptions(type));
       torch::Scalar one =
-          isIntegralType(type) ? torch::Scalar(1) : torch::Scalar(1.0);
+          isIntegralType(type, false) ? torch::Scalar(1) : torch::Scalar(1.0);
       torch::Tensor c = torch::add(b, one);
 
       torch::Tensor lazy_a = CopyToDevice(a, device);
@@ -1024,39 +1024,6 @@ TEST_F(LazyOpsTest, TestQR) {
             /*rtol=*/1e-3,
             /*atol=*/1e-4);
       });
-    }
-  }
-}
-
-TEST_F(LazyOpsTest, TestSymEig) {
-  static const int dims[] = {4, 7};
-  for (auto m : dims) {
-    for (bool eigenvectors : {true, false}) {
-      for (bool upper : {true, false}) {
-        torch::Tensor a = torch::rand(
-            {m, m},
-            torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-        torch::Tensor sym_a = a.mm(a.t());
-        auto b = torch::symeig(sym_a, eigenvectors, upper);
-        ForEachDevice([&](const torch::Device& device) {
-          torch::Tensor lazy_a = CopyToDevice(sym_a, device);
-          auto lazy_b = torch::symeig(lazy_a, eigenvectors, upper);
-          AllClose(
-              std::get<0>(b),
-              std::get<0>(lazy_b),
-              /*rtol=*/3e-2,
-              /*atol=*/1e-2);
-          if (eigenvectors) {
-            AllClose(
-                std::get<1>(b).abs(),
-                std::get<1>(lazy_b).abs(),
-                /*rtol=*/3e-2,
-                /*atol=*/1e-2);
-          } else {
-            EXPECT_EQ(std::get<1>(b).sizes(), std::get<1>(lazy_b).sizes());
-          }
-        });
-      }
     }
   }
 }
@@ -1586,7 +1553,7 @@ TEST_F(LazyOpsTest, TestStdWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1606,7 +1573,7 @@ TEST_F(LazyOpsTest, TestStdMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1743,7 +1710,7 @@ TEST_F(LazyOpsTest, TestVarWithDim) {
 TEST_F(LazyOpsTest, TestVarWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (bool keepDim : {true, false}) {
       for (const auto& correction : corrections) {
@@ -1763,7 +1730,7 @@ TEST_F(LazyOpsTest, TestVarWithCorrection) {
 TEST_F(LazyOpsTest, TestVarMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (const auto& correction : corrections) {
       for (auto keepdim : {true, false}) {

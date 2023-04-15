@@ -46,8 +46,8 @@ bool memoryProfilingEnabled() {
 void reportMemoryUsageToProfiler(
     void* ptr,
     int64_t alloc_size,
-    int64_t total_allocated,
-    int64_t total_reserved,
+    size_t total_allocated,
+    size_t total_reserved,
     Device device) {
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
@@ -59,8 +59,8 @@ void reportMemoryUsageToProfiler(
 
 void reportOutOfMemoryToProfiler(
     int64_t alloc_size,
-    int64_t total_allocated,
-    int64_t total_reserved,
+    size_t total_allocated,
+    size_t total_reserved,
     Device device) {
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
@@ -74,8 +74,8 @@ MemoryReportingInfoBase::MemoryReportingInfoBase() = default;
 
 void MemoryReportingInfoBase::reportOutOfMemory(
     int64_t /*alloc_size*/,
-    int64_t /*total_allocated*/,
-    int64_t /*total_reserved*/,
+    size_t /*total_allocated*/,
+    size_t /*total_reserved*/,
     Device /*device*/) {}
 
 } // namespace c10

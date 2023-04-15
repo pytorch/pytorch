@@ -12,7 +12,6 @@ from typing import (
     Iterator,
     Tuple,
     Dict,
-    Optional,
     List,
     Sequence,
     TypeVar,
@@ -40,7 +39,7 @@ from torch.distributed._tensor import (
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import Placement
 
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -121,6 +120,10 @@ class DTensorTestBase(MultiProcessTestCase):
 
     def destroy_pg(self) -> None:
         # Wait for all ranks to reach here before starting shutdown.
+        # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
+        # dist.all_reduce(torch.zeros((1,), device="cuda" if torch.cuda.is_available() else "cpu"))
+        # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
+        #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         dist.barrier()
         dist.destroy_process_group()
 
@@ -145,15 +148,10 @@ class DTensorTestBase(MultiProcessTestCase):
                 )
 
 
+TestFunc = Callable[[object], object]
+
 # wrapper to initialize comms (processgroup)
-def with_comms(
-    func: Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-        Callable
-    ] = None,
-    backend: Optional[str] = None,
-) -> Optional[  # pyre-fixme[24]: Generic type `Callable` expects 2 type parameters.
-    Callable
-]:
+def with_comms(func: TestFunc) -> TestFunc:
     assert func is not None
 
     @wraps(func)  # pyre-ignore[6]
@@ -161,13 +159,17 @@ def with_comms(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
         # if backend not specified, and cuda available, then use nccl, else gloo
+        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
+            self.device_type = "cuda"
+        else:
+            self.device_type = "cpu"
+
         pg_backend = (
-            "nccl" if backend is None and torch.cuda.is_available() else "gloo"
+            "nccl" if self.device_type == "cuda" else "gloo"
         )
         if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        self.device_type = "cuda" if pg_backend == "nccl" else "cpu"
         self.init_pg(backend=pg_backend)
         func(self)  # type: ignore[misc]
         self.destroy_pg()
@@ -193,7 +195,7 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
-class DTensorConverter(object):
+class DTensorConverter:
     def __init__(
         self,
         mesh: DeviceMesh,
@@ -328,7 +330,9 @@ class DTensorConverter(object):
                         mesh,
                         placements,
                         size=t.size(),
+                        dtype=torch.bool,
                         requires_grad=t.requires_grad,
+                        stride=t.stride()
                     )
                 else:
                     r = distribute_tensor(t, mesh, placements)

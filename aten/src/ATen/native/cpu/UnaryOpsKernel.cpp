@@ -35,22 +35,25 @@ inline namespace CPU_CAPABILITY {
 using namespace vec;
 
 static void sigmoid_kernel(TensorIteratorBase& iter) {
-  if (iter.common_dtype() == kBFloat16) {
-    cpu_kernel_vec(
-        iter,
-        [=](BFloat16 a) -> BFloat16 {
-          float a0 = static_cast<float>(a);
-          return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
-        },
-        [=](Vectorized<BFloat16> a) {
-          Vectorized<float> a0, a1;
-          std::tie(a0, a1) = convert_bfloat16_float(a);
-          a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
-          a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
-          return convert_float_bfloat16(a0, a1);
-        });
+  const auto dtype = iter.common_dtype();
+  if (at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "sigmoid_cpu_reduced_float", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t {
+            float a0 = static_cast<float>(a);
+            return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
+          },
+          [=](Vectorized<scalar_t> a) {
+            Vectorized<float> a0, a1;
+            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+            a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
+            a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
+            return convert_from_float<scalar_t>(a0, a1);
+          });
+    });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(dtype, "sigmoid_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t {
@@ -655,27 +658,32 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 
 // TODO: Disable cont. branch to test more risky code
 
-#define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
-          [&](char** data_, const int64_t* strides, int64_t n) {              \
-            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
-            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
-            int64_t out_stride = strides[0] / sizeof(scalar_t);               \
-            int64_t in_stride = strides[1] / sizeof(scalar_t);                \
-            if (out_stride == 1 && in_stride == 1) {                          \
-              vml::v##op(out_data, in_data, n);                               \
-            } else {                                                          \
-              static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
-              for (int64_t i = 0; i < n; i += WIDTH) {                        \
-                scalar_t buffer[WIDTH];                                       \
-                int64_t width = WIDTH;                                        \
-                width = std::min(width, n - i);                               \
-                for (const auto j : c10::irange(width))\
-                  buffer[j] = in_data[in_stride * (i + j)];                   \
-                vml::v##op(buffer, buffer, width);                            \
-                for (const auto j : c10::irange(width))\
-                  out_data[out_stride * (i + j)] = buffer[j];                 \
-              }                                                               \
-            }                                                                 \
+#define IMPLEMENT_ITERATOR_LAMBDA(op)                                              \
+          [&](char** data_, const int64_t* strides, int64_t n) {                   \
+            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);            \
+            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);             \
+            int64_t out_stride = strides[0] / sizeof(scalar_t);                    \
+            int64_t in_stride = strides[1] / sizeof(scalar_t);                     \
+            if (out_stride == 1 && in_stride == 1) {                               \
+              vml::v##op(out_data, in_data, n);                                    \
+              return;                                                              \
+            }                                                                      \
+            static constexpr int64_t WIDTH = (8*1024) / sizeof(scalar_t);          \
+            for (int64_t i = 0; i < n; i += WIDTH) {                               \
+              scalar_t buffer[WIDTH];                                              \
+              const int64_t width = std::min(WIDTH, n - i);                        \
+              /* If either tensor is contiguous use it, otherwise copy into */     \
+              /* a contiguous buffer so compute can still be vectorized */         \
+              scalar_t * in_buffer = in_stride == 1 ? &in_data[i] : &buffer[0];    \
+              scalar_t * out_buffer = out_stride == 1 ? &out_data[i] : &buffer[0]; \
+              if (in_stride != 1)                                                  \
+                for (const auto j : c10::irange(width))                            \
+                  in_buffer[j] = in_data[in_stride * (i + j)];                     \
+              vml::v##op(out_buffer, in_buffer, width);                            \
+              if (out_stride != 1)                                                 \
+                for (const auto j : c10::irange(width))                            \
+                    out_data[out_stride * (i + j)] = out_buffer[j];                \
+            }                                                                      \
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
@@ -683,9 +691,8 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
-      iter.serial_for_each(                                                         \
-          IMPLEMENT_ITERATOR_LAMBDA(op),                                            \
-          {0, iter.numel()});                                                       \
+      constexpr int64_t grain_size = 2048;                                          \
+      iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                     \
     });                                                                             \
     iter.cast_outputs();                                                            \
   }                                                                                 \
@@ -697,9 +704,8 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
-      iter.serial_for_each(                                                                      \
-          IMPLEMENT_ITERATOR_LAMBDA(op),                                                         \
-          {0, iter.numel()});                                                                    \
+        constexpr int64_t grain_size = 2048;                                                     \
+        iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
     });                                                                                          \
     iter.cast_outputs();                                                                         \
   }                                                                                              \
@@ -771,7 +777,7 @@ IMPLEMENT_FLOAT_KERNEL(erfinv)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(exp)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(expm1)
+IMPLEMENT_COMPLEX_KERNEL(expm1)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_FLOAT_KERNEL(floor)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

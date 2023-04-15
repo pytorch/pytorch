@@ -2,6 +2,7 @@
 #define THP_UTILS_H
 
 #include <ATen/ATen.h>
+#include <torch/csrc/Storage.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -140,6 +141,17 @@
 #define THPQUInt2x4Utils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
 #define THPQUInt2x4Utils_newReal(value) THPUtils_newReal_INT(value)
 
+/*
+   From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
+   If compiled as a shared library, some compilers don't allow addresses of
+   Python objects defined in other libraries to be used in static PyTypeObject
+   initializers. The DEFERRED_ADDRESS macro is used to tag the slots where such
+   addresses appear; the module init function that adds the PyTypeObject to the
+   module must fill in the tagged slots at runtime. The argument is for
+   documentation -- the macro ignores it.
+*/
+#define DEFERRED_ADDRESS(ADDR) nullptr
+
 #define THPUtils_assert(cond, ...) \
   THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...) \
@@ -158,7 +170,7 @@ TORCH_PYTHON_API void THPUtils_invalidArguments(
 bool THPUtils_checkIntTuple(PyObject* arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject* arg);
 
-void THPUtils_addPyMethodDefs(
+TORCH_PYTHON_API void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
     PyMethodDef* methods);
 
@@ -167,7 +179,7 @@ int THPUtils_getCallable(PyObject* arg, PyObject** result);
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
 typedef class THPPointer<THPStorage> THPStoragePtr;
 
-std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
+TORCH_PYTHON_API std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
 PyObject* THPUtils_dispatchStateless(
     PyObject* tensor,
     const char* name,
@@ -208,7 +220,6 @@ std::vector<c10::optional<at::cuda::CUDAStream>>
 THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
 #endif
 
-void storage_copy(at::Storage dst, at::Storage src, bool non_blocking = false);
 void storage_fill(at::Storage self, uint8_t value);
 void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
 uint8_t storage_get(at::Storage self, ptrdiff_t idx);

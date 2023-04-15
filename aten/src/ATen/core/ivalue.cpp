@@ -96,6 +96,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return c10::SymIntType::get();
       case Tag::SymFloat:
         return c10::SymFloatType::get();
+      case Tag::SymBool:
+        return c10::SymBoolType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -108,6 +110,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       }
       case Tag::GenericList:
         return ListType::create(v.toList().elementType());
+      case Tag::Await:
+        return AwaitType::create(v.toAwait()->elementType());
       case Tag::Future:
         return FutureType::create(v.toFuture()->elementType());
       case Tag::RRef:
@@ -235,6 +239,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       break;
     }
     case Tag::Future:
+    case Tag::Await:
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -306,9 +311,9 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::SymInt:
       return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::SymFloat:
-      // NB: this doesn't actually work as sym floats don't have equality
-      // defined
       return rhs.isSymFloat() && lhs.toSymFloat() == rhs.toSymFloat();
+    case Tag::SymBool:
+      return rhs.isSymBool() && lhs.toSymBool() == rhs.toSymBool();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -325,6 +330,7 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -365,6 +371,8 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(v.payload.u.as_int);
     case Tag::SymFloat:
       return c10::get_hash(v.payload.u.as_int);
+    case Tag::SymBool:
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
     case Tag::Tuple:
@@ -375,6 +383,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::GenericList:
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -490,7 +499,7 @@ std::ostream& printMaybeAnnotatedList(
     const IValue& the_list,
     IValueFormatter formatter) {
   auto list_elem_type = the_list.type()->containedType(0);
-  if (the_list.toListRef().size() == 0 ||
+  if (the_list.toListRef().empty() ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", std::move(formatter));
@@ -531,7 +540,7 @@ std::ostream& printMaybeAnnotatedDict(
     const IValue& the_dict,
     IValueFormatter formatter) {
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
-  if (the_dict.toGenericDict().size() == 0 ||
+  if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), std::move(formatter)) << ")";
@@ -596,6 +605,8 @@ std::ostream& IValue::repr(
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:
       return out << v.toSymFloat();
+    case IValue::Tag::SymBool:
+      return out << v.toSymBool();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -786,6 +797,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toSymInt();
     case IValue::Tag::SymFloat:
       return out << v.toSymFloat();
+    case IValue::Tag::SymBool:
+      return out << v.toSymBool();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -805,6 +818,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Await:
+      return out << "Await";
     case IValue::Tag::Uninitialized:
       return out << "Uninitialized";
     case IValue::Tag::Device:
@@ -872,7 +887,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
       for (const auto& e : toTupleRef().elements()) {
-        copied_tuple.push_back(e.deepcopy(memo));
+        copied_tuple.emplace_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
@@ -921,6 +936,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Int:
     case IValue::Tag::SymInt:
     case IValue::Tag::SymFloat:
+    case IValue::Tag::SymBool:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {
@@ -1060,11 +1076,11 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
-        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
-        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
         // A dense/strided tensor contains 1 storage
-        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.storage().getWeakStorageImpl());
       }
     }
   } else {
@@ -1074,7 +1090,7 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }
@@ -1098,7 +1114,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  if (ctx->srcFutures.size() == 0) {
+  if (ctx->srcFutures.empty()) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();

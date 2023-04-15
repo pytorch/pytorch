@@ -3,7 +3,8 @@ from functools import partial
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
-from torch._ops import PyOperator
+from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -17,9 +18,10 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 from torch.utils._pytree import tree_flatten
+from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
-map = PyOperator("map")
+map = HigherOrderOperator("map")
 
 
 def trace_map(proxy_mode, func_overload, f, xs, *args):
@@ -57,14 +59,14 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@map.py_impl(DispatchKey.CPU)
+@map.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_cpu(f, xs, *args):
     mode = _get_current_dispatch_mode()
-    assert (mode is None), "Mode should never be enabled for CPU key"
+    assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
     return torch.stack([f(x, *args) for x in xs])
 
 
-@map.py_impl(DispatchKey.AutogradCPU)
+@map.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, *args):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([f, xs, args])
@@ -89,14 +91,39 @@ def map_fake_tensor_mode(f, xs, *args):
     outs = [f(x, *args) for x in xs]
     return outs[0].new_empty([xs.shape[0], *outs[0].shape])
 
-# We cannot directly call fallthrough here due to issue #89037.
-@map.py_impl(DispatchKey.PythonDispatcher)
-def map_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return map(*args)
+@map.py_impl(torch._C._functorch.TransformType.Functionalize)
+def map_functionalize(interpreter, f, xs, *args):
+    """
+    Functionalization implementation for torch.map. Currently:
+      1. We don't allow any input mutation inside the map function
+      2. Our check for above condition is not exhaustive
+    """
+    reapply_views = interpreter.functionalize_add_back_views()
+    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    # At this point, we will see functionalized tensors, so need to unwrap them first
+    unwrapped_xs = _unwrap_all_tensors_from_functional(xs, reapply_views=reapply_views)
+    unwrapped_args = _unwrap_all_tensors_from_functional(args, reapply_views=reapply_views)
 
+    functional_map_fn = functionalize(f, remove=mode)
+
+    with interpreter.lower():
+        inputs = (unwrapped_xs,) + unwrapped_args
+        if _has_potential_branch_input_mutation(functional_map_fn, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is mutating the input!"
+            )
+
+        if _has_potential_branch_input_alias(functional_map_fn, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is aliasing the input!"
+            )
+
+        map_return = map(functional_map_fn, unwrapped_xs, *unwrapped_args)
+        return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
+map.fallthrough(DispatchKey.PythonDispatcher)
 map.fallthrough(DispatchKey.PythonTLSSnapshot)
 map.fallthrough(DispatchKey.ADInplaceOrView)
 map.fallthrough(DispatchKey.BackendSelect)
+map.fallthrough(DispatchKey.AutocastCPU)

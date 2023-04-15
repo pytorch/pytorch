@@ -1,6 +1,6 @@
 """
 Collection of conversion functions for linear / conv2d structured pruning
-Also contains utilities for bias propogation
+Also contains utilities for bias propagation
 """
 from typing import cast, Optional, Callable, Tuple
 
@@ -10,8 +10,7 @@ from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import ParametrizationList
 from .parametrization import FakeStructuredSparsity, BiasHook
 
-
-# BIAS PROPOGATION
+# BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
         bias_hooks = []
@@ -87,7 +86,7 @@ def _prune_module_bias(module: nn.Module, mask: Tensor) -> None:
 
 def _propogate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     r"""
-    In the case that we need to propogate biases, this function will return the biases we need
+    In the case that we need to propagate biases, this function will return the biases we need
     """
     # set current module bias
     if module.bias is not None:
@@ -95,7 +94,7 @@ def _propogate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     elif getattr(module, "_bias", None) is not None:
         module.bias = nn.Parameter(cast(Tensor, module._bias)[mask])
 
-    # get pruned biases to propogate to subsequent layer
+    # get pruned biases to propagate to subsequent layer
     if getattr(module, "_bias", None) is not None:
         pruned_biases = cast(Tensor, module._bias)[~mask]
     else:
@@ -357,3 +356,120 @@ def prune_conv2d_pool_flatten_linear(
         else:
             linear.weight = nn.Parameter(linear.weight[:, flattened_mask])
             linear.in_features = linear.weight.shape[1]
+
+
+def prune_lstm_output_linear(
+    lstm: nn.LSTM, getitem: Callable, linear: nn.Linear
+) -> None:
+    prune_lstm_output_layernorm_linear(lstm, getitem, None, linear)
+
+
+def prune_lstm_output_layernorm_linear(
+    lstm: nn.LSTM,
+    getitem: Callable,
+    layernorm: Optional[nn.LayerNorm],
+    linear: nn.Linear,
+) -> None:
+    for i in range(lstm.num_layers):
+        if parametrize.is_parametrized(lstm, f"weight_ih_l{i}"):
+            parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
+            weight_parameterizations = cast(
+                ParametrizationList, parametrization_dict[f"weight_ih_l{i}"]
+            )
+            mask = weight_parameterizations[0].mask
+
+            with torch.no_grad():
+                parametrize.remove_parametrizations(
+                    lstm, f"weight_ih_l{i}", leave_parametrized=True
+                )
+                setattr(
+                    lstm,
+                    f"weight_ih_l{i}",
+                    nn.Parameter(getattr(lstm, f"weight_ih_l{i}")[mask]),
+                )
+                setattr(
+                    lstm,
+                    f"bias_ih_l{i}",
+                    nn.Parameter(getattr(lstm, f"bias_ih_l{i}")[mask]),
+                )
+
+        if parametrize.is_parametrized(lstm, f"weight_hh_l{i}"):
+            parametrization_dict = cast(nn.ModuleDict, lstm.parametrizations)
+            weight_parameterizations = cast(
+                ParametrizationList, parametrization_dict[f"weight_hh_l{i}"]
+            )
+            mask = weight_parameterizations[0].mask
+
+            with torch.no_grad():
+                parametrize.remove_parametrizations(
+                    lstm, f"weight_hh_l{i}", leave_parametrized=True
+                )
+                # splitting out hidden-hidden masks
+                W_hi, W_hf, W_hg, W_ho = torch.split(
+                    getattr(lstm, f"weight_hh_l{i}"), lstm.hidden_size
+                )
+                M_hi, M_hf, M_hg, M_ho = torch.split(mask, lstm.hidden_size)
+
+                # resize each individual weight separately
+                W_hi = W_hi[M_hi][:, M_hi]
+                W_hf = W_hf[M_hf][:, M_hf]
+                W_hg = W_hg[M_hg][:, M_hg]
+                W_ho = W_ho[M_ho][:, M_ho]
+
+                # concat, use this as new weight
+                new_weight = torch.cat((W_hi, W_hf, W_hg, W_ho))
+                setattr(lstm, f"weight_hh_l{i}", nn.Parameter(new_weight))
+                setattr(
+                    lstm,
+                    f"bias_hh_l{i}",
+                    nn.Parameter(getattr(lstm, f"bias_hh_l{i}")[mask]),
+                )
+
+            # If this is the final layer, then we need to prune linear layer columns
+            if i + 1 == lstm.num_layers:
+                lstm.hidden_size = int(M_hi.sum())
+                with torch.no_grad():
+                    if parametrize.is_parametrized(linear):
+                        parametrization_dict = cast(
+                            nn.ModuleDict, linear.parametrizations
+                        )
+                        weight_parameterizations = cast(
+                            ParametrizationList, parametrization_dict.weight
+                        )
+
+                        weight_parameterizations.original = nn.Parameter(
+                            weight_parameterizations.original[:, M_ho]
+                        )
+                        linear.in_features = weight_parameterizations.original.shape[1]
+                    else:
+                        linear.weight = nn.Parameter(linear.weight[:, M_ho])
+                        linear.in_features = linear.weight.shape[1]
+
+                    # if layernorm module, prune weight and bias
+                    if layernorm is not None:
+                        layernorm.normalized_shape = (linear.in_features,)
+                        layernorm.weight = nn.Parameter(layernorm.weight[M_ho])
+                        layernorm.bias = nn.Parameter(layernorm.bias[M_ho])
+
+            # otherwise need to prune the columns of the input of the next LSTM layer
+            else:
+                with torch.no_grad():
+                    if parametrize.is_parametrized(lstm, f"weight_ih_l{i+1}"):
+                        parametrization_dict = cast(
+                            nn.ModuleDict, lstm.parametrizations
+                        )
+                        weight_parameterizations = cast(
+                            ParametrizationList,
+                            getattr(parametrization_dict, f"weight_ih_l{i+1}"),
+                        )
+
+                        weight_parameterizations.original = nn.Parameter(
+                            weight_parameterizations.original[:, M_ho]
+                        )
+                    else:
+                        next_layer_weight = getattr(lstm, f"weight_ih_l{i+1}")
+                        setattr(
+                            lstm,
+                            f"weight_ih_l{i+1}",
+                            nn.Parameter(next_layer_weight[:, M_ho]),
+                        )

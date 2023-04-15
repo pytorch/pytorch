@@ -10,12 +10,14 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 
 #include <array>
 #include <memory>
 #include <ostream>
 #include <sstream>
 #include <type_traits>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -239,7 +241,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -823,8 +825,8 @@ struct TORCH_API TensorType : public SharedType {
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& strides,
+      SymbolicShape sizes,
+      VaryingShape<Stride> strides,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
 
@@ -906,7 +908,7 @@ struct TORCH_API ListType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->annotation_str(printer) << "]";
+    ss << "List[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -998,12 +1000,7 @@ struct TORCH_API DictType : public SharedType {
     types.push_back(std::move(value));
   }
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    std::stringstream ss;
-    ss << "Dict[" << getKeyType()->annotation_str(printer) << ", "
-       << getValueType()->annotation_str(printer) << "]";
-    return ss.str();
-  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
 
   std::vector<TypePtr> types;
   bool has_free_variables;
@@ -1046,7 +1043,49 @@ struct TORCH_API FutureType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Future[" << getElementType()->annotation_str(std::move(printer)) << "]";
+    return ss.str();
+  }
+};
+
+struct AwaitType;
+using AwaitTypePtr = std::shared_ptr<AwaitType>;
+
+struct TORCH_API AwaitType
+    : public SingleElementType<TypeKind::AwaitType, AwaitType> {
+  friend struct Type;
+  template <typename... T>
+  static AwaitTypePtr create(TypePtr elem) {
+    return AwaitTypePtr(
+        new AwaitType(std::move(elem))); // NOLINT(modernize-make-shared)
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << "Await(" << getElementType()->str() << ")";
+    return ss.str();
+  }
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    return create(std::move(contained_types.at(0)));
+  }
+
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs.castRaw<AwaitType>()) {
+      return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
+    }
+    return false;
+  }
+
+ private:
+  AwaitType(TypePtr elem) : SingleElementType(std::move(elem)) {}
+
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    std::stringstream ss;
+    ss << "Await[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -1078,7 +1117,7 @@ struct TORCH_API RRefType
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(std::move(printer)) << "]";
     return ss.str();
   }
 };
@@ -1338,6 +1377,26 @@ struct TORCH_API SymFloatType : public Type {
 
  private:
   SymFloatType() : Type(TypeKind::SymFloatType) {}
+};
+
+struct SymBoolType;
+using SymBoolTypePtr = SingletonTypePtr<SymBoolType>;
+struct TORCH_API SymBoolType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymBool";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "bool";
+  }
+  static const TypeKind Kind = TypeKind::SymBoolType;
+  // global singleton
+  static SymBoolTypePtr get();
+
+ private:
+  SymBoolType() : Type(TypeKind::SymBoolType) {}
 };
 
 struct IntType;
@@ -1832,6 +1891,19 @@ template <>
 struct getMaybeFakeTypePtr_<SymFloat, true> final {
   static decltype(auto) call() {
     return FloatType::get();
+  }
+};
+
+template <>
+struct getMaybeFakeTypePtr_<SymBool, false> final {
+  static decltype(auto) call() {
+    return SymBoolType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<SymBool, true> final {
+  static decltype(auto) call() {
+    return BoolType::get();
   }
 };
 

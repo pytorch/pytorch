@@ -180,6 +180,7 @@ def _rebuild_tensor_v2(
 
 _sparse_tensors_to_validate: List["torch.Tensor"] = []
 
+
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
 # tensors have been already unpickled. Those storages contain data necessary for
 # validating sparse tensors: indices and values. That's why sparse tensors are
@@ -374,6 +375,8 @@ def _get_obj_state(obj):
     # This loosely mimicks the function on the object class but since Tensor do not inherit
     # from it, we cannot call that function directly
     # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
+    # Note that starting with Python 3.11, this `__getstate__` is always defined and thus
+    # the else branch will never be taken.
     getstate_fn = getattr(obj, "__getstate__", None)
     if getstate_fn:
         state = getstate_fn()
@@ -404,8 +407,11 @@ def _set_obj_state(obj, state):
         dict_state = state
         slots_state = None
 
-    for k, v in dict_state.items():
-        setattr(obj, k, v)
+    # Starting with Python 3.11, the __dict__ attribute is lazily created
+    # and is serialized as None when not needed.
+    if dict_state:
+        for k, v in dict_state.items():
+            setattr(obj, k, v)
 
     if slots_state:
         for k, v in slots_state.items():
@@ -602,7 +608,7 @@ class KeyErrorMessage(str):
         return self
 
 
-class ExceptionWrapper(object):
+class ExceptionWrapper:
     r"""Wraps an exception plus traceback to communicate across threads"""
 
     def __init__(self, exc_info=None, where="in background"):
@@ -644,6 +650,10 @@ def _get_available_device_type():
         return "cuda"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
+    custom_backend_name = torch._C._get_privateuse1_backend_name()
+    custom_device_mod = getattr(torch, custom_backend_name, None)
+    if custom_device_mod and custom_device_mod.is_available():
+        return custom_backend_name
     # add more available device types here
     return None
 
@@ -654,6 +664,8 @@ def _get_device_attr(get_member):
         return get_member(torch.cuda)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
+    if device_type == torch._C._get_privateuse1_backend_name():
+        return get_member(getattr(torch, device_type))
     # add more available device types here
     return None
 

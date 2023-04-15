@@ -194,7 +194,7 @@ void fuseConsecutiveTransposes(Block* b) {
           composeTransposes(
               origInput->node()->is(attr::perm), n->is(attr::perm)));
       n->replaceInput(0, origInput->node()->input());
-      if (origInput->uses().size() == 0) {
+      if (origInput->uses().empty()) {
         origInput->node()->destroy();
       }
       continue;
@@ -233,7 +233,7 @@ void fuseTransposeIntoGemm(Block* b) {
             inp->node()->is(attr::perm) == simpleTransPerm) {
           n->replaceInput(i, inp->node()->input());
           n->i_(trans, n->hasAttribute(trans) ? !n->i(trans) : 1);
-          if (inp->uses().size() == 0) {
+          if (inp->uses().empty()) {
             inp->node()->destroy();
           }
         }
@@ -307,7 +307,7 @@ void pushPackingPastRnn(Block* b) {
     n->outputs().at(0)->replaceAllUsesWith(n->inputs().at(0));
 
     Value* batch_sizes = n->outputs().at(1);
-    while (batch_sizes->uses().size()) {
+    while (!batch_sizes->uses().empty()) {
       Use use_0 = batch_sizes->uses().at(0);
       Node* user = use_0.user;
       // Make calculation of max_batch_size not depend on batch_sizes.
@@ -332,8 +332,13 @@ void pushPackingPastRnn(Block* b) {
         shape->addInput(rnn_input);
         shape->copyMetadata(n);
         batch_sizes->replaceFirstUseWith(shape->output());
-        user->inputs().at(1)->node()->t_(
-            attr::value, at::native::ones_like(const_val_t));
+        // New Constant node is needed, as it might be shared
+        // with a Constant node 0 from others.
+        Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
+        gather_indices->t_(attr::value, at::native::ones_like(const_val_t));
+        gather_indices->copyMetadata(n);
+        gather_indices->insertBefore(user);
+        user->replaceInput(1, gather_indices->output());
       }
       // Make RNN not depend on batch_sizes.
       else if (user == rnn) {
@@ -526,7 +531,7 @@ void fixDefaultRNNState(
   fixed_init_state->addInput(concated_dims->outputs()[0]);
   n->replaceInput(input_index, fixed_init_state->outputs()[0]);
 
-  if (initial_state->uses().size() == 0) {
+  if (initial_state->uses().empty()) {
     initial_state->node()->destroy();
   }
 }
@@ -658,7 +663,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
             i, std::vector<Value*>({concat_node->output()}));
       } else {
         if (opset_version >= OPSET_VERSION_11) {
-          c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
+          c10::Symbol seq_node_kind = !lc_node->inputs().empty()
               ? onnx::SequenceConstruct
               : onnx::SequenceEmpty;
           Node* seq_node = block->owningGraph()->create(
@@ -855,7 +860,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // (%10)
         origLogSoftmaxNode = prev->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
-        if (transpose->inputs().size() > 0) {
+        if (!transpose->inputs().empty()) {
           origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
         }
       } else if (

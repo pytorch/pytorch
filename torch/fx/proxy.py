@@ -1,5 +1,6 @@
 import dis
 import copy
+import sys
 import torch
 import inspect
 import operator
@@ -19,7 +20,7 @@ __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
 
 
 @compatibility(is_backward_compatible=False)
-class Scope(object):
+class Scope:
     """ Scope object that records the module path and the module type
     of a module. Scope is used to track the information of the module
     that contains a Node in a Graph of GraphModule. For example::
@@ -50,7 +51,7 @@ class Scope(object):
 
 
 @compatibility(is_backward_compatible=False)
-class ScopeContextManager(object):
+class ScopeContextManager:
     """ A context manager to track the Scope of Node during symbolic tracing.
     When entering a forward function of a Module, we'll update the scope information of
     the current module, and when we exit, we'll restore the previous scope information.
@@ -119,13 +120,26 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depricated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
             self.scope.module_type,
         )
-        if self.module_stack:
+        # Optionally set stack trace on the created Node for debugging purposes
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                node.stack_trace = stack_trace
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten"]
+            for field in copy_meta_fields:
+                if field in current_meta:
+                    node.meta[field] = current_meta[field]
+        elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
 
@@ -159,17 +173,12 @@ class TracerBase:
         else:
             proxy = proxy_factory_fn(node)
 
-        # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.is_stack_trace_overridden():
-            proxy.node.meta = fx_traceback.get_current_meta()
-            stacks = fx_traceback.format_stack()
-            proxy.node.stack_trace = '\n'.join(reversed(stacks))
-        elif self.record_stack_traces:
+        if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
+                summary = traceback.extract_stack(user_frame)
                 tb_lines = summary.format()
+                # stack_trace would have innermost frame at the bottom
                 proxy.node.stack_trace = ''.join(tb_lines)
 
         return proxy
@@ -192,7 +201,8 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py'
+                    'torch/_refs/nn/functional/__init__.py',
+                    'torch/utils/_stats.py',
                     ]
         while frame:
             frame = frame.f_back
@@ -358,7 +368,13 @@ class Proxy:
         assert frame is not None
         calling_frame = frame.f_back
         assert calling_frame is not None
-        inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
+        inst_list = list(dis.get_instructions(calling_frame.f_code))
+        if sys.version_info >= (3, 11):
+            from bisect import bisect_left
+            inst_idx = bisect_left(inst_list, calling_frame.f_lasti, key=lambda x: x.offset)
+        else:
+            inst_idx = calling_frame.f_lasti // 2
+        inst = inst_list[inst_idx]
         if inst.opname == 'UNPACK_SEQUENCE':
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
@@ -373,7 +389,11 @@ class Proxy:
             calling_frame = frame.f_back
             assert calling_frame is not None
             insts = list(dis.get_instructions(calling_frame.f_code))
-            cur = calling_frame.f_lasti // 2
+            if sys.version_info >= (3, 11):
+                from bisect import bisect_left
+                cur = bisect_left(insts, calling_frame.f_lasti, key=lambda x: x.offset)
+            else:
+                cur = calling_frame.f_lasti // 2
             inst = insts[cur]
 
             if inst.opname == 'POP_JUMP_IF_TRUE':
@@ -421,9 +441,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            if isinstance(orig_method, torch._ops.PyOperator):
-                # TODO: Define how to symbolically trace PyOperators
-                raise RuntimeError("Unable to symbolically trace PyOperators")
+            if isinstance(orig_method, torch._ops.HigherOrderOperator):
+                # TODO: Define how to symbolically trace HigherOrderOperators
+                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 

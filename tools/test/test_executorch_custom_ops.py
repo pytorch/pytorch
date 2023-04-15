@@ -1,9 +1,16 @@
+import tempfile
+import unittest
 from typing import Any, Dict
+from unittest.mock import ANY, Mock, patch
 
 import expecttest
 
+import torchgen
 from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
+from torchgen.gen_executorch import gen_headers
 from torchgen.model import Location, NativeFunction
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import FileManager
 
 SPACES = "    "
 
@@ -72,3 +79,45 @@ void wrapper_CPU__foo_out(const at::Tensor & self, at::TensorList out) {{
         gen = ComputeNativeFunctionStub()
         with self.assertRaisesRegex(Exception, "Can't handle this return type"):
             gen(func)
+
+
+class TestGenCustomOpsHeader(unittest.TestCase):
+    @patch.object(torchgen.utils.FileManager, "write_with_template")
+    @patch.object(torchgen.utils.FileManager, "write")
+    def test_fm_writes_custom_ops_header_when_boolean_is_true(
+        self, unused: Mock, mock_method: Mock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            fm = FileManager(tempdir, tempdir, False)
+            gen_headers(
+                native_functions=[],
+                gen_custom_ops_header=True,
+                custom_ops_native_functions=[],
+                static_dispatch_idx=[],
+                selector=SelectiveBuilder.get_nop_selector(),
+                backend_indices={},
+                cpu_fm=fm,
+                use_aten_lib=False,
+            )
+            mock_method.assert_called_once_with(
+                "CustomOpsNativeFunctions.h", "NativeFunctions.h", ANY
+            )
+
+    @patch.object(torchgen.utils.FileManager, "write_with_template")
+    @patch.object(torchgen.utils.FileManager, "write")
+    def test_fm_doesnot_writes_custom_ops_header_when_boolean_is_false(
+        self, unused: Mock, mock_method: Mock
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            fm = FileManager(tempdir, tempdir, False)
+            gen_headers(
+                native_functions=[],
+                gen_custom_ops_header=False,
+                custom_ops_native_functions=[],
+                static_dispatch_idx=[],
+                selector=SelectiveBuilder.get_nop_selector(),
+                backend_indices={},
+                cpu_fm=fm,
+                use_aten_lib=False,
+            )
+            mock_method.assert_not_called()

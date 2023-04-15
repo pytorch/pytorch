@@ -248,13 +248,13 @@ public:
   }
   Vectorized<float> frac() const;
   Vectorized<float> sin() const {
-    return Vectorized<float>(Sleef_sinf16_u10(values));
+    return Vectorized<float>(Sleef_sinf16_u35(values));
   }
   Vectorized<float> sinh() const {
     return Vectorized<float>(Sleef_sinhf16_u10(values));
   }
   Vectorized<float> cos() const {
-    return Vectorized<float>(Sleef_cosf16_u10(values));
+    return Vectorized<float>(Sleef_cosf16_u35(values));
   }
   Vectorized<float> cosh() const {
     return Vectorized<float>(Sleef_coshf16_u10(values));
@@ -337,7 +337,7 @@ public:
   }
 
   Vectorized<float> operator!=(const Vectorized<float>& other) const {
-    auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_OQ);
+    auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
                                                       0xFFFFFFFF));
   }

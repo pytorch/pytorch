@@ -168,7 +168,7 @@ class CUDAHostAllocator {
     // primary context, if available. See pytorch/pytorch#21081.
     at::OptionalDeviceGuard device_guard;
     auto primary_ctx_device_index =
-        at::cuda::detail::getDeviceIndexWithPrimaryContext();
+        c10::cuda::getDeviceIndexWithPrimaryContext();
     if (primary_ctx_device_index.has_value()) {
       device_guard.reset_device(
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
@@ -225,7 +225,7 @@ class CUDAHostAllocator {
     } else {
       std::lock_guard<std::mutex> g(cuda_events_mutex_);
       for (auto&& event : *events) {
-        cuda_events_.push_front({std::move(event), block});
+        cuda_events_.emplace_front(std::move(event), block);
       }
     }
   }

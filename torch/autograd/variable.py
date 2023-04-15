@@ -1,15 +1,14 @@
 import torch
-from torch._six import with_metaclass
+from torch._C import _ImperativeEngine as ImperativeEngine
+
 
 __all__ = ["VariableMeta", "Variable"]
+
 
 class VariableMeta(type):
     def __instancecheck__(cls, other):
         return isinstance(other, torch.Tensor)
 
-# mypy doesn't understand torch._six.with_metaclass
-class Variable(with_metaclass(VariableMeta, torch._C._LegacyVariableBase)):  # type: ignore[misc]
-    pass
 
-from torch._C import _ImperativeEngine as ImperativeEngine
-Variable._execution_engine = ImperativeEngine()
+class Variable(torch._C._LegacyVariableBase, metaclass=VariableMeta):  # type: ignore[misc]
+    _execution_engine = ImperativeEngine()

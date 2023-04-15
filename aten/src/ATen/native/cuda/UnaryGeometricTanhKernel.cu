@@ -11,7 +11,7 @@
 
 namespace at::native {
 
-const char tanh_name[] = "tanh";
+CONSTEXPR_EXCEPT_WIN_CUDA char tanh_name[] = "tanh";
 void tanh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {

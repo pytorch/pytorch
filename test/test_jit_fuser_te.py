@@ -21,7 +21,7 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo
+    enable_profiling_mode_for_profiling_tests, slowTest, skipIfTorchDynamo, TEST_WITH_ASAN
 from torch.testing._internal.jit_utils import JitTestCase, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
     clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions, NoTracerWarnContextManager
@@ -46,7 +46,7 @@ LLVM_ENABLED = torch._C._llvm_enabled()
 autograd_check_set = {'aten::__is__', 'prim::AutogradAllNonZero', 'prim::AutogradAllZero', 'prim::ListConstruct'}
 
 def strip_profiling_nodes(nodes):
-    profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
+    profiling_opcodes = {'prim::BailoutTemplate', 'prim::BailOut'}
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
 def warmup_forward(f, *args, profiling_count=2):
@@ -80,6 +80,8 @@ def inline_fusion_groups():
     finally:
         torch._C._debug_set_fusion_group_inlining(old_inlining)
 
+
+@skipIfTorchDynamo()
 class TestTEFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -189,7 +191,7 @@ class TestTEFuser(JitTestCase):
             return x2.sum()
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
@@ -205,7 +207,7 @@ class TestTEFuser(JitTestCase):
             return x.sum((-2, )) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
@@ -217,7 +219,7 @@ class TestTEFuser(JitTestCase):
             return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
 
             self.checkScript(func, (a,))
@@ -969,7 +971,7 @@ class TestTEFuser(JitTestCase):
             __constants__ = ['d']
 
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.d = torch.device('cuda')
 
             @torch.jit.script_method
@@ -1236,7 +1238,7 @@ class TestTEFuser(JitTestCase):
 
         class MyMod(torch.nn.Module):
             def __init__(self, dtype):
-                super(MyMod, self).__init__()
+                super().__init__()
                 self.dtype = dtype
 
             def forward(self, x):
@@ -2197,6 +2199,7 @@ class TestTEFuser(JitTestCase):
             x = torch.ones((8, 1))
             torch.testing.assert_close(eager(x), script(x))
 
+    @unittest.skipIf(TEST_WITH_ASAN, "takes 10+ minutes on asan")
     def test_batch_norm(self):
         def test(fn, args):
             trace = torch.jit.trace(fn, args)
@@ -2622,6 +2625,7 @@ def get_name(op):
 # super() [with no arguments] fails, presumably because of how instantiate_device_type_tests works.
 # super(TestNNCOpInfo, self) fails because TestNNCOpInfo gets deleted from global scope.
 # super(JitCommonTestCase, self).fn() would skip JitCommonTestCase.fn() implementation
+@skipIfTorchDynamo()
 class TestNNCOpInfoParent(JitCommonTestCase):
     pass
 
@@ -2739,6 +2743,7 @@ only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 # Purpose of this class is to allow super() calls. (See TestNNCOpInfoParent)
+@skipIfTorchDynamo()
 class TestLoopnestRandomizationParent(JitTestCase):
     pass
 

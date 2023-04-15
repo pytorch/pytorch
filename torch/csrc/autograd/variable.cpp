@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -120,7 +121,7 @@ ViewInfo ViewInfo::chain(
     };
   }
 
-  return ViewInfo(base_, view_func);
+  return ViewInfo(base_, std::move(view_func));
 }
 
 namespace {
@@ -350,7 +351,7 @@ void add_hook(
     const at::TensorBase& self,
     std::unique_ptr<FunctionPreHook> hook) {
   AutogradMeta* meta = materialize_autograd_meta(self);
-  TORCH_INTERNAL_ASSERT(meta->hooks_.size() == 0);
+  TORCH_INTERNAL_ASSERT(meta->hooks_.empty());
   meta->hooks_.push_back(std::move(hook));
 }
 
@@ -581,7 +582,7 @@ void VariableHooks::_backward(
   std::vector<torch::autograd::Variable> input_vars(
       inputs.begin(), inputs.end());
   torch::autograd::backward(
-      {self}, {_gradient}, keep_graph, create_graph, input_vars);
+      {self}, {std::move(_gradient)}, keep_graph, create_graph, input_vars);
 }
 
 void VariableHooks::requires_grad_(
@@ -663,14 +664,14 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       //   self = inplace_op(self)
       //
       // For CPU/CUDA backends, we employ one AsStridedBackward0 Node to
-      // represent the chain of view backward ops for effienciency.
+      // represent the chain of view backward ops for efficiency.
       //
       // However in XLA backend we don't have full support of
       // AsStridedBackward0, we instead run a full forward pass with a tensor
       // that requires gradient to get proper grad_fn setup, then save it to
       // DifferentiableViewMeta for future use. This is fairly cheap for XLA
       // lazy tensor approach (but would be really expensive for CPU/CUDA). XLA
-      // Tensor only run thorugh VariableType dispatch and lower the forward
+      // Tensor only run through VariableType dispatch and lower the forward
       // pass to a XLA HLO graph, then we take grad_fn and never materialize the
       // tensor content. So we only construct the graph but not execute it,
       // which is a fairly cheap operation to do.

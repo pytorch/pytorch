@@ -187,7 +187,8 @@ inline at::Tensor as_view(
           diff_view_meta->get_creation_meta(), creation_meta);
       return make_variable_differentiable_view(
           tensor,
-          diff_view_meta->get_backward_view().chain(base, tensor, view_func),
+          diff_view_meta->get_backward_view().chain(
+              base, tensor, std::move(view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -195,7 +196,7 @@ inline at::Tensor as_view(
     } else {
       return make_variable_differentiable_view(
           tensor,
-          ViewInfo(base, view_func),
+          ViewInfo(base, std::move(view_func)),
           c10::nullopt,
           /*shared_view_info*/ true,
           creation_meta,
@@ -224,9 +225,9 @@ inline at::Tensor as_view(
     // Check if base is a forward differentiable view
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
-      new_fw_info = base_fw_info.chain(base, tensor, view_func);
+      new_fw_info = base_fw_info.chain(base, tensor, std::move(view_func));
     } else {
-      new_fw_info = ViewInfo(base, view_func);
+      new_fw_info = ViewInfo(base, std::move(view_func));
     }
   }
 
@@ -329,7 +330,7 @@ inline std::vector<at::Tensor> as_view(
         "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
   }
   if (is_fw_differentiable) {
-    // Check if base is a forward differentiabble view
+    // Check if base is a forward differentiable view
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();

@@ -1,8 +1,6 @@
 import math
 
-from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
-
-from typing_extensions import Literal
+from typing import Iterable, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims as prims

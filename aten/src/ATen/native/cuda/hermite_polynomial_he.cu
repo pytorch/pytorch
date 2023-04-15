@@ -10,7 +10,7 @@
 
 namespace at::native {
         namespace {
-            const char hermite_polynomial_he_name[] = "hermite_polynomial_he_forward";
+            CONSTEXPR_EXCEPT_WIN_CUDA char hermite_polynomial_he_name[] = "hermite_polynomial_he_forward";
 
             void hermite_polynomial_he_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

@@ -12,6 +12,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <c10/util/ssize.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -127,7 +128,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         return nullptr;
       }
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
+        DCHECK(
+            static_cast<size_t>(p_node->num_inputs() - 1) ==
+            p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
         const auto num_inputs = p_node->num_inputs();
         for (size_t i = 1; i < num_inputs; ++i) {
@@ -1086,7 +1089,7 @@ class TORCH_API ForkedSubgraphSRLauncher {
 /*
   helper function to create a future on return type
   of the graph outputs. This function is utilized by
-  prim::fork and aten::wait oprations for async
+  prim::fork and aten::wait operations for async
   execution of subgraphs
 */
 c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
@@ -1249,7 +1252,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       }
       return [](ProcessedNode* pnode) {
         const auto& elems = pnode->Input(0).toTupleRef().elements();
-        const auto num_elems = elems.size();
+        using c10::ssize;
+        const auto num_elems = ssize(elems);
         const auto idx = pnode->Input(1).toInt();
         const auto norm_idx = normalizeIndex(idx, num_elems);
         if (norm_idx < 0 || norm_idx >= num_elems) {
@@ -1293,7 +1297,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (!sr_schema_check(n, "aten::format(str self, ...) -> str")) {
         return nullptr;
       }
-      TORCH_CHECK(n->inputs().size() > 0);
+      TORCH_CHECK(!n->inputs().empty());
       return [](ProcessedNode* pnode) {
         const auto num_inputs = pnode->num_inputs();
         auto stack = boxInputs(*pnode);
@@ -1485,7 +1489,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& tensor = pnode->Input(0).toTensor();
         // JIT does a check for requires_grad, but we skip it here since SR is
         // inference only
-        if (tensor.sizes().size() != 0) {
+        if (!tensor.sizes().empty()) {
           throw std::runtime_error(
               "Cannot convert a tensor of dimension > 0 to scalar");
         }

@@ -26,7 +26,7 @@ struct TORCH_API TensorDesc {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)
       : scalar_type{type}, contiguity{contiguity} {
-    if (contiguity.size() == 0) {
+    if (contiguity.empty()) {
       nDim_ = 0;
     } else {
       nDim_ = std::count(contiguity.begin(), contiguity.end(), false) +
@@ -59,7 +59,7 @@ struct TORCH_API TensorDesc {
 
   // True iff innermost stride is 1
   bool lastIsContiguous() const {
-    return (contiguity.size() == 0 || contiguity.back());
+    return (contiguity.empty() || contiguity.back());
   }
 
   static std::vector<bool> findContiguous(

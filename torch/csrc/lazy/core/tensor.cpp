@@ -174,7 +174,7 @@ void LazyTensor::TryLimitGraphSize() {
               FLAGS_torch_lazy_trim_graph_check_frequency ==
           0) {
     size_t graph_size = Util::GetGraphSize({data()->ir_value.node.get()});
-    if (graph_size > FLAGS_torch_lazy_trim_graph_size) {
+    if (static_cast<int64_t>(graph_size) > FLAGS_torch_lazy_trim_graph_size) {
       TORCH_LAZY_COUNTER("TrimIrGraph", 1);
       ApplyPendingGraph();
     }
@@ -367,7 +367,7 @@ std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   std::vector<LazyTensorPtr> ltc_tensors;
   ltc_tensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
-    ltc_tensors.push_back(TryGetLtcTensor(tensor));
+    ltc_tensors.emplace_back(TryGetLtcTensor(tensor));
   }
   return ltc_tensors;
 }

@@ -17,21 +17,29 @@ namespace kineto {
 
 #ifdef USE_KINETO
 namespace {
-const std::set<libkineto::ActivityType> cpuTypes{
+const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::CPU_OP,
     libkineto::ActivityType::CPU_INSTANT_EVENT,
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
+    libkineto::ActivityType::XPU_RUNTIME,
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::PYTHON_FUNCTION,
 };
 
-const std::set<libkineto::ActivityType> cudaTypes = {
+const std::set<libkineto::ActivityType> kCudaTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // CUDA_RUNTIME appears in both cpuTypes and cudaTypes.
+    // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
+};
+const std::set<libkineto::ActivityType> kXpuTypes = {
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    // XPU_RUNTIME appears in both kCpuTypes and kXpuTypes.
+    libkineto::ActivityType::XPU_RUNTIME,
 };
 } // namespace
 #endif // USE_KINETO
@@ -57,6 +65,7 @@ void addMetadata(
 #ifdef USE_KINETO
   // ActivityTraceInterface returns const pointers, so we have to cast away the
   // constness to add metadata.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<activity_t*>(activity)->addMetadata(key, value);
 #endif // USE_KINETO
 }
@@ -88,6 +97,7 @@ activity_t* TraceWrapper::addCPUActivity(
   auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
+  // NOLINTNEXTLINE
   act.id = correlation_id;
   act.startTime = start_time;
   if (type != libkineto::ActivityType::CPU_INSTANT_EVENT) {
@@ -147,25 +157,19 @@ class ExperimentalConfigWrapper {
       const torch::profiler::impl::ExperimentalConfig& config)
       : config_(config) {}
 
-  bool assertValid(const ActivitySet& activities) {
-    // Kineto supports reading performance events per kernel/iteration
-    // using CUPTI Range based profiler API. In this mode however we
-    // do not trace CPU or GPU events.
-    bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
-    if (cupti_range_profiler &&
-        activities.count(torch::autograd::profiler::ActivityType::CPU)) {
-      LOG(WARNING)
-          << "Cannot run range profiler with CPU activities, please only"
-          << " use CUDA activity type";
-      return false;
-    }
-    return cupti_range_profiler;
+  bool assertValid() {
+    return !config_.profiler_metrics.empty();
   }
 
-  void prepareTraceWithExperimentalOptions() {
+  void prepareTraceWithExperimentalOptions(bool add_cpu_activity) {
 #ifdef USE_KINETO
     std::set<libkineto::ActivityType> k_activities{
         libkineto::ActivityType::CUDA_PROFILER_RANGE};
+
+    // Only add CPU activities if we are measuring per kernel ranges
+    if (add_cpu_activity && config_.profiler_measure_per_kernel) {
+      k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
+    }
 
     const size_t num_metrics = config_.profiler_metrics.size();
     std::stringstream configss;
@@ -175,7 +179,7 @@ class ExperimentalConfigWrapper {
     configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
              << "CUPTI_PROFILER_METRICS=";
 
-    for (int i = 0; i < num_metrics; i++) {
+    for (size_t i = 0; i < num_metrics; i++) {
       configss << config_.profiler_metrics[i];
       if (num_metrics > 1 && i < (num_metrics - 1)) {
         configss << ",";
@@ -211,18 +215,24 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
-  if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
-    k_activities.insert(cpuTypes.begin(), cpuTypes.end());
+  bool has_cpu_activity =
+      activities.count(torch::autograd::profiler::ActivityType::CPU);
+
+  if (has_cpu_activity) {
+    k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
+  }
+  if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+    k_activities.insert(kXpuTypes.begin(), kXpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
-    k_activities.insert(cudaTypes.begin(), cudaTypes.end());
+    k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
   }
 
   ExperimentalConfigWrapper configWrap(config);
 
   // Experimental Configuration options are present
-  if (config && configWrap.assertValid(activities)) {
-    configWrap.prepareTraceWithExperimentalOptions();
+  if (config && configWrap.assertValid()) {
+    configWrap.prepareTraceWithExperimentalOptions(has_cpu_activity);
     return;
   }
 
@@ -273,6 +283,19 @@ void popUserCorrelationId() {
 void recordThreadInfo() {
 #ifdef USE_KINETO
   libkineto::api().activityProfiler().recordThreadInfo();
+#endif // USE_KINETO
+}
+
+void logInvariantViolation(
+    const std::string& assertion,
+    const std::string& error,
+    const std::string& profile_id,
+    const std::string& group_profile_id) {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    libkineto::api().activityProfiler().logInvariantViolation(
+        profile_id, assertion, error, group_profile_id);
+  }
 #endif // USE_KINETO
 }
 

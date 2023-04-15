@@ -21,7 +21,7 @@ def get_aten():
 
     aten_ops = OrderedDict()
     for function in native_functions:
-        if "canonical" in function.tags:
+        if "core" in function.tags:
             op_name = str(function.func.name)
             aten_ops[op_name] = function
 

@@ -21,7 +21,7 @@ import unittest
 import tarfile
 import tempfile
 import shutil
-from six.moves.urllib.request import urlretrieve
+from urllib.request import urlretrieve
 
 def _print_net(net):
     for i in net.external_input:

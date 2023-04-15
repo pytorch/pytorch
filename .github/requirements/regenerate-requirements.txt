@@ -1,2 +1,2 @@
-typing_extensions
+typing-extensions
 jinja2

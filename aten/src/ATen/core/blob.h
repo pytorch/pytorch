@@ -27,7 +27,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
    * Initializes an empty Blob.
    */
   Blob() noexcept : meta_(), pointer_(nullptr), has_ownership_(false) {}
-  ~Blob() {
+  ~Blob() override {
     Reset();
   }
 

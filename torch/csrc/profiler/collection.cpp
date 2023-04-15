@@ -52,13 +52,13 @@ RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
 
 TensorMetadata::TensorMetadata(
     const RawTensorMetadata& r,
-    const std::vector<int64_t>& sizes,
-    const std::vector<int64_t>& strides)
+    std::vector<int64_t> sizes,
+    std::vector<int64_t> strides)
     : RawTensorMetadataBase(r),
       weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))},
       device_{r.device_type_, r.device_index_},
-      sizes_{sizes},
-      strides_{strides} {
+      sizes_{std::move(sizes)},
+      strides_{std::move(strides)} {
   SOFT_ASSERT(r.weak_self_.has_value());
 }
 
@@ -519,7 +519,7 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     const ProfilerConfig& config)
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
-  if (config_.experimental_config.performance_events.size()) {
+  if (!config_.experimental_config.performance_events.empty()) {
     perf_profiler_ =
         std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
     perf_profiler_->Configure(config_.experimental_config.performance_events);
@@ -583,7 +583,8 @@ static constexpr const char* indexKey = "Ev Idx";
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_us,
-    uint64_t end_time_us) {
+    uint64_t end_time_us,
+    const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
   TraceWrapper cpu_trace(start_time_us, "PyTorch Profiler");
 
@@ -601,6 +602,16 @@ void passEventsToKineto(
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
+
+      // There is a longstanding regression for initializing
+      // on-demand Kineto activity handling. Enabling this path
+      // for Profiler API could cause side effects as much has changed since.
+      // Make a surgical fix here until we holistically assess the on-demand
+      // vs API path framentation, which has been snowballing in complexity
+      // and thus flakiness.
+      if (config.global()) {
+        e->kineto_activity_ = activity;
+      }
     }
   }
 
@@ -865,7 +876,7 @@ trace_ptr_t addKinetoEvents(
     uint64_t end_time_us,
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
-  passEventsToKineto(results, start_time_us, end_time_us);
+  passEventsToKineto(results, start_time_us, end_time_us, config);
 
   // In on demand mode kineto is directly controlled by other machinery.
   if (config.global()) {
@@ -1129,12 +1140,16 @@ RecordQueue::getRecords(
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
+        time_t start_time_ns;
+        if constexpr (std::is_same<
+                          std::remove_reference_t<decltype(i)>,
+                          ExtraFields<EventType::Backend>>::value) {
+          start_time_ns = i.start_time_us_ * 1000;
+        } else {
+          start_time_ns = converter(i.start_time_);
+        }
         out.emplace_back(Result::create(
-            /*start_time_ns_=*/c10::guts::if_constexpr<std::is_same<
-                typename std::remove_reference<decltype(i)>::type,
-                ExtraFields<EventType::Backend>>::value>(
-                [&](auto _) { return _(i).start_time_us_ * 1000; },
-                [&](auto _) { return converter(_(i).start_time_); }),
+            /*start_time_ns_=*/start_time_ns,
             /*start_tid_=*/queue.tid(),
             /*kineto_info_=*/queue.kineto_info(),
             /*extra_fields_=*/std::move(i)));

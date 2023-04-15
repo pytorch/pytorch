@@ -97,6 +97,46 @@ bool softAssertRaises() {
   return soft_assert_raises_.value_or(false);
 }
 
+void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    const char* args) {
+#ifdef USE_KINETO
+  std::string error;
+  error = fmt::format(
+      "{} SOFT ASSERT FAILED at {}:{}, func: {}, args: {}",
+      cond,
+      file,
+      line,
+      func,
+      args);
+  // TODO: Implement profile_id and group_profile_id as 3rd/4th arguments.
+  kineto::logInvariantViolation(cond, error, "", "");
+#endif
+}
+
+void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    const std::string& args) {
+#ifdef USE_KINETO
+  std::string error;
+  error = fmt::format(
+      "{} SOFT ASSERT FAILED at {}:{}, func: {}, args: {}",
+      cond,
+      file,
+      line,
+      func,
+      args);
+  // TODO: Implement profile_id and group_profile_id as 3rd/4th arguments.
+  kineto::logInvariantViolation(cond, error, "", "");
+#endif
+}
+
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
 // ----------------------------------------------------------------------------
@@ -106,7 +146,7 @@ std::string getNvtxStr(
     const std::vector<std::vector<int64_t>>& shapes,
     at::RecordFunctionHandle op_id,
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
-  if (sequence_nr >= -1 || shapes.size() > 0) {
+  if (sequence_nr >= -1 || !shapes.empty()) {
     std::string str;
     if (sequence_nr >= 0) {
       str = fmt::format("{}, seq = {}", name, sequence_nr);
@@ -121,12 +161,12 @@ std::string getNvtxStr(
     if (op_id > 0) {
       str = fmt::format("{}, op_id = {}", str, op_id);
     }
-    if (shapes.size() > 0) {
+    if (!shapes.empty()) {
       str = fmt::format("{}, sizes = {}", str, shapesToStr(shapes));
     }
     // Include the op ids of the input edges so
     // you can build the network graph
-    if (input_op_ids.size() > 0) {
+    if (!input_op_ids.empty()) {
       str = fmt::format(
           "{}, input_op_ids = {}", str, inputOpIdsToStr(input_op_ids));
     }
@@ -557,7 +597,7 @@ uint64_t computeFlops(
 
     const auto mat1_size = mat1_sizes_ref.toDimVector();
     const auto mat2_size = mat2_sizes_ref.toDimVector();
-    if (mat1_size.size() == 0) {
+    if (mat1_size.empty()) {
       return 0;
     }
 
@@ -598,7 +638,7 @@ uint64_t computeFlops(
 
     const auto mat1_size = mat1_sizes_ref.toDimVector();
     const auto mat2_size = mat2_sizes_ref.toDimVector();
-    if (mat1_size.size() == 0) {
+    if (mat1_size.empty()) {
       return 0;
     }
 

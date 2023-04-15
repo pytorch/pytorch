@@ -3,6 +3,7 @@ import dis
 import functools
 import logging
 import os.path
+import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -32,6 +33,16 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
+def skip_if_pytest(fn):
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise unittest.SkipTest("does not work under pytest")
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 def named_parameters_for_optimized_module(mod):
     assert isinstance(mod, eval_frame.OptimizedModule)
     return mod._orig_mod.named_parameters
@@ -46,7 +57,7 @@ def remove_optimized_module_prefix(name):
     prefix = "_orig_mod."
     assert name.startswith(prefix)
     name = name[len(prefix) :]
-    return torch.distributed.fsdp._common_utils.clean_tensor_name(name)
+    return name
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -96,6 +107,8 @@ def requires_bwd_pass(out):
         return any([requires_bwd_pass(x) for x in out])
     elif out is None:
         return False
+    elif isinstance(out, int):
+        return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
@@ -135,7 +148,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -175,7 +188,7 @@ class CompileCounterWithBackend:
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        from torch._dynamo.eval_frame import lookup_backend
+        from .backends.registry import lookup_backend
 
         self.frame_count += 1
         for node in gm.graph.nodes:
@@ -272,6 +285,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
         pass
 
     DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):
@@ -284,3 +298,11 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass
+
+
+# temporary decorator to skip failing 3.11 dynamo tests
+def skipIfPy311(fn):
+    if sys.version_info < (3, 11):
+        return fn
+    else:
+        return unittest.skip(fn)

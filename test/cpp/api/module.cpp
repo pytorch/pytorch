@@ -45,8 +45,7 @@ TEST_F(ModuleTest, ZeroGrad) {
   for (auto& parameter : module->parameters()) {
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
-    ASSERT_TRUE(grad.defined());
-    ASSERT_EQ(grad.sum().item<float>(), 0);
+    ASSERT_FALSE(grad.defined());
   }
 }
 
@@ -66,14 +65,14 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
   ASSERT_TRUE(module.x.grad().defined());
   ASSERT_FALSE(module.y.grad().defined());
 
-  module.zero_grad();
+  module.zero_grad(false); // set_to_none = false
 
   ASSERT_TRUE(module.x.grad().defined());
   ASSERT_FALSE(module.y.grad().defined());
 
   ASSERT_EQ(module.x.grad().sum().item<float>(), 0);
 
-  module.zero_grad(true); // set_to_none = true
+  module.zero_grad();
 
   ASSERT_FALSE(module.x.grad().defined());
   ASSERT_FALSE(module.y.grad().defined());

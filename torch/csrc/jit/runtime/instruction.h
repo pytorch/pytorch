@@ -58,7 +58,7 @@ namespace jit {
   _(UNCHECKED_CAST, "") /* perform an unchecked cast operation */              \
   _(__IS__, "") /* performs `is` operator from Python */                       \
   _(UN_INITIALIZED,                                                            \
-    "") /* sets default values to varaibles that are  un initialized */        \
+    "") /* sets default values to variables that are uninitialized */          \
   _(__ISNOT__, "") /* performs `is not` operator from Python  */               \
   _(FORMAT, "I") /* performs string format function `f strings` or `{}.format` \
                      the number of inputs in stored in X */                    \
@@ -73,7 +73,8 @@ namespace jit {
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */       \
   _(WARN, "I") /* emit a warning with line information */                      \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
-  _(EXIT, "EX") /* exit the last entered contextmanager */
+  _(EXIT, "EX") /* exit the last entered contextmanager */                     \
+  _(AWAITABLE, "CN") /* initialize await for code entry x with N inputs  */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,

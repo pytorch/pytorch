@@ -16,7 +16,7 @@ import functools
 import warnings
 import inspect
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -81,7 +81,7 @@ class ONNXTracedModule(torch.nn.Module):
         return_inputs=False,
         return_inputs_states=False,
     ):
-        super(ONNXTracedModule, self).__init__()
+        super().__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
@@ -302,7 +302,7 @@ class TracingCheckError(Exception):
                 " encountered untraceable code.\n"
             )
             self.message += indent(tensor_compare_error) + "\n"
-        super(TracingCheckError, self).__init__(self.message)
+        super().__init__(self.message)
 
 
 # Check the traced module against a set of user-provided validation inputs
@@ -337,6 +337,7 @@ def _check_trace(
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
                 example_inputs_is_kwarg=example_inputs_is_kwarg,
+                _store_inputs=False
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -351,6 +352,7 @@ def _check_trace(
                     _force_outplace=force_outplace,
                     _module_class=_module_class,
                     example_kwarg_inputs=_clone_inputs(inputs),
+                    _store_inputs=False
                 )
             else:
                 check_mod = torch.jit.trace(
@@ -360,9 +362,8 @@ def _check_trace(
                     strict=strict,
                     _force_outplace=force_outplace,
                     _module_class=_module_class,
+                    _store_inputs=False
                 )
-
-
             check_mod_func = check_mod
 
         def graph_diagnostic_info():
@@ -621,7 +622,8 @@ def trace(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
-    example_kwarg_inputs=None
+    example_kwarg_inputs=None,
+    _store_inputs=True
 ):
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
@@ -748,7 +750,7 @@ def trace(
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -800,8 +802,8 @@ def trace(
             _force_outplace,
             _module_class,
             example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs
         )
-
     if (
         hasattr(func, "__self__")
         and isinstance(func.__self__, torch.nn.Module)
@@ -823,6 +825,7 @@ def trace(
             _force_outplace,
             _module_class,
             example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs
         )
 
     # Special case for common case of passing a single Tensor
@@ -890,6 +893,8 @@ def trace(
                 example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
 
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
     return traced
 
 
@@ -908,6 +913,7 @@ def trace_module(
     _module_class=None,
     _compilation_unit=_python_cu,
     example_inputs_is_kwarg=False,
+    _store_inputs=True,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -957,7 +963,7 @@ def trace_module(
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -1043,6 +1049,7 @@ def trace_module(
                     strict,
                     _force_outplace,
                     argument_names,
+                    _store_inputs
                 )
             else:
                 example_inputs = make_tuple(example_inputs)
@@ -1054,6 +1061,7 @@ def trace_module(
                     strict,
                     _force_outplace,
                     argument_names,
+                    _store_inputs
                 )
 
             check_trace_method = module._c._get_method(method_name)
@@ -1105,7 +1113,7 @@ class TracedModule(ScriptModule):
 
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
-        super(TracedModule, self).__init__()
+        super().__init__()
         assert isinstance(orig, torch.nn.Module)
 
         # Copy a subset of `orig` to a temporary nn.Module.
@@ -1176,12 +1184,12 @@ class TracedModule(ScriptModule):
 
     def __getattr__(self, attr):
         if "_actual_script_module" not in self.__dict__:
-            return super(TracedModule, self).__getattr__(attr)
+            return super().__getattr__(attr)
         return getattr(self._actual_script_module, attr)
 
     def __setattr__(self, attr, value):
         if "_actual_script_module" not in self.__dict__:
-            return super(TracedModule, self).__setattr__(attr, value)
+            return super().__setattr__(attr, value)
         setattr(self._actual_script_module, attr, value)
 
     def _get_name(self):
@@ -1192,7 +1200,7 @@ class TracedModule(ScriptModule):
 
 
 class TopLevelTracedModule(TracedModule):
-    forward = _CachedForward()
+    forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
 
     def _reconstruct(self, cpp_module):
         """

@@ -40,7 +40,6 @@ on:
         default: "linux.2xlarge"
         description: |
           List of CUDA architectures CI build should target.
-
       test-matrix:
         required: false
         type: string
@@ -54,7 +53,7 @@ on:
         value: ${{ jobs.build.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
 jobs:
@@ -65,6 +64,7 @@ jobs:
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -158,7 +158,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'

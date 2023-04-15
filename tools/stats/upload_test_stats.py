@@ -11,7 +11,7 @@ from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     is_rerun_disabled_tests,
     unzip,
-    upload_to_s3,
+    upload_workflow_stats_to_s3,
 )
 
 
@@ -33,8 +33,12 @@ def parse_xml_report(
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    job_id = get_job_id(report)
-    print(f"Found job id: {job_id}")
+    try:
+        job_id = get_job_id(report)
+        print(f"Found job id: {job_id}")
+    except Exception:
+        job_id = None
+        print("Failed to find job id")
 
     test_cases: List[Dict[str, Any]] = []
 
@@ -326,7 +330,7 @@ if __name__ == "__main__":
             args.workflow_run_id, args.workflow_run_attempt
         )
 
-    # Flush stdout so that any errors in rockset upload show up last in the logs.
+    # Flush stdout so that any errors in Rockset upload show up last in the logs.
     sys.stdout.flush()
 
     # For PRs, only upload a summary of test_runs. This helps lower the
@@ -336,22 +340,37 @@ if __name__ == "__main__":
         test_case_summary, pytest_parallel_times
     )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
         test_case_summary,
     )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "invoking_file_times",
         invoking_file_times,
     )
 
+    # Separate out the failed test cases.
+    # Uploading everything is too data intensive most of the time,
+    # but these will be just a tiny fraction.
+    failed_tests_cases = []
+    for test_case in test_cases:
+        if "rerun" in test_case or "failure" in test_case or "error" in test_case:
+            failed_tests_cases.append(test_case)
+
+    upload_workflow_stats_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "failed_test_runs",
+        failed_tests_cases,
+    )
+
     if args.head_branch == "master":
-        # For master jobs, upload everytihng.
-        upload_to_s3(
+        # For master jobs, upload everything.
+        upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )

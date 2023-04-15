@@ -172,7 +172,7 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
 
 Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.select_scatter_symint(mutated_view, dim, index);
+    return base.select_scatter_symint(mutated_view, dim, std::move(index));
 }
 
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
@@ -244,7 +244,7 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
     }
 }
 
-Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_size_tensor, const Tensor& nested_stride_tensor, IntArrayRef offsets) {
+Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
     return Tensor();
 }

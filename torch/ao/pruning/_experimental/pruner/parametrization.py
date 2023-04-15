@@ -1,6 +1,18 @@
 import torch
 from torch import nn
+from torch.nn.utils.parametrize import is_parametrized
 
+
+def module_contains_param(module, parametrization):
+    if is_parametrized(module):
+        # see if any of the module tensors have a parametriztion attached that matches the one passed in
+        return any(
+            [
+                any(isinstance(param, parametrization) for param in param_list)
+                for key, param_list in module.parametrizations.items()
+            ]
+        )
+    return False
 
 
 # Structured Pruning Parameterizations
@@ -27,15 +39,15 @@ class FakeStructuredSparsity(nn.Module):
         # avoid double saving masks
         return {}
 
-class BiasHook:
 
+class BiasHook:
     def __init__(self, parametrization, prune_bias):
         self.param = parametrization
         self.prune_bias = prune_bias
 
     def __call__(self, module, input, output):
 
-        if getattr(module, '_bias', None) is not None:
+        if getattr(module, "_bias", None) is not None:
             bias = module._bias.data
             if self.prune_bias:
                 bias[~self.param.mask] = 0

@@ -16,7 +16,7 @@ void VmapInterpreterPtr::sendToNextInterpreterImpl(
     torch::jit::Stack* stack,
     bool grad_special_case) {
   // Re-dispatch
-  if (getDynamicLayerStack().size() == 0) {
+  if (getDynamicLayerStack().empty()) {
     sanityCheckStack(op, stack);
   }
   op.callBoxed(stack);

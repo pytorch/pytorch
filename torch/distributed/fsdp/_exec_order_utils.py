@@ -227,6 +227,8 @@ class _ExecOrderData:
                 local_num_valid_indices,
                 group=self.process_group,
             )
+            # Copy entire tensor from D2H once to avoid per element D2H copies
+            world_num_valid_indices = world_num_valid_indices.cpu()
             # Check that all ranks plan to all-gather the same number of
             # parameters
             # TODO (awgu): Since every module has at most one handle in the
@@ -251,6 +253,8 @@ class _ExecOrderData:
             dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
+            # Copy entire tensor from D2H once to avoid per element D2H copies
+            world_indices = world_indices.cpu()
             # Check that all ranks plan to all-gather the same index parameters
             for (r1, i1), (r2, i2) in itertools.combinations(
                 (

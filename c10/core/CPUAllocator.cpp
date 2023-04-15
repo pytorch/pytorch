@@ -5,6 +5,7 @@
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/Logging.h>
 
 // TODO: rename flag to C10
 C10_DEFINE_bool(
@@ -71,7 +72,6 @@ template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   DefaultMobileCPUAllocator() = default;
-  // NOLINTNEXTLINE(modernize-use-override)
   ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
@@ -208,7 +208,11 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr,
+        static_cast<int64_t>(nbytes),
+        allocated,
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -243,7 +247,11 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
+        ptr,
+        -static_cast<int64_t>(nbytes),
+        allocated,
+        0,
+        c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -265,7 +273,7 @@ void ProfiledCPUMemoryReporter::OutOfMemory(size_t nbytes) {
   if (profile_memory) {
     reportOutOfMemoryToProfiler(
         static_cast<int64_t>(nbytes),
-        static_cast<int64_t>(allocated),
+        allocated,
         0,
         c10::Device(c10::DeviceType::CPU));
   }

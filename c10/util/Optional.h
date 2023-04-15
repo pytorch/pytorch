@@ -501,13 +501,8 @@ class arrayref_optional_base {
       : storage_(v) {}
 
   constexpr bool initialized() const noexcept {
-    typename storage::raw repr;
-    // Cast to void* to suppress GCC's -Wclass-memaccess.
-    memcpy(
-        static_cast<void*>(&repr),
-        static_cast<const void*>(&storage_),
-        sizeof(storage_));
-    return repr.p != nullptr || repr.sz == 0;
+    return storage_.uninitialized_.p != nullptr ||
+        storage_.uninitialized_.sz == 0;
   }
 
   void setInitialized(bool init) noexcept {

@@ -278,7 +278,7 @@ off_t refresh(
 FileStore::FileStore(std::string path, int numWorkers)
     : Store(),
       path_(std::move(path)),
-      pos_(0),
+
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
       refCountKey_("refcount/"),
@@ -313,7 +313,7 @@ FileStore::~FileStore() {
   // Clean up the file if number of references is 0.
   if (refCount == 0 && numWorkers_ >= 0 && numFinishedWorker >= numWorkers_) {
     // Best effort removal without checking the return
-    std::remove(path_.c_str());
+    ::remove(path_.c_str());
   }
 }
 

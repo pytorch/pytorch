@@ -3,7 +3,6 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <vector>
 
@@ -43,9 +42,10 @@ ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
 const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  if (update.view_metas.size() == 0) return t;
+  if (update.view_metas.empty()) return t;
 
   std::vector<at::Tensor> tmp_values({base});
+  tmp_values.reserve(update.view_metas.size());
   for (size_t i = 0; i < update.view_metas.size() - 1; ++i) {
     at::Tensor next_view = update.view_metas[i].forward_fn(tmp_values.back(), update.view_metas[i].out_index);
     // NB: We only actually need tmp_values for ops like select/slice/diagonal/squeeze/as_strided
@@ -113,7 +113,7 @@ bool FunctionalStorageImpl::apply_updates() {
   // It adds the Functionalize key into TLS before redispatching to the functionalization kernels,
   // which means that we need to explicitly exclude it here before doing any other work underneath the pass.
   at::AutoDispatchSkipFunctionalize guard;
-  bool any_updates = updates_.size() > 0;
+  bool any_updates = !updates_.empty();
   for (auto& update_data: updates_) {
     base_ = apply_update(update_data, base_);
   }

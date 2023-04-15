@@ -8,6 +8,7 @@
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 #include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
@@ -54,6 +55,7 @@ TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
 namespace ivalue {
 struct Tuple;
 struct Future;
+struct Await;
 struct ConstantString;
 struct GenericDict;
 struct Object;
@@ -79,7 +81,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
     StreamData3Holder(struct c10::StreamData3 d) {
       val = d;
     }
-    StreamData3Holder() {}
+    StreamData3Holder() = delete;
     struct c10::StreamData3 val;
 };
 
@@ -161,6 +163,7 @@ struct Capsule {
   _(Int)                     \
   _(SymInt)                  \
   _(SymFloat)                \
+  _(SymBool)                 \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -168,6 +171,7 @@ struct Capsule {
   _(GenericList)             \
   _(GenericDict)             \
   _(Future)                  \
+  _(Await)                   \
   _(Device)                  \
   _(Stream)                  \
   _(Object)                  \
@@ -551,6 +555,13 @@ public:
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const&;
 
+  IValue(c10::intrusive_ptr<ivalue::Await> v);
+  bool isAwait() const {
+    return Tag::Await == tag;
+  }
+  c10::intrusive_ptr<ivalue::Await> toAwait() &&;
+  c10::intrusive_ptr<ivalue::Await> toAwait() const&;
+
   // RRef
   IValue(c10::intrusive_ptr<c10::RRefInterface> v);
   bool isRRef() const {
@@ -605,6 +616,23 @@ public:
 
   c10::SymFloat toSymFloat() &&;
   c10::SymFloat toSymFloat() const&;
+
+  IValue(c10::SymBool i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymBool;
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    } else {
+      tag = Tag::Bool;
+      payload.u.as_bool = i.as_bool_unchecked();
+    }
+  }
+
+  bool isSymBool() const {
+    return Tag::SymBool == tag;
+  }
+
+  c10::SymBool toSymBool() &&;
+  c10::SymBool toSymBool() const&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -831,6 +859,9 @@ public:
     } else if (s.isSymFloat()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = s.toSymFloat().toSymNodeImpl().release();
+    } else if (s.isSymBool()) {
+      tag = Tag::SymBool;
+      payload.u.as_intrusive_ptr = s.toSymBool().toSymNodeImpl().release();
     } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
@@ -847,7 +878,7 @@ public:
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat() || isSymBool();
   }
 
   at::Scalar toScalar() const {
@@ -863,6 +894,8 @@ public:
       return toSymInt();
     else if (isSymFloat())
       return toSymFloat();
+    else if (isSymBool())
+      return toSymBool();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -1162,6 +1195,8 @@ public:
         return true;
       case Tag::SymFloat:
         return true;
+      case Tag::SymBool:
+        return true;
       case Tag::Bool:
         return false;
       case Tag::Tuple:
@@ -1176,10 +1211,12 @@ public:
         return true;
       case Tag::Future:
         return true;
+      case Tag::Await:
+        return true;
       case Tag::Device:
         return false;
       case Tag::Stream:
-        return false;
+        return true;
       case Tag::Object:
         return true;
       case Tag::PyObject:
@@ -1250,12 +1287,12 @@ public:
   friend MaybeOwnedTraits<IValue>;
 
   Payload payload;
-  Tag tag;
+  Tag tag{IValue::Tag::None};
   friend struct WeakIValue;
 };
 
 struct TORCH_API WeakIValue final {
-  WeakIValue() : tag(IValue::Tag::None), is_intrusive_ptr(false) {}
+  WeakIValue() = default;
 
   WeakIValue(const WeakIValue& rhs)
       : payload(rhs.payload),
@@ -1367,8 +1404,8 @@ struct TORCH_API WeakIValue final {
  private:
   using Payload = IValue::Payload::TriviallyCopyablePayload;
   Payload payload;
-  IValue::Tag tag;
-  bool is_intrusive_ptr;
+  IValue::Tag tag{IValue::Tag::None};
+  bool is_intrusive_ptr{false};
 };
 
 // An owning pointer to a type. When the type is class type, it requires a pair

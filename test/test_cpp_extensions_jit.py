@@ -16,6 +16,7 @@ import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 from torch.testing._internal.common_utils import gradcheck
+import torch.multiprocessing as mp
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -30,12 +31,15 @@ IS_WINDOWS = sys.platform == "win32"
 
 
 def remove_build_path():
-    if sys.platform == "win32":
-        print("Not wiping extensions build folder because Windows")
-        return
     default_build_root = torch.utils.cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root)
+        if IS_WINDOWS:
+            # rmtree returns permission error: [WinError 5] Access is denied
+            # on Windows, this is a word-around
+            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+        else:
+            shutil.rmtree(default_build_root)
+
 
 # There's only one test that runs gracheck, run slow mode manually
 class TestCppExtensionJIT(common.TestCase):
@@ -145,16 +149,30 @@ class TestCppExtensionJIT(common.TestCase):
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
         try:
             os.environ['TORCH_CUDA_ARCH_LIST'] = flags
-            torch.utils.cpp_extension.load(
-                name="cudaext_archflags",
-                sources=[
+
+            params = {
+                "name": "cudaext_archflags",
+                "sources": [
                     "cpp_extensions/cuda_extension.cpp",
                     "cpp_extensions/cuda_extension.cu",
                 ],
-                extra_cuda_cflags=["-O2"],
-                verbose=True,
-                build_directory=temp_dir,
-            )
+                "extra_cuda_cflags": ["-O2"],
+                "verbose": True,
+                "build_directory": temp_dir,
+            }
+
+            if IS_WINDOWS:
+                p = mp.Process(target=torch.utils.cpp_extension.load, kwargs=params)
+
+                # Compile and load the test CUDA arch in a different Python process to avoid
+                # polluting the current one and causes test_jit_cuda_extension to fail on
+                # Windows. There is no clear way to unload a module after it has been imported
+                # and torch.utils.cpp_extension.load builds and loads the module in one go.
+                # See https://github.com/pytorch/pytorch/issues/61655 for more details
+                p.start()
+                p.join()
+            else:
+                torch.utils.cpp_extension.load(**params)
 
             # Expected output for --list-elf:
             #   ELF file    1: cudaext_archflags.1.sm_61.cubin
@@ -166,7 +184,9 @@ class TestCppExtensionJIT(common.TestCase):
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
             if IS_WINDOWS:
-                print("Not wiping extensions build folder because Windows")
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a word-around
+                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
             else:
                 shutil.rmtree(temp_dir)
 
@@ -512,7 +532,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Create a torch.nn.Module which uses the C++ module as a submodule.
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.x = torch.nn.Parameter(torch.tensor(1.0))
                 self.net = extension.Net(3, 5)
 
@@ -565,7 +585,7 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            self.assertEqual(p.grad, torch.zeros_like(p))
+            assert p.grad is None, "zero_grad defaults to setting grads to None"
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)

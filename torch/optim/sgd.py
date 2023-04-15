@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, required, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc
+from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -23,7 +24,7 @@ class SGD(Optimizer):
                         differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
-        super(SGD, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -137,10 +138,9 @@ SGD.__doc__ = r"""\
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
         {maximize}
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
+        {foreach}
         {differentiable}
-    """.format(maximize=_maximize_doc, differentiable=_differentiable_doc) + r"""
+    """.format(maximize=_maximize_doc, foreach=_foreach_doc, differentiable=_differentiable_doc) + r"""
 
     Example:
         >>> # xdoctest: +SKIP
@@ -190,7 +190,7 @@ def sgd(params: List[Tensor],
         # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
         # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
         has_sparse_grad: bool = None,
-        foreach: bool = None,
+        foreach: Optional[bool] = None,
         *,
         weight_decay: float,
         momentum: float,
@@ -204,8 +204,12 @@ def sgd(params: List[Tensor],
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        # why must we be explicit about an if statement for torch.jit.is_scripting here?
+        # because JIT can't handle Optionals nor fancy conditionals when scripting
+        if not torch.jit.is_scripting():
+            _, foreach = _default_to_fused_or_foreach(params, differentiable=False, use_fused=False)
+        else:
+            foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')

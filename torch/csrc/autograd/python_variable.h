@@ -23,11 +23,11 @@ struct THPVariable {
   PyObject* backward_hooks = nullptr;
 };
 
-TORCH_API void registerPythonTensorClass(
+TORCH_PYTHON_API void registerPythonTensorClass(
     const std::string& device,
     PyObject* python_tensor_class);
 
-TORCH_API void activateCUDATrace();
+TORCH_PYTHON_API void activateCUDATrace();
 
 TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
@@ -53,6 +53,11 @@ inline bool THPVariable_Check(PyObject* obj) {
   if (!THPVariableClass)
     return false;
 
+  // Fast path
+  if (THPVariable_CheckExact(obj)) {
+    return true;
+  }
+
   const auto result = PyObject_IsInstance(obj, THPVariableClass);
   if (result == -1)
     throw python_error();
@@ -66,9 +71,6 @@ inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
 inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
   return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
 }
-
-TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
-TORCH_PYTHON_API bool isMainPyInterpreter();
 
 std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
     const c10::OperatorHandle& op,

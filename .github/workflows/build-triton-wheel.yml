@@ -9,11 +9,13 @@ on:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -21,14 +23,15 @@ concurrency:
 
 jobs:
   build-wheel:
+    name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
     steps:
       - name: Setup SSH (Click me for login details)
@@ -64,9 +67,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.7)
-            PYTHON_EXECUTABLE=/opt/python/cp37-cp37m/bin/python
-            ;;
           3.8)
             PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
             ;;
@@ -85,7 +85,8 @@ jobs:
             ;;
           esac
 
-          docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
+          docker exec -t "${container_name}" yum install -y zlib-devel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
@@ -107,11 +108,6 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.github-token }}
     steps:
-      - name: Download Build Artifacts (3.7)
-        uses: actions/download-artifact@v3
-        with:
-          name: "pytorch-triton-wheel-3.7"
-          path: "${{ runner.temp }}/artifacts/"
       - name: Download Build Artifacts (3.8)
         uses: actions/download-artifact@v3
         with:
@@ -148,14 +144,15 @@ jobs:
               aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
              done
   build-conda:
+    name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.7", "3.8", "3.9", "3.10" ]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
       ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     steps:

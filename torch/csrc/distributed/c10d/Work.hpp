@@ -50,7 +50,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
       const c10::optional<std::vector<at::Tensor>>& inputTensors =
           c10::nullopt);
 
-  virtual ~Work();
+  ~Work() override;
 
   // Checks if request has completed. Non-blocking operation.
   virtual bool isCompleted();

@@ -72,6 +72,19 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr)
   return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
 }
 
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr, int64_t count) {
+  return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr, count));
+}
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr, int64_t count) {
+  using Vec = Vectorized<float>;
+  if (count > Vec::size()) {
+  return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size(), count - Vec::size()));
+  } else {
+    return std::make_tuple(Vec::loadu(ptr, count), Vec(0));
+  }
+}
+
 } // namespace
 
 namespace utils {

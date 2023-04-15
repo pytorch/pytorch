@@ -287,7 +287,7 @@ class Decoder:
     @staticmethod
     def _is_stream_handle(data):
         obj_to_check = data.file_obj if isinstance(data, StreamWrapper) else data
-        return isinstance(obj_to_check, io.BufferedIOBase) or isinstance(obj_to_check, io.RawIOBase)
+        return isinstance(obj_to_check, (io.BufferedIOBase, io.RawIOBase))
 
     def decode1(self, key, data):
         if not data:

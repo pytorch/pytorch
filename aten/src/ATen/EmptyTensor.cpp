@@ -164,7 +164,8 @@ TensorBase _empty_generic(
   auto tensor = detail::make_tensor_base<TensorImpl>(
       std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
+  // NB: test for meta dispatch key to avoid guarding on zero-ness
+  if (ks.has(c10::DispatchKey::Meta) || size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->generic_set_sizes_contiguous(size);
   }
 
@@ -242,8 +243,7 @@ TensorBase empty_cpu(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  auto device = device_or_default(device_opt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
@@ -277,8 +277,7 @@ TensorBase empty_strided_cpu(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  auto device = device_or_default(device_opt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
@@ -335,8 +334,7 @@ TensorBase empty_meta(
   c10::optional<bool> pin_memory_opt,
   c10::optional<c10::MemoryFormat> memory_format_opt
 ) {
-  auto device = device_or_default(device_opt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   // NB: because there is no SparseMeta (yet), non-strided layout is
   // exerciseable
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -388,8 +386,7 @@ TensorBase empty_strided_meta(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  auto device = device_or_default(device_opt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   auto dtype = dtype_or_default(dtype_opt);
@@ -424,8 +421,7 @@ TensorBase empty_strided_symint_meta(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  auto device = device_or_default(device_opt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device_opt).type() == DeviceType::Meta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
 
   auto dtype = dtype_or_default(dtype_opt);

@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
+#include <c10/util/strides.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -29,7 +30,17 @@
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
-    TORCH_INTERNAL_ASSERT(!schema.hasAnyAliasInfo(), "mutating and aliasing ops should all have codegen'd kernels");
+    TORCH_CHECK(
+      !schema.hasAnyAliasInfo(),
+      "Found a custom (non-ATen) operator that either mutates or its inputs: ",
+      op.operator_name().name, ".", op.operator_name().overload_name,
+      ". Getting these operators to work with functionalization requires some extra work",
+      ". For mutable ops you need to register a corresponding out-of-place variant of the op,",
+      " and you also need to register a Functionalization kernel that performs some boilerplate,",
+      " telling functionalization to map from the mutable op to the out-of-place op",
+      ". See a more complete example of how to do this at ",
+      "https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa.",
+      " Please file a GitHub issue if you run into any problems.");
     const auto num_arguments = schema.arguments().size();
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
@@ -98,20 +109,6 @@ namespace {
   }
 }
 
-// Vanilla implementation to compute contiguous strides given some sizes.
-// Should probably refactor this into shared code (also used in TensorImpl.h)
-std::vector<int64_t> compute_contiguous_strides(c10::IntArrayRef sizes) {
-  auto n = sizes.size();
-  std::vector<int64_t> strides(n);
-  if (n == 0) return strides;
-
-  strides[n - 1] = 1;
-  for (int64_t i = n - 2; i >= 0; --i) {
-    strides[i] = strides[i+1] * sizes[i];
-  }
-  return strides;
-}
-
 // resize_() is special because:
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
@@ -128,7 +125,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // Case 1: arguments are not functional tensors, so we no-op and redispatch.
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
      at::AutoDispatchSkipFunctionalize guard;
-     at::Tensor tmp_output = self_.resize_(size, memory_format);
+     self_.resize_(size, memory_format);
      return self;
   }
 
@@ -162,13 +159,13 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       if (reapply_views) {
-        return base.as_strided(size, compute_contiguous_strides(size));
+        return base.as_strided(size, c10::contiguous_strides(size));
       } else {
-        return at::as_strided_copy(base, size, compute_contiguous_strides(size));
+        return at::as_strided_copy(base, size, c10::contiguous_strides(size));
       }
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
+      return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
     }
   );
   at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));

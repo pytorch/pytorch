@@ -9,7 +9,7 @@ namespace c10 {
 
 // A RAII, thread local (!) guard that enables or disables inference mode upon
 // construction, and sets it back to the original value upon destruction.
-struct TORCH_API InferenceMode {
+struct C10_API InferenceMode {
   // Note [Expected TLS state in InferenceMode]:
   //   InferenceMode: ADInplaceOrView not in
   //   raw_local_dispatch_key_set.included(),
@@ -46,7 +46,7 @@ struct TORCH_API InferenceMode {
   //
   // 3. Why does setting InferenceMode also set GradMode?
   //
-  //    This is required since InferenceMode is a faster and more restricive
+  //    This is required since InferenceMode is a faster and more restrictive
   //    version of NoGradGuard. All runtime checks using GradMode::is_enabled()
   //    are applicable to InferenceMode as well, e.g.
   //    `tensorTypeInCurrentExecutionContext` in interpreter.cpp.

@@ -21,9 +21,6 @@ class TestIgnoreContextManager(JitTestCase):
     @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_inp_out(self):
         class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -40,9 +37,6 @@ class TestIgnoreContextManager(JitTestCase):
         self.assertEqual(s(), 20)
 
         class B(torch.nn.Module):
-            def __init__(self):
-                super(B, self).__init__()
-
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -57,9 +51,6 @@ class TestIgnoreContextManager(JitTestCase):
         self.assertEqual(s(), model())
 
         class C(torch.nn.Module):
-            def __init__(self):
-                super(C, self).__init__()
-
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -75,9 +66,6 @@ class TestIgnoreContextManager(JitTestCase):
     @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_just_inp(self):
         class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def forward(self):
                 a: int = 4
                 b: int = 5
@@ -92,9 +80,6 @@ class TestIgnoreContextManager(JitTestCase):
     @unittest.skipUnless(_IS_ASTUNPARSE_INSTALLED, "astunparse package is required")
     def test_with_ignore_context_manager_with_just_out(self):
         class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def forward(self):
                 with torch.jit._IgnoreContextManager(c="out:List[int]"):
                     c = [2 for i in range(7) if i > 2]

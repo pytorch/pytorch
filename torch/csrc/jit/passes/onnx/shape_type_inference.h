@@ -56,7 +56,17 @@ TORCH_API void ONNXAssignOutputShape(
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
     bool onnx_shape_inference,
-    bool is_script);
+    bool is_script,
+    int opset_version);
+
+// Replace None in output with Optional node (opset > 15) if it's
+// script model. This helps align the output format in ONNX internal tests
+// when comparing pytorch results with ONNX results, as they have different
+// process for None in output.
+void ReplaceGraphOutputNoneWithOptional(
+    std::shared_ptr<Graph>& graph,
+    size_t outputs_index);
+Node* ONNXOptionalNodeForNone(std::shared_ptr<Graph>& graph);
 
 // Utilize ONNX Shape Inference for node.
 // The node must have ONNX namespace, and is valid ONNX node according to spec.

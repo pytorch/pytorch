@@ -16,7 +16,7 @@
 namespace at::native {
 namespace binary_internal {
 
-const char div_name[] = "div_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char div_name[] = "div_kernel";
 void div_true_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (iter.common_dtype() == kComplexHalf) {

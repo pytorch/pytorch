@@ -263,7 +263,7 @@ class MemongerTest(hu.HypothesisTestCase):
         device_crossers = device_blobs[caffe2_pb2.CPU].intersection(
             device_blobs[workspace.GpuDeviceType]
         )
-        self.assertEquals(device_crossers, set())
+        self.assertEqual(device_crossers, set())
 
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),

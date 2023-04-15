@@ -3,12 +3,12 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
@@ -20,6 +20,7 @@
 #include <ATen/Operators.h>
 #else
 #include <ATen/ops/_conj_physical_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
@@ -51,6 +52,7 @@
 #include <ATen/ops/deg2rad.h>
 #include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/erfinv.h>
@@ -798,7 +800,7 @@ Tensor add_sparse_csr(
     const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty({0, 0}, self.options().dtype(commonDtype));
+  Tensor result = at::empty_like(self, self.options().dtype(commonDtype).memory_format(at::MemoryFormat::Contiguous));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
@@ -932,6 +934,11 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
+
+    if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
+      return out;
+    }
+
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
@@ -1227,7 +1234,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t>
     TORCH_INTERNAL_ASSERT(((dims[0] == 0 && dims[1] == 1) || (dims[0] == 1 && dims[1] == 0)));
     return reduce_sparse_csr_dim01_cpu_template<scalar_t>(sparse, rop);
   }
-  TORCH_INTERNAL_ASSERT(dims.size() == 0);
+  TORCH_INTERNAL_ASSERT(dims.empty());
   // effective after gh-29137 has been resolved
   return sparse.clone();
 }
@@ -1242,7 +1249,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
   TORCH_INTERNAL_ASSERT(input_dim == 2);
   auto dims = dims_to_sum.vec();
   maybe_wrap_dims(dims, input_dim);
-  if (dims.size() == 0) {
+  if (dims.empty()) {
     // after gh-29137 is resolved, delete this if-block
     dims.emplace_back(0);
     dims.emplace_back(1);
@@ -1291,6 +1298,135 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
     });
   return result;
 }
+
+std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
+    const Tensor& self,
+    const Tensor& other,
+    const c10::string_view reduce) {
+
+  auto layout = self.layout();
+  TORCH_CHECK(layout == kSparseCsr,
+      "sparse_mm_reduce: expect self to be SparseCsr, got ", layout);
+  TORCH_CHECK(self.dense_dim() == 0,
+      "sparse_mm_reduce: expected non-hybrid self tensor.");
+  TORCH_CHECK(self.dim() == 2,
+      "sparse_mm_reduce: expected self to be a 2-D tensor, got ", self.dim(), "-D tensor.");
+
+  sparse::impl::check_sparse_mm_reduce_impl_inputs</*train*/false>(
+      self, Tensor(), other);
+
+  auto op = get_reduction_enum(reduce);
+  TORCH_CHECK(op != ReductionType::PROD, "sparse_mm_reduce: reduce type of prod has not been enabled.")
+
+  auto crow = self.crow_indices();
+  auto col = self.col_indices();
+  auto val = self.values();
+
+  // init output to be all zeros, for `rows` that has no nonzero elements,
+  // the corresponding rows in the output will be zero.
+  auto out = at::zeros({self.size(0), other.size(1)}, other.options());
+  auto arg_out = at::empty({0}, col.options());
+
+  int64_t nnz = self._nnz();
+  if (nnz == 0) {
+    return std::make_tuple(out, arg_out);
+  }
+
+  // only need to calculate the out args
+  // for reduce type "amax" and "amin" for training
+  bool need_arg_out = at::GradMode::is_enabled()
+      && (self.requires_grad() || other.requires_grad())
+      && (op == ReductionType::MAX || op == ReductionType::MIN);
+
+  if (!need_arg_out) {
+    spmm_reduce_stub(kCPU, out, crow, col, val, other, op);
+  } else {
+    // allocate memory and init with invalid index
+    arg_out.resize_(out.sizes());
+    arg_out.fill_(nnz);
+    spmm_reduce_arg_stub(kCPU, out, arg_out, crow, col, val, other, op);
+  }
+
+  return std::make_tuple(std::move(out), std::move(arg_out));
+}
+
+std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
+    const Tensor& self,
+    const Tensor& grad_out,
+    const Tensor& other,
+    const c10::string_view reduce,
+    const Tensor& arg_out,
+    std::array<bool, 2> output_mask) {
+
+  auto layout = self.layout();
+  TORCH_CHECK(layout == kSparseCsr,
+      "sparse_mm_reduce: expect self to be SparseCsr, got ", layout);
+
+  sparse::impl::check_sparse_mm_reduce_impl_inputs</*train*/true>(
+      self, grad_out, other);
+
+  auto op = get_reduction_enum(reduce);
+
+  auto crow = self.crow_indices();
+  auto col = self.col_indices();
+  auto val = self.values();
+
+  // `row`: row indices of COO format
+  // `ccol`: ccol indices of CSC format (with permute)
+  // `permute`: permute pattern from CSR to CSC
+  //
+  // TODO: optimize the following section,
+  // currently `argsort` is sequential.
+  Tensor row, ccol, permute;
+  {
+    bool out_int32 = crow.scalar_type() == ScalarType::Int;
+    Tensor coo_indices = at::_convert_indices_from_csr_to_coo(
+        crow,
+        col,
+        out_int32,
+        /*transpose*/false);
+    row = coo_indices.select(0, 0);
+
+    // calculte the global index for CSC
+    // and get the conversion permute pattern
+    Tensor index = col.mul(self.size(0)).add_(row);
+    permute = index.argsort();
+
+    ccol = at::_convert_indices_from_coo_to_csr(
+        /*column indices*/col.index_select(0, permute),
+        /*column count*/self.size(1),
+        out_int32);
+  }
+
+  Tensor grad_self, grad_other;
+  if (output_mask[0]) {
+    // grad_input has the same indices and nnz with input
+    grad_self = at::empty_like(self);
+    grad_self.values().zero_();
+    if (op == ReductionType::MAX || op == ReductionType::MIN) {
+      spmm_reduce_backward_input_arg_stub(kCPU, grad_self, grad_out, col, other, arg_out, op);
+    } else {
+      spmm_reduce_backward_input_stub(kCPU, grad_self, grad_out, crow, col, other, row, op);
+    }
+  }
+  if (output_mask[1]) {
+    grad_other = at::zeros(other.sizes(), other.options());
+    if (op == ReductionType::MAX || op == ReductionType::MIN) {
+      spmm_reduce_backward_other_arg_stub(kCPU, grad_other, grad_out, col, val, arg_out, op);
+    } else {
+      spmm_reduce_backward_other_stub(kCPU, grad_other, grad_out, crow, val, row, ccol, permute, op);
+    }
+  }
+
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
+}
+
+DEFINE_DISPATCH(spmm_reduce_stub);
+DEFINE_DISPATCH(spmm_reduce_arg_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_input_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_input_arg_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_other_stub);
+DEFINE_DISPATCH(spmm_reduce_backward_other_arg_stub);
 
 } // namespace native
 } // namespace at

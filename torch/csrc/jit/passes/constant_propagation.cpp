@@ -144,6 +144,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::profile,
     prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
+    prim::awaitable,
     aten::dequantize,
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -358,7 +359,7 @@ struct ConstantPropagator {
     }
     return no_mutation && !n->kind().is_onnx() &&
         skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-        !n->hasSideEffects() && n->blocks().size() == 0;
+        !n->hasSideEffects() && n->blocks().empty();
   }
 
   void ConstantPropagation(at::ArrayRef<Block*> blocks) {

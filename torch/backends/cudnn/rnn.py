@@ -24,7 +24,7 @@ def get_cudnn_mode(mode):
 # NB: We don't actually need this class anymore (in fact, we could serialize the
 # dropout state for even better reproducibility), but it is kept for backwards
 # compatibility for old models.
-class Unserializable(object):
+class Unserializable:
 
     def __init__(self, inner):
         self.inner = inner

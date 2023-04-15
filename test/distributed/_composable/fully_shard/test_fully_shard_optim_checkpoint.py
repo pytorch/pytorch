@@ -46,8 +46,8 @@ class TestOptimStateCheckpointing(FSDPTest):
             model(batch).sum().backward()
             optim.step()
 
-        optim_state_dict1 = FSDP._optim_state_dict(model1, optim1)
-        optim_state_dict2 = FSDP._optim_state_dict(model2, optim2)
+        optim_state_dict1 = FSDP.optim_state_dict(model1, optim1)
+        optim_state_dict2 = FSDP.optim_state_dict(model2, optim2)
 
         self.assertEqual(
             len(optim_state_dict1["state"]), len(optim_state_dict2["state"])

@@ -18,7 +18,7 @@ class TorchBenchmarkBase(torch.nn.Module):
     """
 
     def __init__(self):
-        super(TorchBenchmarkBase, self).__init__()
+        super().__init__()
         self.user_given_name = None
         self._pass_count = 0
         self._num_inputs_require_grads = 0
@@ -100,7 +100,7 @@ class TorchBenchmarkBase(torch.nn.Module):
         return name
 
 
-class PyTorchOperatorTestCase(object):
+class PyTorchOperatorTestCase:
     """ This class includes all the information needed to benchmark an operator.
         op_bench: it's a user-defined class (child of TorchBenchmarkBase)
         which includes input and operator, .etc

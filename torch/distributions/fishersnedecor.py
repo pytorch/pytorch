@@ -1,6 +1,6 @@
 from numbers import Number
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
@@ -36,7 +36,7 @@ class FisherSnedecor(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.df1.size()
-        super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(FisherSnedecor, _instance)

@@ -2,6 +2,7 @@ import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
+from unittest.mock import patch
 
 import sympy
 
@@ -66,13 +67,13 @@ class MockHandler:
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"{name}({', '.join(fargs)})"
+            return f"ops.{name}({', '.join(fargs)})"
 
         return inner
 
     @staticmethod
     def masked(mask, body, other):
-        return f"masked({mask}, {body()}, {other})"
+        return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
     def indirect_indexing(index_var):
@@ -96,8 +97,34 @@ class MockHandler:
 class KernelFormatterHandler:
     def __init__(self, parent_handler):
         self.parent_handler = parent_handler
-        self.output = IndentedBuffer()
+        self.output = IndentedBuffer(1)
         self.var_counter = itertools.count()
+
+    @staticmethod
+    def ir_to_string(ir_fn, index, rindex=None):
+        from .ir import FlexibleLayout
+
+        args = [index, rindex] if rindex is not None else [index]
+        names = ["index", "rindex"] if rindex is not None else ["index"]
+        formatter = KernelFormatterHandler(MockHandler())
+
+        with formatter.output.indent(-1):
+            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
+        for name, arg in zip(names, args):
+            if arg:
+                lhs = ", ".join(
+                    [
+                        str("_" if isinstance(v, (int, sympy.Integer)) else v)
+                        for v in arg
+                    ]
+                )
+                formatter.output.writeline(f"{lhs} = {name}")
+
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = ir_fn(*args)
+            return formatter.getvalue(result)
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -128,8 +155,10 @@ MockHandler._init_cls()
 
 ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
+_fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
+_interpreter = Virtualized("interpreter", NullHandler)
 
 
 class _V:
@@ -140,8 +169,10 @@ class _V:
     set_ops_handler = ops._set_handler
     get_ops_handler = ops._get_handler
     set_graph_handler = _graph._set_handler
+    set_fake_mode = _fake_mode._set_handler
     set_kernel_handler = _kernel._set_handler
     set_debug_handler = _debug._set_handler
+    set_interpreter_handler = _interpreter._set_handler
 
     @property
     def ops(self) -> MockHandler:
@@ -154,6 +185,11 @@ class _V:
         return _graph._get_handler()
 
     @property
+    def fake_mode(self):
+        """The graph currently being generated"""
+        return _fake_mode._get_handler()
+
+    @property
     def kernel(self):
         """The kernel currently being generated"""
         return _kernel._get_handler()
@@ -161,6 +197,10 @@ class _V:
     @property
     def debug(self):
         return _debug._get_handler()
+
+    @property
+    def interpreter(self):
+        return _interpreter._get_handler()
 
 
 V = _V()

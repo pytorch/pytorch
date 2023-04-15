@@ -19,6 +19,7 @@ runs:
       # timeout-minutes is unsupported for composite workflows, see https://github.com/actions/runner/issues/1979
       # timeout-minutes: 10
       shell: bash
+      id: get-job-id
       run: |
         set -eux
         GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")

@@ -381,7 +381,7 @@ void loadFunctions() {
 c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
-  if (cached_schema_to_graph.size() == 0) {
+  if (cached_schema_to_graph.empty()) {
     loadFunctions();
   }
 
@@ -398,7 +398,7 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
 TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
-  if (cached_bounded_schema_to_graph.size() == 0) {
+  if (cached_bounded_schema_to_graph.empty()) {
     loadFunctions();
   }
   GRAPH_DEBUG("Trying to find schema in bounded graphs: ", schema);
@@ -414,7 +414,7 @@ void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g) {
   std::lock_guard<std::mutex> guard(lock);
-  if (cached_schema_to_graph.size() == 0) {
+  if (cached_schema_to_graph.empty()) {
     loadFunctions();
   }
   transformShapeFunction(&schema, g);
@@ -425,7 +425,7 @@ void RegisterShapeComputeGraphForSchema(
 
 std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas() {
   std::lock_guard<std::mutex> guard(lock);
-  if (cached_schema_to_graph.size() == 0) {
+  if (cached_schema_to_graph.empty()) {
     loadFunctions();
   }
 

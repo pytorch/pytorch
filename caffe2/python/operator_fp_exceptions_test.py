@@ -33,7 +33,7 @@ class OperatorFPExceptionsTest(TestCase):
                 workspace.RunNetOnce(net)
             except Exception as e:
                 exception_raised = True
-            self.assertEquals(exception_raised, throw_if_fp_exceptions)
+            self.assertEqual(exception_raised, throw_if_fp_exceptions)
 
 
 if __name__ == '__main__':

@@ -34,8 +34,6 @@
 #include <ATen/ops/_linalg_svd_meta.h>
 #include <ATen/ops/_linalg_svd_native.h>
 #include <ATen/ops/_lu_with_info_native.h>
-#include <ATen/ops/_symeig_helper.h>
-#include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/all.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/cat.h>
@@ -110,8 +108,6 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/svd_native.h>
-#include <ATen/ops/symeig.h>
-#include <ATen/ops/symeig_native.h>
 #include <ATen/ops/triangular_solve_meta.h>
 #include <ATen/ops/triangular_solve_native.h>
 #include <ATen/ops/tril.h>
@@ -288,12 +284,6 @@ extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::co
 extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
 extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
 extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
-
-// syev
-extern "C" void zheev_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *info);
-extern "C" void cheev_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *info);
-extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
-extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 
 // syevd
 extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
@@ -908,24 +898,6 @@ template<> void lapackOrmqr<double>(char side, char trans, int m, int n, int k, 
 
 template<> void lapackOrmqr<float>(char side, char trans, int m, int n, int k, float *a, int lda, float *tau, float *c, int ldc, float *work, int lwork, int *info) {
   sormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
-}
-
-template<> void lapackSymeig<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int *info) {
-  zheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, w, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, info);
-}
-
-template<> void lapackSymeig<c10::complex<float>, float>(char jobz, char uplo, int n, c10::complex<float> *a, int lda, float *w, c10::complex<float> *work, int lwork, float *rwork, int *info) {
-  cheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, w, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, info);
-}
-
-template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double* rwork, int *info) {
-  (void)rwork;  // unused
-  dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
-}
-
-template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float* rwork, int *info) {
-  (void)rwork;  // unused
-  ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
 template<> void lapackSyevd<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
@@ -2813,134 +2785,6 @@ Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
   auto V = at::empty({0}, A.options());
   at::_linalg_eigh_out(L, V, A, uplo, /*comptue_v=*/false);
   return L;
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <typename scalar_t>
-static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, int* infos) {
-#if !AT_BUILD_WITH_LAPACK()
-  AT_ERROR("symeig: LAPACK library not found in compilation");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto self_data = self.data_ptr<scalar_t>();
-  auto eigvals_data = eigvals.data_ptr<value_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto eigvals_stride = eigvals.size(-1);
-  auto batch_size = batchCount(self);
-  auto n = self.size(-1);
-
-  char uplo = upper ? 'U' : 'L';
-  char jobz = eigenvectors ? 'V' : 'N';
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
-  // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with the same dimensions, doing this outside
-  // the loop saves (batch_size - 1) workspace queries which would provide the same result
-  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
-  int lwork = -1;
-  scalar_t wkopt;
-
-  Tensor rwork;
-  value_t* rwork_data = nullptr;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    int64_t lrwork = std::max(int64_t(1), 3 * n - 2);
-    ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
-    rwork = at::empty({lrwork}, self.options().dtype(dtype));
-    rwork_data = rwork.data_ptr<value_t>();
-  }
-
-  lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, rwork_data, &info);
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
-  Tensor work = at::empty({lwork}, self.options());
-
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    value_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
-
-    // now compute the eigenvalues and the eigenvectors (optionally)
-    lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
-}
-
-std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvectors, bool upper) {
-  auto infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
-
-  auto self_sizes = self.sizes().vec();
-  self_sizes.pop_back();
-  ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
-  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
-
-  if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
-  }
-
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cpu", [&]{
-    apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos.data_ptr<int>());
-  });
-
-  at::_linalg_check_errors(infos, "symeig", self.dim() == 2);
-  if (eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals, self_working_copy);
-  } else {
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
-  }
-}
-
-std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool upper) {
-  TORCH_WARN_ONCE(
-    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
-    "PyTorch release.\n",
-    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
-    "to using the lower triangular portion.\n",
-    "L, _ = torch.symeig(A, upper=upper)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')\n",
-    "and\n",
-    "L, V = torch.symeig(A, eigenvectors=True)\n"
-    "should be replaced with\n",
-    "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
-  );
-  squareCheckInputs(self, "linalg.symeig");
-  return at::_symeig_helper(self, eigenvectors, upper);
-}
-
-std::tuple<Tensor&, Tensor&> symeig_out(const Tensor& self, bool eigenvectors, bool upper, Tensor& vals, Tensor& vecs) {
-  TORCH_WARN_ONCE(
-    "torch.symeig is deprecated in favor of torch.linalg.eigh and will be removed in a future ",
-    "PyTorch release.\n",
-    "The default behavior has changed from using the upper triangular portion of the matrix by default ",
-    "to using the lower triangular portion.\n",
-    "L, _ = torch.symeig(A, upper=upper)\n",
-    "should be replaced with\n",
-    "L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')\n",
-    "and\n",
-    "L, V = torch.symeig(A, eigenvectors=True)\n"
-    "should be replaced with\n",
-    "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
-  );
-  checkSameDevice("symeig", vals, self, "eigenvalues");
-  checkSameDevice("symeig", vecs, self, "eigenvectors");
-  checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
-  // eigenvalues are always real-valued here
-  ScalarType real_dtype = toRealValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("symeig", vals.scalar_type(), real_dtype, "eigenvalues");
-
-  Tensor vals_tmp, vecs_tmp;
-  std::tie(vals_tmp, vecs_tmp) = at::symeig(self, eigenvectors, upper);
-
-  at::native::resize_output(vals, vals_tmp.sizes());
-  at::native::resize_output(vecs, vecs_tmp.sizes());
-  vals.copy_(vals_tmp);
-  vecs.copy_(vecs_tmp);
-  return std::tuple<Tensor&, Tensor&>(vals, vecs);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

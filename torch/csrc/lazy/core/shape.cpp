@@ -76,7 +76,7 @@ c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
       sizes.size() == is_symbolic->size(),
       "Dims of two values are not consistent");
   std::vector<c10::optional<int64_t>> symbolic_dims;
-  for (int64_t i = 0; i < sizes.size(); i++) {
+  for (size_t i = 0; i < sizes.size(); i++) {
     if (is_symbolic->at(i)) {
       symbolic_dims.emplace_back(c10::nullopt);
     } else {
@@ -120,7 +120,7 @@ void applySymbolicShapesOnLT(
     TORCH_INTERNAL_ASSERT(
         res_symbolic->size() == result_shapes.size(),
         "Result shape size is not consistent");
-    for (int64_t i = 0; i < res_symbolic->size(); i++) {
+    for (size_t i = 0; i < res_symbolic->size(); i++) {
       auto sym_dims = res_symbolic->at(i).symbolicDims();
       if (sym_dims.has_value()) {
         result_shapes[i] = result_shapes[i].with_symbolic_dims(*sym_dims);

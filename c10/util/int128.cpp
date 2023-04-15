@@ -35,7 +35,6 @@
 #include <c10/util/int128.h>
 #include <iomanip>
 #include <ostream> // NOLINT(readability/streams)
-#include <sstream>
 
 namespace c10 {
 

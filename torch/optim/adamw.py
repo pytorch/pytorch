@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _capturable_doc, _differentiable_doc, _foreach_doc, _maximize_doc, _default_to_foreach)
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
+                        _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
+                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -22,6 +23,7 @@ class AdamW(Optimizer):
         foreach: Optional[bool] = None,
         capturable: bool = False,
         differentiable: bool = False,
+        fused: Optional[bool] = None,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -43,8 +45,25 @@ class AdamW(Optimizer):
             maximize=maximize,
             capturable=capturable,
             differentiable=differentiable,
+            fused=fused,
         )
-        super(AdamW, self).__init__(params, defaults)
+        super().__init__(params, defaults)
+
+        if fused:
+            if differentiable:
+                raise RuntimeError("`fused` does not support `differentiable`")
+            self._step_supports_amp_scaling = True
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Suppor AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
+            if foreach:
+                raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -54,6 +73,7 @@ class AdamW(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
+            group.setdefault("fused", None)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -62,7 +82,17 @@ class AdamW(Optimizer):
             for s in state_values:
                 s["step"] = torch.tensor(float(s["step"]))
 
-    def _init_group(self, group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
+    def _init_group(
+        self,
+        group,
+        params_with_grad,
+        grads,
+        amsgrad,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+    ):
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -75,9 +105,11 @@ class AdamW(Optimizer):
 
             # State initialization
             if len(state) == 0:
+                # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+                # This is because kernel launches are costly on CUDA and XLA.
                 state["step"] = (
-                    torch.zeros((1,), dtype=torch.float, device=p.device)
-                    if self.defaults["capturable"]
+                    torch.zeros((), dtype=torch.float, device=p.device)
+                    if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )
                 # Exponential moving average of gradient values
@@ -127,7 +159,16 @@ class AdamW(Optimizer):
             amsgrad = group["amsgrad"]
             beta1, beta2 = group["betas"]
 
-            self._init_group(group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+            self._init_group(
+                group,
+                params_with_grad,
+                grads,
+                amsgrad,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+            )
 
             adamw(
                 params_with_grad,
@@ -146,6 +187,9 @@ class AdamW(Optimizer):
                 foreach=group["foreach"],
                 capturable=group["capturable"],
                 differentiable=group["differentiable"],
+                fused=group["fused"],
+                grad_scale=getattr(self, "grad_scale", None),
+                found_inf=getattr(self, "found_inf", None),
             )
 
         return loss
@@ -206,7 +250,7 @@ AdamW.__doc__ = r"""Implements AdamW algorithm.
         {foreach}
         {capturable}
         {differentiable}
-
+        {fused}
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
@@ -214,6 +258,7 @@ AdamW.__doc__ = r"""Implements AdamW algorithm.
 
     """.format(maximize=_maximize_doc,
                foreach=_foreach_doc,
+               fused=_fused_doc,
                capturable=_capturable_doc,
                differentiable=_differentiable_doc)
 
@@ -230,6 +275,9 @@ def adamw(
     foreach: Optional[bool] = None,
     capturable: bool = False,
     differentiable: bool = False,
+    fused: Optional[bool] = None,
+    grad_scale: Optional[Tensor] = None,
+    found_inf: Optional[Tensor] = None,
     *,
     amsgrad: bool,
     beta1: float,
@@ -249,16 +297,25 @@ def adamw(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
         )
 
-    # Respect when the user inputs False/True for foreach.
+    # Respect when the user inputs False/True for foreach or fused. We only want to change
+    # the default when neither have been user-specified. Note that we default to foreach
+    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
+    # bake-in time before making it the default, even if it is typically faster.
+    if fused is None and foreach is None:
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+    if fused is None:
+        fused = False
     if foreach is None:
-        foreach = _default_to_foreach(
-            [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable=differentiable)
+        foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+    if fused and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
-    if foreach and not torch.jit.is_scripting():
+    if fused and not torch.jit.is_scripting():
+        func = _fused_adamw
+    elif foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamw
     else:
         func = _single_tensor_adamw
@@ -279,6 +336,8 @@ def adamw(
         maximize=maximize,
         capturable=capturable,
         differentiable=differentiable,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
     )
 
 
@@ -289,6 +348,8 @@ def _single_tensor_adamw(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
     beta1: float,
@@ -300,6 +361,8 @@ def _single_tensor_adamw(
     capturable: bool,
     differentiable: bool,
 ):
+
+    assert grad_scale is None and found_inf is None
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -388,6 +451,8 @@ def _multi_tensor_adamw(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
     beta1: float,
@@ -408,6 +473,8 @@ def _multi_tensor_adamw(
         ), "If capturable=True, params and state_steps must be CUDA tensors."
 
     assert not differentiable, "_foreach ops don't support autograd"
+
+    assert grad_scale is None and found_inf is None
 
     grouped_tensors = _group_tensors_by_device_and_dtype([
         params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
@@ -438,9 +505,8 @@ def _multi_tensor_adamw(
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
         if capturable:
-            # TODO: use foreach_pow if/when foreach_pow is added
-            bias_correction1 = [torch.pow(beta1, step) for step in device_state_steps]
-            bias_correction2 = [torch.pow(beta2, step) for step in device_state_steps]
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
@@ -501,3 +567,68 @@ def _multi_tensor_adamw(
                 denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
             torch._foreach_addcdiv_(device_params, device_exp_avgs, denom, step_size)
+
+
+def _fused_adamw(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+    capturable: bool,  # Needed for consistency.
+    differentiable: bool,
+) -> None:
+    if differentiable:
+        raise RuntimeError("_fused_adamw is not differentiable")
+    grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
+    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    for (device, dtype) in grouped_tensors:
+        (
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
+        ) = grouped_tensors[(device, dtype)]
+        device_grad_scale, device_found_inf = None, None
+        if grad_scale is not None:
+            if device not in grad_scale_dict:
+                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
+            device_grad_scale = grad_scale_dict[device]
+        if found_inf is not None:
+            if found_inf not in found_inf_dict:
+                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
+            device_found_inf = found_inf_dict[device]
+        torch._foreach_add_(device_state_steps, 1)
+        torch._fused_adamw_(
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
+            amsgrad=amsgrad,
+            lr=lr,
+            beta1=beta1,
+            beta2=beta2,
+            weight_decay=weight_decay,
+            eps=eps,
+            maximize=maximize,
+            grad_scale=device_grad_scale,
+            found_inf=device_found_inf,
+        )
+        if device_found_inf is not None:
+            torch._foreach_sub_(device_state_steps, [device_found_inf] * len(device_state_steps))

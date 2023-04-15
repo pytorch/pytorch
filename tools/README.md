@@ -25,11 +25,6 @@ Build system pieces:
 * [build_libtorch.py](build_libtorch.py) - Script for building
   libtorch, a standalone C++ library without Python support.  This
   build script is tested in CI.
-* [fast_nvcc](fast_nvcc) - Mostly-transparent wrapper over nvcc that
-  parallelizes compilation when used to build CUDA files for multiple
-  architectures at once.
-  * [fast_nvcc.py](fast_nvcc/fast_nvcc.py) - Python script, entrypoint to the
-    fast nvcc wrapper.
 
 Developer tools which you might find useful:
 
@@ -39,8 +34,6 @@ Developer tools which you might find useful:
   can conveniently run diffs on them when working on code-generation.
   (See also [generated_dirs.txt](generated_dirs.txt) which
   specifies the list of directories with generated files.)
-* [stats/test_history.py](stats/test_history.py) - Query S3 to display history of a single
-  test across multiple jobs over time.
 
 Important if you want to run on AMD GPU:
 

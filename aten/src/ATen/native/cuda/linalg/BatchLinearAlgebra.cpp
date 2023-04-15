@@ -24,7 +24,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_cholesky_solve_helper_native.h>
-#include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
@@ -1031,7 +1030,7 @@ magma_trans_t to_magma(TransposeType trans) {
 
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
-  name = static_cast<type*>(storage_##name.data());
+  name = static_cast<type*>(storage_##name.mutable_data());
 
 namespace {
 
@@ -1873,8 +1872,6 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 
 REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 template <typename scalar_t>
 static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
@@ -1930,7 +1927,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
   if (vectors.is_complex()) {
     lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
     storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.data());
+    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
   }
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
@@ -1947,39 +1944,6 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
     }
   }
 #endif
-}
-
-std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(at::kCPU));
-
-  auto eigvals_shape = IntArrayRef(self.sizes().data(), self.dim()-1);  // self.shape[:-1]
-  ScalarType real_dtype = toRealValueType(self.scalar_type());
-
-  // magmaSyevd uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
-  // The driver routine magma_(d/s)syev_gpu accepts a tensor on the CPU for eigvalenvalues.
-  // The data is later moved to the appropriate device.
-  // In the case where self.numel() == 0, we just return an empty tensor of
-  // dimensions on the CUDA (to avoid the unnecessary "to(at::kCUDA)")
-  auto eigvals_working_copy = self.numel() == 0
-                              ? at::empty(eigvals_shape, self.options().dtype(real_dtype))
-                              : at::empty(eigvals_shape, self.options().dtype(real_dtype).device(at::kCPU));
-
-  if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
-  }
-
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cuda", [&]{
-    apply_magma_eigh<scalar_t>(eigvals_working_copy, self_working_copy, infos, upper, eigenvectors);
-  });
-
-  at::_linalg_check_errors(infos, "symeig", self.dim() == 2);
-
-  if (eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
-  } else {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), at::empty({0}, self.options()));
-  }
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2161,7 +2125,7 @@ AT_ERROR("linalg.svd: MAGMA library not found in "
   if (A.is_complex()) {
     auto lrwork = computeLRWorkDim(compute_uv ? (full_matrices ? 'A' : 'S') : 'N', m, n);
     storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.data());
+    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
   }
 
   magma_int_t* iwork;
@@ -2796,8 +2760,7 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel);
 #if defined(BUILD_LAZY_CUDA_LINALG)
 struct DispatchInitializer {
   DispatchInitializer() {
-    cuda::detail::LinalgDispatch disp{ _symeig_helper_cuda,
-                                       _cholesky_solve_helper_cuda};
+    cuda::detail::LinalgDispatch disp{_cholesky_solve_helper_cuda};
     cuda::detail::registerLinalgDispatch(disp);
   };
 } initializer;

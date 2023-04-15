@@ -10,7 +10,7 @@ class TestGraphRewritePasses(JitTestCase):
     def test_fuse_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
-                super(FunctionalLinear, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
 
@@ -44,7 +44,7 @@ class TestGraphRewritePasses(JitTestCase):
         # check matmuls are not fused
         class Matmul(torch.nn.Module):
             def __init__(self, weight):
-                super(Matmul, self).__init__()
+                super().__init__()
                 self.weight = weight
 
             def forward(self, x):

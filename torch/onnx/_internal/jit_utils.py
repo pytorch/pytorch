@@ -99,6 +99,10 @@ class GraphContext:
             **kwargs,
         )
 
+    # NOTE: For backward compatibility with the old symbolic functions.
+    # We are probably going to remove this only after the fx exporter is established.
+    at = aten_op
+
     @_beartype.beartype
     def onnxscript_op(
         self,
@@ -305,10 +309,8 @@ def _create_node(
 
 @_beartype.beartype
 def _is_onnx_list(value):
-    return (
-        not isinstance(value, torch._six.string_classes)
-        and not isinstance(value, torch.Tensor)
-        and isinstance(value, Iterable)
+    return isinstance(value, Iterable) and not isinstance(
+        value, (str, bytes, torch.Tensor)
     )
 
 

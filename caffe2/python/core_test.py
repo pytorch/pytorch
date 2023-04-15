@@ -459,13 +459,13 @@ class TestExtractPredictorNet(test_util.TestCase):
             self.assertFalse("xx/data" in op.input)
 
         # Note: image input should not be included
-        self.assertEquals(ops[0].type, "Conv")
-        self.assertEquals(ops[1].type, "FC")
-        self.assertEquals(ops[2].type, "FC")
-        self.assertEquals(len(ops), 3)
+        self.assertEqual(ops[0].type, "Conv")
+        self.assertEqual(ops[1].type, "FC")
+        self.assertEqual(ops[2].type, "FC")
+        self.assertEqual(len(ops), 3)
 
         # test rename happened
-        self.assertEquals(ops[0].input[0], "image")
+        self.assertEqual(ops[0].input[0], "image")
 
         # Check export blobs
         self.assertTrue("image" not in export_blobs)
@@ -474,7 +474,7 @@ class TestExtractPredictorNet(test_util.TestCase):
 
         # Check external inputs/outputs
         self.assertTrue("image" in predict_net.Proto().external_input)
-        self.assertEquals(set(["pred"]), set(predict_net.Proto().external_output))
+        self.assertEqual(set(["pred"]), set(predict_net.Proto().external_output))
         self.assertEqual(
             set(predict_net.Proto().external_input) -
             set([str(p) for p in model.params]), set(["image"])

@@ -74,6 +74,7 @@ runs:
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
+      continue-on-error: true
       shell: powershell
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
@@ -105,6 +106,7 @@ runs:
     - name: Store Usage Logs on S3
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
+      continue-on-error: true
       with:
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
@@ -116,6 +118,7 @@ runs:
     - name: Store Test Downloaded JSONs on Github
       uses: actions/upload-artifact@v3
       if: inputs.use-gha
+      continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: test-jsons-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
@@ -126,6 +129,7 @@ runs:
     - name: Store Test Reports on Github
       uses: actions/upload-artifact@v3
       if: inputs.use-gha
+      continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
@@ -139,6 +143,7 @@ runs:
     - name: Store Usage Logs on Github
       uses: actions/upload-artifact@v3
       if: inputs.use-gha
+      continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
@@ -147,4 +152,3 @@ runs:
         path: |
           usage_log.txt
           test/**/*.log
-      continue-on-error: true

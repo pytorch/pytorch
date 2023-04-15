@@ -16,7 +16,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <unordered_set>
 
 #ifdef C10_ANDROID
 #ifndef SYS_gettid

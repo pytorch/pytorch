@@ -9,6 +9,9 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/layer_norm.h>
+#include <c10/core/DeviceType.h>
 
 namespace at {
 namespace native {
@@ -41,11 +44,12 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
   }
   Tensor grad_input, grad_weight, grad_bias;
-  auto* nt_grad_output = get_nested_tensor_impl(grad_output);
+  auto grad_ouput_contiguous = grad_output.contiguous();
+  auto* nt_grad_output = get_nested_tensor_impl(grad_ouput_contiguous);
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_INTERNAL_ASSERT(nt_grad_output != nullptr);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad_output));
+  TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(nt_grad_output));
   auto grad_ouput_buffer = nt_grad_output->get_buffer();
   auto input_buffer = nt_input->get_buffer();
 
@@ -53,7 +57,7 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
 
   if (output_mask[0]) {
     auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});
-    auto grad_input_nt_size = nt_input->get_nested_size_tensor().clone();
+    auto grad_input_nt_size = nt_input->get_nested_sizes().clone();
     grad_input = wrap_buffer(grad_input_buffer, grad_input_nt_size);
   }
   if (output_mask[1]) {
@@ -84,10 +88,10 @@ Tensor nested_softmax_backward(
 
   //  Get the info about the output
   const Tensor &output_buffer = output_ptr->get_buffer(),
-               &output_sizemat = output_ptr->get_nested_size_tensor();
+               &output_sizemat = output_ptr->get_nested_sizes();
 
   //  Get the info about the grad
-  const Tensor &grad_sizemat = grad_ptr->get_nested_size_tensor();
+  const Tensor &grad_sizemat = grad_ptr->get_nested_sizes();
 
   TORCH_INTERNAL_ASSERT(output_sizemat.equal(grad_sizemat));
   Tensor grad_output =
@@ -119,8 +123,8 @@ Tensor _nested_sum_backward_cpu(
   auto nt_grad = get_nested_tensor_impl(grad);
   const Tensor& grad_buffer = nt_grad->get_buffer();
   const Tensor& self_buffer = nt_self->get_buffer();
-  auto grad_sizes = nt_grad->get_nested_size_tensor();
-  auto self_sizes = nt_self->get_nested_size_tensor();
+  auto grad_sizes = nt_grad->get_nested_sizes();
+  auto self_sizes = nt_self->get_nested_sizes();
   int64_t ntensors = nt_self->size(0);
   const Tensor& self_grad_buffer = self_buffer.new_empty(self_buffer.sizes());
 
@@ -161,13 +165,125 @@ Tensor _nested_select_backward_symint(
   c10::SymInt index) {
   auto nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
-  const auto self_sizes = nt_self->get_nested_size_tensor();
+  const auto self_sizes = nt_self->get_nested_sizes();
   const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());
 
   auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
   nt_grad.select_symint(dim, index).copy_(grad);
 
   return nt_grad;
+}
+
+Tensor gelu_backwards_nested(const Tensor& grad, const Tensor& self, c10::string_view approximate){
+    auto partial_gelu_backward = [approximate](auto && PH1, auto && PH2) { return at::gelu_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2), approximate); };
+    return map_nt_binary(grad, self, partial_gelu_backward);
+}
+
+// Naming convention for relu
+Tensor threshold_backwards_nested(const Tensor& grad_output, const Tensor& input, const Scalar& threshold){
+    auto partial_relu_backward = [threshold](auto && PH1, auto && PH2) { return at::threshold_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2), threshold); };
+    return map_nt_binary(grad_output, input, partial_relu_backward);
+}
+
+// Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
+Tensor silu_backward_nested(const Tensor& grad_output, const Tensor& self){
+    auto partial_silu_backward = [](auto && PH1, auto && PH2) { return at::silu_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2)); };
+    return map_nt_binary(grad_output, self, partial_silu_backward);
+}
+
+std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
+    const Tensor& grad,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /*{ optional */,
+    std::array<bool, 3> grad_input_mask) {
+  // For NestedTensors weight and bias are non nested.
+  auto* nt_impl_grad = get_nested_tensor_impl(grad);
+  auto* nt_impl_input = get_nested_tensor_impl(input);
+  const auto& weight = *weight_opt;
+  const auto& bias = *bias_opt;
+  const auto& sizes = nt_impl_input->get_nested_sizes();
+  auto M_N = _check_nested_layer_norm_inputs(
+      *nt_impl_input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
+
+  Tensor dInput;
+  Tensor dgamma;
+  Tensor dbeta;
+  auto input_buffer = nt_impl_input->get_buffer();
+  auto grad_buffer = nt_impl_grad->get_buffer();
+  if (grad_input_mask[0]) {
+    dInput = at::native::empty_like(
+        input_buffer,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  } else {
+    dInput = at::native::zeros_like(
+        input_buffer,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = M > 0 ? at::native::empty_like(
+                         *gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         c10::nullopt /* device */,
+                         c10::nullopt /* pin_memory */,
+                         at::MemoryFormat::Contiguous)
+                   : at::native::zeros_like(
+                         *gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         c10::nullopt /* device */,
+                         c10::nullopt /* pin_memory */,
+                         at::MemoryFormat::Contiguous);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = M > 0 ? at::native::empty_like(
+                        *beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        c10::nullopt /* device */,
+                        c10::nullopt /* pin_memory */,
+                        at::MemoryFormat::Contiguous)
+                  : at::native::zeros_like(
+                        *beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        c10::nullopt /* device */,
+                        c10::nullopt /* pin_memory */,
+                        at::MemoryFormat::Contiguous);
+  }
+  if (M > 0) {
+    LayerNormBackwardKernel(
+        input_buffer.is_cuda() ? kCUDA : kCPU,
+        grad_buffer,
+        input_buffer,
+        mean,
+        rstd,
+        *gamma,
+        M,
+        N,
+        &dInput,
+        &dgamma,
+        &dbeta);
+  }
+  return std::make_tuple(
+      wrap_buffer(dInput, sizes), std::move(dgamma), std::move(dbeta));
 }
 
 } // namespace native
