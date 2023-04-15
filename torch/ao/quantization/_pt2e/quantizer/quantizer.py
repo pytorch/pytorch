@@ -42,16 +42,19 @@ class QuantizationSpec:
         if self.dtype not in SUPPORTED_DTYPES:
             raise TypeError(f"Unsupported dtype {self.dtype}.")
 
-        if self.dtype in [torch.float16, torch.float32, torch.float64]:
-            raise ValueError(
-                f"Unsupported dtype {self.dtype}. Quantizer only supports integer types."
-            )
-
         if self.quant_max is None:
-            self.quant_max = torch.iinfo(self.dtype).max
+            if self.dtype in [torch.float16, torch.float32, torch.float64]:
+                # Right now only tracking quant_min/max for int type
+                self.quant_max = None
+            else:
+                self.quant_max = torch.iinfo(self.dtype).max
 
         if self.quant_min is None:
-            self.quant_max = torch.iinfo(self.dtype).min
+            if self.dtype in [torch.float16, torch.float32, torch.float64]:
+                # Right now only tracking quant_min/max for int type
+                self.quant_min = None
+            else:
+                self.quant_min = torch.iinfo(self.dtype).min
 
         # quant_min must be less than quant_max
         if (
