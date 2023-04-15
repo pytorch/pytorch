@@ -26,6 +26,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
+    nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
 )
@@ -272,6 +273,14 @@ class NNModuleVariable(VariableTracker):
                 initialize_lazy_module(tx, mod, args, kwargs)
 
             if is_allowed(mod.__class__):
+                if nnmodule_has_hooks(
+                    mod, check_forward_hooks=True, check_backward_hooks=True
+                ):
+                    unimplemented(
+                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
+                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
+                    )
+
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -283,7 +292,6 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
-
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
