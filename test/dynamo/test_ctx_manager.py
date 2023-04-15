@@ -98,7 +98,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         for _ in range(10):
             opt_fn(a)
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     @skipIfPy311
     def test_torch_profiler(self):

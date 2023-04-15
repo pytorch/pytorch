@@ -21,9 +21,6 @@ from functorch import make_fx
 
 import torch
 import torch.distributed as dist
-
-# We need to import _functional_collectives to trigger op registration
-import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
@@ -388,8 +385,8 @@ FOREACH_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    torch.ops.c10d_functional.all_reduce.default,
-    torch.ops.c10d_functional.wait_tensor.default,
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
 }
 
 
@@ -426,7 +423,7 @@ class _CompiledResult:
 
 def _compile(
     func: Callable,
-    module_override: Optional[Dict[Type[Any], Override]],
+    module_override: Optional[Dict[Union[Type[Any], str], Override]],
     *args: Any,
     **kwargs: Any,
 ) -> _CompiledResult:
@@ -449,9 +446,15 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
-        for typ, override in module_override.items():
+        # FIXME(@mrshenli): type might overlap with fqns
+        for typ_or_fqn, override in module_override.items():
             for name, submodule in mod.named_modules():
-                if isinstance(submodule, typ):
+                if (
+                    isinstance(typ_or_fqn, str)
+                    and typ_or_fqn == name
+                    or isinstance(typ_or_fqn, type)
+                    and isinstance(submodule, typ_or_fqn)
+                ):
                     accessor.swap_submodule(name, override.replacement(submodule))
 
     # 3. Trace statelss version of the train_step
@@ -460,8 +463,6 @@ def _compile(
 
     named_states = {}
     if opt is not None:
-        opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
@@ -543,7 +544,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
 def compile(
-    module_override: Optional[Dict[Type[Any], Override]] = None,
+    module_override: Optional[Dict[Union[Type[Any], str], Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ):
     r"""
@@ -553,9 +554,10 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Type[Any], Override]]): a dictionary maps
-            from target :class:`nn.Module` types to :class:`Override` objects.
-            The :class:`Override` objects provide :class:`nn.Module` replacements
+        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a
+            dictionary maps from target :class:`nn.Module` types or
+            fully-qualified names to :class:`Override` objects. The
+            :class:`Override` objects provide :class:`nn.Module` replacements
             during tracing and a graph transformation function after tracing.
             (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
