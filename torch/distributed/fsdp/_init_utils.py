@@ -503,7 +503,7 @@ def _init_param_handles_from_module(
                 for buffer_name in buffer_names
             ]
         _move_states_to_device(params, buffers, device_from_device_id)
-        if not hasattr(state, "compute_device"):  # only need to set once
+        if state.compute_device is None:  # only need to set once
             state.compute_device = _get_compute_device(
                 fully_sharded_module,
                 state._ignored_params,
@@ -571,7 +571,8 @@ def _get_state_names_for_states(
     param_names: List[str] = []
     buffer_names: List[str] = []
     param_to_param_name = {
-        param: param_name for param_name, param in module.named_parameters()
+        param: param_name
+        for param_name, param in module.named_parameters(remove_duplicate=False)
     }
     buffer_to_buffer_name = {
         buffer: buffer_name for buffer_name, buffer in module.named_buffers()
@@ -992,7 +993,7 @@ def _check_orig_params_flattened(
     ``fsdp_module``. This should be called as a sanity check after flattening
     the wrapped module's parameters.
     """
-    for param_name, param in fsdp_module.named_parameters():
+    for param_name, param in fsdp_module.named_parameters(remove_duplicate=False):
         if param not in ignored_params and not _is_fsdp_flattened(param):
             raise RuntimeError(
                 f"Found an unflattened parameter: {param_name}; "
