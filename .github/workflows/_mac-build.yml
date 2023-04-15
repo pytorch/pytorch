@@ -52,7 +52,7 @@ on:
 
     outputs:
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
       build-outcome:
         value: ${{ jobs.build.outputs.build-outcome }}
@@ -68,6 +68,7 @@ jobs:
       SCCACHE_USE_GHA: ${{ inputs.sccache-use-gha }}  # this is placed here instead of the sccache step to appease actionlint
     outputs:
       build-outcome: ${{ steps.build.outcome }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Clean up disk space before running MacOS workflow
         uses: pytorch/test-infra/.github/actions/check-disk-space@main
