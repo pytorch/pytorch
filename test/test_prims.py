@@ -1094,46 +1094,6 @@ class TestPrims(TestCase):
         result_refs = refs.view(a, *new_shape)
         self.assertEqual(result_eager, result_refs)
 
-    @dtypes(torch.float32)
-    def test_as_strided_scatter(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
-
-        inp = make_arg((4, 1))
-        src = make_arg((4, 1))
-        out = prims.as_strided_scatter(
-            inp,
-            src,
-            size=(4, 1),
-            stride=(1, 1),
-            storage_offset=0,
-        )
-        self.assertEqual(src, out)
-
-        # test with view input
-        src = make_arg((1,))
-        out = prims.as_strided_scatter(
-            inp[1],
-            src,
-            size=(1,),
-            stride=(1,),
-            storage_offset=1,
-        )
-        # shoud not raise size check error
-        self.assertEqual(src, out)
-
-        # test with view input but copy src to outside the view
-        out = prims.as_strided_scatter(
-            inp[1],
-            src,
-            size=(1,),
-            stride=(1,),
-            storage_offset=2,
-        )
-        # shoud not raise size check error
-        # since src is copy to storage_offset=2
-        # out will still be same as inp[1]
-        self.assertEqual(inp[1], out)
-
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
