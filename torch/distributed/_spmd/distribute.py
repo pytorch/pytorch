@@ -67,7 +67,7 @@ class DSymInt:
     """
 
     value: int  # value that the SymInt evaluates to
-    op: torch._ops.OpOverload  # one of {sym_size, sym_numel}
+    op: torch._ops.OpOverloadPacket  # one of {sym_size, sym_numel}
     tensor: DTensor  # DTensor this SymInt was extracted from
     dim: Optional[int] = None  # dimension the SymInt was extracted from
 
