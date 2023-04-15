@@ -142,7 +142,8 @@ def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype
     # need to insert placeholder observer for dynamic quantization so that it can
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
-        assert cur_target_dtype in _OBS_DTYPE_LIST, "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
+        assert cur_target_dtype in _OBS_DTYPE_LIST, \
+            "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
         return True
     if reuse_input_obs_or_fq:
@@ -228,7 +229,7 @@ def _is_output_dtype_supported_by_backend(
     # TODO: we should check is_dynamic here as well, the code from _is_input_arg_dtype_supported_by_backend
     # from input activation check can be reused here
     qconfig_output_dtype = None
-    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", None)
+    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
     qconfig_output_dtype, qconfig_output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
     # TODO: this is a hack because we can only specify one activation_obs_or_fq for
     # qconfig (qconfig.activation), and we are only supporting dynamically quantized
@@ -657,12 +658,16 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
         is_weight = node_arg_is_weight(node, arg)
 
+        # TODO: we are assuming "target_dtype_info" exists here, maybe
+        # a default value also need to be provided here
+        target_dtype_info = node.meta["target_dtype_info"]
         # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
         # we'll default to False, this makes configuring this field optional for users
-        reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
+        reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
 
-        act_post_process_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", None) if is_weight else \
-            node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", None)
+        # TODO: check bias as well?
+        obs_or_fq_ctr_key = "weight_obs_or_fq_ctr" if is_weight else "input_act_obs_or_fq_ctr"
+        act_post_process_ctr = target_dtype_info.get(obs_or_fq_ctr_key, _DEFAULT_FP32_OBS_OR_FQ_CTR)
 
         arg_as_output_target_dtype = _get_arg_target_dtype_as_output(arg, named_modules)
         arg_as_output_target_is_dynamic = _get_arg_target_is_dynamic_as_output(arg, named_modules)
@@ -693,7 +698,13 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         #         # input etc.
         #         arg_as_input_target_is_dynamic
         #     )
-        needs_obs_or_fq = _needs_obs_or_fq(arg_as_output_target_dtype, arg_as_output_target_is_dynamic, arg_as_input_target_dtype, arg_as_input_target_is_dynamic, reuse_input_obs_or_fq)
+        needs_obs_or_fq = _needs_obs_or_fq(
+            arg_as_output_target_dtype,
+            arg_as_output_target_is_dynamic,
+            arg_as_input_target_dtype,
+            arg_as_input_target_is_dynamic,
+            reuse_input_obs_or_fq
+        )
 
     else:
         assert qconfig is not None
@@ -871,7 +882,9 @@ def _maybe_insert_output_observer_for_node(
     # implemntations for this key instead of reusing the input_output_share_observers
     # code
     # reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
-    # for now we set this to False since reuse_input_obs_or_fq for the output of a node is implementation in the same code path as observer sharing, we should refactor this part to make it clearer in the future
+    # for now we set this to False since reuse_input_obs_or_fq for
+    # the output of a node is implementation in the same code path as observer sharing,
+    # we should refactor this part to make it clearer in the future
     # and we would be able to read this from config directly
     reuse_input_obs_or_fq = False
 
