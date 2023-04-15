@@ -31,7 +31,7 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 
 InputList = List
 DimList = List
@@ -283,10 +283,12 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        assert min <= a <= max
+        if not (min <= a <= max):
+            raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
         return
     if isinstance(a.node.expr, sympy.Integer):
-        assert min <= int(a.node.expr) <= max
+        if not (min <= int(a.node.expr) <= max):
+            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
     # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
@@ -1968,14 +1970,16 @@ class ShapeEnv:
             error_msgs = []
             for constraint, msg in constraint_violations:
                 if constraint.warn_only:
-                    msg = f"  {len(warn_msgs) + 1}. {msg}"
+                    msg = f"  {len(warn_msgs) + 1}. {msg()}"
                     warn_msgs.append(msg)
                 else:
-                    msg = f"  {len(error_msgs) + 1}. {msg}"
+                    msg = f"  {len(error_msgs) + 1}. {msg()}"
                     error_msgs.append(msg)
-            log.warning("Warning only constraints violated %s", warn_msgs)
             if len(error_msgs) > 0:
+                log.warning("Warning only constraints violated %s", warn_msgs)
                 raise ConstraintViolationError(f"Constraints violated!\n{error_msgs}")
+            elif len(warn_msgs) > 0:
+                log.warning("%s Warning only constraints violated", len(warn_msgs))
 
         return exprs
 
