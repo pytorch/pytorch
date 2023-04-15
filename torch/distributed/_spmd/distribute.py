@@ -73,16 +73,31 @@ class DSymInt:
 
     @property
     def local_value(self) -> int:
-        if self.op == aten.sym_size:
-            assert self.dim is not None
-            return self.tensor.to_local().size(self.dim)
-        elif self.op == aten.sym_numel:
-            return self.tensor.to_local().numel()
-        else:
-            raise NotImplementedError(f"Unsupported SymInt op {self.op}")
+        with torch.no_grad():
+            if self.op == aten.sym_size:
+                assert self.dim is not None
+                return self.tensor.to_local().size(self.dim)
+            elif self.op == aten.sym_numel:
+                return self.tensor.to_local().numel()
+            else:
+                raise NotImplementedError(f"Unsupported SymInt op {self.op}")
 
     def is_shard(self) -> bool:
         return any(p.is_shard(self.dim) for p in self.tensor.placements)
+
+    @classmethod
+    def from_node(cls, node: fx.Node, dtensor: DTensor) -> "DSymInt":
+        if node.target == aten.sym_size:
+            dim: int = node.args[1]
+            return cls(value=dtensor.size(dim), tensor=dtensor, op=node.target, dim=dim)
+        elif node.target == aten.sym_numel:
+            return cls(
+                value=dtensor.numel(),
+                tensor=dtensor,
+                op=node.target,
+            )
+        else:
+            raise NotImplementedError(f"DSymInt does not support {node.target}")
 
 
 def _is_partial_dtensor(obj: object) -> bool:
@@ -655,21 +670,9 @@ def _convert_to_distributed(
                 # prevent running this collective in backwards pass
                 run_check=False,
             )
-        elif node.target == aten.sym_size:
-            dim: int = node.args[1]
+        elif isinstance(node.target, torch._ops.OpOverloadPacket):
             dtensor = cast(DTensor, node_to_obj[node.args[0]])
-            node_to_obj[node] = DSymInt(
-                value=dtensor.size(dim), tensor=dtensor, op=node.target, dim=dim
-            )
-        elif node.target == aten.sym_numel:
-            # FIXME(@mrshenli): refactory this file to organize op-specific
-            # logic into its dedicated file.
-            dtensor = cast(DTensor, node_to_obj[node.args[0]])
-            node_to_obj[node] = DSymInt(
-                value=dtensor.numel(),
-                tensor=dtensor,
-                op=node.target,
-            )
+            node_to_obj[node] = DSymInt.from_node(node, dtensor)
         elif isinstance(node.target, torch._ops.OpOverload):
             if node.target == torch.ops.aten.scalar_tensor.default:
                 node_to_obj[node] = DTensor.from_local(
