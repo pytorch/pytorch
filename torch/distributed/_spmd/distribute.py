@@ -88,13 +88,18 @@ class DSymInt:
     @classmethod
     def from_node(cls, node: fx.Node, dtensor: DTensor) -> "DSymInt":
         if node.target == aten.sym_size:
-            dim: int = node.args[1]
-            return cls(value=dtensor.size(dim), tensor=dtensor, op=node.target, dim=dim)
+            dim: int = cast(int, node.args[1])
+            return cls(
+                value=dtensor.size(dim),
+                tensor=dtensor,
+                op=cast(torch._ops.OpOverloadPacket, node.target),
+                dim=dim,
+            )
         elif node.target == aten.sym_numel:
             return cls(
                 value=dtensor.numel(),
                 tensor=dtensor,
-                op=node.target,
+                op=cast(torch._ops.OpOverloadPacket, node.target),
             )
         else:
             raise NotImplementedError(f"DSymInt does not support {node.target}")
@@ -304,8 +309,9 @@ def default_factory_op_rule(
     default_mesh: DeviceMesh,
 ) -> DTensor:
     node.args, node.kwargs = args, kwargs
+    op = cast(torch._ops.OpOverload, node.target)
     return DTensor.from_local(
-        local_tensor=node.target(*node.args, **node.kwargs),
+        local_tensor=op(*node.args, **node.kwargs),
         device_mesh=default_mesh,
         placements=[Replicate()],
         run_check=False,
@@ -378,8 +384,8 @@ def _get_dtensor_dispatch_graph(
             lambda a: a.local_value if isinstance(a, DSymInt) else a, kwargs
         )
 
-        if node.target in FACTORY_OPS:
-            node_to_obj[node] = FACTORY_OPS[node.target](
+        if op_overload in FACTORY_OPS:
+            node_to_obj[node] = FACTORY_OPS[op_overload](
                 node, args, kwargs, default_mesh
             )
             return None
