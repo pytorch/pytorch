@@ -59,6 +59,15 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
 };
 
 std::tuple<at::Tensor,optional<int64_t>>
+huber_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction, double delta) {
+  return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
+                                reduction, [delta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
+                                  return at::huber_loss(self, target, reduction, delta);
+                                });
+};
+
+std::tuple<at::Tensor,optional<int64_t>>
 smooth_l1_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
           optional<int64_t> target_bdim, int64_t reduction, double beta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
@@ -305,6 +314,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(mse_loss, mse_loss_batch_rule);
   // mse_loss_backwards uses a decomposition for its batch rule
   VMAP_SUPPORT(smooth_l1_loss, smooth_l1_loss_batch_rule);
+  VMAP_SUPPORT(huber_loss, huber_loss_batch_rule);
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
