@@ -1,0 +1,40 @@
+name: pull-on-SM89
+
+on:
+  pull_request:
+  push:
+    branches:
+      - release/*
+    tags:
+      - ciflow/cuda-sm89/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-bionic-cuda11_8-py3_10-gcc7-sm89-build:
+    name: linux-bionic-cuda11.8-py3.10-gcc7-sm89
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm89
+      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.gcp.l4" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.gcp.l4" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.gcp.l4" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.gcp.l4" },
+        ]}
+
+  linux-bionic-cuda11_8-py3_10-gcc7-sm89-test:
+    name: linux-bionic-cuda11.8-py3.10-gcc7-sm89
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_8-py3_10-gcc7-sm89-build
+    with:
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm89
+      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm89-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm89-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
