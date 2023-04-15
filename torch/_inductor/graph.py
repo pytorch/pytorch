@@ -44,6 +44,7 @@ from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
+    foreach_ops,
     layout_constraints,
     lowerings,
     make_fallback,
@@ -500,6 +501,15 @@ class GraphLowering(torch.fx.Interpreter):
                     result = super().run_node(n)
             else:
                 result = super().run_node(n)
+
+            if isinstance(result, ir.TensorListItem) and not all(
+                [
+                    user.op == "call_function" and user.target in foreach_ops
+                    for user in n.users
+                ]
+            ):
+                # if the result is a TensorListItem, but it is not used by a foreach op, we need to realize it
+                result = result.get_value()
 
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor

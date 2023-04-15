@@ -1636,6 +1636,7 @@ class ForeachKernel(Kernel):
             code.splice(self.compute)
             code.splice(self.stores)
 
+        print(code.getrawvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):

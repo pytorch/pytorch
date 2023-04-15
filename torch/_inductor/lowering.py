@@ -51,6 +51,7 @@ aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
+foreach_ops = set()
 
 
 def add_needs_realized_inputs(fn):
@@ -383,13 +384,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(fn):
     def inner(*inputs: List[List[TensorBox]], alpha=None):
-        ranges = [input.get_size() for input in inputs[0]]
-
-        for ind, other, dims in zip(itertools.count(), inputs[1], ranges):
-            assert len(dims) == len(
-                other.get_size()
-            ), f"ndim mismatch {fn} {dims} {other.get_size()} at arg list ind {ind}"
-
         list_inputs = [TensorList.create(input) for input in inputs]
 
         return ForeachPointwise.create(*list_inputs, fn)
@@ -481,6 +475,7 @@ def register_foreach_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
+    foreach_ops.add(aten_fn)
     pw_name = aten_pointwise_fn.__name__
     fn = ops_wrapper(name)
     pw_fn = ops_wrapper(pw_name)

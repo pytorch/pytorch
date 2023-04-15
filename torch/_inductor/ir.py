@@ -2159,9 +2159,9 @@ class ListElemBuffer(Buffer):
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.input.get_name()}_{self.index}")
 
-    def __init__(self, layout, input, index: int):
+    def __init__(self, layout, parent_list, index: int):
         super().__init__(None, layout)
-        self.input = input
+        self.parent_list = parent_list
         self.name = V.graph.register_buffer(self)
         self.index = index
 
@@ -2195,8 +2195,14 @@ class ListElemBuffer(Buffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=True
         )
-        deps.reads = {dependencies.StarDep(self.input.get_name())}
+        deps.reads = {dependencies.StarDep(self.parent_list.get_name())}
         return deps
+
+    @staticmethod
+    def is_valid_list(buffers):
+        for ind, buffer in enumerate(buffers):
+            if buffer.parent_list is not buffers[0].parent_list or ind != buffer.index:
+                return False
 
 
 class InputBuffer(Buffer):
@@ -4015,26 +4021,28 @@ class TensorListInputsWrapper:
 # and ensure the same list of args is mapped to the same TensorList
 class TensorList(IRNode):
     def __init__(self, tensor_boxes):
+        assert isinstance(
+            tensor_boxes, (ForeachPointwise, TensorListInputsWrapper, BufferList)
+        )
         self.data: Union[
             ForeachPointwise, TensorListInputsWrapper, BufferList
         ] = tensor_boxes
 
     @classmethod
     def create(cls, tensor_boxes):
-        assert isinstance(tensor_boxes, (list, TensorList, ForeachPointwise))
-        # if upstream is a foreach op, we don't need to wrap it
-        if isinstance(tensor_boxes, TensorList):
-            return tensor_boxes
-
         if isinstance(tensor_boxes, list):
-            tensor_boxes = TensorListInputsWrapper(tensor_boxes)
+            tensor_box = tensor_boxes[0]
+            if isinstance(tensor_box, TensorListItem) and TensorListItem.is_valid_list(
+                tensor_boxes
+            ):
+                return tensor_box.tensor_list
+
+            return cls(TensorListInputsWrapper(tensor_boxes))
 
         return cls(tensor_boxes)
 
     def __getitem__(self, ind):
-        self.realize()
-        assert isinstance(self.data, BufferList)
-        return self.data[ind]
+        return TensorListItem(self, ind)
 
     def make_loader(self):
         return self.data.make_loader()
@@ -4048,6 +4056,34 @@ class TensorList(IRNode):
             self.name = self.data.list_name
 
         return self.data.name
+
+
+# This class is used to get around how FX
+# inserts item calls after each list in the graph
+# if downstream is a foreach op, we extract the upstream foreach
+# op and fuse them.
+# In GraphLowering, if a non-foreach op accesses a TensorListItem
+# we realize the TensorList
+@dataclasses.dataclass
+class TensorListItem:
+    tensor_list: TensorList
+    ind: int
+
+    def get_value(self):
+        self.tensor_list.realize()
+        return self.tensor_list.data[self.ind]
+
+    @staticmethod
+    def is_valid_list(items):
+        if len(items) == 0:
+            return True
+
+        tensor_list = items[0].tensor_list
+        for ind, item in enumerate(items):
+            if item.tensor_list != tensor_list or item.ind != ind:
+                return False
+
+        return True
 
 
 # This will have some other metadata and stuffs
