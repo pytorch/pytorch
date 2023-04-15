@@ -352,6 +352,8 @@ def _get_dtensor_dispatch_graph(
             # so we convert the view op to reshape before calling DTensor
             op_overload = torch.ops.aten.reshape.default
 
+        # DSymInt args are not sharded on any dimension, local value and global
+        # value should be the same
         args = tree_map(lambda a: a.local_value if isinstance(a, DSymInt) else a, args)
 
         # run dispatch once to get the real DTensor output.
@@ -714,10 +716,7 @@ def _convert_to_distributed(
         elif node.op == OP.CALL_FUNCTION:
             args = tree_map(partial(_remap_arg, node_to_obj), node.args)
             kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
-            if node.target == torch.ops.aten.sym_numel:
-                node_to_obj[node] = args[0].numel()  # type: ignore[has-type]
-            else:
-                node_to_obj[node] = node.target(*args, **kwargs)
+            node_to_obj[node] = node.target(*args, **kwargs)
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
 

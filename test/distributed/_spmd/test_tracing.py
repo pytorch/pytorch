@@ -904,6 +904,20 @@ class CoverageTest(DTensorTestBase):
 
         self._test_factory_ops(Model)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_numel(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.numel()
+                return self.fc(x) + y
+
+        self._test_factory_ops(Model)
+
 
 if __name__ == "__main__":
     run_tests()
