@@ -487,6 +487,12 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         **fsdp_kwargs,
     ):
         super(NestedWrappedModule, self).__init__()
+        # This `__init__` only differs from `NestedWrappedModule.__init__` in that
+        # the last two `nn.Linear` layers are FSDP wrapped in a `nn.Sequential`
+        # container. This arrangement results in all elements of the last two parameters
+        # residing on a single rank. Freezing all parameters except those two allows us
+        # to verify that `ShardedGradScaler` accommodates situations where some ranks
+        # have no (non-zero sized) parameter shards.
         self.rank = group.rank()
         self.world_size = group.size()
         move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
@@ -537,6 +543,9 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         ``ShardedGradScaler`` support for ranks with no (non-zero sized) local shards in
         FSDP ``use_orig_params=True`` mode.
         """
+        # The parameters that should remain unfrozen are in `module.2.1`. The regex
+        # pattern below matches the relevant parameter names both with and without
+        # an interstitial FSDP module indicator (`_fsdp_wrapped_module`) present.
         req_grad_pattern = re.compile(r"module\.2.*\.1.*")
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             ddp_model = NonUniformReqGradNWM(
