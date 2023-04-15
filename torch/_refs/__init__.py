@@ -3291,9 +3291,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.roll)
 def roll(
-    a: TensorLikeType,
-    shifts: DimsType,
-    dims: DimsType = tuple(),
+    a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
 ) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
     dims = utils.canonicalize_dims(a.ndim, dims)
