@@ -46,6 +46,8 @@ torch._functorch.aot_autograd.aot_function = patched_aot_function  # type: ignor
 
 logger: Optional[logging.Logger] = None
 
+aten = torch.ops.aten
+
 
 class TrainingPhase(Enum):
     FORWARD = auto()
@@ -59,13 +61,28 @@ class Schema:
 
 
 @dataclass
-class DSize:
+class DSymInt:
     """
-    DSize represents a size value retrieved by aten.sym_size.
+    DSymInt represents a value retrieved by a SymInt op
     """
 
-    size: int  # local size
-    placement: Placement  # DTensor placement of the dimension where the size was retrieved
+    value: int  # value that the SymInt evaluates to
+    op: torch._ops.OpOverloadPacket  # one of {sym_size, sym_numel}
+    tensor: DTensor  # DTensor this SymInt was extracted from
+    dim: Optional[int] = None  # dimension the SymInt was extracted from
+
+    @property
+    def local_value(self) -> int:
+        if self.op == aten.sym_size:
+            assert self.dim is not None
+            return self.tensor.to_local().size(self.dim)
+        elif self.op == aten.sym_numel:
+            return self.tensor.to_local().numel()
+        else:
+            raise NotImplementedError(f"Unsupported SymInt op {self.op}")
+
+    def is_shard(self) -> bool:
+        return any(p.is_shard(self.dim) for p in self.tensor.placements)
 
 
 def _is_partial_dtensor(obj: object) -> bool:
@@ -180,14 +197,16 @@ def _remap_arg(node_to_obj: Dict[fx.Node, object], arg: object) -> object:
         return arg
 
 
-def unpack_dsize_sharded_dims(
-    sizes: List[Union[DSize, int]], mesh: DeviceMesh
+def unpack_size_and_sharded_dims(
+    sizes: List[Union[DSymInt, int]], mesh: DeviceMesh
 ) -> Tuple[List[int], List[Placement]]:
-    local_sizes: List[int] = [s.size if isinstance(s, DSize) else s for s in sizes]
+    local_sizes: List[int] = [
+        s.local_value if isinstance(s, DSymInt) else s for s in sizes
+    ]
     sharded_placements: List[Placement] = [
         Shard(i)
         for i, a in enumerate(sizes)
-        if (isinstance(a, DSize) and a.placement.is_shard())
+        if (isinstance(a, DSymInt) and a.is_shard())
     ]
     assert len(sharded_placements) == mesh.ndim, (
         f"The number of sharded dimensions ({len(sharded_placements)}) must "
@@ -206,7 +225,7 @@ def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[object, ...]) -> DTen
 
     # extract sharded dimensions in the size list, the output DTensor should
     # follow these placements.
-    local_sizes, sharded_placements = unpack_dsize_sharded_dims(
+    local_sizes, sharded_placements = unpack_size_and_sharded_dims(
         args[1], args[0].device_mesh
     )
 
@@ -234,13 +253,31 @@ def factory_sym_int_consumer_rule(
     )
     assert isinstance(args[0], list), f"Expect 2nd argument as list but got {args[1]}"
 
-    local_sizes, sharded_placements = unpack_dsize_sharded_dims(args[0], default_mesh)
+    local_sizes, sharded_placements = unpack_size_and_sharded_dims(
+        args[0], default_mesh
+    )
     node.args = (local_sizes, *args[1:])
     op = cast(torch._ops.OpOverload, node.target)
     return DTensor.from_local(
         local_tensor=op(*node.args, **kwargs),
         device_mesh=default_mesh,
         placements=sharded_placements,
+        run_check=False,
+    )
+
+
+def factory_op_replicate_rule(
+    node: fx.Node,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    default_mesh: DeviceMesh,
+) -> DTensor:
+    node.args = tree_map(lambda a: a.local_value if isinstance(a, DSymInt) else a, args)
+    op = cast(torch._ops.OpOverload, node.target)
+    return DTensor.from_local(
+        local_tensor=op(*node.args, **kwargs),
+        device_mesh=default_mesh,
+        placements=[Replicate()],
         run_check=False,
     )
 
@@ -252,8 +289,10 @@ SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
     aten.view.default: binop_sym_int_consumer_rule,
 }
 
-FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
-    aten.full.default: factory_sym_int_consumer_rule
+FACTORY_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
+    aten.full.default: factory_sym_int_consumer_rule,
+    aten.arange.default: factory_op_replicate_rule,
+    aten.arange.start: factory_op_replicate_rule,
 }
 
 
@@ -271,18 +310,14 @@ def _get_dtensor_dispatch_graph(
 
         op_overload = cast(torch._ops.OpOverload, node.target)
 
-        if any(
-            a.placement.is_shard()
-            for a in tree_flatten(args)[0]
-            if isinstance(a, DSize)
-        ):
+        if any(a.is_shard() for a in tree_flatten(args)[0] if isinstance(a, DSymInt)):
             if op_overload in SYM_INT_CONSUMERS:
                 assert len(kwargs) == 0, f"Expect empty kwargs, but got {kwargs}"
                 node_to_obj[node] = SYM_INT_CONSUMERS[op_overload](node, args)
                 # skip DTensor expansion
-            elif op_overload in FACTORY_OPS:
+            elif op_overload in FACTORY_SYM_INT_CONSUMERS:
                 assert default_mesh is not None, "Requires default mesh for factory ops"
-                node_to_obj[node] = FACTORY_OPS[op_overload](
+                node_to_obj[node] = FACTORY_SYM_INT_CONSUMERS[op_overload](
                     node, args, kwargs, default_mesh
                 )
             else:
@@ -302,7 +337,7 @@ def _get_dtensor_dispatch_graph(
             # so we convert the view op to reshape before calling DTensor
             op_overload = torch.ops.aten.reshape.default
 
-        args = tree_map(lambda a: a.size if isinstance(a, DSize) else a, args)
+        args = tree_map(lambda a: a.local_value if isinstance(a, DSymInt) else a, args)
 
         # run dispatch once to get the real DTensor output.
         out, op_schema, output_sharding = _operator_dispatch(
@@ -622,14 +657,18 @@ def _convert_to_distributed(
             )
         elif node.target == aten.sym_size:
             dim: int = node.args[1]
-            dtensor: DTensor = cast(DTensor, node_to_obj[node.args[0]])
-            placement: Placement = (
-                Shard(dim)
-                if any(p.is_shard(dim) for p in dtensor.placements)
-                else Replicate()
+            dtensor = cast(DTensor, node_to_obj[node.args[0]])
+            node_to_obj[node] = DSymInt(
+                value=dtensor.size(dim), tensor=dtensor, op=node.target, dim=dim
             )
-            node_to_obj[node] = DSize(
-                size=dtensor.to_local().size(dim), placement=placement
+        elif node.target == aten.sym_numel:
+            # FIXME(@mrshenli): refactory this file to organize op-specific
+            # logic into its dedicated file.
+            dtensor = cast(DTensor, node_to_obj[node.args[0]])
+            node_to_obj[node] = DSymInt(
+                value=dtensor.numel(),
+                tensor=dtensor,
+                op=node.target,
             )
         elif isinstance(node.target, torch._ops.OpOverload):
             if node.target == torch.ops.aten.scalar_tensor.default:
@@ -670,11 +709,11 @@ def _convert_to_distributed(
                         )
 
         elif node.op == OP.CALL_FUNCTION:
+            args = tree_map(partial(_remap_arg, node_to_obj), node.args)
+            kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
             if node.target == torch.ops.aten.sym_numel:
                 node_to_obj[node] = args[0].numel()  # type: ignore[has-type]
             else:
-                args = tree_map(partial(_remap_arg, node_to_obj), node.args)
-                kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
                 node_to_obj[node] = node.target(*args, **kwargs)
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
