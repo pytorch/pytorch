@@ -114,6 +114,7 @@ __all__ = [
 
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
+_OBS_DTYPE_LIST = [torch.quint8, torch.qint8, torch.qint32, torch.float16]
 
 _DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
 
@@ -128,6 +129,30 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "input_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
     "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
+
+def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype, cur_target_is_dynamic, reuse_input_obs_or_fq):
+    """
+    note: we will treat "not specified" as torch.float for now
+    utility function that checks if we should insert an observer or fake quant node
+    base on the requested dtype for the nodes from user
+
+    TODO: more detailed docs
+    """
+
+    # need to insert placeholder observer for dynamic quantization so that it can
+    # be converted to choose_qparams -> q -> dq in convert step
+    if cur_target_is_dynamic:
+        assert cur_target_dtype in _OBS_DTYPE_LIST, "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
+        assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
+        return True
+    if reuse_input_obs_or_fq:
+        return False
+    # non dynamic quantization
+    if cur_target_dtype in _OBS_DTYPE_LIST:
+        return prev_output_dtype in _OBS_DTYPE_LIST + [torch.float] and cur_target_dtype != prev_output_dtype
+
+    # lots of error checking are skipped here for now
+    return False
 
 def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -203,7 +228,7 @@ def _is_output_dtype_supported_by_backend(
     # TODO: we should check is_dynamic here as well, the code from _is_input_arg_dtype_supported_by_backend
     # from input activation check can be reused here
     qconfig_output_dtype = None
-    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
+    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", None)
     qconfig_output_dtype, qconfig_output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
     # TODO: this is a hack because we can only specify one activation_obs_or_fq for
     # qconfig (qconfig.activation), and we are only supporting dynamically quantized
@@ -508,6 +533,40 @@ def _get_arg_target_dtype_as_output(
     # TODO: should support is_dynamic here as well
     return output_act_dtype
 
+
+# TODO: merge with _get_arg_target_dtype_as_output
+def _get_arg_target_is_dynamic_as_output(
+    arg: Node,
+    named_modules: Dict[str, torch.nn.Module],
+) -> Optional[Union[torch.dtype, type]]:
+    """ Get the target output activation dtype for
+    the argument in the original graph, skipping inserted observers
+    We are assuming that the observers are inserted correctly, and the dtype for
+    argument in quantized graph will match what is specified by the qconfig
+    """
+    assert isinstance(arg, Node)
+    # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
+    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
+    # Since we modified the graph in this case, we must trace back from the args through
+    # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
+    # not be able to accurately detect whether this node is a consumer of custom module LSTM.
+    custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
+    output_act_obs_or_fq_ctr = None
+    if custom_module_lstm_node is not None:
+        output_act_obs_or_fq_ctr = custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+    elif _is_activation_post_process_node(arg, named_modules):
+        observed_arg = arg.args[0]
+        assert isinstance(observed_arg, Node), "Currently we only support observing Node"
+        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+    else:
+        if "target_dtype_info" in arg.meta:
+            output_act_obs_or_fq_ctr = \
+                arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
+        else:
+            output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
+    _, output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    return output_is_dynamic
+
 def _get_arg_target_dtype_as_input_to_node(
     arg: Node,
     node: Node,
@@ -521,18 +580,18 @@ def _get_arg_target_dtype_as_input_to_node(
     is_bias = node_arg_is_bias(node, arg)
     is_activation = not is_weight and not is_bias
     if is_activation:
-        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr")
+        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
         qconfig_dtype, _ = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
         return qconfig_dtype
     elif is_weight:
         if node.target in NON_QUANTIZABLE_WEIGHT_OPS:
             return None
         else:
-            weight_obs_or_fq_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", None)
+            weight_obs_or_fq_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
             qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
             return qconfig_weight_dtype
     else:
-        bias_obs_or_fq_ctr = node.meta["target_dtype_info"].get("bias_obs_or_fq_ctr", None)
+        bias_obs_or_fq_ctr = node.meta["target_dtype_info"].get("bias_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
         qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
         return qconfig_bias_dtype
 
@@ -549,7 +608,7 @@ def _get_arg_target_is_dynamic_as_input_to_node(
     is_bias = node_arg_is_bias(node, arg)
     is_activation = not is_weight and not is_bias
     if is_activation and "input_act_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
-        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr")
+        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
         _, qconfig_is_dynamic = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
         return qconfig_is_dynamic
     else:
@@ -602,37 +661,39 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # we'll default to False, this makes configuring this field optional for users
         reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
 
-        act_post_process_ctr = node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] if is_weight else \
-            node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"]
+        act_post_process_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", None) if is_weight else \
+            node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", None)
 
         arg_as_output_target_dtype = _get_arg_target_dtype_as_output(arg, named_modules)
+        arg_as_output_target_is_dynamic = _get_arg_target_is_dynamic_as_output(arg, named_modules)
         arg_as_input_target_dtype = _get_arg_target_dtype_as_input_to_node(arg, node, named_modules)
         arg_as_input_target_is_dynamic = \
             _get_arg_target_is_dynamic_as_input_to_node(arg, node, named_modules)  # type: ignore[arg-type]
-        needs_obs = \
-            (
-                # the following code block is for static quantization
-                (not arg_as_input_target_is_dynamic) and
-                # if the dtypes are different, we need an observer
-                (arg_as_output_target_dtype != arg_as_input_target_dtype) and
-                # except if the second dtype is float, a dequant will be inserted
-                # without an observer in convert
-                # TODO(future PR): change this so a placeholder is inserted for
-                # future dequants, to make the logic easier to understand
-                (arg_as_input_target_dtype != torch.float) and
-                # if arg output dtype is in _DO_NOT_OBS_DTYPE_LIST do not insert observer
-                (arg_as_output_target_dtype not in _DO_NOT_OBS_DTYPE_LIST) and
-                # we won't insert extra observer for input if the nodes configured with
-                # reuse_input_obs_or_fq
-                not reuse_input_obs_or_fq
-            ) or (
-                # need to add input observer for dynamic quantization
-                # only add observer for first input for now, we may need to extend
-                # qconfig_dict and backend_config to support more general configurations
-                # of dynamic quantization, e.g. dynamically quantizing second input, third
-                # input etc.
-                arg_as_input_target_is_dynamic and arg is node.args[0]
-            )
+        # needs_obs = \
+        #     (
+        #         # the following code block is for static quantization
+        #         (not arg_as_input_target_is_dynamic) and
+        #         # if the dtypes are different, we need an observer
+        #         (arg_as_output_target_dtype != arg_as_input_target_dtype) and
+        #         # except if the second dtype is float, a dequant will be inserted
+        #         # without an observer in convert
+        #         # TODO(future PR): change this so a placeholder is inserted for
+        #         # future dequants, to make the logic easier to understand
+        #         (arg_as_input_target_dtype not in _DO_NOT_OBS_DTYPE_LIST) and
+        #         # if arg output dtype is in _DO_NOT_OBS_DTYPE_LIST do not insert observer
+        #         (arg_as_output_target_dtype not in _DO_NOT_OBS_DTYPE_LIST) and
+        #         # we won't insert extra observer for input if the nodes configured with
+        #         # reuse_input_obs_or_fq
+        #         not reuse_input_obs_or_fq
+        #     ) or (
+        #         # need to add input observer for dynamic quantization
+        #         # only add observer for first input for now, we may need to extend
+        #         # qconfig_dict and backend_config to support more general configurations
+        #         # of dynamic quantization, e.g. dynamically quantizing second input, third
+        #         # input etc.
+        #         arg_as_input_target_is_dynamic
+        #     )
+        needs_obs_or_fq = _needs_obs_or_fq(arg_as_output_target_dtype, arg_as_output_target_is_dynamic, arg_as_input_target_dtype, arg_as_input_target_is_dynamic, reuse_input_obs_or_fq)
 
     else:
         assert qconfig is not None
@@ -651,19 +712,19 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 break
 
         if cur_input_idx is None:
-            needs_obs = False
+            needs_obs_or_fq = False
         else:
             arg_as_output_target_dtype = _get_arg_target_dtype_as_output(arg, named_modules)
             arg_as_input_target_dtype = torch.quint8 if cur_input_idx in sm_input_quantized_idxs \
                 else torch.float
-            needs_obs = (
+            needs_obs_or_fq = (
                 (arg_as_output_target_dtype != arg_as_input_target_dtype) and
                 (arg_as_input_target_dtype != torch.float)
             )
 
         act_post_process_ctr = qconfig.activation
 
-    if needs_obs:
+    if needs_obs_or_fq:
 
         new_obs_mod = act_post_process_ctr()
         existing_obs_node = None
@@ -805,20 +866,41 @@ def _maybe_insert_output_observer_for_node(
     is_standalone_module = node.meta["target_dtype_info"].get("_is_standalone_module", False)
 
     output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
-    target_dtype, is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
-    should_insert_observer = target_dtype not in _DO_NOT_OBS_DTYPE_LIST + [torch.float]
-    # TODO(future PR): move the following logic to
-    # should_insert_observer_for_output
-    should_insert_observer = should_insert_observer and \
-        target_dtype in [torch.quint8, torch.qint8, torch.qint32, torch.float16] and \
-        not is_dynamic
+    target_dtype, target_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    # uncomment after we support reuse_input_obs_or_fq properly by having separate
+    # implemntations for this key instead of reusing the input_output_share_observers
+    # code
+    # reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
+    # for now we set this to False since reuse_input_obs_or_fq for the output of a node is implementation in the same code path as observer sharing, we should refactor this part to make it clearer in the future
+    # and we would be able to read this from config directly
+    reuse_input_obs_or_fq = False
+
+    # Note: prev_output_dtype = torch.float and prev_output_is_dynamic=False
+    # because the prev_output is the output of an fp32 op, althought technically
+    # we should get the dtype of the output from node.meta["val"] in the future
+    # if we deprecate fx graph mode quantization
+    needs_obs_or_fq = _needs_obs_or_fq(torch.float, False, target_dtype, target_is_dynamic, reuse_input_obs_or_fq)
+    # currently the activation in QConfig(activation=...,) is for both input
+    # and output, and when the activation is configured to be dynamic quantization
+    # e.g. PlaceholderObserver(dtype=torch.quint8, is_dynamic=True, ...), it means
+    # the input should by dynamically quantized, but output should not be quantized
+    #
+    # there is no way we can specify different observer/fq for input and output
+    # activation through QConfig today, this limitation is lifted in the
+    # quantizer/annotation API in pytorch 2.0 export quantization code path,
+    # but since this code is reused, annotating output to be dynamically quantized
+    # would not work either for that.
+    # we can change QConfig to support input/output activation if we want
+    # to remove the following check, or if we can deprecate fx graph mode quantization
+    if target_is_dynamic:
+        needs_obs_or_fq = False
 
     # we never insert observers to output of standalone module, we assume
     # if needed, they are inserted inside the standalone module
-    should_insert_observer = should_insert_observer and \
+    needs_obs_or_fq = needs_obs_or_fq and \
         (not is_standalone_module)
 
-    if should_insert_observer:
+    if needs_obs_or_fq:
         ctr = output_act_obs_or_fq_ctr()
         return _insert_observer(node, ctr, model, named_modules, graph)
     else:
