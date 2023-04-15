@@ -98,7 +98,7 @@ class _ExecOrderTracer:
         tracer.call_module = functools.partial(
             self._patched_call_module, orig_call_module, self.exec_info
         )
-        fqn_to_param = dict(root_module.named_parameters())
+        fqn_to_param = dict(root_module.named_parameters(remove_duplicate=False))
         tracer.create_proxy = functools.partial(
             self._patched_create_proxy,
             orig_create_proxy,
@@ -139,7 +139,7 @@ class _ExecOrderTracer:
             Same return value as ``call_module``.
         """
         exec_info.module_forward_order.append(module)
-        named_params = list(module.named_parameters())
+        named_params = list(module.named_parameters(remove_duplicate=False))
         curr_module = exec_info.curr_module
         if named_params:
             assert (
@@ -225,7 +225,7 @@ class _ExecOrderTracer:
                         _ParamUsageInfo(curr_module, named_params)
                     )
         elif kind == "call_module":
-            named_params = list(curr_module.named_parameters())
+            named_params = list(curr_module.named_parameters(remove_duplicate=False))
             if named_params:
                 exec_info.module_to_param_usage_infos[curr_module].append(
                     _ParamUsageInfo(curr_module, named_params)
