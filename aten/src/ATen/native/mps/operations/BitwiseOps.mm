@@ -1,6 +1,11 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/bitwise_and_native.h>
+#include <ATen/ops/bitwise_not_native.h>
+#include <ATen/ops/bitwise_or_native.h>
+#include <ATen/ops/bitwise_xor_native.h>
 #include <ATen/ops/logical_not_native.h>
 #include <fmt/format.h>
 
