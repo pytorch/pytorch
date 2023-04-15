@@ -4361,47 +4361,47 @@
     CompositeExplicitAutograd: rand_like
   autogen: rand_like.out
 
-- func: randint(int high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint(SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.generator(int high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.generator(SymInt high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.low(int low, int high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low(SymInt low, SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.low_generator(int low, int high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low_generator(SymInt low, SymInt high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.out(int high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: randint.out(SymInt high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint.generator_out(int high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randint.generator_out(SymInt high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint.low_out(int low, int high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: randint.low_out(SymInt low, SymInt high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint.low_generator_out(int low, int high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randint.low_generator_out(SymInt low, SymInt high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like(Tensor self, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -4409,7 +4409,7 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -4457,22 +4457,22 @@
     CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
 
-- func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm(SymInt n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm
 
-- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm.generator(SymInt n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm
 
-- func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+- func: randperm.out(SymInt n, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm_out
 
-- func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randperm.generator_out(SymInt n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CPU: randperm_out_cpu
