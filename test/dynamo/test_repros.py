@@ -38,7 +38,6 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -2298,7 +2297,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod(*args)
 
     @skipIfPy311
-    @unittest.skipIf(IS_MACOS, "need to debug mac issue")
     def test_pointless_graph_removal(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -2641,20 +2639,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
-    def test_inplace_unsqueeze_input(self):
-        def backend(gm, example_inputs):
-            self.assertEqual(example_inputs[0].size(), torch.Size([3, 4]))
-            return gm
-
-        @torch.compile(backend=backend, fullgraph=True)
-        def fn(x):
-            x.unsqueeze_(0)
-            return x + 1
-
-        inputs = [torch.randn(3, 4)]
-        self.assertEqual(fn(*inputs).size(), torch.Size([1, 3, 4]))
-        self.assertEqual(inputs[0].size(), torch.Size([1, 3, 4]))
-
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
@@ -2751,19 +2735,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ra = compiled_fn(t1, t2, 6)
         self.assertEqual(ra, torch.tensor([0.0, 7.0, 14.0]))
 
-    def test_build_map_unpack_with_call(self):
-        def forward_with_cond_scale(x, t, cond_scale, self_cond, other1, other2):
-            return x.sin() + t + cond_scale + self_cond + other1 + other2
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            d1 = dict(other1=5)
-            d2 = dict(other2=4)
-            text_cond = {**d1, **d2}
-            return forward_with_cond_scale(x, 1, cond_scale=2, self_cond=3, **text_cond)
-
-        self.assertTrue(same(fn(torch.ones(4)), torch.ones(4).sin() + 15))
-
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
 
@@ -2775,49 +2746,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.op_count, ifdyn(ifunspec(2, 3), 3))
         self.assertEqual(counter.frame_count, ifdyn(ifunspec(2, 1), 1))
-
-    def test_delattr(self):
-        class MyObj:
-            def __init__(self, a, b):
-                self.a = a
-                self.b = b
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, obj):
-            del obj.a
-            obj.c = x + 1
-            del obj.c
-            tmp = MyObj(x + 2, x + 3)
-            del tmp.b
-            if hasattr(obj, "a"):
-                return x + 1
-            return tmp
-
-        x = torch.zeros([])
-        obj1 = MyObj(x, x)
-        obj2 = fn(x, obj1)
-        self.assertFalse(hasattr(obj1, "a"))
-        self.assertFalse(hasattr(obj1, "c"))
-        self.assertFalse(hasattr(obj2, "b"))
-        self.assertEqual(obj1.b.item(), 0)
-        self.assertEqual(obj2.a.item(), 2)
-
-    def test_delattr_raises(self):
-        class MyObj:
-            def __init__(self, a, b):
-                self.a = a
-                self.b = b
-
-        @torch.compile(backend="eager")
-        def fn(x, obj):
-            del obj.a
-            x = x + 1
-            obj.a  # will raise
-            return x
-
-        x = torch.zeros([])
-        obj1 = MyObj(x, x)
-        self.assertRaises(AttributeError, lambda: fn(x, obj1))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_implicit_guard(self):
@@ -2937,10 +2865,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
         )
-        if not IS_MACOS:
-            # TODO(jansel): I have no idea why these are failing on mac...
-            self.assertEqual(cnt.op_count, 6)
-            self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
 
