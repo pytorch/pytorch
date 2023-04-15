@@ -1542,6 +1542,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
+  inline const T* data_ptr_impl() const {
+    return data_ptr_impl_impl<const T>(
+        [this] { return static_cast<const T*>(storage_.data()); });
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
   inline T* mutable_data_ptr_impl() {
     return data_ptr_impl_impl<T>(
         [this] { return static_cast<T*>(storage_.mutable_data()); });
@@ -1623,15 +1634,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  public:
-  /**
-   * Like data<T>(), but performs no checks.  You are responsible for ensuring
-   * that all invariants required by data() are upheld here.
-   */
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
-  }
-
   /**
    * Returns the TypeMeta of a tensor, which describes what data type
    * it is (e.g., int, float, ...)
