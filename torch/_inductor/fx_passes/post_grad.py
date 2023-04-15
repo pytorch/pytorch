@@ -36,6 +36,12 @@ pass_patterns = [
 
 
 def post_grad_passes(gm: torch.fx.GraphModule):
+    """
+    Passes that run on after grad.  This is called once on the forwards
+    graph and once on the backwards graph.
+
+    The IR here has been normalized and functionalized.
+    """
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
