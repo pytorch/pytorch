@@ -6,6 +6,7 @@ import itertools
 import logging
 import math
 import operator
+import inspect
 import os
 import shutil
 import sys
@@ -32,7 +33,22 @@ VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 try:
-    from triton.testing import do_bench
+    from triton.testing import do_bench as triton_do_bench
+
+    # triton PR https://github.com/openai/triton/pull/1513 change the
+    # quantile fields name from 'percentiles' to 'quantiles'
+    # and change the default value from (0.5, 0.2, 0.8) to None.
+    # This may break inductor since a caller expects a tuple may get a item.
+    #
+    # Add a wrapper to maintain the same behavior for inductor.
+    # Maybe we should have own implementation of this function?
+    quantile_field_name = "quantiles" if inspect.signature(triton_do_bench).parameters.get("quantiles") is not None else "percentiles"
+
+    def do_bench(*args, **kwargs):
+        if quantile_field_name not in kwargs:
+            kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
+        return triton_do_bench(*args, **kwargs)
+
 except ImportError:
 
     def do_bench(*args, **kwargs):
