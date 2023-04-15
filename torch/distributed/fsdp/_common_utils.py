@@ -8,6 +8,7 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterable,
@@ -41,6 +42,46 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
+class _FSDPDeviceHandler:
+    """
+    This is a simple abstraction for FSDP computing devices,
+    which enables custom backends that implement CUDA-like
+    semantics to be integrated with FSDP.
+    """
+
+    def __init__(self, device: torch.device, backend: Any = None):
+        if backend is None:
+            try:
+                self.__backend = getattr(torch, device.type)
+                self.__device = device
+            except AttributeError:
+                raise AttributeError(
+                    f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
+                )
+        else:
+            self.__backend = backend
+
+    @classmethod
+    def from_device(cls, device: torch.device) -> "_FSDPDeviceHandler":
+        """
+        Return an device handle corresponding to the device, and through this handle,
+        operations with the same semantics as CUDA can be performed on the device.
+        Just return torch.cuda if the device is cuda for performance issue.
+        Custom backend must first register a module with the same name with {device.type} on torch.
+        """
+        if device.type == "cuda":
+            return cast(_FSDPDeviceHandler, torch.cuda)
+        return cls(device)
+
+    def __getattr__(self, __name: str) -> Any:
+        try:
+            return getattr(self.__backend, __name)
+        except AttributeError:
+            raise AttributeError(
+                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
+            )
+
+
 class _FSDPState(_State):
     def __init__(self) -> None:
         # TODO: Move all the attributes to this class to enable typing for
@@ -63,10 +104,24 @@ class _FSDPState(_State):
             nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
+        # Abstract device handler for fsdp compute device. For now,
+        # the compute device must implement cuda semantics used by fsdp
+        self._device_handler: Optional[_FSDPDeviceHandler] = None
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+
+    @property
+    def device_handler(self) -> _FSDPDeviceHandler:
+        if self._device_handler is not None:
+            return self._device_handler
+
+        assert (
+            self.compute_device is not None
+        ), "FSDP compute device has not been initialized."
+        self._device_handler = _FSDPDeviceHandler.from_device(self.compute_device)
+        return self._device_handler
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

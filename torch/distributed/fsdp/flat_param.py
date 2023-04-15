@@ -29,6 +29,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
+    _FSDPDeviceHandler,
     _named_parameters_with_duplicates,
     _set_fsdp_flattened,
     HandleTrainingState,
@@ -435,6 +436,7 @@ class FlatParamHandle:
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
+        self._device_handler: Optional[_FSDPDeviceHandler] = None
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -464,6 +466,14 @@ class FlatParamHandle:
             params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
+
+    @property
+    def device_handler(self) -> _FSDPDeviceHandler:
+        if self._device_handler is not None:
+            return self._device_handler
+
+        self._device_handler = _FSDPDeviceHandler.from_device(self.device)
+        return self._device_handler
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
@@ -1292,7 +1302,7 @@ class FlatParamHandle:
         # default stream suffices since the default stream waits for the
         # unshard stream.
         _no_dispatch_record_stream(
-            self.flat_param._mp_shard, torch.cuda.current_stream()  # type: ignore[attr-defined]
+            self.flat_param._mp_shard, self.device_handler.current_stream()  # type: ignore[attr-defined]
         )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
@@ -1563,7 +1573,9 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
+        _no_dispatch_record_stream(
+            unsharded_flat_param, self.device_handler.current_stream()
+        )
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:

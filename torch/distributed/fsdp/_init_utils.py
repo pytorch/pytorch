@@ -428,6 +428,7 @@ def _init_param_handle_from_module(
         device_from_device_id,
         state.rank,
     )
+
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     if sync_module_states:
         _sync_module_params_and_buffers(
@@ -877,7 +878,8 @@ def _get_compute_device(
     rank: int,
 ) -> torch.device:
     """
-    Determines and returns this FSDP instance's compute device. If the module
+    Determines and returns this FSDP instance's compute device. If specified
+    device by 'device_id', then returns that device. Otherwise, If the module
     is already on a non-CPU device, then the compute device is that non-CPU
     device. If the module is on CPU, then the compute device is the current
     device.
@@ -889,13 +891,14 @@ def _get_compute_device(
     Precondition: ``_check_single_device_module()`` and
     ``_move_module_to_device()``.
     """
-    # If the module is on GPU already, then that GPU device has priority
-    # over the current device
     param = next(_get_orig_params(module, ignored_params), None)
-    if param is not None and param.device.type == "cuda":
-        compute_device = param.device
+    if param is not None and param.device.type != "cpu":
+        compute_device = param.device  # Determined by model param placement
     else:
-        compute_device = torch.device("cuda", torch.cuda.current_device())
+        if device_from_device_id is not None and device_from_device_id != "cuda":
+            compute_device = device_from_device_id  # Determined by custom backend
+        else:
+            compute_device = torch.device("cuda", torch.cuda.current_device())
     if device_from_device_id is not None and compute_device != device_from_device_id:
         raise ValueError(
             f"Inconsistent compute device and `device_id` on rank {rank}: "
