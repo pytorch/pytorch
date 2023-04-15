@@ -431,6 +431,7 @@ cu_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_cuda_cpp",
+        "//c10/util:bit_cast",
         "@cuda//:cublas",
         "@cuda//:cufft",
         "@cuda//:cusparse",

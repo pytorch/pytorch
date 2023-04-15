@@ -47,7 +47,9 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(THPStorage_Unpack(self).data());
+  // PyLong_FromVoidPtr should not need to mutate the pointer in order
+  // to extract a new long object from it.
+  return PyLong_FromVoidPtr(const_cast<void*>(THPStorage_Unpack(self).data()));
   END_HANDLE_TH_ERRORS
 }
 

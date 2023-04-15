@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+from typing import Union
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -31,9 +32,27 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
+class DummyModule(object):
+
+    @staticmethod
+    def device_count() -> int:
+        return 1
+
+    @staticmethod
+    def get_rng_state(device: Union[int, str, torch.device] = 'foo') -> torch.Tensor:
+        # create a tensor using our custom device object.
+        return torch.empty(4, 4, device="foo")
+
+    @staticmethod
+    def set_rng_state(new_state: torch.Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
+        pass
+
+
+@unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions.
     """
+    module = None
 
     def setUp(self):
         super().setUp()
@@ -41,6 +60,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        assert self.module is not None
 
     def tearDown(self):
         super().tearDown()
@@ -50,14 +70,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
     @classmethod
     def setUpClass(cls):
         remove_build_path()
-
-    @classmethod
-    def tearDownClass(cls):
-        remove_build_path()
-
-    @unittest.skipIf(IS_ARM64, "Does not work on arm")
-    def test_open_device_registration(self):
-        module = torch.utils.cpp_extension.load(
+        cls.module = torch.utils.cpp_extension.load(
             name="custom_device_extension",
             sources=[
                 "cpp_extensions/open_registration_extension.cpp",
@@ -67,10 +80,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             verbose=True,
         )
 
-        self.assertFalse(module.custom_add_called())
+    @classmethod
+    def tearDownClass(cls):
+        remove_build_path()
+
+    def test_open_device_registration(self):
+        self.assertFalse(self.module.custom_add_called())
 
         # create a tensor using our custom device object.
-        device = module.custom_device()
+        device = self.module.custom_device()
 
         x = torch.empty(4, 4, device=device)
         y = torch.empty(4, 4, device=device)
@@ -79,13 +97,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertTrue(x.device == device)
         self.assertFalse(x.is_cpu)
 
-        self.assertFalse(module.custom_add_called())
+        self.assertFalse(self.module.custom_add_called())
 
         # calls out custom add kernel, registered to the dispatcher
         z = x + y
 
         # check that it was called
-        self.assertTrue(module.custom_add_called())
+        self.assertTrue(self.module.custom_add_called())
 
         z_cpu = z.to(device='cpu')
 
@@ -98,14 +116,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z2 = z_cpu + z_cpu
 
         # None of our CPU operations should call the custom add function.
-        self.assertFalse(module.custom_add_called())
+        self.assertFalse(self.module.custom_add_called())
 
         # check generator registered befor use
         with self.assertRaisesRegex(RuntimeError,
                                     "Please register a generator to the PrivateUse1 dispatch key"):
             gen_ = torch.Generator(device=device)
 
-        module.register_generator()
+        self.module.register_generator()
 
         gen = torch.Generator(device=device)
         self.assertTrue(gen.device == device)
@@ -113,7 +131,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # generator can be registered only once
         with self.assertRaisesRegex(RuntimeError,
                                     "Only can register a generator to the PrivateUse1 dispatch key once"):
-            module.register_generator()
+            self.module.register_generator()
 
         # check whether print tensor.type() meets the expectation
         torch.utils.rename_privateuse1_backend('foo')
@@ -131,6 +149,32 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         for tt, dt in dtypes.items():
             test_tensor = torch.empty(4, 4, dtype=tt, device=device)
             self.assertTrue(test_tensor.type() == dt)
+
+        # check whether the attributes and methods of the corresponding custom backend are generated correctly
+        torch.utils.rename_privateuse1_backend('foo')
+        torch.utils.generate_methods_for_privateuse1_backend()
+        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
+            torch.utils.generate_methods_for_privateuse1_backend()
+
+        x = torch.empty(4, 4)
+        self.assertFalse(x.is_foo)
+        x = x.foo()
+        self.assertTrue(x.is_foo)
+        self.assertTrue(hasattr(torch.nn.Module, 'foo'))
+
+    def test_open_device_random(self):
+        torch.utils.rename_privateuse1_backend('foo')
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('xxx', DummyModule)
+
+        with self.assertRaisesRegex(RuntimeError, "torch has no module of"):
+            with torch.random.fork_rng(device_type="foo"):
+                pass
+        torch._register_device_module('foo', DummyModule)
+
+        with torch.random.fork_rng(device_type="foo"):
+            pass
+
 
 if __name__ == "__main__":
     common.run_tests()

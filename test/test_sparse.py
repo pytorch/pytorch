@@ -26,7 +26,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
-
+from torch.testing._internal.opinfo.core import ErrorInput
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -71,13 +71,28 @@ def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
-        subtest(gradcheck_sparse, name='sparse'),
+        subtest(gradcheck_sparse, name='non_masked'),
         subtest(gradcheck_masked, name='masked')])
 
-def xfail_mode(test_name='xfail_mode'):
+def gradcheck_input_func_wrappers(test_name='input_func_wrapper'):
+    # decorator that provides wrappers to gradcheck input functions
+
+    def gradcheck_nop_wrapper(func, **params):
+        return func
+
+    def gradcheck_to_dense_wrapper(func, **params):
+
+        def func_wrapped(*args, **kwargs):
+            return func(*args, **kwargs).to_dense(**params)
+
+        return func_wrapped
+
+    gradcheck_nop_wrapper.returns_to_dense = False
+    gradcheck_to_dense_wrapper.returns_to_dense = True
+
     return parametrize(test_name, [
-        subtest(False, name='success'),
-        subtest(True, name='xfail')])
+        subtest(gradcheck_nop_wrapper, name='return_as_is'),
+        subtest(gradcheck_to_dense_wrapper, name='return_to_dense')])
 
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
@@ -1758,15 +1773,12 @@ class TestSparse(TestSparseBase):
         _test_spadd()
         _test_spadd_hybrid()
 
-    @onlyCUDA
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.float)
     def test_sparse_add_out_bfloat16(self, device, dtype, coalesced):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
         y, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
-        x = x.float().cuda()
-        y = y.float().cuda()
         res_fp32 = torch.add(x, y)
 
         # bfloat16
@@ -4642,8 +4654,7 @@ class TestSparseAny(TestCase):
     @ops(reduction_ops_with_sparse_support)
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
     @all_sparse_layouts('layout', include_strided=False)
-    @xfail_mode()
-    def test_reductions(self, xfail_mode, layout, device, dtype, op):
+    def test_reductions(self, layout, device, dtype, op):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
@@ -4652,18 +4663,13 @@ class TestSparseAny(TestCase):
                 and dtype in {torch.bool, torch.uint8}):
             self.skipTest('Requires fix to gh-98495. Skipping!')
 
-        if xfail_mode:
-            have_sample = False
-            for sample, exc_type, exc_msg in op.sample_inputs_sparse(layout, device, dtype, xfail_mode=xfail_mode):
-                t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
-                with self.assertRaisesRegex(exc_type, exc_msg):
-                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE sample_inputs_reduction_sparse_*
-                have_sample = True
-            if not have_sample:
-                self.skipTest('no failing samples!')
-            return
-
         for sample in op.sample_inputs_sparse(layout, device, dtype):
+            if isinstance(sample, ErrorInput):
+                t_inp, t_args, t_kwargs = sample.sample_input.input, sample.sample_input.args, sample.sample_input.kwargs
+                with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE sample_inputs_reduction_sparse_*
+                continue
+
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
 
             result = op.op(t_inp, *t_args, **t_kwargs)
@@ -4683,7 +4689,10 @@ class TestSparseAny(TestCase):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
         count = 0
-        for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True, xfail_mode=False):
+        for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
+            if isinstance(sample, ErrorInput):
+                # skip error inputs that are tested in test_reductions
+                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
 
             r = op.op(t_inp, *t_args, **t_kwargs)
@@ -4795,23 +4804,18 @@ class TestSparseAny(TestCase):
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
-    @xfail_mode()
-    def test_binary_operation(self, xfail_mode, layout, device, dtype, op):
+    def test_binary_operation(self, layout, device, dtype, op):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
-        if xfail_mode:
-            have_sample = False
-            for sample, exc_type, exc_msg in op.sample_inputs_sparse(layout, device, dtype, xfail_mode=xfail_mode):
-                t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
-                with self.assertRaisesRegex(exc_type, exc_msg):
-                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE opinfo/definitions/sparse.py
-                have_sample = True
-            if not have_sample:
-                self.skipTest('no failing samples!')
-            return
-
         for sample in op.sample_inputs_sparse(layout, device, dtype):
+
+            if isinstance(sample, ErrorInput):
+                with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                    t_inp, t_args, t_kwargs = sample.sample_input.input, sample.sample_input.args, sample.sample_input.kwargs
+                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE opinfo/definitions/sparse.py
+                continue
+
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
 
