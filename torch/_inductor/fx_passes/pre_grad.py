@@ -41,11 +41,13 @@ def pre_grad_passes(gm, example_inputs):
     """
 
     # used to implement low memory dropout
-    overrides.replace_fx(gm, example_inputs)
+    gm = overrides.replace_fx(gm, example_inputs)
 
     if config.pattern_matcher:
         lazy_init()
-        fuse_fx(gm, example_inputs)
+        gm = fuse_fx(gm, example_inputs)
+
+    return gm
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):

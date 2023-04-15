@@ -25,7 +25,6 @@ patch_functions = AutogradMonkeypatch
 def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     # Sometimes patch_functions() misses things already in the graph
     changed = 0
-
     for node in reversed(list(gm.graph.nodes)):
         if node.op == "call_function" and replace_fn(node.target) is not node.target:
             with gm.graph.inserting_before(node):
@@ -40,6 +39,8 @@ def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     if changed:
         gm.graph.lint()
         gm.recompile()
+
+    return gm
 
 
 def _philox_rand_like_meta(input, seed, offset):
