@@ -2752,8 +2752,7 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
 
         for sample in samples:
-            # TODO: Remove detach once we have autograd support for CSR input
-            a = sample.args[0].to_sparse_csr().detach()
+            a = sample.args[0].to_sparse_csr()
 
             def fn(c, b):
                 output = torch.addmv(c, a, b, **sample.kwargs)
@@ -2786,8 +2785,7 @@ class TestSparseCSR(TestCase):
 
         # Here we assume that the signature is op(sparse_input, dense_input) -> dense_output
         for sample in samples:
-            # TODO: Remove detach once we have autograd support for CSR input
-            sparse_input = sample.input.to_sparse_csr().detach()
+            sparse_input = sample.input.to_sparse_csr()
 
             def fn(*args):
                 output = op.gradcheck_wrapper(op.get_op(), sparse_input, *args, **sample.kwargs)
