@@ -4321,9 +4321,9 @@ Tensor fft_c2r_backward(
   //               = 1, 2, ..., N - onesided_length
   auto gI = at::_fft_r2c(grad, dim, normalization, /*onesided=*/true);
 
-  auto double_length = grad.size(dim.back()) - gI.size(dim.back());
+  auto double_length = grad.sym_size(dim.back()) - gI.sym_size(dim.back());
   if (double_length > 0) { // also covers case when signal size is zero
-    gI.narrow(dim.back(), 1, double_length).mul_(2);
+    gI.narrow_symint(dim.back(), 1, double_length).mul_(2);
   }
   return gI;
 }

@@ -2517,26 +2517,6 @@ symbolic_aot_autograd_failures = {
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fftshift', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.hfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.hfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.hfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifftshift', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ihfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ihfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ihfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.irfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.irfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.irfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.rfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
