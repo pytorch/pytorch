@@ -3,22 +3,23 @@ from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
-    from . import (
+    from . import test_export, test_misc, test_repros
+except ImportError:
+    import test_export
+    import test_misc
+    import test_repros
+
+try:
+    from .variables import (
         test_ctx_manager,
-        test_export,
         test_functions,
-        test_misc,
         test_modules,
-        test_repros,
         test_subgraphs,
     )
 except ImportError:
     import test_ctx_manager
-    import test_export
     import test_functions
-    import test_misc
     import test_modules
-    import test_repros
     import test_subgraphs
 
 import unittest
