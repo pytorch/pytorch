@@ -2080,9 +2080,8 @@ class BufferList(IRNode):
         self.layout = self.layout.as_same_order(stride)
 
     def make_loader(self):
-        load = self.data.make_loader()
-
         def fn():
+            load = self.data.make_loader()
             result = load()
             # write out intermediate, so that we properly support
             # returning an intermediate but fusing the rest of
@@ -4103,11 +4102,10 @@ class ForeachPointwise(IRNode):
         return itertools.chain(self.left_inputs, self.right_inputs)
 
     def make_loader(self):
-        left_loader = self.left_inputs.make_loader()
-        right_loader = self.right_inputs.make_loader()
-
         def fn():
-            return self.op_fn(left_loader(), right_loader())
+            return self.op_fn(
+                self.left_inputs.make_loader()(), self.right_inputs.make_loader()()
+            )
 
         return fn
 

@@ -1581,7 +1581,7 @@ class ForeachKernel(Kernel):
                 self.buffer_name_to_arg_name[buffer_name] = arg_name
 
             self.stores.writeline(
-                f"tl.store({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), {var}, mask=mask)"
+                f"tl.store({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), {value}, mask=mask)"
             )
 
     def codegen_kernel(self, name=None):
