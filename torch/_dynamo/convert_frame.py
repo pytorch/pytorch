@@ -10,6 +10,7 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
@@ -214,7 +215,9 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
 
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame_assert(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         increment_frame()
         code = frame.f_code
 
@@ -301,6 +304,17 @@ def convert_frame_assert(
             torch.are_deterministic_algorithms_enabled()
         )
 
+        signpost_event(
+            "dynamo",
+            "_convert_frame_assert._compile",
+            {
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size,
+            },
+        )
+
         return _compile(
             frame.f_code,
             frame.f_globals,
@@ -312,6 +326,7 @@ def convert_frame_assert(
             export_constraints,
             hooks,
             frame,
+            frame_state=frame_state,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -330,6 +345,7 @@ def _compile(
     export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
+    frame_state=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
@@ -351,6 +367,7 @@ def _compile(
             export,
             export_constraints,
             mutated_closure_cell_contents,
+            frame_state=frame_state,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()
@@ -455,10 +472,12 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks)
+            result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
