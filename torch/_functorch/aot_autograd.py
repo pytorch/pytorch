@@ -1919,7 +1919,8 @@ def aot_wrapper_dedupe(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*deduped_flat_args)
-        assert ref_fw_metadata == updated_fw_metadata
+        assert ref_fw_metadata == updated_fw_metadata, \
+            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}'
 
     compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata)
 
@@ -2047,7 +2048,8 @@ def aot_wrapper_synthetic_base(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated
+        assert ref_fw_metadata == fw_metadata_updated, \
+            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(fw_metadata_updated)}'
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
 
