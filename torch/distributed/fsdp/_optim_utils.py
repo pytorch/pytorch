@@ -1418,10 +1418,8 @@ def _optim_state_dict(
     """
     _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
-    fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
+    fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
-    if "param_groups" not in optim_state_dict:
-        fsdp_osd.pop("param_groups")
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
     is_named_optimizer = _is_named_optimizer(optim_state_dict)
