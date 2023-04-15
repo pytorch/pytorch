@@ -757,7 +757,6 @@ def mps_ops_error_inputs_modifier(ops):
         'index_add',
         'trace',
         'nn.functional.max_pool2d',
-        'nn.functional.gelu',
         'masked_scatter',
 
         # unsupported float64 dtype
