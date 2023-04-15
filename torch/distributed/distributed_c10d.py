@@ -1506,23 +1506,26 @@ def _coalescing_manager(
     Args:
         group (`ProcessGroup`, optional): The process group to work on. If None,
             the default process group will be used.
-        device (`torch.device`, optional): Default is None, set to a device if there isn't a `**_coalesced` implementation
-            by the backend.
-        reqs (`List`, optional): if provided, put created `Work` items in the `reqs` list. If `async_op` is False, no
-            item will be put in the list. The number of created `Work` items may vary by backend.
+        device (`torch.device`, optional): Default is None, set to a device if
+            there isn't a `**_coalesced` implementation by the backend.
+        async_ops (`bool`, optional): whether the coalesced ops are async ops.
 
     Examples:
         >>> # xdoctest: +SKIP("no rank")
-        >>> reqs = []
-        >>> with _coalescing_manager(reqs=reqs):
-        >>>     for i in range(num_coll):
-        >>>         dist.all_reduce(tensors[i], async_op=True)
-        >>> for req in reqs:
-        >>>     req.wait()
+        >>> # Synchronous ops
+        >>> with _coalescing_manager():
+        >>>     for i in range(num_colls):
+        >>>         dist.all_reduce(tensors[i])
+        >>> # Asynchronous ops
+        >>> with _coalescing_manager(async_ops=True) as cm:
+        >>>     for i in range(num_colls):
+        >>>         dist.all_reduce(tensors[i])
+        >>> cm.wait()
 
     .. warning::
-       :func:`_coalescing_manager` currently do not support coalescing all-reduces with different reduce operators, e.g.
-       `ReduceOp.SUM` and `ReduceOp.PRODUCT`.
+       :func:`_coalescing_manager` currently do not support coalescing
+       all-reduces with different reduce operators, e.g.  `ReduceOp.SUM` and
+       `ReduceOp.PRODUCT`.
     """
     group = group or _get_default_group()
     op_list = _world.pg_coalesce_state.setdefault(group, [])
