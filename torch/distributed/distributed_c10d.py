@@ -1536,7 +1536,10 @@ def _coalescing_manager(
     cm = _CoalescingManager()
     try:
         yield cm
-    finally:
+    except:
+        # Re-throw exception caught by code inside the context manager
+        raise
+    else:
         op_list = _world.pg_coalesce_state.pop(group)
         if op_list:
             # Collectives supporting "Fast Path" coalescing are captured.
