@@ -82,7 +82,7 @@ struct TORCH_API CUDAHooksInterface {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual bool isPinnedPtr(void* /*data*/) const {
+  virtual bool isPinnedPtr(const void* /*data*/) const {
     return false;
   }
 

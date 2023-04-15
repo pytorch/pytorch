@@ -290,7 +290,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
-    "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randint": {f16, f32, f64, i32, i64},

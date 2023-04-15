@@ -127,6 +127,7 @@ struct SegmentInfo {
   int64_t active_size = 0;
   cudaStream_t stream = 0;
   bool is_large = false;
+  bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
 };
@@ -145,6 +146,8 @@ struct TraceEntry {
     SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
     SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
                   // defragment or empty_caches)
+    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
+    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free

@@ -4945,7 +4945,7 @@ Shape legend:
 
 Examples::
 
-    >>> # Optionally use the context manager to ensure one of the fused kerenels is run
+    >>> # Optionally use the context manager to ensure one of the fused kernels is run
     >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
@@ -5087,7 +5087,7 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
             Default: `True`
             Note: `needs_weight` defaults to `True`, but should be set to `False`
-            For best performance when attention weights are not nedeeded.
+            For best performance when attention weights are not needed.
             *Setting needs_weights to `True`
             leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
