@@ -33,7 +33,7 @@ class WeightNormSparsifierBenchmark(op_bench.TorchBenchmarkBase):
         model.register_buffer("weight", weight)
 
         sparse_config = [{"tensor_fqn": "weight"}]
-        self.sparsifier = pruning.WeightNormSparsifier(
+        self.sparsifier = pruning.sparsifier.weight_norm_sparsifier.WeightNormSparsifier(
             sparsity_level=SL,
             sparse_block_shape=SBS,
             zeros_per_block=ZPB,
