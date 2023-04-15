@@ -5,7 +5,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, Set
+from typing import Dict, Optional, Set, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
@@ -116,28 +116,110 @@ log_registry = LogRegistry()
 log_state = LogState()
 
 
-# User API for setting log properties
-# ex. format set_logs(LOG_NAME=LEVEL, ARTIFACT_NAME=bool)
-# ex. set_logs(dynamo=logging.DEBUG, graph_code=True)
 def set_logs(
-    dynamo=DEFAULT_LOG_LEVEL,
-    aot=DEFAULT_LOG_LEVEL,
-    inductor=DEFAULT_LOG_LEVEL,
-    bytecode=False,
-    aot_graphs=False,
-    aot_joint_graph=False,
-    graph=False,
-    graph_code=False,
-    guards=False,
-    recompiles=False,
-    output_code=False,
-    schedule=False,
-    modules=None,
+    *,
+    dynamo: int = DEFAULT_LOG_LEVEL,
+    aot: int = DEFAULT_LOG_LEVEL,
+    inductor: int = DEFAULT_LOG_LEVEL,
+    bytecode: bool = False,
+    aot_graphs: bool = False,
+    aot_joint_graph: bool = False,
+    graph: bool = False,
+    graph_code: bool = False,
+    guards: bool = False,
+    recompiles: bool = False,
+    output_code: bool = False,
+    schedule: bool = False,
+    modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
-    Enable setting the log level of individual components through kwargs.
-    Args are set using the following format:
-        set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>, ...,modules={"module.qualified.name":<log_level>})
+    Sets the log level for individual components and toggles individual log
+    artifact types.
+
+    .. warning:: This feature is a prototype and may have compatibility
+        breaking changes in the future.
+
+    .. note:: The ``TORCH_LOGS`` environment variable has complete precedence
+        over this function, so if it was set, this function does nothing.
+
+    A component is a set of related features in PyTorch. All of the log
+    messages emitted from a given component has its own log level setting.
+    This allows you to, for instance, silence large groups of log messages that
+    are not relevant to you and increase verbosity of logs for components that
+    are relevant. The expected log level values are:
+
+        * ``logging.CRITICAL``
+        * ``logging.ERROR``
+        * ``logging.WARNING``
+        * ``logging.INFO``
+        * ``logging.DEBUG``
+        * ``logging.NOTSET``
+
+    See documentation for the Python ``logging`` module for more information on
+    log levels: `<https://docs.python.org/3/library/logging.html#logging-levels>`_
+
+    An artifact is a particular type of log message within a component.
+    A component can emit many different kinds of artifacts.
+
+    Keyword args:
+        dynamo (:class:`int`):
+            The log level for the "dynamo" component. Default: ``logging.WARN``
+
+        aot (:class:`int`):
+            The log level for the "aot" component. Default: ``logging.WARN``
+
+        inductor (:class:`int`):
+            The log level for the "inductor" component. Default: ``logging.WARN``
+
+        bytecode (:class:`bool`):
+            Whether to emit "bytecode" log artifacts. Default: ``False``
+
+        aot_graphs (:class:`bool`):
+            Whether to emit "aot_graphs" log artifacts. Default: ``False``
+
+        aot_joint_graph (:class:`bool`):
+            Whether to emit "aot_joint_graph" log artifacts. Default: ``False``
+
+        graph (:class:`bool`):
+            Whether to emit "graph" log artifacts. Default: ``False``
+
+        graph_code (:class:`bool`):
+            Whether to emit "graph_code" log artifacts. Default: ``False``
+
+        guards (:class:`bool`):
+            Whether to emit "guards" log artifacts. Default: ``False``
+
+        recompiles (:class:`bool`):
+            Whether to emit "recompiles" log artifacts. Default: ``False``
+
+        output_code (:class:`bool`):
+            Whether to emit "output_code" log artifacts. Default: ``False``
+
+        schedule (:class:`bool`):
+            Whether to emit "schedule" log artifacts. Default: ``False``
+
+        modules (dict):
+            This argument provides an alternate way to specify the above log
+            component and artifact settings, in the format of a keyword args
+            dictionary given as a single argument. This is useful if a new log
+            component or artifact has been registered but a keyword argument
+            for it has not been added to this function. Default: ``None``
+
+
+    Example::
+
+        >>> # xdoctest: +SKIP
+        >>> import logging
+
+        # The following changes the "dynamo" component to emit DEBUG-level
+        # logs, and to emit "graph_code" artifacts.
+
+        >>> torch._logging.set_logs(dynamo=logging.DEBUG, graph_code=True)
+
+        # The following accomplishes the same thing as the above example, but
+        # uses the `module` keyword arg.
+
+        >>> torch._logging.set_logs(modules=dict(dynamo=logging.DEBUG, graph_code=True))
     """
     # ignore if env var is set
     if LOG_ENV_VAR in os.environ:
@@ -148,11 +230,10 @@ def set_logs(
 
     log_state.clear()
 
-    if modules is None:
-        modules = {}
+    modules = modules or {}
 
     def _set_logs(**kwargs):
-        for alias, val in itertools.chain(kwargs.items(), modules.items()):
+        for alias, val in itertools.chain(kwargs.items(), modules.items()):  # type: ignore[union-attr]
             if log_registry.is_artifact(alias):
                 if val:
                     log_state.enable_artifact(alias)
