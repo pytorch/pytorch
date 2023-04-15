@@ -156,12 +156,9 @@ class SideEffects:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False):
+    def load_attr(self, item, name):
         assert self.is_attribute_mutation(item)
-        result = self.store_attr_mutations[item.mutable_local][name]
-        if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented("read deleted attribute")
-        return result
+        return self.store_attr_mutations[item.mutable_local][name]
 
     def store_cell(self, cellvar, value):
         assert isinstance(cellvar, variables.NewCellVariable)
@@ -190,11 +187,6 @@ class SideEffects:
 
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
-
-    def has_pending_mutation(self, item):
-        return self.is_attribute_mutation(item) and bool(
-            self.store_attr_mutations.get(item.mutable_local)
-        )
 
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
@@ -412,15 +404,6 @@ class SideEffects:
                         )
                     elif name == "__call_nn_module_init":
                         pass  # handled in codegen_save_tempvars
-                    elif isinstance(value, variables.DeletedVariable):
-                        if isinstance(
-                            var.mutable_local, AttributeMutationExisting
-                        ) and hasattr(getattr(var, "value", None), name):
-                            cg.tx.output.update_co_names(name)
-                            cg(var.mutable_local.source)
-                            suffixes.append(
-                                [create_instruction("DELETE_ATTR", argval=name)]
-                            )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)

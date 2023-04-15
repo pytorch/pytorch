@@ -553,7 +553,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.c10d_functional.all_reduce.default
+                            if n.target == torch.ops.aten.all_reduce.default
                         ]
                     ),
                     1,
@@ -732,6 +732,24 @@ class TraceTrainStepTest(DTensorTestBase):
 
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
         self.assertEqual(mod.dummy_buffer, ddp_mod.module.dummy_buffer)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_expand_dimension(self):
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = nn.Linear(10, 10, bias=True).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+        for node in train_step._compiled_obj.gm.graph.nodes:
+            if node.target == torch.ops.aten.expand.default:
+                # backward grad expandion op should match local batch size
+                # instead of global batch size.
+                self.assertEqual(node.args[1], [2, 10])
 
 
 class CoverageTest(DTensorTestBase):
