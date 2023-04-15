@@ -902,8 +902,8 @@ void check_arguments(
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
     if (offsets.size(0) > 0) {
-      index_t offset_0 = offsets.data_ptr<index_t>()[0];
-      index_t offset_n = offsets.data_ptr<index_t>()[offsets.size(0)-1];
+      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
+      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.size(0)-1];
       TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
                                 "in the mini-batch has to start from position 0. "
                                 "However, got ", offsets[0]);
