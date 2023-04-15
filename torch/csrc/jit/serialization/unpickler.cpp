@@ -95,6 +95,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         TORCH_CHECK(!w.value.toSymFloat().is_symbolic());
         // no op, there is nothing to tag
         break;
+      case c10::SymBoolType::Kind:
+        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
+        // no op, there is nothing to tag
+        break;
       case DynamicType::Kind:
       case UnionType::Kind:
       case EnumType::Kind:
@@ -343,6 +347,10 @@ PickleOpCode Unpickler::readInstruction() {
     } break;
     case PickleOpCode::BINUNICODE: {
       uint32_t length = from_le32(read<uint32_t>());
+      stack_.emplace_back(readBytes(length));
+    } break;
+    case PickleOpCode::BINUNICODE8: {
+      int64_t length = from_le64(read<int64_t>());
       stack_.emplace_back(readBytes(length));
     } break;
     case PickleOpCode::BINFLOAT:
