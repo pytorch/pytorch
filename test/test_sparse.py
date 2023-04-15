@@ -74,26 +74,6 @@ def gradcheck_semantics(test_name='gradcheck'):
         subtest(gradcheck_sparse, name='non_masked'),
         subtest(gradcheck_masked, name='masked')])
 
-def gradcheck_input_func_wrappers(test_name='input_func_wrapper'):
-    # decorator that provides wrappers to gradcheck input functions
-
-    def gradcheck_nop_wrapper(func, **params):
-        return func
-
-    def gradcheck_to_dense_wrapper(func, **params):
-
-        def func_wrapped(*args, **kwargs):
-            return func(*args, **kwargs).to_dense(**params)
-
-        return func_wrapped
-
-    gradcheck_nop_wrapper.returns_to_dense = False
-    gradcheck_to_dense_wrapper.returns_to_dense = True
-
-    return parametrize(test_name, [
-        subtest(gradcheck_nop_wrapper, name='return_as_is'),
-        subtest(gradcheck_to_dense_wrapper, name='return_to_dense')])
-
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
