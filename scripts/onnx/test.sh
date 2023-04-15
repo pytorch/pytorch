@@ -41,7 +41,7 @@ args+=("--cov-report")
 args+=("xml:test/coverage.xml")
 args+=("--cov-append")
 
-time python "${top_dir}/test/run_test.py" --onnx --shard "$SHARD_NUMBER" --verbose
+time python "${top_dir}/test/run_test.py" --onnx --shard "$SHARD_NUMBER" 2 --verbose
 
 if [[ "$SHARD_NUMBER" == "2" ]]; then
   # xdoctests on onnx
