@@ -3895,7 +3895,11 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
-
+                )
+            if not all(isinstance(x, int) for x in size):
+                raise TypeError(
+                    "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
+                    f"Tuple[int, int, int], but got size with types {list(type(x) for x in size)}"
                 )
             output_size = size
         else:
