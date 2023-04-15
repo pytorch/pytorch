@@ -21,18 +21,25 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops)
+    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.testing._internal.opinfo.core import ErrorInput
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and
-                                     (op.supports_sparse
-                                      or op.supports_sparse_csr
-                                      or op.supports_sparse_csc
-                                      or op.supports_sparse_bsr
-                                      or op.supports_sparse_bsc)]
+def _op_supports_any_sparse(op):
+    return (op.supports_sparse
+            or op.supports_sparse_csr
+            or op.supports_sparse_csc
+            or op.supports_sparse_bsr
+            or op.supports_sparse_bsc)
+
+
+reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
+
+binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
+
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -64,8 +71,28 @@ def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
-        subtest(gradcheck_sparse, name='sparse'),
+        subtest(gradcheck_sparse, name='non_masked'),
         subtest(gradcheck_masked, name='masked')])
+
+def gradcheck_input_func_wrappers(test_name='input_func_wrapper'):
+    # decorator that provides wrappers to gradcheck input functions
+
+    def gradcheck_nop_wrapper(func, **params):
+        return func
+
+    def gradcheck_to_dense_wrapper(func, **params):
+
+        def func_wrapped(*args, **kwargs):
+            return func(*args, **kwargs).to_dense(**params)
+
+        return func_wrapped
+
+    gradcheck_nop_wrapper.returns_to_dense = False
+    gradcheck_to_dense_wrapper.returns_to_dense = True
+
+    return parametrize(test_name, [
+        subtest(gradcheck_nop_wrapper, name='return_as_is'),
+        subtest(gradcheck_to_dense_wrapper, name='return_to_dense')])
 
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
@@ -3728,8 +3755,8 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    # NOTE: addcmul_out is not implemented for bool and half.
-    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    # NOTE: addcmul_out is not implemented for bool.
+    @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_sparse_mul(self, device, dtype, coalesced):
         self._test_mul_skips(device, dtype, coalesced)
@@ -4628,29 +4655,46 @@ class TestSparseAny(TestCase):
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions(self, layout, device, dtype, op):
-        count = 0
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
+        if (
+                layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+                and dtype in {torch.bool, torch.uint8}):
+            self.skipTest('Requires fix to gh-98495. Skipping!')
+
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-            count += 1
+            if isinstance(sample, ErrorInput):
+                t_inp, t_args, t_kwargs = sample.sample_input.input, sample.sample_input.args, sample.sample_input.kwargs
+                with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE sample_inputs_reduction_sparse_*
+                continue
 
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+
             result = op.op(t_inp, *t_args, **t_kwargs)
 
             #  Checking invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
             dense = op.op(t_inp.to_dense(), *t_args, **t_kwargs)
             self.assertEqual(result, dense)
 
-        if count == 0:
-            # we count samples to avoid false-positive test reports
-            self.skipTest('no sample inputs')
-
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(reduction_ops_with_sparse_support, allowed_dtypes=(torch.float32, torch.float64, torch.complex64, torch.complex128))
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions_backward(self, layout, device, dtype, op):
+        # TODO: Once gradcheck supports sparse outputs, use gradcheck
+        # for testing the reductions backward and merge this test to
+        # test_reductions.
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
         count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
+            if isinstance(sample, ErrorInput):
+                # skip error inputs that are tested in test_reductions
+                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+
             r = op.op(t_inp, *t_args, **t_kwargs)
             if r.numel() != 0:
                 r = r.sum()
@@ -4662,9 +4706,7 @@ class TestSparseAny(TestCase):
             else:
                 self.skipTest('NOT IMPL')
 
-        if count == 0:
-            # we count samples to avoid false-positive test reports
-            self.skipTest('no sample inputs')
+        self.assertNotEqual(count, 0)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -4756,6 +4798,54 @@ class TestSparseAny(TestCase):
             self.skipTest('NOT IMPL')
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(binary_ufuncs_with_sparse_support)
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_binary_operation(self, layout, device, dtype, op):
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+
+            if isinstance(sample, ErrorInput):
+                with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                    t_inp, t_args, t_kwargs = sample.sample_input.input, sample.sample_input.args, sample.sample_input.kwargs
+                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE opinfo/definitions/sparse.py
+                continue
+
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+
+            result = op.op(t_inp, *t_args, **t_kwargs)
+
+            # Check rop(inp, ...).shape == inp.shape
+            self.assertEqual(result.shape, t_inp.shape)
+
+            if layout is torch.sparse_coo and t_inp.numel() == 0 and op.name == 'mul' and t_inp.dense_dim() > 0:
+                # BUG: gh-97627
+                with self.assertRaisesRegex(
+                        AssertionError,
+                        "Scalars are not equal!"):
+                    self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+            else:
+                # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+                self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+
+                # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+            # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+            try:
+                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+            except Exception as msg:
+                # this is strided op issue, so skipping the sample silently here
+                if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
+                    continue
+                raise
+            self.assertEqual(result, dense)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

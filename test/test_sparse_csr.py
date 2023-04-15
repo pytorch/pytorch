@@ -14,12 +14,14 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
+    (op_db, sparse_csr_unary_ufuncs, BinaryUfuncInfo, ReductionOpInfo)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and
 )
+from torch.testing._internal.opinfo.core import SampleInput
+
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
@@ -466,25 +468,32 @@ class TestSparseCompressed(TestCase):
     @all_sparse_compressed_layouts()
     @ops(_sparse_compressed_ops)
     def test_consistency(self, layout, device, dtype, op):
-        # TODO: Normaly, we should use DecorateInfo instead of
-        # skipTest but this requires implemening OpInfo support for
-        # layout as a test parameter (similar to device and dtype).
-        if not (layout == torch.sparse_csr and op.supports_sparse_csr
-                or layout == torch.sparse_csc and op.supports_sparse_csc
-                or layout == torch.sparse_bsr and op.supports_sparse_bsr
-                or layout == torch.sparse_bsc and op.supports_sparse_bsc):
-            self.skipTest(f"{op.name} does not support input with {layout} layout")
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         # FIXME: remove in followup once integer support is landed for segment_reduce
         if (layout == torch.sparse_csr and not dtype.is_floating_point
                 and op.name in ('masked.mean', 'masked.amax', 'masked.amin')):
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
+        if isinstance(op, BinaryUfuncInfo):
+            self.skipTest("test does not support binary operations")
+
         require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
-        samples = list(op.sample_inputs(device, dtype))
+        all_samples_are_valid = False
+        if op.name == 'sum':
+            if (
+                    layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
+                    and dtype in {torch.bool, torch.uint8}):
+                self.skipTest('Requires fix to gh-98495. Skipping!')
+            all_samples_are_valid = True
+            samples = [type(sample)(sample.input.to_dense(), sample.args, sample.kwargs)
+                       for sample in op.sample_inputs_sparse(layout, device, dtype) if isinstance(sample, SampleInput)]
+        else:
+            samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
         ndims_equals_2d = (s.input.ndim == 2 for s in samples)
@@ -493,31 +502,26 @@ class TestSparseCompressed(TestCase):
 
         count = 0
         for sample in samples:
-            assert torch.is_tensor(sample.input)
-            # Sparse CSR/CSC only supports 2D tensors as inputs
-            if sample.input.ndim != 2:
-                continue
-            if isinstance(op, ReductionOpInfo):
-                # Reductions on sparse compressed require keepdim=True
-                if not sample.kwargs.get('keepdim'):
+            if not all_samples_are_valid:
+                assert torch.is_tensor(sample.input)
+                # Sparse CSR/CSC only supports 2D tensors as inputs
+                if sample.input.ndim != 2:
                     continue
-                # Reductions on sparse compressed tensors require explicit mask
-                if require_mask and sample.kwargs.get('mask') is None:
-                    continue
+                if isinstance(op, ReductionOpInfo):
+                    # Reductions on sparse compressed require keepdim=True
+                    if not sample.kwargs.get('keepdim'):
+                        continue
+                    # Reductions on sparse compressed tensors require explicit mask
+                    if require_mask and sample.kwargs.get('mask') is None:
+                        continue
             expected = op(sample.input, **sample.kwargs)
             assert torch.is_tensor(expected)
-            # Use smallest non-trivial blocksize for the given input shape:
-            blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
-            if layout is torch.sparse_bsr:
-                sparse = sample.input.to_sparse_bsr(blocksize)
-            elif layout is torch.sparse_bsc:
-                sparse = sample.input.to_sparse_bsc(blocksize)
-            elif layout is torch.sparse_csr:
-                sparse = sample.input.to_sparse_csr()
-            elif layout is torch.sparse_csc:
-                sparse = sample.input.to_sparse_csc()
+            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                # Use smallest non-trivial blocksize for the given input shape:
+                blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
             else:
-                assert 0, layout
+                blocksize = None
+            sparse = sample.input.to_sparse(layout=layout, blocksize=blocksize)
 
             assert torch.is_tensor(sparse)
             output = op(sparse, **sample.kwargs)
