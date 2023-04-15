@@ -33,6 +33,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
+    FSDPDeviceHandler,
     TrainingState,
 )
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
@@ -382,7 +383,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
-        device_id: Optional[Union[int, torch.device]] = None,
+        device_id: Optional[Union[int, torch.device, FSDPDeviceHandler]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,

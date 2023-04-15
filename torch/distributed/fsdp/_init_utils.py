@@ -26,10 +26,12 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
+    _CUDADeviceHandler,
     _FSDPState,
     _get_module_fsdp_state,
     _is_fsdp_flattened,
     clean_tensor_name,
+    FSDPDeviceHandler,
     TrainingState,
 )
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
@@ -394,7 +396,7 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
 def _init_param_handle_from_module(
     state: _FSDPState,
     fully_sharded_module: nn.Module,
-    device_id: Optional[Union[int, torch.device]],
+    device_id: Optional[Union[int, torch.device, FSDPDeviceHandler]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
     module_wrapper_cls: Type,
@@ -404,7 +406,9 @@ def _init_param_handle_from_module(
     This is the module wrapper code path.
     """
     _check_single_device_module(fully_sharded_module, state._ignored_params)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    device_handler_from_device_id = _get_device_handler_from_device_id(
+        device_id, state.rank
+    )
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
         fully_sharded_module, state._ignored_params
     )
@@ -412,21 +416,27 @@ def _init_param_handle_from_module(
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
         _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
     elif is_meta_module:
-        _materialize_meta_module(fully_sharded_module, device_id)
+        _materialize_meta_module(
+            fully_sharded_module,
+            device_id.device if isinstance(device_id, FSDPDeviceHandler) else device_id,
+        )
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
             check_fn=lambda k: not isinstance(k, module_wrapper_cls),
         )
     _move_module_to_device(
-        fully_sharded_module, state._ignored_params, device_from_device_id
-    )
-    state.compute_device = _get_compute_device(
         fully_sharded_module,
         state._ignored_params,
-        device_from_device_id,
+        device_handler_from_device_id.device if device_handler_from_device_id else None,
+    )
+    state.compute_device, state.device_handler = _get_compute_device(
+        fully_sharded_module,
+        state._ignored_params,
+        device_handler_from_device_id,
         state.rank,
     )
+
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     if sync_module_states:
         _sync_module_params_and_buffers(
@@ -441,7 +451,7 @@ def _init_param_handles_from_module(
     state: _FSDPState,
     root_module: nn.Module,
     policy: _FSDPPolicy,
-    device_id: Optional[Union[int, torch.device]],
+    device_id: Optional[Union[int, torch.device, FSDPDeviceHandler]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
 ) -> _FSDPState:
@@ -458,7 +468,7 @@ def _init_param_handles_from_module(
         state._ignored_params,
     )
     _check_single_device_module(root_module, state._ignored_params)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    device_handler = _get_device_handler_from_device_id(device_id, state.rank)
     # Initialize and shard `FlatParamHandle`s one by one following reverse
     # depth-first order (i.e. reverse `.modules()` order), which represents a
     # reverse topological sort order. This avoids increasing peak GPU memory
@@ -486,7 +496,12 @@ def _init_param_handles_from_module(
         ) and param_init_fn is not None:
             _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
         elif is_meta_module:
-            _materialize_meta_module(fully_sharded_module, device_id)
+            _materialize_meta_module(
+                fully_sharded_module,
+                device_id.device
+                if isinstance(device_id, FSDPDeviceHandler)
+                else device_id,
+            )
         elif is_torchdistX_deferred_init:
             deferred_init.materialize_module(
                 root_module,
@@ -502,12 +517,14 @@ def _init_param_handles_from_module(
                 fully_sharded_module.get_buffer(buffer_name)
                 for buffer_name in buffer_names
             ]
-        _move_states_to_device(params, buffers, device_from_device_id)
+        _move_states_to_device(
+            params, buffers, device_handler.device if device_handler else None
+        )
         if state.compute_device is None:  # only need to set once
-            state.compute_device = _get_compute_device(
+            state.compute_device, state.device_handler = _get_compute_device(
                 fully_sharded_module,
                 state._ignored_params,
-                device_from_device_id,
+                device_handler,
                 state.rank,
             )
         if sync_module_states:
@@ -531,7 +548,7 @@ def _init_param_handle_from_params(
     handle = FlatParamHandle(
         params,
         fully_sharded_module,
-        state.compute_device,
+        state.device_handler,
         SHARDING_STRATEGY_MAP[state.sharding_strategy],
         state.cpu_offload.offload_params,
         state.mixed_precision.param_dtype,
@@ -704,30 +721,34 @@ def _check_single_device_module(
         )
 
 
-def _get_device_from_device_id(
+def _get_device_handler_from_device_id(
     device_id: Optional[Union[int, torch.device]],
     rank: int,
-) -> Optional[torch.device]:
+) -> Optional[FSDPDeviceHandler]:
     """
     Processes ``device_id`` and returns either the corresponding device or
     ``None`` if ``device_id`` is ``None``.
     """
     if device_id is None:
         return None
-    device = (
-        device_id if isinstance(device_id, torch.device) else torch.device(device_id)
-    )
-    if device == torch.device("cuda"):
-        warnings.warn(
-            f"FSDP got the argument `device_id` {device_id} on rank "
-            f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {torch.cuda.current_device()}. "
-            "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
-            "before FSDP initialization or pass in the explicit device "
-            "index as the `device_id` argument."
-        )
-        device = torch.device("cuda", torch.cuda.current_device())
-    return device
+
+    if isinstance(device_id, FSDPDeviceHandler):
+        return device_id
+
+    if isinstance(device_id, torch.device):
+        assert device_id.type == "cuda", "Only CUDA devices are supported"
+        if device_id == torch.device("cuda"):
+            warnings.warn(
+                f"FSDP got the argument `device_id` {device_id} on rank "
+                f"{rank}, which does not have an explicit index. "
+                f"FSDP will use the current device {torch.cuda.current_device()}. "
+                "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
+                "before FSDP initialization or pass in the explicit device "
+                "index as the `device_id` argument."
+            )
+        return _CUDADeviceHandler(torch.cuda.current_device())
+    else:
+        return _CUDADeviceHandler(device_id)
 
 
 def _need_to_materialize_module(
@@ -871,11 +892,12 @@ def _warn_cpu_init():
 def _get_compute_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
-    device_from_device_id: Optional[torch.device],
+    device_handler_from_device_id: Optional[FSDPDeviceHandler],
     rank: int,
-) -> torch.device:
+) -> Tuple[torch.device, FSDPDeviceHandler]:
     """
-    Determines and returns this FSDP instance's compute device. If the module
+    Determines and returns this FSDP instance's compute device. If specified
+    device by 'device_id', then returns that device. Otherwise, If the module
     is already on a non-CPU device, then the compute device is that non-CPU
     device. If the module is on CPU, then the compute device is the current
     device.
@@ -887,19 +909,24 @@ def _get_compute_device(
     Precondition: ``_check_single_device_module()`` and
     ``_move_module_to_device()``.
     """
-    # If the module is on GPU already, then that GPU device has priority
-    # over the current device
     param = next(_get_orig_params(module, ignored_params), None)
-    if param is not None and param.device.type == "cuda":
-        compute_device = param.device
-    else:
-        compute_device = torch.device("cuda", torch.cuda.current_device())
-    if device_from_device_id is not None and compute_device != device_from_device_id:
-        raise ValueError(
-            f"Inconsistent compute device and `device_id` on rank {rank}: "
-            f"{compute_device} vs {device_from_device_id}"
-        )
-    return compute_device
+    if device_handler_from_device_id is not None:
+        # If 'device_id' specified, param must has been on 'device_handler_from_device_id' or
+        # other non-CPU device after '_move_module_to_device()'.
+        if param is not None and param.device != device_handler_from_device_id.device:
+            raise ValueError(
+                f"Inconsistent compute device and `device_id` on rank {rank}: "
+                f"{param.device} vs {device_handler_from_device_id.device}"
+            )
+        return device_handler_from_device_id.device, device_handler_from_device_id
+
+    if param is not None:
+        assert param.device.type == "cuda"
+        return param.device, _CUDADeviceHandler(param.device.index)
+
+    return torch.device("cuda", torch.cuda.current_device()), _CUDADeviceHandler(
+        torch.cuda.current_device()
+    )
 
 
 # TODO: See how to deprecate!

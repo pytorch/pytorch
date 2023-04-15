@@ -4,9 +4,12 @@ This file includes private common utilities for FSDP.
 
 import traceback
 import warnings
+from abc import ABC, abstractmethod
 from enum import auto, Enum
 from typing import (
+    Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterable,
@@ -33,6 +36,111 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+
+class FSDPDeviceHandler(ABC):
+    """
+    This class is used to abstract the device handling logic for FSDP.
+    """
+
+    def __init__(self, type: str, index: int):
+        self._type = type
+        self._index = index
+        self._device = torch.device(type, index)
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    @property
+    def type(self) -> str:
+        return self._type
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        ...
+
+    @abstractmethod
+    def set_device(self) -> None:
+        ...
+
+    @abstractmethod
+    def current_device(self) -> int:
+        ...
+
+    @abstractmethod
+    def device_count(self) -> int:
+        ...
+
+    @abstractmethod
+    def Stream(self):
+        ...
+
+    @abstractmethod
+    def Event(self):
+        ...
+
+    @abstractmethod
+    def synchronize(self) -> None:
+        ...
+
+    @abstractmethod
+    def current_stream(self):
+        ...
+
+    @abstractmethod
+    def stream(self, stream: torch.cuda.Stream):
+        ...
+
+
+class _UntochableDeviceHandler:
+    """
+    Uninitialized FSDP device handler for MYPY.
+    """
+
+    def __getattribute__(self, __name: str) -> Any:
+        raise RuntimeError("Try using uninitialized FSDP device handler")
+
+
+class _CUDADeviceHandler(FSDPDeviceHandler):
+    """
+    FSDP device handler for cuda device.
+    """
+
+    def __init__(self, index: int):
+        super().__init__("cuda", index)
+
+    def is_available(self) -> bool:
+        return torch.cuda.is_available()
+
+    def set_device(self) -> None:
+        torch.cuda.set_device(self._index)
+
+    def current_device(self) -> int:
+        return torch.cuda.current_device()
+
+    def device_count(self) -> int:
+        return torch.cuda.device_count()
+
+    def Stream(self) -> torch.cuda.Stream:
+        return torch.cuda.Stream()
+
+    def Event(self) -> torch.cuda.Event:
+        return torch.cuda.Event()
+
+    def synchronize(self) -> None:
+        torch.cuda.synchronize()
+
+    def current_stream(self) -> torch.cuda.Stream:
+        return torch.cuda.current_stream()
+
+    def stream(self, stream: torch.cuda.Stream) -> torch.cuda.StreamContext:
+        return torch.cuda.stream(stream)
+
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -61,6 +169,12 @@ class _FSDPState(_State):
             nn.Module, flat_param_file.FlatParamHandle
         ] = {}
         self.compute_device: Optional[torch.device] = None
+        # Abstract device handler for fsdp compute device. For now,
+        # the compute device must implement some cuda-like semantics
+        # see required semantics in 'FSDPDeviceHandler'.
+        self.device_handler: FSDPDeviceHandler = cast(
+            FSDPDeviceHandler, _UntochableDeviceHandler()
+        )
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []

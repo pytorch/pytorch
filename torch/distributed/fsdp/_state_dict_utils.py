@@ -122,8 +122,8 @@ def _common_pre_state_dict_hook(
     fsdp_state: _FSDPState,
 ) -> None:
     """Performs the pre-state_dict tasks shared by all state_dict types."""
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if fsdp_state.device_handler.is_available():
+        fsdp_state.device_handler.synchronize()
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
@@ -513,7 +513,7 @@ def _sharded_post_state_dict_hook(
             tensor=param,
             rank=fsdp_state.rank,
             world_size=fsdp_state.world_size,
-            num_devices_per_node=torch.cuda.device_count(),
+            num_devices_per_node=fsdp_state.device_handler.device_count(),
             pg=fsdp_state.process_group,
         )
         if fsdp_state._state_dict_config.offload_to_cpu:
@@ -702,8 +702,8 @@ def _pre_load_state_dict_hook(
         StateDictType.SHARDED_STATE_DICT: _sharded_pre_load_state_dict_hook,
     }
     # Code that is common for all state_dict impls
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if fsdp_state.device_handler.is_available():
+        fsdp_state.device_handler.synchronize()
     # Dispatch into state_dict specific implementation of pre-hook.
     _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
         module, fsdp_state, state_dict, prefix
