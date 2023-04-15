@@ -1136,14 +1136,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.create_call_resume_at(self.next_instruction)
         )
 
-    def DELETE_ATTR(self, inst):
-        obj = self.pop()
-        self.output.guards.update(
-            BuiltinVariable(delattr)
-            .call_function(self, [obj, ConstantVariable(inst.argval)], {})
-            .guards
-        )
-
     def create_call_resume_at(self, offset):
         raise AssertionError(
             f"create_call_resume_at not overridden by subclass {type(self)}"
@@ -1211,25 +1203,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(
             ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
         )
-
-    def BUILD_MAP_UNPACK(self, inst):
-        items = self.popn(inst.argval)
-        # ensure everything is a dict
-        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]
-        result = dict()
-        for x in items:
-            assert isinstance(x, ConstDictVariable)
-            result.update(x.items)
-        self.push(
-            ConstDictVariable(
-                result,
-                dict,
-                mutable_local=MutableLocal(),
-                **VariableTracker.propagate(items),
-            )
-        )
-
-    BUILD_MAP_UNPACK_WITH_CALL = BUILD_MAP_UNPACK
 
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
@@ -1835,6 +1808,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
     ):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
         super().__init__(
             output=OutputGraph(
                 f_globals,
@@ -1922,7 +1896,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
     def match_nested_cell(self, name, cell):
