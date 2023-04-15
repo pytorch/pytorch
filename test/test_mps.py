@@ -1495,6 +1495,18 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(linear, linear_mps)
 
+    def test_linear_2d_bias(self):
+        device = "cpu"
+        x = torch.randn(2, 2, 2, 64, device=device)
+        linear = torch.nn.Linear(64, 4, device=device)
+        linear.bias = torch.nn.Parameter(torch.arange(8, dtype=torch.float32, device=device).reshape(2, 4))
+        y = linear(x)
+        device = "mps"
+        x_mps = x.to(device)
+        linear.to(device)
+        y_mps = linear(x_mps)
+        self.assertEqual(y, y_mps)
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
