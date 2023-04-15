@@ -357,15 +357,9 @@ class NNModuleVariable(VariableTracker):
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
-            assert is_allowed(
-                module.__class__
-            ), "Expected only allowed module forward to call here"
             # Example: `self.layer.forward(x)`
-            # This is used for explicit calling `forward` in a forward function,
-            # and self.layer is allowed module.
+            # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
-            # For not allowed module, it has been inlined before getting here,
-            # see `UserMethodVariable.call_function`.
             with self.record_nn_module_stack(tx, module):
                 return generic_call_method_helper(name)
 
