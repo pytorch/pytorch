@@ -88,13 +88,18 @@ class DSymInt:
     @classmethod
     def from_node(cls, node: fx.Node, dtensor: DTensor) -> "DSymInt":
         if node.target == aten.sym_size:
-            dim: int = node.args[1]
-            return cls(value=dtensor.size(dim), tensor=dtensor, op=node.target, dim=dim)
+            dim: int = cast(int, node.args[1])
+            return cls(
+                value=dtensor.size(dim),
+                tensor=dtensor,
+                op=cast(torch._ops.OpOverloadPacket, node.target),
+                dim=dim,
+            )
         elif node.target == aten.sym_numel:
             return cls(
                 value=dtensor.numel(),
                 tensor=dtensor,
-                op=node.target,
+                op=cast(torch._ops.OpOverloadPacket, node.target),
             )
         else:
             raise NotImplementedError(f"DSymInt does not support {node.target}")
