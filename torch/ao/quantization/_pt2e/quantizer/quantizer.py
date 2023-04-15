@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from typing import Callable, List, NamedTuple, Optional, Union
+from typing import Callable, List, NamedTuple, Optional
 
 import torch
 
@@ -82,14 +82,13 @@ def get_observer_kwargs(quant_spec: QuantizationSpec):
     return kwargs_dict
 
 
-nonetype = type(None)
 # In the absence of better name, just winging it with QuantizationConfig
 QuantizationConfig = NamedTuple(
     "QuantizationConfig",
     [
-        ("activation", Union[QuantizationSpec, nonetype]),
-        ("weight", Union[QuantizationSpec, nonetype]),
-        ("bias", Union[QuantizationSpec, nonetype]),
+        ("activation", Optional[QuantizationSpec]),
+        ("weight", Optional[QuantizationSpec]),
+        ("bias", Optional[QuantizationSpec]),
     ],
 )
 
