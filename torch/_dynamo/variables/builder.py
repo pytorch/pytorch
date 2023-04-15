@@ -1115,7 +1115,7 @@ class TrackedFake:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, TrackedFake):
-            return self.fake == other.fake and self.source.name() == other.source.name()
+            return self.fake is other.fake and self.source.name() == other.source.name()
         return False
 
 
