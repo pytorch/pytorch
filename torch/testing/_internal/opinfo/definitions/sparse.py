@@ -91,15 +91,7 @@ def sample_inputs_mul_sparse(op_info, device, dtype, requires_grad, layout, **kw
         if layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
             yield ErrorInput(
                 sample,
-                error_regex="crow_indices is supposed to be a vector, but got 2 dimensional tensor",
-            )
-        elif layout is torch.sparse_csr and t_inp.numel() == 0 and t_args[0].ndim > 0:
-            yield ErrorInput(
-                sample,
-                error_regex=(
-                    "Only tensors with two sparse dimensions can be converted to the SparseCsr layout,"
-                    " got self with 3 sparse dimensions"
-                ),
+                error_regex="crow_indices is supposed to be a vector, but got 2 dimensional tensor"
             )
         elif layout is torch.sparse_csc and t_args[0].ndim > 0:
             yield ErrorInput(
