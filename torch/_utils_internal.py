@@ -1,6 +1,10 @@
+import logging
 import os
 import sys
 import tempfile
+from typing import Any, Dict
+
+log = logging.getLogger(__name__)
 
 
 # this arbitrary-looking assortment of functionality is provided here
@@ -40,6 +44,23 @@ def prepare_multiprocessing_environment(path: str) -> None:
 
 def resolve_library_path(path: str) -> str:
     return os.path.realpath(path)
+
+
+# Meta only, see
+# https://www.internalfb.com/intern/wiki/ML_Workflow_Observability/User_Guides/Adding_instrumentation_to_your_code/
+#
+# This will cause an event to get logged to Scuba via the signposts API.  You
+# can view samples on the API at https://fburl.com/scuba/workflow_signpost/zh9wmpqs
+# we log to subsystem "torch", and the category and name you provide here.
+# Each of the arguments translate into a Scuba column.  We're still figuring
+# out local conventions in PyTorch, but category should be something like
+# "dynamo" or "inductor", and name should be a specific string describing what
+# kind of event happened.
+#
+# Killswitch is at
+# https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
+def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
+    log.info("%s %s: %r", category, name, parameters)
 
 
 TEST_MASTER_ADDR = "127.0.0.1"
