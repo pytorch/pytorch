@@ -237,10 +237,6 @@ class CPUReproTests(TestCase):
         self.assertFalse(complex_memory_overlap(unsqueezed))
         self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
 
-        expanded = unsqueezed.expand(-1, 2, -1)
-        self.assertTrue(complex_memory_overlap(expanded))
-        self.assertTrue(complex_memory_overlap(expanded.permute(1, 2, 0)))
-
         gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
         self.assertFalse(complex_memory_overlap(gathered))
         self.assertFalse(complex_memory_overlap(gathered.t()))

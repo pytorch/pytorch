@@ -2185,7 +2185,7 @@ class TestTyping(TestCase):
             self.assertFalse(issubinstance(d, t[int]))  # type: ignore[index]
 
         # dict
-        d = dict({'1': 1, '2': 2.})
+        d = {'1': 1, '2': 2.}
         self.assertTrue(issubinstance(d, Dict))
         self.assertTrue(issubinstance(d, Dict[str, T_co]))
         self.assertFalse(issubinstance(d, Dict[str, int]))
