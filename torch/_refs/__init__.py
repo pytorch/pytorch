@@ -3327,7 +3327,7 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
@@ -5429,6 +5429,31 @@ def normal(self, mean=0, std=1, generator=None):
     return std * normal_samples + mean
 
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def rad2deg(self: TensorLikeType):
+    utils.check(
+        not utils.is_complex_dtype(self.dtype),
+        lambda: "rad2deg is not supported for complex tensors.",
+    )
+    M_180_PI = 57.295779513082320876798154814105170332405472466564
+    return self * M_180_PI
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def deg2rad(self: TensorLikeType):
+    utils.check(
+        not utils.is_complex_dtype(self.dtype),
+        lambda: "deg2rad is not supported for complex tensors.",
+    )
+    M_PI_180 = 0.017453292519943295769236907684886127134428718885417
+    return self * M_PI_180
+
+
+@register_decomposition(aten.count_nonzero)
+def count_nonzero(self, dim: Optional[DimsType] = None):
+    return (self != 0).sum(dim)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5457,6 +5482,7 @@ cos_ = _make_inplace(cos)
 cosh_ = _make_inplace(cosh)
 cumsum_ = _make_inplace(cumsum)
 cumprod_ = _make_inplace(cumprod)
+deg2rad_ = _make_inplace(deg2rad)
 digamma_ = _make_inplace(digamma)
 div_ = _make_inplace(div)
 eq_ = _make_inplace(eq)
@@ -5499,6 +5525,7 @@ ne_ = _make_inplace(ne)
 neg_ = _make_inplace(neg)
 nextafter_ = _make_inplace(nextafter)
 pow_ = _make_inplace(pow)
+rad2deg_ = _make_inplace(rad2deg)
 reciprocal_ = _make_inplace(reciprocal)
 remainder_ = _make_inplace(remainder)
 rsqrt_ = _make_inplace(rsqrt)

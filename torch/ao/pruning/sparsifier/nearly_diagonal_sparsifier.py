@@ -1,11 +1,12 @@
 import torch
 
-from . import base_pruner
+from . import base_sparsifier
 
-class NearlyDiagonalPruner(base_pruner.BasePruner):
-    r"""Nearly Diagonal Pruner
 
-    This pruner creates a nearly diagonal mask to be applied to the weight matrix.
+class NearlyDiagonalSparsifier(base_sparsifier.BaseSparsifier):
+    r"""Nearly Diagonal Sparsifier
+
+    This sparsifier creates a nearly diagonal mask to be applied to the weight matrix.
     Nearly Diagonal Matrix is a matrix that contains non-zero elements near the diagonal and the rest are zero.
     An example of a nearly diagonal matrix with degree (or nearliness) 3 and 5 are follows respectively.
     1 1 0 0       1 1 1 0
@@ -14,7 +15,7 @@ class NearlyDiagonalPruner(base_pruner.BasePruner):
     0 0 1 1       0 1 1 1
     Note that a nearly diagonal matrix with degree 1 is just a matrix with main diagonal populated
 
-    This pruner is controlled by one variable:
+    This sparsifier is controlled by one variable:
     1. `nearliness` defines the number of non-zero diagonal lines that are closest to the main diagonal.
         Currently - supports only odd number
 
