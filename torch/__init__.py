@@ -1367,6 +1367,7 @@ def _assert(condition, message):
 # side effect of adding to the imported module's members for other users.
 from torch import cuda as cuda
 from torch import cpu as cpu
+from torch import mps as mps
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -1386,7 +1387,6 @@ from torch import multiprocessing as multiprocessing
 from torch import sparse as sparse
 from torch import special as special
 import torch.utils.backcompat
-from torch import onnx as onnx
 from torch import jit as jit
 from torch import linalg as linalg
 from torch import hub as hub
@@ -1590,8 +1590,6 @@ def compile(model: Optional[Callable] = None, *,
     import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
-    if torch.backends.mps.is_available():
-        backend = "aot_eager"
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
@@ -1634,6 +1632,9 @@ import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
 from torch.func import vmap
+
+# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
