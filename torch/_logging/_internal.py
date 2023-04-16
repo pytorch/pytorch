@@ -234,10 +234,7 @@ def configure_artifact_log(log):
     # set propagate to False so that this artifact is not propagated
     # to its ancestor logger
     # this artifact is only logged when explicitly enabled (occurs below)
-    if (
-        log_registry.is_off_by_default(log.artifact_name)
-        and log.getEffectiveLevel() == logging.DEBUG
-    ):
+    if log_registry.is_off_by_default(log.artifact_name):
         log.propagate = False
 
     # enable artifact logging when explicitly enabled
