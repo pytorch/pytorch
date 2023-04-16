@@ -37,39 +37,16 @@ on:
           Set the maximum (in minutes) how long the workflow should take to finish
 
 jobs:
-  # This needs to be run right before the test starts so that it can gather the
-  # latest labels from the PR
-  filter:
-    runs-on: [self-hosted, linux.large]
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
     # Also ensure that we always run with the right architecture
     defaults:
       run:
         shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -82,7 +59,6 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-      CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
     steps:
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
@@ -123,6 +99,16 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Check for keep-going label
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels.  It does not actually do any filtering.  All
+        # filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Pre-process arm64 wheels
         if: inputs.build-environment == 'macos-12-py3-arm64'
         run: |
@@ -143,6 +129,7 @@ jobs:
         env:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
         run: |
           # shellcheck disable=SC1090
           set -ex
