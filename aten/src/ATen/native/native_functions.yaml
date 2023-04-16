@@ -13075,10 +13075,16 @@
 - func: linalg_lu_factor(Tensor A, *, bool pivot=True) -> (Tensor LU, Tensor pivots)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: linalg_lu_factor
+    MPS: linalg_lu_factor_mps
 
 - func: linalg_lu_factor.out(Tensor A, *, bool pivot=True, Tensor(a!) LU, Tensor(b!) pivots) -> (Tensor(a!) LU, Tensor(b!) pivots)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: linalg_lu_factor_out
+    MPS: linalg_lu_factor_out_mps
 
 - func: linalg_lu_factor_ex(Tensor A, *, bool pivot=True, bool check_errors=False) -> (Tensor LU, Tensor pivots, Tensor info)
   python_module: linalg
@@ -13117,6 +13123,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_lu_solve_out
+    MPS: linalg_lu_solve_out_mps
 
 # linalg.det
 - func: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
@@ -13455,9 +13462,13 @@
 
 - func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
   python_module: linalg
+  #dispatch:
+  #  MPS: linalg_solve_mps
 
 - func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  #dispatch:
+  #  MPS: linalg_solve_out_mps
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg

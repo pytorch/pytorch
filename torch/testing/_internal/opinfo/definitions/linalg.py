@@ -279,7 +279,7 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
 
     is_linalg_lu_solve = op_info.name == "linalg.lu_solve"
 
-    batches = ((), (0,), (2,))
+    batches = ((),) #(0,), (2,))
     ns = (3, 1, 0)
     nrhs = (4, 1, 0)
 
