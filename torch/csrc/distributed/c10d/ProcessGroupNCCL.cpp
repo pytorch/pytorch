@@ -1407,7 +1407,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
     groupEndNonblocking(comms);
   }
 
-  coalescing_active_ = false;
+  coalescing_state_ = 0;
 
   if (coalescedDevices_.size() == 0) {
     // There is no work being coalesced
@@ -1423,7 +1423,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
 
   // Record stream event
   // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
-  // (as opposed to )
   const auto key = getKeyFromDevices(devices);
   auto& ncclStreams = ncclStreams_[key];
   for (const auto i : c10::irange(devices.size())) {
@@ -1444,7 +1443,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
     // not being able to abort hanged P2P ops.
   }
 
-  coalescing_state_ = 0;
   return work;
 }
 
