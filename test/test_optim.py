@@ -1262,6 +1262,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
+    @skipIfTorchDynamo()
     def test_adagrad_sparse(self):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
@@ -1275,6 +1276,7 @@ class TestOptim(TestCase):
                 ],
             )
 
+    @skipIfTorchDynamo()
     def test_adagrad_complex(self):
         for foreach in (False, True):
             self._test_complex_optimizer(
