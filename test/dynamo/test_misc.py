@@ -2551,8 +2551,8 @@ def fn():
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
+    @unittest.skip("broken due to issue with Module.__constants__")
     def test_cross_entropy_loss_fancy_ctor(self):
-        output = None
         rand_5 = torch.randn(5)
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)

@@ -10,6 +10,7 @@ from torch.distributed._spmd.graph_utils import (
     get_output,
     is_leaf_subgraph,
 )
+from torch.distributed._spmd.partial_lower import partial_lower
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
@@ -614,7 +615,7 @@ class IterGraphModule(nn.Module):
     data dependency for all 3 graphs.
     """
 
-    def __init__(self, main_gm: fx.GraphModule) -> None:
+    def __init__(self, main_gm: fx.GraphModule, enable_inductor: bool = False) -> None:
         super().__init__()
 
         def _copy_gm(src: fx.GraphModule, graph: fx.Graph) -> fx.GraphModule:
@@ -633,13 +634,22 @@ class IterGraphModule(nn.Module):
         self._max_iters = 0
         self._previous_output: Tuple[Any, ...] = tuple()
         self._num_extra_output = 0
+        self._is_frozen = False
+        self._enable_inductor = enable_inductor
 
     def setup(self, max_iters: int = 0) -> None:
         """
-        This method is used to tell IterGraphModule the iterations to train so
-        that IterGraphModule knows which iteration is the last one and can do
-        proper cleanup.
+        Must be called before the forward() is called. This method setups
+        the internal states and also get the signal from users that what
+        is the maximum iteration count.
         """
+        if not self._is_frozen:
+            self.graph.freeze_cross_iter_movement()
+            self._num_extra_output = self.graph.num_extra_output
+            if self._enable_inductor:
+                self.main_gm = partial_lower(self.main_gm)
+            self._is_frozen = True
+
         # TODO: There are cases where max_iters is not known or not precise,
         # e.g., data is depleted. One suggestion from the reviewer is to
         # add one extra argument to forward(..., last_iter: bool = False) to
@@ -694,6 +704,7 @@ class IterGraphModule(nn.Module):
         return self.main_gm.recompile()
 
     def freeze_cross_iter_movement(self) -> None:
+        # TODO: remove this API once it is not used.
         self.graph.freeze_cross_iter_movement()
         self._num_extra_output = self.graph.num_extra_output
 

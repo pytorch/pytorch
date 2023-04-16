@@ -90,16 +90,15 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
 
         # do this stuff in constructor to lower overhead slightly
-        if skipfiles.check(inspect.getsourcefile(self._orig_mod.forward)):
+        if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
+            inspect.getsourcefile(self._orig_mod.forward)
+        ):
             # this is likely a torch.nn.* instance in skipfiles.py
             # workaround to add an extra frame we can capture
             self._optimized_call = self.dynamo_ctx(external_utils.wrap_inline(mod))
-            self.forward = self.dynamo_ctx(external_utils.wrap_inline(mod.forward))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
             self._optimized_call = self.dynamo_ctx(mod.__call__)
-            # If the user calls forward directly they skip hooks (same as eager)
-            self.forward = self.dynamo_ctx(mod.forward)
 
         # these are needed for some tests to work
         self.named_parameters = mod.named_parameters
@@ -142,6 +141,13 @@ class OptimizedModule(torch.nn.Module):
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._optimized_call(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        log.warning(
+            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
+            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
+        )
+        return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
 def remove_from_cache(f):
