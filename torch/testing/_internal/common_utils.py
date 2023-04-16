@@ -1148,13 +1148,6 @@ def skipIfRocmVersionLessThan(version=None):
         return wrap_fn
     return dec_fn
 
-# Temporary function to simplify adding support to 3.11
-def xfailIfPython311(fn):
-    if sys.version_info < (3, 11):
-        return fn
-    else:
-        return unittest.expectedFailure(fn)
-
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1807,7 +1800,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
     if TEST_SKIP_FAST:
-        if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 
