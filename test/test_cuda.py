@@ -1699,6 +1699,15 @@ except RuntimeError as e:
         self.assertEqual(before0, after0, atol=0, rtol=0)
         self.assertEqual(before1, after1, atol=0, rtol=0)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_get_set_rng_state_offset(self):
+        before = torch.cuda.get_rng_state()
+        torch.cuda.set_rng_state_offset(100)
+        after = torch.cuda.get_rng_state()
+        offset = after[8:].view(dtype=torch.int64)
+        torch.cuda.set_rng_state(before)
+        self.assertEqual(offset, 100)
+
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
