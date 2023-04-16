@@ -1200,15 +1200,17 @@ def wrap_to_fake_tensor_and_record(
                     # disagrees with the current static size, replace it with None. E.g., {“x”: [2, 3]} -> {“x”: [2, None]}
                     for i, curr_dim in enumerate(curr_sizes):
                         new_dim = e.size()[i]
-                        if new_dim != curr_dim:
-                            log.debug(
-                                "Registered dynamic dim for %s due to size change change %s->%s at dim %s",
-                                name,
-                                curr_dim,
-                                new_dim,
-                                i,
-                            )
-                            curr_sizes[i] = None
+                        # None is fine here, we could have seen this and marked it dynamic prior.
+                        if curr_dim is not None:
+                            if new_dim != curr_dim:
+                                log.debug(
+                                    "Registered dynamic dim for %s due to size change change %s->%s at dim %s",
+                                    name,
+                                    curr_dim,
+                                    new_dim,
+                                    i,
+                                )
+                                curr_sizes[i] = None
 
         tx.output.frame_state[name] = curr_sizes
 
