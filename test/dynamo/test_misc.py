@@ -2551,7 +2551,8 @@ def fn():
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
-    @unittest.skip("broken due to issue with Module.__constants__")
+    # requires_static_shapes due to: https://github.com/pytorch/pytorch/issues/99250
+    @requires_static_shapes
     def test_cross_entropy_loss_fancy_ctor(self):
         rand_5 = torch.randn(5)
         rand_3_5 = torch.randn(3, 5)
@@ -2573,7 +2574,6 @@ def fn():
         self.assertTrue(torch.allclose(dynamo_output, output))
 
     def test_cross_entropy_loss_simple_ctor(self):
-        output = None
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)
 
