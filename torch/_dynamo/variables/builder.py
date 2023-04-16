@@ -4,12 +4,15 @@ import dataclasses
 import enum
 import functools
 import inspect
+
+import logging
 import operator
 import re
 import types
 from typing import Any, List, NamedTuple, Optional, Union
 
 import torch
+import torch._logging
 
 from torch import SymInt
 from torch._guards import GuardSource
@@ -105,6 +108,7 @@ from .torch import (
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
+log = logging.getLogger(__name__)
 
 DimList = List
 
@@ -1176,18 +1180,34 @@ def wrap_to_fake_tensor_and_record(
             # If there is no entry for this source, add the tensor to frame state with its current static size.
             # E.g., {} -> {“x”: [2, 4]}
             curr_sizes = list(e.size())
+            log.debug("Registered static shapes %s for %s", curr_sizes, name)
         else:
             curr_sizes = tx.output.frame_state[name]
             if curr_sizes is not None:
+                curr_ndim = len(curr_sizes)
                 if e.ndim != len(curr_sizes):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
                     # E.g. {“x”: [2, 3, 4]} -> {“x”: None}
                     curr_sizes = None
+                    log.debug(
+                        "Registered fully dynamic shape for %s due to ndim change %s->%s",
+                        name,
+                        curr_ndim,
+                        e.ndim,
+                    )
                 else:
                     # If there is already an entry, and the dim matches, for every size in the frame state which
                     # disagrees with the current static size, replace it with None. E.g., {“x”: [2, 3]} -> {“x”: [2, None]}
-                    for i, dim in enumerate(curr_sizes):
-                        if e.size()[i] != dim:
+                    for i, curr_dim in enumerate(curr_sizes):
+                        new_dim = e.size()[i]
+                        if new_dim != curr_dim:
+                            log.debug(
+                                "Registered dynamic dim for %s due to size change change %s->%s at dim %s",
+                                name,
+                                curr_dim,
+                                new_dim,
+                                i,
+                            )
                             curr_sizes[i] = None
 
         tx.output.frame_state[name] = curr_sizes
@@ -1224,7 +1244,6 @@ def wrap_to_fake_tensor_and_record(
 
                 # NB: both static and dynamic have precedence over
                 automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
-
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints

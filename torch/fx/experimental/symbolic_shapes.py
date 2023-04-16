@@ -1945,10 +1945,10 @@ class ShapeEnv:
                     msg = f"  {len(error_msgs) + 1}. {msg()}"
                     error_msgs.append(msg)
             if len(error_msgs) > 0:
-                log.warning("Warning only constraints violated %s", warn_msgs)
+                log.info("Warning only constraints violated %s", warn_msgs)
                 raise ConstraintViolationError(f"Constraints violated!\n{error_msgs}")
             elif len(warn_msgs) > 0:
-                log.warning("%s Warning only constraints violated", len(warn_msgs))
+                log.info("%s Warning only constraints violated", len(warn_msgs))
 
         return exprs
 
