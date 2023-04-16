@@ -114,6 +114,10 @@ static void pool2d_template(const Tensor& input,
                      outputWidth,
                      memory_format);
 
+  if (input.numel() == 0) {
+    return;
+  }
+
   auto output_memory_format = output.suggest_memory_format();
   // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors
   // by simply restriding them (instead of calling the costly Contiguous()).
