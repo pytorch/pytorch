@@ -270,10 +270,10 @@ void slow_conv2d_backward(
           'n', 't',
           n, m, k,
           scalar_t(1),
-          grad_output_n.data_ptr<scalar_t>(), n,
-          weight.data_ptr<scalar_t>(), m,
+          grad_output_n.const_data_ptr<scalar_t>(), n,
+          weight.const_data_ptr<scalar_t>(), m,
           scalar_t(0),
-          grad_columns.data_ptr<scalar_t>(), n
+          grad_columns.mutable_data_ptr<scalar_t>(), n
       );
 
       // Unpack columns back into input:
