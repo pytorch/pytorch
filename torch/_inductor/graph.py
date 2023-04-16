@@ -324,15 +324,10 @@ class GraphLowering(torch.fx.Interpreter):
             self.graph_inputs[target] = expr
             return expr
         assert isinstance(example, torch.Tensor), example
-        # todo(chilli): We can remove the last check once we turn buffers into
-        # static shape tensors. That's a hack to workaround Inductor believing
-        # the buffer should be static but us passing in a fake tensor with
-        # symbolic shapes.
         if (
             config.static_weight_shapes
             and (
                 len(self.graph_inputs) < self.num_static_inputs
-                or not dynamo_config.dynamic_shapes
             )
             and not example._has_symbolic_sizes_strides
         ):
