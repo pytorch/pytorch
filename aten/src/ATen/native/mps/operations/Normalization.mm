@@ -1,14 +1,17 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/native_batch_norm.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -384,27 +387,26 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
                                                   double epsilon) {
   const auto memory_format = self.suggest_memory_format();
 
-  auto output =
-      at::native::empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
+  auto output = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
 
   int64_t n_input = self.size(1);
 
-  auto save_mean = at::native::empty_mps({n_input},
-                                         self.scalar_type(),
-                                         // TODO: Accumulate type?
-                                         // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
-                                         c10::nullopt,
-                                         kMPS,
-                                         c10::nullopt,
-                                         c10::nullopt);
-  auto save_var = at::native::empty_mps({n_input},
-                                        self.scalar_type(),
-                                        // TODO: Accumulate type?
-                                        // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
-                                        c10::nullopt,
-                                        kMPS,
-                                        c10::nullopt,
-                                        c10::nullopt);
+  auto save_mean = at::empty({n_input},
+                             self.scalar_type(),
+                             // TODO: Accumulate type?
+                             // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
+                             c10::nullopt,
+                             kMPS,
+                             c10::nullopt,
+                             c10::nullopt);
+  auto save_var = at::empty({n_input},
+                            self.scalar_type(),
+                            // TODO: Accumulate type?
+                            // at::toAccumulateType(self.scalar_type(), /*is_cuda=*/false),
+                            c10::nullopt,
+                            kMPS,
+                            c10::nullopt,
+                            c10::nullopt);
 
   at::native::batch_norm_mps_out(self,
                                  weight_opt,
@@ -502,25 +504,24 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   const auto memory_format = input.suggest_memory_format();
 
   if (grad_input_mask[0]) {
-    grad_input =
-        at::native::empty_mps(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
+    grad_input = at::empty(input.sizes(), input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
   }
   // Assuming that if grad_input_mask of weight is 1, then the weight is available
   if (grad_input_mask[1]) {
-    grad_weight = at::native::empty_mps(weight_opt.value().sizes(),
-                                        weight_opt.value().scalar_type(),
-                                        c10::nullopt,
-                                        kMPS,
-                                        c10::nullopt,
-                                        at::MemoryFormat::Contiguous);
+    grad_weight = at::empty(weight_opt.value().sizes(),
+                            weight_opt.value().scalar_type(),
+                            c10::nullopt,
+                            kMPS,
+                            c10::nullopt,
+                            at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::native::empty_mps(weight_opt.value().sizes(),
-                                      weight_opt.value().scalar_type(),
-                                      c10::nullopt,
-                                      kMPS,
-                                      c10::nullopt,
-                                      at::MemoryFormat::Contiguous);
+    grad_bias = at::empty(weight_opt.value().sizes(),
+                          weight_opt.value().scalar_type(),
+                          c10::nullopt,
+                          kMPS,
+                          c10::nullopt,
+                          at::MemoryFormat::Contiguous);
   }
 
   namespace native_mps = at::native::mps;
@@ -585,7 +586,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
         std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
-        [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input);
+        [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + native_mps::getMPSTypeString(input);
     auto input_mps_dtype = native_mps::getMPSDataType(input);
     CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
 
@@ -815,7 +816,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     if (grad_input_mask[1])
       gradWeightPlaceholder = native_mps::Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
     auto gradBiasPlaceholder = native_mps::Placeholder();
-    ;
+
     if (grad_input_mask[2])
       gradBiasPlaceholder = native_mps::Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
 
@@ -931,40 +932,40 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::native::empty_like(*X,
-                                        c10::nullopt /* dtype */,
-                                        c10::nullopt /* layout */,
-                                        kMPS /* device */,
-                                        c10::nullopt /* pin_memory */,
-                                        at::MemoryFormat::Contiguous);
+    grad_input = at::empty_like(*X,
+                                c10::nullopt /* dtype */,
+                                c10::nullopt /* layout */,
+                                kMPS /* device */,
+                                c10::nullopt /* pin_memory */,
+                                at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    grad_weight = M > 0 ? at::native::empty_like(*gamma,
-                                                 c10::nullopt /* dtype */,
-                                                 c10::nullopt /* layout */,
-                                                 kMPS /* device */,
-                                                 c10::nullopt /* pin_memory */,
-                                                 at::MemoryFormat::Contiguous)
-                        : at::native::zeros_like(*gamma,
-                                                 c10::nullopt /* dtype */,
-                                                 c10::nullopt /* layout */,
-                                                 kMPS /* device */,
-                                                 c10::nullopt /* pin_memory */,
-                                                 at::MemoryFormat::Contiguous);
+    grad_weight = M > 0 ? at::empty_like(*gamma,
+                                         c10::nullopt /* dtype */,
+                                         c10::nullopt /* layout */,
+                                         kMPS /* device */,
+                                         c10::nullopt /* pin_memory */,
+                                         at::MemoryFormat::Contiguous)
+                        : at::zeros_like(*gamma,
+                                         c10::nullopt /* dtype */,
+                                         c10::nullopt /* layout */,
+                                         kMPS /* device */,
+                                         c10::nullopt /* pin_memory */,
+                                         at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = M > 0 ? at::native::empty_like(*beta,
-                                               c10::nullopt /* dtype */,
-                                               c10::nullopt /* layout */,
-                                               kMPS /* device */,
-                                               c10::nullopt /* pin_memory */,
-                                               at::MemoryFormat::Contiguous)
-                      : at::native::zeros_like(*beta,
-                                               c10::nullopt /* dtype */,
-                                               c10::nullopt /* layout */,
-                                               kMPS /* device */,
-                                               c10::nullopt /* pin_memory */,
-                                               at::MemoryFormat::Contiguous);
+    grad_bias = M > 0 ? at::empty_like(*beta,
+                                       c10::nullopt /* dtype */,
+                                       c10::nullopt /* layout */,
+                                       kMPS /* device */,
+                                       c10::nullopt /* pin_memory */,
+                                       at::MemoryFormat::Contiguous)
+                      : at::zeros_like(*beta,
+                                       c10::nullopt /* dtype */,
+                                       c10::nullopt /* layout */,
+                                       kMPS /* device */,
+                                       c10::nullopt /* pin_memory */,
+                                       at::MemoryFormat::Contiguous);
   }
   if (M > 0) {
     namespace native_mps = at::native::mps;

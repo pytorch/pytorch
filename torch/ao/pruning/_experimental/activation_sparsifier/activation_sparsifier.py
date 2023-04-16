@@ -302,7 +302,7 @@ class ActivationSparsifier:
 
     def squash_mask(self, attach_sparsify_hook=True, **kwargs):
         """
-        Unregisters aggreagate hook that was applied earlier and registers sparsification hooks if
+        Unregisters aggregate hook that was applied earlier and registers sparsification hooks if
         attach_sparsify_hook = True.
         """
         for name, configs in self.data_groups.items():
