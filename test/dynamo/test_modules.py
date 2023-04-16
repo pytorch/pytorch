@@ -679,6 +679,24 @@ class CallForwardDirectly(torch.nn.Module):
         return x
 
 
+class ConvCallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+
+    def forward(self, x):
+        return self.layer.forward(x)
+
+
+class ConvTransposeCallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.ConvTranspose2d(4, 4, 4)
+
+    def forward(self, x):
+        return self.layer.forward(x)
+
+
 class ModuleNameString(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1236,6 +1254,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
         graph, _ = torch._dynamo.export(mod, rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
+    def test_conv_call_forward_directly(self):
+        m = ConvCallForwardDirectly()
+        x = torch.rand([4, 3, 9, 9])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_transpose_call_forward_directly(self):
+        m = ConvTransposeCallForwardDirectly()
+        x = torch.rand([4, 4, 4, 4])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
 
 class MockModule(torch.nn.Module):
