@@ -188,7 +188,10 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName, IS_ARM64
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+    IS_ARM64,
+)
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
