@@ -183,15 +183,21 @@ compute_internal(
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t, bool is_3d>
 void cpu_max_pool(
     const Tensor& output_,
     const Tensor& indices_,
     const Tensor& input_,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH) {
+    int kW, int kH, c10::optional<int> opt_kD,
+    int dW, int dH, c10::optional<int> opt_dD,
+    int padW, int padH, c10::optional<int> opt_padD,
+    int dilationW, int dilationH, c10::optional<int> opt_dilationD) {
+  TORCH_CHECK(is_3d == (opt_kD.has_value() && opt_dD.has_value() && opt_padD.has_value() && opt_dilationD.has_value()),
+              "max pooling 2d/3d are not matched");
+  int kD = opt_kD.has_value() ? *opt_kD : 1;
+  int dD = opt_dD.has_value() ? *opt_dD : 1;
+  int padD = opt_padD.has_value() ? *opt_padD : 0;
+  int dilationD = opt_dilationD.has_value() ? *opt_dilationD : 1;
   auto input = input_.contiguous();
   auto output = output_.contiguous();
   auto indices = indices_.contiguous();
@@ -200,95 +206,30 @@ void cpu_max_pool(
   auto output_data = output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
-  int64_t numel = output.numel();
   int64_t ndim = input.ndimension();
   // treat batch size and channels as one dimension
-  int64_t channels = ndim == 3 ? input.size(0) : input.size(0) * input.size(1);
-  int64_t input_height = input.size(-2);
-  int64_t input_width = input.size(-1);
-  int64_t output_height = output.size(-2);
-  int64_t output_width = output.size(-1);
-
-  // parallel on dim N, C, H, W
-  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
-    int64_t c = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
-    data_index_init(begin, c, channels, oh, output_height, ow, output_width);
-
-    for (const auto i : c10::irange(begin, end)) {
-      int64_t ih0 = oh * dH - padH;
-      int64_t iw0 = ow * dW - padW;
-      int64_t ih1 = std::min(ih0 + (kH - 1) * dilationH + 1, input_height);
-      int64_t iw1 = std::min(iw0 + (kW - 1) * dilationW + 1, input_width);
-      while(ih0 < 0) { ih0 += dilationH; }
-      while(iw0 < 0) { iw0 += dilationW; }
-
-      // local pointers
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
-
-      // compute local max
-      int64_t maxindex = ih0 * input_width + iw0;
-      accscalar_t maxval = -std::numeric_limits<accscalar_t>::infinity();
-      for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
-        for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
-          int64_t index = ih * input_width + iw;
-          accscalar_t val = accscalar_t(input_ptr[index]);
-          if ((val > maxval) || std::isnan(val)) {
-            maxval = val;
-            maxindex = index;
-          }
-        }
-      }
-
-      // set output to local max and store location of max
-      output_data[i] = scalar_t(maxval);
-      indices_data[i] = maxindex;
-
-      // move on to next output index
-      data_index_step(c, channels, oh, output_height, ow, output_width);
-    }
-  });
-
-  if (!output_.is_contiguous()) {
-    output_.copy_(output);
-  }
-  if (!indices_.is_contiguous()) {
-    indices_.copy_(indices);
-  }
-}
-
-template <typename scalar_t, typename accscalar_t>
-void cpu_max_pool_3d(
-    const Tensor& output_,
-    const Tensor& indices_,
-    const Tensor& input_,
-    int kW, int kH, int kD,
-    int dW, int dH, int dD,
-    int padW, int padH, int padD,
-    int dilationW, int dilationH, int dilationD) {
-  auto input = input_.contiguous();
-  auto output = output_.contiguous();
-  auto indices = indices_.contiguous();
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
-
+  //
+  // MaxPool2d:
+  //   ndim == 3: CHW
+  //   ndim == 4: NCHW
+  //
   // MaxPool3d:
   //   ndim == 4: CDHW
   //   ndim == 5: NCDHW
-
-  int64_t ndim = input.ndimension();
   int64_t channels;
-  channels = ndim == 4 ? input.size(0) : input.size(0) * input.size(1);
-  int64_t input_depth = input.size(-3);
+  if (is_3d) {
+    channels = ndim == 4 ? input.size(0) : input.size(0) * input.size(1);
+  } else {
+    channels = ndim == 3 ? input.size(0) : input.size(0) * input.size(1);
+  }
+  int64_t input_depth = is_3d ? input.size(-3) : 1;
   int64_t input_height = input.size(-2);
   int64_t input_width = input.size(-1);
-  int64_t output_depth = output.size(-3);
+  int64_t output_depth = is_3d ? output.size(-3) : 1;
   int64_t output_height = output.size(-2);
   int64_t output_width = output.size(-1);
 
+  using accscalar_t = at::opmath_type<scalar_t>;
   // parallel on dim N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (int64_t c = begin; c < end; c++) {
@@ -345,125 +286,50 @@ void cpu_max_pool_3d(
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+
+template <typename scalar_t, bool is_3d>
 void cpu_max_pool_channels_last(
     const Tensor& output_,
     const Tensor& indices_,
     const Tensor& input_,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH) {
-  TORCH_CHECK(input_.ndimension() == 4,
-              "max pooling with channels last format supports tensors with 4 dims");
-  auto memory_format = at::MemoryFormat::ChannelsLast;
-  auto input = input_.contiguous(memory_format);
-  auto output = output_.contiguous(memory_format);
-  auto indices = indices_.contiguous(memory_format);
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
-
-  int64_t nbatch = input.size(0);
-  int64_t channels = input.size(1);
-  int64_t input_height = input.size(2);
-  int64_t input_width = input.size(3);
-  int64_t output_height = output.size(2);
-  int64_t output_width = output.size(3);
-
-  using Vec = vec::Vectorized<scalar_t>;
-  using integer_t = vec::int_same_size_t<accscalar_t>;
-  // for the convience of vectorization, use integer of the same size of scalar_t,
-  //   e.g. int32_t for float, int64_t for double
-  // need to make sure doesn't overflow
-  TORCH_CHECK(input_height * input_width <= std::numeric_limits<integer_t>::max());
-
-  // parallel on dim N, H, W
-  at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
-    int64_t n = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
-    data_index_init(begin, n, nbatch, oh, output_height, ow, output_width);
-
-    int64_t size = channels;
-    int64_t len = size - (size % Vec::size());
-    // temp buffer holding index with integer_t
-    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
-    integer_t * index_ptr = index_buffer.get();
-    // temp buffer holding max value with accscalar_t
-    std::unique_ptr<accscalar_t []> max_arr;
-    accscalar_t* max_ptr = nullptr;
-    if (!std::is_same<scalar_t, accscalar_t>::value) {
-      max_arr = std::make_unique<accscalar_t[]>(size);
-      max_ptr = max_arr.get();
-    }
-    for (const auto i : c10::irange(begin, end)) {
-      int64_t ih0 = oh * dH - padH;
-      int64_t iw0 = ow * dW - padW;
-      int64_t ih1 = std::min(ih0 + (kH - 1) * dilationH + 1, input_height);
-      int64_t iw1 = std::min(iw0 + (kW - 1) * dilationW + 1, input_width);
-      while(ih0 < 0) { ih0 += dilationH; }
-      while(iw0 < 0) { iw0 += dilationW; }
-
-      scalar_t* out = output_data + i * channels;
-      int64_t* ind = indices_data + i * channels;
-
-      compute_internal(input_data, out, max_ptr, index_ptr, ind, int64_t(1), input_height, input_width, channels,
-                        n, len, size, int64_t(0), int64_t(1), ih0, ih1, iw0, iw1,
-                        int64_t(1), dilationH, dilationW);
-
-      // convert indice data type
-      vec::convert<integer_t, int64_t>(index_buffer.get(), ind, len);
-
-      // move on to next output index
-      data_index_step(n, nbatch, oh, output_height, ow, output_width);
-    }
-  });
-
-  if (!output_.is_contiguous(memory_format)) {
-    output_.copy_(output);
-  }
-  if (!indices_.is_contiguous(memory_format)) {
-    indices_.copy_(indices);
-  }
-}
-
-
-template <typename scalar_t, typename accscalar_t>
-void cpu_max_pool_channels_last_3d(
-    const Tensor& output_,
-    const Tensor& indices_,
-    const Tensor& input_,
-    int kW, int kH, int kD,
-    int dW, int dH, int dD,
-    int padW, int padH, int padD,
-    int dilationW, int dilationH, int dilationD) {
+    int kW, int kH, c10::optional<int> opt_kD,
+    int dW, int dH, c10::optional<int> opt_dD,
+    int padW, int padH, c10::optional<int> opt_padD,
+    int dilationW, int dilationH, c10::optional<int> opt_dilationD) {
+  TORCH_CHECK(is_3d == (opt_kD.has_value() && opt_dD.has_value() && opt_padD.has_value() && opt_dilationD.has_value()),
+              "max pooling 2d/3d are not matched");
   int64_t ndim = input_.ndimension();
-
-  TORCH_CHECK(ndim == 5, "MaxPool3d with channels last format supports tensors with 5 dims");
-
-  auto memory_format = at::MemoryFormat::ChannelsLast3d;
-  auto input = input_.contiguous(memory_format);
-  auto output = output_.contiguous(memory_format);
-  auto indices = indices_.contiguous(memory_format);
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto output_data = output.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
-
   // MaxPool2d: NHWC
   // MaxPool3d: NDHWC
+  if (is_3d) {
+    TORCH_CHECK(ndim == 5, "max pooling 3d with channels last format supports tensors with 5 dims");
+  } else {
+    TORCH_CHECK(ndim == 4, "max pooling 2d with channels last format supports tensors with 4 dims");
+  }
+  int kD = opt_kD.has_value() ? *opt_kD : 1;
+  int dD = opt_dD.has_value() ? *opt_dD : 1;
+  int padD = opt_padD.has_value() ? *opt_padD : 0;
+  int dilationD = opt_dilationD.has_value() ? *opt_dilationD : 1;
+
+  auto memory_format = is_3d ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+  auto input = input_.contiguous(memory_format);
+  auto output = output_.contiguous(memory_format);
+  auto indices = indices_.contiguous(memory_format);
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+  auto indices_data = indices.data_ptr<int64_t>();
+
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
-  int64_t input_depth = input.size(2);
+  int64_t input_depth = is_3d ? input.size(-3) : 1;
   int64_t input_height = input.size(-2);
   int64_t input_width = input.size(-1);
-  int64_t output_depth = output.size(2);
+  int64_t output_depth = is_3d ? output.size(-3) : 1;
   int64_t output_height = output.size(-2);
   int64_t output_width = output.size(-1);
 
+  using accscalar_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   using integer_t = vec::int_same_size_t<accscalar_t>;
   // for the convience of vectorization, use integer of the same size of scalar_t,
@@ -666,15 +532,15 @@ void max_pool2d_kernel_impl(
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool2d", [&] {
-        using param_t = at::opmath_type<scalar_t>;
-        cpu_max_pool<scalar_t, /*accscalar_t*/param_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        cpu_max_pool<scalar_t, /*is 3d*/false>(output, indices, input,
+            kW, kH, nullopt, dW, dH, nullopt, padW, padH, nullopt, dilationW, dilationH, nullopt);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
       AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool2d_channels_last", [&] {
-        using param_t = at::opmath_type<scalar_t>;
-        cpu_max_pool_channels_last<scalar_t, param_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        cpu_max_pool_channels_last<scalar_t, /*is 3d*/false>(output, indices, input,
+            kW, kH, nullopt, dW, dH, nullopt, padW, padH, nullopt, dilationW, dilationH, nullopt);
       });
       break;
     }
@@ -694,16 +560,14 @@ void max_pool3d_kernel_impl(
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d", [&] {
-        using param_t = at::opmath_type<scalar_t>;
-        cpu_max_pool_3d<scalar_t, /*accscalar_t*/param_t>(output, indices, input,
+        cpu_max_pool<scalar_t, /*is 3d*/true>(output, indices, input,
             kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast3d: {
       AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d_channels_last", [&] {
-        using param_t = at::opmath_type<scalar_t>;
-        cpu_max_pool_channels_last_3d<scalar_t, param_t>(output, indices, input,
+        cpu_max_pool_channels_last<scalar_t, /*is 3d*/true>(output, indices, input,
           kW, kH, kD, dW, dH, dD, padW, padH, padD, dilationW, dilationH, dilationD);
       });
       break;
