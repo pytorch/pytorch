@@ -85,9 +85,6 @@ def mps_ops_grad_modifier(ops):
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
 
-        # Correctness issues
-        'atanh': [torch.float32],
-
         # Random output
         'exponential': [torch.float16, torch.float32],
 

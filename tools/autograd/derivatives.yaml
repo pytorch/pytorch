@@ -306,7 +306,7 @@
   self: not_implemented("inplace version of asinh")
 
 - name: atanh(Tensor self) -> Tensor
-  self: grad * 1 / (1 - self.pow(2)).conj()
+  self: grad / (1 - self * self).conj()
   result: auto_element_wise
 
 - name: atanh_(Tensor(a!) self) -> Tensor(a!)
