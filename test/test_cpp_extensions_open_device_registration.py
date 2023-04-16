@@ -150,6 +150,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             test_tensor = torch.empty(4, 4, dtype=tt, device=device)
             self.assertTrue(test_tensor.type() == dt)
 
+        # check whether the attributes and methods of the corresponding custom backend are generated correctly
+        torch.utils.rename_privateuse1_backend('foo')
+        torch.utils.generate_methods_for_privateuse1_backend()
+        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
+            torch.utils.generate_methods_for_privateuse1_backend()
+
+        x = torch.empty(4, 4)
+        self.assertFalse(x.is_foo)
+        x = x.foo()
+        self.assertTrue(x.is_foo)
+        self.assertTrue(hasattr(torch.nn.Module, 'foo'))
+
     def test_open_device_random(self):
         torch.utils.rename_privateuse1_backend('foo')
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
@@ -162,6 +174,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         with torch.random.fork_rng(device_type="foo"):
             pass
+
 
 if __name__ == "__main__":
     common.run_tests()

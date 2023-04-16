@@ -25,12 +25,13 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides, pattern_matcher
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
+from .fx_passes.post_grad import post_grad_passes
+from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .mkldnn import convert_outplace_to_inplace
 from .utils import (
     developer_warning,
     get_dtype_size,
@@ -199,7 +200,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        pattern_matcher.post_grad_passes(gm)
+        post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -654,9 +655,7 @@ def compile_fx(
 
         # Since handle_dynamo_export_graph will trigger compile_fx again,
         # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_, example_inputs_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -683,10 +682,6 @@ def compile_fx(
             joint_graph_passes(model)
 
         fixed = len(example_inputs) - num_example_inputs
-        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
-        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
-        # implementation is used if available.
-        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
