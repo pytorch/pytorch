@@ -879,9 +879,7 @@ class VariableBuilder:
                     curr_size = value
                 else:
                     curr_size = self.tx.output.frame_state[name]
-                    if curr_size is not None and curr_size == value:
-                        pass
-                    else:
+                    if curr_size != value:
                         curr_size = None
                 self.tx.output.frame_state[name] = curr_size
 
