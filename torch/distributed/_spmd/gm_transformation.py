@@ -17,6 +17,7 @@ from torch.distributed._spmd.graph_optimization import (
 )
 from torch.distributed._spmd.graph_utils import dump_graphs_to_files, OP
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
+from torch.distributed._spmd.partial_lower import partial_lower
 from torch.utils._pytree import tree_flatten
 
 
@@ -123,13 +124,11 @@ class GraphModuleTransformation:
         *,
         enable_graph_optimization: bool = False,
         enable_inductor: bool = False,
-        enable_cudagraphs: bool = False,
         dump_graphs: bool = False,
     ) -> None:
         self.num_iters = num_iters
         self.enable_graph_optimization = enable_graph_optimization
         self.enable_inductor = enable_inductor
-        self.enable_cudagraphs = enable_cudagraphs
         self.dump_graphs = dump_graphs
 
     def __call__(self, gm: fx.GraphModule) -> Callable:
@@ -158,6 +157,6 @@ class GraphModuleTransformation:
             )
 
         if self.enable_inductor:
-            iter_gm.main_gm = lower_to_inductor(iter_gm.main_gm, self.enable_cudagraphs)
+            iter_gm.main_gm = partial_lower(iter_gm.main_gm)
 
         return iter_gm

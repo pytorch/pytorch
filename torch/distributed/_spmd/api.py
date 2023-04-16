@@ -466,8 +466,6 @@ def _compile(
 
     named_states = {}
     if opt is not None:
-        opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
