@@ -1,12 +1,15 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/mm.h>
+#endif
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -19,7 +22,7 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
 
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
-  auto output = at::native::empty_mps({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  auto output = at::empty({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -116,7 +119,7 @@ Tensor& addmv_out_mps_impl(const Tensor& self,
   mps::MPSGraphCache* cache_ = mps::MPSGraphCache::getInstance();
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
-  Tensor matMulVec = mm(mat, vec.unsqueeze(1)).squeeze(1);
+  Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {
     string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" + to_string(beta_.toDouble()) +
