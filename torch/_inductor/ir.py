@@ -3748,7 +3748,8 @@ class StorageBox(MutableBox):
         """
         if (
             isinstance(self.data, (Pointwise, Reduction))
-            and self.num_non_scalar_tensor_read() > 1
+            and self.num_reads() > 1
+            and self.check_non_scalar_tensor_num_reads()
         ):
             self.realize()
 
@@ -3804,14 +3805,9 @@ class StorageBox(MutableBox):
         return len(read_writes.reads)
 
     @cache_on_self
-    def num_non_scalar_tensor_read(self):
+    def check_non_scalar_tensor_num_reads(self):
         data = self.data
-        if isinstance(data, (InputsKernel, InputBuffer, ReinterpretView)):
-            return 1
-        if isinstance(data, ComputedBuffer):
-            read_writes = data.get_read_writes()
-        else:
-            assert isinstance(data, (Pointwise, Reduction)), type(data)
+        if isinstance(data, Pointwise):
             read_writes = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
@@ -3821,15 +3817,18 @@ class StorageBox(MutableBox):
                 ),
                 data=data,
             ).get_read_writes()
-        num_of_scalar_tensor = 0
-        for read in read_writes.reads:
-            if (
-                len(read.index.free_symbols) == 0
-                and (read.index.is_Integer)
-                and (read.index == 0)
-            ):
-                num_of_scalar_tensor += 1
-        return len(read_writes.reads) - num_of_scalar_tensor
+            num_of_scalar_tensor = 0
+            for read in read_writes.reads:
+                if (
+                    len(read.index.free_symbols) == 0
+                    and (read.index.is_Integer)
+                    and (read.index == 0)
+                ):
+                    num_of_scalar_tensor += 1
+            return (len(read_writes.reads) - num_of_scalar_tensor) > 1
+        else:
+            # Skip the check for non Pointwise
+            return True
 
 
 class InterpreterShim(torch.fx.Interpreter):
