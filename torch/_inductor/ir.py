@@ -13,7 +13,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Un
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer
+from sympy import Expr, Integer, simplify
 
 import torch._dynamo.config as dynamo_config
 import torch._logging
@@ -86,27 +86,27 @@ In these cases, the underlying StorageBox/Buffer will be shared with the pre-vie
 
 
 def validate_ir(node_or_nodes):
-    def _check_tensorbox(node):
+    def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        assert isinstance(
-            node,
-            (
-                DynamicScalar,
-                TensorBox,
-                RandSeedBuffer,
-                sympy.Symbol,
-                sympy.core.relational.Relational,
-                Expr,
-            ),
-        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+        if isinstance(nodes, (List, Tuple)):
+            for node in nodes:
+                _check_tensorbox(node)
+        else:
+            assert isinstance(
+                nodes,
+                (
+                    DynamicScalar,
+                    TensorBox,
+                    RandSeedBuffer,
+                    sympy.Symbol,
+                    sympy.core.relational.Relational,
+                    Expr,
+                ),
+            ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
     # Be picky about the accepted data structure (don't use pytree here)
-    if isinstance(node_or_nodes, (List, Tuple)):
-        for node in node_or_nodes:
-            _check_tensorbox(node)
-    else:
-        _check_tensorbox(node_or_nodes)
+    _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -201,7 +201,9 @@ class ModularIndexing(sympy.Function):
         if divisor != 1:
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
-                return ModularIndexing(base / gcd, divisor / gcd, modulus)
+                return ModularIndexing(
+                    simplify(base / gcd), simplify(divisor / gcd), modulus
+                )
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -641,13 +643,14 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
         num_inner = 0
         for i in indices:
-            strides = V.graph.sizevars.stride_hints(i, reduction_vars)
+            i = V.graph.sizevars.simplify_with_ranges(i, ranges)
+            strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
             outer = all([s > 1 for s in strides])
             if outer:
                 num_outer += 1
@@ -2043,7 +2046,7 @@ class RandSeedBuffer(ConstantBuffer):
 
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
-        return "None"
+        return V.graph.wrapper_code.none_str
 
 
 class ShapeAsConstantBuffer(IRNode):
@@ -2185,9 +2188,9 @@ class ComputedBuffer(Buffer):
             ):
                 reordering_reindex[i] = reads_buf.iter_reordering_reindex
 
-        def simplify_and_reorder(x_vars, sizes, reordering_reindex=None):
+        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, sizes, memory_addrs, reordering_reindex
+                x_vars, support_vars, sizes, memory_addrs, reordering_reindex
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
@@ -2203,11 +2206,12 @@ class ComputedBuffer(Buffer):
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
+        support_vars = index_vars + reduce_vars
         iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, index_size, reordering_reindex
+            index_vars, support_vars, index_size, reordering_reindex
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, reduce_size
+            reduce_vars, support_vars, reduce_size
         )
 
         # remember the reordering if not have loop collapse.
@@ -2224,7 +2228,12 @@ class ComputedBuffer(Buffer):
 
     @staticmethod
     def _apply_loop_reordering(
-        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=None
+        index_vars,
+        support_vars,
+        sizes,
+        memory_addrs,
+        reordering_reindex=None,
+        priority_idx=None,
     ):
         """
         Shuffle the order of loops around to hopefully improve performance.
@@ -2236,7 +2245,8 @@ class ComputedBuffer(Buffer):
 
         try:
             strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars) for expr in memory_addrs
+                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
+                for expr in memory_addrs
             ]
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
@@ -2253,7 +2263,9 @@ class ComputedBuffer(Buffer):
         except Exception:
             if config.debug:
                 log.warning(
-                    f"Did not simplify complex index:\n{dict(zip(index_vars, sizes))}\n{memory_addrs}"
+                    "Did not simplify complex index:\n%s\n%s",
+                    dict(zip(index_vars, sizes)),
+                    memory_addrs,
                 )
             order = list(range(len(sizes)))
         sizes = [sizes[i] for i in order]
@@ -2594,7 +2606,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, int)):
+        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -2673,32 +2685,37 @@ class ExternKernel(InputsKernel):
     def apply_constraint(self):
         pass
 
+    def codegen_const_args(self):
+        return map(V.graph.wrapper_code.val_to_str, self.constant_args)
+
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
-        args.extend(map(repr, self.constant_args))
-        return args
-
-    def cpp_wrapper_codegen_args(self):
-        args = [x.codegen_reference() for x in self.inputs]
-        args.extend(self.cpp_constant_args)
+        args.extend(self.codegen_const_args())
         return args
 
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
             if V.graph.cpp_wrapper:
+                # TODO: use native_functions.yaml as the ground truth
+                assert (
+                    self.ordered_kwargs_for_cpp_kernel
+                ), "ordered_kwargs_for_cpp_kernel has to be provided"
                 for arg_name in self.ordered_kwargs_for_cpp_kernel:
                     assert arg_name in self.kwargs, (
                         "arg %s not found in self.kwargs" % arg_name
                     )
                     v = self.kwargs.get(arg_name)
-                    kwargs.append(repr(v))
+                    kwargs.append(V.graph.wrapper_code.val_to_str(v))
             else:
-                kwargs = [f"{k}={repr(v)}" for k, v in self.kwargs.items()]
+                kwargs = [
+                    f"{k}={V.graph.wrapper_code.val_to_str(v)}"
+                    for k, v in self.kwargs.items()
+                ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
-        if config.size_asserts:
+        if config.size_asserts and not V.graph.cpp_wrapper:
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -2716,7 +2733,7 @@ class ExternKernel(InputsKernel):
 
     def canonicalize(self):
         """
-        Manually get cononicalization of the output index
+        Manually get canonicalization of the output index
         """
         # manually generate index formula for conv
         sizevars = V.graph.sizevars
@@ -2757,17 +2774,12 @@ class ExternKernelOut(ExternKernel):
     output_view: Optional[ReinterpretView] = None
 
     def codegen(self, wrapper):
-        args = self.codegen_args()
-        kwargs = self.codegen_kwargs()
-        if kwargs:
-            args.extend(kwargs)
-
+        args = [*self.codegen_args(), *self.codegen_kwargs()]
         wrapper.generate_extern_kernel_out(
             self.output_view,
             self.codegen_reference(),
             args,
             self.kernel,
-            self.cpp_kernel,
         )
 
     def __init__(
@@ -2785,11 +2797,9 @@ class ExternKernelOut(ExternKernel):
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.output_view = output_view
-        self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.name = V.graph.register_buffer(self)
-        if kernel is not None:
-            self.kernel = kernel
+        self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
         return True
@@ -2798,7 +2808,9 @@ class ExternKernelOut(ExternKernel):
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         args = [*self.codegen_args(), *self.codegen_kwargs()]
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({', '.join(args)})")
+        V.graph.wrapper_code.generate_extern_kernel_alloc(
+            self.get_name(), self.kernel, args
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -2811,17 +2823,13 @@ class ExternKernelAlloc(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
-        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
-        self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
-        self.cpp_constant_args = cpp_constant_args
         self.name = V.graph.register_buffer(self)
-        if kernel is not None:
-            self.kernel = kernel
+        self.kernel = cpp_kernel if V.graph.cpp_wrapper else kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
         return False
@@ -2920,8 +2928,6 @@ class IndexPutFallback(ExternKernel):
     This needs to be a custom class to handle mutation and indices properly
     """
 
-    kernel = "aten.index_put_"
-
     def codegen(self, wrapper):
         (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
         indices = []
@@ -2930,10 +2936,11 @@ class IndexPutFallback(ExternKernel):
             if self.indices[i] is not None:
                 indices.append(next(iter_valid_indices))
             else:
-                indices.append("None")
-        wrapper.writeline(
-            f"{self.kernel}({x}, [{','.join(indices)}], {values}, {repr(self.constant_args[0])})"
-        )
+                indices.append(V.graph.wrapper_code.none_str)
+
+        indices = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
+        args = [x, indices, values, *self.codegen_const_args()]
+        wrapper.writeline(wrapper.wrap_kernel_call(self.kernel, args))
 
     def should_allocate(self):
         return False
@@ -2949,6 +2956,7 @@ class IndexPutFallback(ExternKernel):
             [accumulate],
         )
         self.name = V.graph.register_buffer(self)
+        self.kernel = "at::index_put_" if V.graph.cpp_wrapper else "aten.index_put_"
 
 
 class DeviceCopy(ExternKernelOut):
@@ -3124,13 +3132,6 @@ class MultiOutput(ExternKernel):
 
     def should_allocate(self):
         return False
-
-
-def _string(shape: tuple):
-    from .codegen.wrapper import CppWrapperCodeGen
-
-    cpp_wrapper_codegen = CppWrapperCodeGen()
-    return cpp_wrapper_codegen.codegen_shape_tuple(shape)
 
 
 def _prepare_convolution_fusion_create(
@@ -3437,18 +3438,20 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
 
 
 class MKLPackedLinear(ExternKernelAlloc):
-    kernel = "torch.ops.mkl._mkl_linear"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        cpp_constant_args=(),
-        kernel="torch.ops.mkl._mkl_linear",
-        cpp_kernel="mkl::_mkl_linear",
     ):
-        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkl._mkl_linear",
+            cpp_kernel="mkl::_mkl_linear",
+        )
         self.cpp_kernel_key = "mkl_linear"
         self.cpp_op_schema = """
             at::Tensor(
@@ -3457,29 +3460,18 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const at::Tensor& origin_weight_t,
                 const c10::optional<at::Tensor>& bias_opt,
                 const int64_t prepack_batch_size)"""
-        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            args = self.cpp_wrapper_codegen_args()
-        else:
-            args = self.codegen_args()
-
         wrapper.generate_fusion_ops_code(
             self.get_name(),
             self.kernel,
-            self.cpp_kernel,
-            args,
+            self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
         )
 
     @classmethod
     def create(cls, x, packed_w, orig_w, batch_size):
-        kernel = "torch.ops.mkl._mkl_linear"
-
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -3487,10 +3479,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        bias = None
-        cpp_bias = "at::Tensor()"
-        constant_args = [bias, batch_size]
-        cpp_constant_args = [cpp_bias, str(batch_size)]
+        constant_args = [None, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3498,24 +3487,24 @@ class MKLPackedLinear(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
-            cpp_constant_args=cpp_constant_args,
-            kernel=kernel,
         )
 
 
 class LinearUnary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._linear_pointwise"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._linear_pointwise",
-        cpp_kernel="mkldnn::_linear_pointwise",
-        cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._linear_pointwise",
+            cpp_kernel="mkldnn::_linear_pointwise",
+        )
         self.cpp_kernel_key = "linear_pointwise"
         self.cpp_op_schema = """
             at::Tensor(
@@ -3525,28 +3514,18 @@ class LinearUnary(ExternKernelAlloc):
                 c10::string_view attr,
                 torch::List<c10::optional<at::Scalar>> scalars,
                 c10::optional<c10::string_view> algorithm)"""
-        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            args = self.cpp_wrapper_codegen_args()
-        else:
-            args = self.codegen_args()
-
         wrapper.generate_fusion_ops_code(
             self.get_name(),
             self.kernel,
-            self.cpp_kernel,
-            args,
+            self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
         )
 
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
-        kernel = "torch.ops.mkldnn._linear_pointwise"
         x = cls.require_stride1(cls.realize_input(x))
         w = cls.require_stride1(cls.realize_input(w))
 
@@ -3554,18 +3533,12 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
 
         inputs = [x, w]
-        constant_args = [attr, scalars, algorithm]
-        cpp_constant_args = [
-            f'"{attr}"',
-            _string(scalars) if scalars else "{-1}",
-            f'"{algorithm}"',
-        ]
+        constant_args = [attr, scalars if scalars else [-1], algorithm]
         if b is not None:
             b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
-            constant_args.insert(0, b)
-            cpp_constant_args.insert(0, "at::Tensor()")
+            constant_args.insert(0, None)
 
         return LinearUnary(
             layout=FlexibleLayout(
@@ -3575,8 +3548,6 @@ class LinearUnary(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
-            cpp_constant_args=cpp_constant_args,
-            kernel=kernel,
         )
 
     def apply_constraint(self):
@@ -4205,15 +4176,18 @@ class AllGatherIntoTensor(CollectiveKernel):
 
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op):
+    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
+        # TODO support dim
+        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
         cls,
         x: "TensorBox",
         reduce_op: str,
+        scatter_dim: int,
         tag: str,
         ranks: List[int],
         group_size: int,
@@ -4223,7 +4197,7 @@ class ReduceScatterTensor(CollectiveKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_size = x.get_size()
-        new_size[0] /= group_size
+        new_size[scatter_dim] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
         return ReduceScatterTensor(
@@ -4231,6 +4205,7 @@ class ReduceScatterTensor(CollectiveKernel):
             inputs=[x],
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):

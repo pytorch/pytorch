@@ -151,6 +151,14 @@ class LoggingTests(LoggingTestCase):
         logger.info("hi")
         self.assertEqual(len(records), 1)
 
+    # check logging to a random log that is not a child log of a registered
+    # logger registers it and sets handlers properly
+    @make_logging_test(modules={"torch.utils": logging.INFO})
+    def test_open_registration_python_api(self, records):
+        logger = logging.getLogger("torch.utils")
+        logger.info("hi")
+        self.assertEqual(len(records), 1)
+
 
 # single record tests
 exclusions = {"bytecode", "output_code", "schedule", "aot_graphs", "recompiles"}

@@ -596,6 +596,79 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 .run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
 
+    def test_fsdp_dup_tensors_same_source(self):
+        """
+        Tests that FSDP-managed modules' parameters and buffers with the same
+        source are de-duplicated, meaning that they are each only passed once
+        as a graph input.
+        """
+        class DuplicateModule(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._param = torch.randn((3,), device="cuda")
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Use `_param` and `_buf` each twice in this compiled forward
+                # to exercise if they are de-duplicated by TorchDynamo
+                z = x + self._buf + self._buf
+                z += self._param + self._param
+                return z
+
+        model = DuplicateModule()
+        fsdp_model = FSDP(copy.deepcopy(model), use_orig_params=True)
+        fsdp_model = torch._dynamo.optimize("aot_eager")(fsdp_model)
+        inp = torch.randn((2, 3), device="cuda")
+        local_out = model(inp)
+        fsdp_out = fsdp_model(inp)
+        self.assertEqual(local_out, fsdp_out)
+
+    def test_fsdp_dup_tensors_diff_source(self):
+        """
+        Tests that FSDP-managed modules' parameters and buffers with different
+        source do not result in incorrect AOTAutograd de-dup guards like
+        ``a is b``, where ``a`` and ``b`` are certainly not the same. We check
+        this by checking for per-invocation recompiles.
+        """
+        class BufModule(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self._buf
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._param = nn.Parameter(torch.randn((1,), device="cuda"))
+                self._buf_module = BufModule()
+                # Share the buffer, meaning same tensor but different source
+                self.register_buffer("_buf", self._buf_module._buf)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Use the same buffer tensor twice in the compiled forward,
+                # including a data mutation to trigger de-dup logic
+                self._buf.mul_(2)
+                z = x + self._buf
+                z = self._buf_module(z)
+                z += self._param
+                return z
+
+        fsdp_model = FSDP(Model(), use_orig_params=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
+        inp = torch.randn((2, 3), device="cuda")
+        for _ in range(3):
+            fsdp_model(inp)
+        # Check for no recompiles (if there were incorrect de-dup guards, then
+        # the frame count would be equal to the number of forward calls)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
