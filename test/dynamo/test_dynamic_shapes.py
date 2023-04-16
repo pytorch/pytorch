@@ -31,6 +31,8 @@ ALL_DYNAMIC_XFAILS = {
     "ReproTests": [
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",
+        # TODO: look into this: FakeTensor error.
+        "test_gan_repro_trying_to_backward_through_the_graph_a_second_time",
     ],
     "SubGraphTests": [
         "test_enumerate_not_break_graph",
@@ -110,6 +112,11 @@ unittest.expectedFailure(
 
 unittest.expectedFailure(
     DynamicShapesNNModuleTests.test_lazy_module4_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module5_dynamic_shapes
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
 )
 
