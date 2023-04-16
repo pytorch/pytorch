@@ -159,6 +159,6 @@ Here is a few examples of existing methods and their limitations:
 -  ``torch._dynamo`` works out of the box and produces partial graphs.
    It still has the option of producing a single graph with
    ``nopython=True`` which are needed for `some
-   situations <https://pytorch.org/docs/stable/dynamo/faq.html#do-i-still-need-to-export-whole-graphs>`__
+   situations <https://pytorch.org/docs/stable/compile/faq.html#do-i-still-need-to-export-whole-graphs>`__
    but allows a smoother transition where partial graphs can be
    optimized without code modification
