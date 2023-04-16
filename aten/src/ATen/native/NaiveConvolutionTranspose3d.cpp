@@ -320,12 +320,12 @@ void slow_conv_transpose3d_out_cpu_template(
               m,
               k,
               static_cast<scalar_t>(1),
-              input_n.data_ptr<scalar_t>(),
+              input_n.const_data_ptr<scalar_t>(),
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               m,
               static_cast<scalar_t>(0),
-              columns.data_ptr<scalar_t>(),
+              columns.mutable_data_ptr<scalar_t>(),
               n);
 
           // Unpack columns back into input:
@@ -369,12 +369,12 @@ void slow_conv_transpose3d_out_cpu_template(
                 m_,
                 k_,
                 static_cast<scalar_t>(1),
-                ones.data_ptr<scalar_t>(),
+                ones.const_data_ptr<scalar_t>(),
                 k_,
-                bias.data_ptr<scalar_t>(),
+                bias.const_data_ptr<scalar_t>(),
                 k_,
                 static_cast<scalar_t>(1),
-                output_n.data_ptr<scalar_t>(),
+                output_n.mutable_data_ptr<scalar_t>(),
                 n_);
           }
         }
@@ -574,10 +574,10 @@ void slow_conv_transpose3d_backward_out_cpu_template(
               static_cast<scalar_t>(1),
               gemm_in_ptr,
               n,
-              weight.data_ptr<scalar_t>(),
+              weight.const_data_ptr<scalar_t>(),
               k,
               static_cast<scalar_t>(0),
-              grad_input_n.data_ptr<scalar_t>(),
+              grad_input_n.mutable_data_ptr<scalar_t>(),
               n);
         }
 
@@ -794,10 +794,10 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
                 static_cast<scalar_t>(scale),
                 gemm_in_ptr,
                 k,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 k,
                 static_cast<scalar_t>(1),
-                grad_weight.data_ptr<scalar_t>(),
+                grad_weight.mutable_data_ptr<scalar_t>(),
                 n);
           }
         }
