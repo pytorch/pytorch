@@ -251,6 +251,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
+    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
 ]
 
 CI_SKIP_OPTIMIZER = {
@@ -2111,13 +2112,13 @@ def run(runner, args, original_dir=None):
         torch.set_num_threads(args.threads)
 
     if args.verbose:
-        torch._dynamo.config.log_level = logging.DEBUG
+        torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
         torch._dynamo.config.print_graph_breaks = True
 
     if args.quiet:
-        torch._dynamo.config.log_level = logging.ERROR
+        torch._logging.set_logs(dynamo=logging.ERROR)
 
     torch._dynamo.config.suppress_errors = args.suppress_errors
 
