@@ -1197,10 +1197,6 @@ def get_fake_value(node, tx):
         # If the first argument is nn.Module, should copy to fake mode.
         args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
 
-        if isinstance(args[0], torch.nn.CrossEntropyLoss) and args[0].label_smoothing:
-            # Workaround https://github.com/pytorch/pytorch/issues/99250
-            tx.fake_mode.allow_non_fake_inputs = True
-
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
@@ -1247,7 +1243,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        raise TorchRuntimeError() from e
 
 
 def run_node(output_graph, node, args, kwargs, nnmodule):
@@ -1282,7 +1278,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
-        ).with_traceback(e.__traceback__) from None
+        ) from e
     raise AssertionError(op)
 
 
