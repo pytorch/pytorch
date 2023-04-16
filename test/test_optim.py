@@ -1204,6 +1204,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
             optim.NAdam(None, lr=1e-2, momentum_decay=-0.2)
 
+    @skipIfTorchDynamo()
     def test_adagrad(self):
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: optim.Adagrad(
