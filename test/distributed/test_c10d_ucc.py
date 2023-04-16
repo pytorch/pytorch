@@ -13,8 +13,8 @@ from functools import reduce
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_ucc_available():
+    print("c10d UCC not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
