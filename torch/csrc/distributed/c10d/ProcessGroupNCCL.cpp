@@ -1398,8 +1398,8 @@ void ProcessGroupNCCL::startCoalescing() {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
-  if (!nccl_use_nonblocking()
-      || coalescedComms_.size() == 0) {  // There is no work being coalesced
+  if (!nccl_use_nonblocking() ||
+      coalescedComms_.size() == 0) { // There is no actual work being coalesced
     groupEnd();
   } else {
     // `coalescedComms_` should have same set of comms across collectives
@@ -1410,7 +1410,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   coalescing_state_ = 0;
 
   if (coalescedDevices_.size() == 0) {
-    // There is no work being coalesced
+    // There is no actual work being coalesced
     return nullptr;
   }
 
