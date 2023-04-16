@@ -822,11 +822,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def int_minimum(a, b):
-        return f"(std::min({a}, {b})"
+        return f"std::min({a}, {b})"
 
     @staticmethod
     def int_maximum(a, b):
-        return f"(std::max({a}, {b})"
+        return f"std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
