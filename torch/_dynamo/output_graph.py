@@ -198,6 +198,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         root_tx,
         export: bool,
         export_constraints,
+        frame_state,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
@@ -207,6 +208,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
         self.export = export
         self.export_constraints = export_constraints
+        self.frame_state = frame_state
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -237,14 +239,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
-        # Although we prune unused graphargs before sending graphs to
-        # compilers, we may have legitimately triggered shape guards
-        # on "unused" inputs that we must keep track of.  So after
-        # remove_unused_graphargs is called, orig_graphargs and
-        # graphargs no longer alias; orig_graphargs is the original
-        # graphargs, and graphargs is the pruned list.  Guard creation
-        # should use original graphargs.
-        self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
@@ -561,6 +555,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for block in reversed(tx.block_stack):
             block.exit(tx)
 
+        self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
         assert self.nn_modules is not None
@@ -657,6 +652,31 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
 
+    def cleanup_graph(self):
+        """
+        Remove this pattern from the graph:
+            torch._C._set_grad_enabled(False)
+            torch._C._set_grad_enabled(True)
+        """
+        nodes = list(self.graph.nodes)
+        grad_enabled = torch.is_grad_enabled()
+        for node1, node2 in zip(nodes, nodes[1:]):
+            if (
+                node1.target is torch._C._set_grad_enabled
+                and tuple(node1.args) == (not grad_enabled,)
+                and not node1._erased
+            ):
+                grad_enabled = node1.args[0]
+                if (
+                    node2.target is torch._C._set_grad_enabled
+                    and tuple(node2.args) == (not grad_enabled,)
+                    and not node2._erased
+                ):
+                    grad_enabled = node2.args[0]
+                    self.graph.erase_node(node1)
+                    self.graph.erase_node(node2)
+
+    @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
         Generate code from self.graph and return the Instruction()s to
@@ -778,22 +798,22 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def fake_example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
-            example = arg.get_fake_examples()
-            if example is not None:
-                result.extend(example)
+            if arg.fake_tensor is not None:
+                result.append(arg.fake_tensor)
             else:
                 # Fallback, in case fake_tensor was not set
                 # Particularly for graph args that are not tensors
-                result.extend(arg.get_examples())
+                result.append(arg.example)
         return result
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
-            result.extend(arg.get_examples())
+            result.append(arg.example)
         return result
 
     def remove_unused_graphargs(self) -> None:
+        # Miniature DCE pass, but only for obviously trivial operations
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
                 if node.op == "get_attr":
@@ -801,16 +821,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 elif node.op == "call_function" and node.target is operator.getitem:
                     self.remove_node(node)
 
-        expanded_graphargs = []
         for arg in self.graphargs:
-            expanded_graphargs.extend([arg] * len(arg))
             arg.uses = 0
 
-        for node, arg in zip(self.graph.nodes, expanded_graphargs):
+        for node, arg in zip(self.graph.nodes, self.graphargs):
             assert node.op == "placeholder"
             arg.uses += len(node.users)
 
-        for node, arg in list(zip(self.graph.nodes, expanded_graphargs)):
+        for node, arg in list(zip(self.graph.nodes, self.graphargs)):
             if arg.uses == 0:
                 log.debug("REMOVE UNUSED GRAPHARG %s", arg.source.name())
                 if "example_value" in node.meta:

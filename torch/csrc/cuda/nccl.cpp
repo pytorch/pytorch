@@ -423,7 +423,10 @@ AutoNcclGroup::AutoNcclGroup() {
 AutoNcclGroup::AutoNcclGroup(
     std::vector<ncclComm_t>& comms,
     bool comm_nonblocking) {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
+  // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
+#endif
   // TODO(eqy): can we make comms_ reference?
   comms_ = comms;
   comm_nonblocking_ = comm_nonblocking;
