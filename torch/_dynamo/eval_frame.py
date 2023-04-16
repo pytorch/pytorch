@@ -95,10 +95,10 @@ class OptimizedModule(torch.nn.Module):
         ):
             # this is likely a torch.nn.* instance in skipfiles.py
             # workaround to add an extra frame we can capture
-            self._optimized_call = self.dynamo_ctx(external_utils.wrap_inline(mod))
+            self.forward = self.dynamo_ctx(external_utils.wrap_inline(mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
-            self._optimized_call = self.dynamo_ctx(mod.__call__)
+            self.forward = self.dynamo_ctx(mod.__call__)
 
         # these are needed for some tests to work
         self.named_parameters = mod.named_parameters
@@ -106,8 +106,6 @@ class OptimizedModule(torch.nn.Module):
 
         if hasattr(mod, "_initialize_hook"):
             self.__call__ = self._call_lazy_check
-        else:
-            self.__call__ = self._optimized_call
 
     def __getstate__(self):
         return (self._orig_mod, self.dynamo_ctx)
@@ -120,18 +118,6 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name, value):
-        if name == "forward":
-            log.warning(
-                "Modifying OptimizedModule.forward may not do what you expect. "
-                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
-                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
-                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
-                "forward method without __call__ (and thus bypassing module hooks). "
-                "To alter the behavior of the wrapped module, modify its forward before compilation. "
-            )
-        super().__setattr__(name, value)
-
     def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
             # In the case of a lazy module, we want to run
@@ -140,14 +126,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return self._optimized_call(*args, **kwargs)
-
-    def forward(self, *args, **kwargs):
-        log.warning(
-            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
-            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
-        )
-        return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
 
 
 def remove_from_cache(f):
