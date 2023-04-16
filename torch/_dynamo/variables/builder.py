@@ -7,7 +7,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
 import torch
 
@@ -116,7 +116,10 @@ class _missing:
 @dataclasses.dataclass
 class GraphArg:
     source: Source
-    example: Any
+    # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
+    # thing to do.  Probably should have example (which stores an int) and
+    # fake_example
+    example: Union[torch.Tensor, torch.SymInt]
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
@@ -136,19 +139,6 @@ class GraphArg:
 
     def load(self, tx):
         return self.source.reconstruct(tx)
-
-    def get_examples(self):
-        return [self.example]
-
-    def get_fake_examples(self):
-        if self.fake_tensor is not None:
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
-            return [self.fake_tensor]
-
-    def __len__(self):
-        return 1
 
     def erase(self):
         self.example = None
@@ -224,7 +214,6 @@ class VariableBuilder:
                 (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
-            ((torch.SymInt, torch.SymFloat), cls.wrap_sym),
             ((tuple, list, odict_values), cls.wrap_listlike),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
@@ -583,31 +572,6 @@ class VariableBuilder:
             )
         )
 
-    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
-        is_duplicate_sym = self.get_source() in self.tx.output.input_source_to_var
-        if is_duplicate_sym:
-            return self.tx.output.input_source_to_var[self.get_source()]
-        if not is_constant_source(self.get_source()):
-            self.tx.output.add_grapharg(GraphArg(self.get_source(), value, False, None))
-        elif is_constant_source(self.get_source()):
-            return self.tx.output.register_attr_or_module(
-                value,
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                source=None,
-                sym_num=value
-                # shape Guards live their own rich life via shape_env
-            )
-        sym_node_var = SymNodeVariable.create(
-            tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
-            sym_num=value
-            # shape Guards live their own rich life via shape_env
-        )
-        self.tx.output.input_source_to_var[self.get_source()] = sym_node_var
-        return sym_node_var
-
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
@@ -873,11 +837,7 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                # TODO: This should be dynamic, as we in general do not
-                # know if bare integers are actually going to be sizevars
-                # and it is inappropriate to eagerly duck size them with
-                # real sizevars
-                dynamic_dim = DimDynamic.DUCK
+                dynamic_dim = DimDynamic.DYNAMIC
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -1166,7 +1126,33 @@ def wrap_to_fake_tensor_and_record(
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(
+            e, is_tensor, guard_source=source.guard_source()
+        )
+
+        name = source.name()
+
+        # Prep for automatic dynamic
+        curr_sizes = None
+        if name not in tx.output.frame_state:
+            # If there is no entry for this source, add the tensor to frame state with its current static size.
+            # E.g., {} -> {“x”: [2, 4]}
+            curr_sizes = list(e.size())
+        else:
+            curr_sizes = tx.output.frame_state[name]
+            if curr_sizes is not None:
+                if e.ndim != len(curr_sizes):
+                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
+                    # E.g. {“x”: [2, 3, 4]} -> {“x”: None}
+                    curr_sizes = None
+                else:
+                    # If there is already an entry, and the dim matches, for every size in the frame state which
+                    # disagrees with the current static size, replace it with None. E.g., {“x”: [2, 3]} -> {“x”: [2, None]}
+                    for i, dim in enumerate(curr_sizes):
+                        if e.size()[i] != dim:
+                            curr_sizes[i] = None
+
+        tx.output.frame_state[name] = curr_sizes
 
         # TODO: index export_constraints ahead of time so we don't have to
         # do a linear scan every time here
@@ -1181,8 +1167,9 @@ def wrap_to_fake_tensor_and_record(
                         )
 
                         dim2constraint[constraint.dim] = StrictMinMaxConstraint(
-                            constraint.constraint_range.vr
-                            & dim2constraint[constraint.dim].vr
+                            vr=constraint.constraint_range.vr
+                            & dim2constraint[constraint.dim].vr,
+                            warn_only=False,
                         )
                     else:
                         dim2constraint[constraint.dim] = constraint.constraint_range
@@ -1197,13 +1184,18 @@ def wrap_to_fake_tensor_and_record(
                 marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
+                # NB: both static and dynamic have precedence over
+                automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
+
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints
                 constraint = dim2constraint.get(i)
                 if constraint is None:
                     if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                        constraint = RelaxedUnspecConstraint()
+                        constraint = RelaxedUnspecConstraint(warn_only=False)
+                    elif not marked_static and automatic_dynamic:
+                        constraint = RelaxedUnspecConstraint(warn_only=True)
                 constraint_dims.append(constraint)
 
                 # Now, figure out if the dim is dynamic/duck/static
