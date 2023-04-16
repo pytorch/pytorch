@@ -387,6 +387,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # and then again to record it
             self.assertEqual(self.num_checkpoints(), 2)
 
+        def test_expanded_inputs(self):
+            x = torch.rand(1, 512, device="cuda").expand(4, 512)
+
+            def foo(x):
+                return x + 4 + torch.ones([4, 512], device="cuda")
+
+            foo_opt = torch.compile()(foo)
+
+            for _ in range(3):
+                self.assertEqual(foo_opt(x), foo(x))
+
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_tensor_dies_between_checkpoint(self):
             def foo(args):

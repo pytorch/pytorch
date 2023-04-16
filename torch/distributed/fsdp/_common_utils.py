@@ -60,7 +60,7 @@ class _FSDPState(_State):
         self._fully_sharded_module_to_handles: Dict[
             nn.Module, flat_param_file.FlatParamHandle
         ] = {}
-        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.compute_device: Optional[torch.device] = None
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
@@ -205,7 +205,9 @@ def _get_param_to_fqns(
     """
 
     def module_fn(module, prefix, param_to_fqns):
-        for param_name, param in module.named_parameters(recurse=False):
+        for param_name, param in module.named_parameters(
+            recurse=False, remove_duplicate=False
+        ):
             local_fqns = (
                 param._fqns
                 if type(param) is flat_param_file.FlatParameter
@@ -247,7 +249,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
-        [key for key, _ in model.named_parameters()],
+        [key for key, _ in model.named_parameters(remove_duplicate=False)],
         param_to_unflat_param_names,
     )
 
