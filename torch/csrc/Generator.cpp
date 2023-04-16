@@ -116,6 +116,27 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   END_HANDLE_TH_ERRORS
 }
 
+uint64_t unpack_int_pyobj(PyObject* obj) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  uint64_t obj_unpacked;
+  try {
+    // First try to interpret as unsigned long
+    obj_unpacked = THPUtils_unpackUInt64(obj);
+  } catch (...) {
+    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+      // If an overflow happened, then the obj could be negative,
+      // so try to interpret it as signed long
+      PyErr_Clear();
+      int64_t obj_unpacked_signed = THPUtils_unpackLong(obj);
+      obj_unpacked = *(reinterpret_cast<uint64_t*>(&obj_unpacked_signed));
+    } else {
+      // If any other type of exception happened, rethrow it
+      throw;
+    }
+  }
+  return obj_unpacked;
+}
+
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
@@ -125,23 +146,7 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
       "manual_seed expected a long, "
       "but got %s",
       THPUtils_typename(seed));
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t seed_unpacked;
-  try {
-    // First try to interpret as unsigned long
-    seed_unpacked = THPUtils_unpackUInt64(seed);
-  } catch (...) {
-    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
-      // If an overflow happened, then the seed could be negative,
-      // so try to interpret it as signed long
-      PyErr_Clear();
-      int64_t seed_unpacked_signed = THPUtils_unpackLong(seed);
-      seed_unpacked = *(reinterpret_cast<uint64_t*>(&seed_unpacked_signed));
-    } else {
-      // If any other type of exception happened, rethrow it
-      throw;
-    }
-  }
+  uint64_t seed_unpacked = unpack_int_pyobj(seed);
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
   generator.set_current_seed(seed_unpacked);
@@ -159,23 +164,7 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
       "manual_offset expected a long, "
       "but got %s",
       THPUtils_typename(offset));
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t offset_unpacked;
-  try {
-    // First try to interpret as unsigned long
-    offset_unpacked = THPUtils_unpackUInt64(offset);
-  } catch (...) {
-    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
-      // If an overflow happened, then the offset could be negative,
-      // so try to interpret it as signed long
-      PyErr_Clear();
-      int64_t offset_unpacked_signed = THPUtils_unpackLong(offset);
-      offset_unpacked = *(reinterpret_cast<uint64_t*>(&offset_unpacked_signed));
-    } else {
-      // If any other type of exception happened, rethrow it
-      throw;
-    }
-  }
+  uint64_t offset_unpacked = unpack_int_pyobj(offset);
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
   generator.set_offset(offset_unpacked);
