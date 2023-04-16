@@ -4,6 +4,7 @@ import pickle
 from io import BytesIO
 from textwrap import dedent
 
+from parameterized import parameterized
 from torch.package import PackageExporter, PackageImporter, sys_importer
 from torch.testing._internal.common_utils import run_tests
 
@@ -16,6 +17,9 @@ except ImportError:
 from pathlib import Path
 
 packaging_directory = Path(__file__).parent
+
+
+PICKLE_PROTOCOLS = [(3,), (4,)]
 
 
 class TestSaveLoad(PackageTestCase):
@@ -69,14 +73,15 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    def test_dunder_imports(self):
+    @parameterized.expand(PICKLE_PROTOCOLS)
+    def test_dunder_imports(self, protocol):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
             import package_b
 
             obj = package_b.PackageBObject
             he.intern("**")
-            he.save_pickle("res", "obj.pkl", obj)
+            he.save_pickle("res", "obj.pkl", obj, pickle_protocol=protocol)
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
@@ -125,7 +130,8 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
-    def test_pickle(self):
+    @parameterized.expand(PICKLE_PROTOCOLS)
+    def test_pickle(self, protocol):
         import package_a.subpackage
 
         obj = package_a.subpackage.PackageASubpackageObject()
@@ -134,7 +140,7 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
             he.intern("**")
-            he.save_pickle("obj", "obj.pkl", obj2)
+            he.save_pickle("obj", "obj.pkl", obj2, pickle_protocol=protocol)
         buffer.seek(0)
         hi = PackageImporter(buffer)
 
@@ -151,7 +157,8 @@ class TestSaveLoad(PackageTestCase):
             package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject
         )
 
-    def test_pickle_long_name_with_protocol_4(self):
+    @parameterized.expand(PICKLE_PROTOCOLS)
+    def test_pickle_long_name(self, protocol):
         import package_a.long_name
 
         container = []
@@ -163,7 +170,9 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as exporter:
             exporter.intern("**")
-            exporter.save_pickle("container", "container.pkl", container, pickle_protocol=4)
+            exporter.save_pickle(
+                "container", "container.pkl", container, pickle_protocol=protocol
+            )
 
         buffer.seek(0)
         importer = PackageImporter(buffer)
@@ -172,7 +181,8 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(len(unpickled_container), 1)
         self.assertEqual(container[0](), unpickled_container[0]())
 
-    def test_exporting_mismatched_code(self):
+    @parameterized.expand(PICKLE_PROTOCOLS)
+    def test_exporting_mismatched_code(self, protocol):
         """
         If an object with the same qualified name is loaded from different
         packages, the user should get an error if they try to re-save the
@@ -186,7 +196,7 @@ class TestSaveLoad(PackageTestCase):
         b1 = BytesIO()
         with PackageExporter(b1) as pe:
             pe.intern("**")
-            pe.save_pickle("obj", "obj.pkl", obj2)
+            pe.save_pickle("obj", "obj.pkl", obj2, pickle_protocol=protocol)
 
         b1.seek(0)
         importer1 = PackageImporter(b1)
@@ -205,20 +215,21 @@ class TestSaveLoad(PackageTestCase):
         # is not necessarily the same 'obj2's version of 'PackageAObject'.
         pe = make_exporter()
         with self.assertRaises(pickle.PicklingError):
-            pe.save_pickle("obj", "obj.pkl", obj2)
+            pe.save_pickle("obj", "obj.pkl", obj2, pickle_protocol=protocol)
 
         # This should also fail. The 'PackageAObject' type defined from 'importer1'
         # is not necessarily the same as the one defined from 'importer2'
         pe = make_exporter()
         with self.assertRaises(pickle.PicklingError):
-            pe.save_pickle("obj", "obj.pkl", loaded2)
+            pe.save_pickle("obj", "obj.pkl", loaded2, pickle_protocol=protocol)
 
         # This should succeed. The 'PackageAObject' type defined from
         # 'importer1' is a match for the one used by loaded1.
         pe = make_exporter()
-        pe.save_pickle("obj", "obj.pkl", loaded1)
+        pe.save_pickle("obj", "obj.pkl", loaded1, pickle_protocol=protocol)
 
-    def test_save_imported_module(self):
+    @parameterized.expand(PICKLE_PROTOCOLS)
+    def test_save_imported_module(self, protocol):
         """Saving a module that came from another PackageImporter should work."""
         import package_a.subpackage
 
@@ -228,7 +239,7 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as exporter:
             exporter.intern("**")
-            exporter.save_pickle("model", "model.pkl", obj2)
+            exporter.save_pickle("model", "model.pkl", obj2, pickle_protocol=protocol)
 
         buffer.seek(0)
 
