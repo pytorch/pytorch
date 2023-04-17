@@ -188,9 +188,9 @@ def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> Non
     def is_sym_int_or_int(arg: Union[int, torch.fx.Node]) -> bool:
         if isinstance(arg, torch.fx.Node):
             return arg.target in [
-                torch.ops.aten.sym_size,
-                torch.ops.aten.sym_numel,
-                torch.ops.aten.sym_stride,
+                aten.sym_size,
+                aten.sym_numel,
+                aten.sym_stride,
             ]
         return isinstance(arg, int)
 
@@ -370,12 +370,12 @@ def _get_dtensor_dispatch_graph(
                 )
             return None
 
-        if node.target == torch.ops.aten.view.default:
+        if node.target == aten.view.default:
             # HACK: this is a hack to get around with the fact that some
             # view operations on a "global" tensor is invalid usage
             # but somehow the view operation on the batch input might hit it
             # so we convert the view op to reshape before calling DTensor
-            op_overload = torch.ops.aten.reshape.default
+            op_overload = aten.reshape.default
 
         # DSymInt args are not sharded on any dimension, local value and global
         # value should be the same
