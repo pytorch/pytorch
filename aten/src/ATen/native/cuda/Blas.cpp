@@ -333,9 +333,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           using opmath_t = at::opmath_type<scalar_t>;
           opmath_t alpha_val = alpha.to<opmath_t>();
           opmath_t beta_val = beta.to<opmath_t>();
-          scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-          scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-          scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+          const scalar_t* mat1_ptr = mat1_->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = mat2_->const_data_ptr<scalar_t>();
+          scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
               transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
@@ -428,9 +428,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     using opmath_t = at::opmath_type<scalar_t>;
     opmath_t alpha_val = alpha.to<opmath_t>();
     opmath_t beta_val = beta.to<opmath_t>();
-    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+    const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+    const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
     at::cuda::blas::bgemm<scalar_t>(
       transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
       transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
