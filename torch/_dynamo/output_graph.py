@@ -10,6 +10,8 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
+import sympy
+
 import torch._guards
 
 import torch._logging
@@ -23,7 +25,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -45,6 +47,8 @@ from .source import (
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
+    TensorProperty,
+    TensorPropertySource,
 )
 from .utils import (
     assert_no_fake_params_or_buffers,
@@ -213,6 +217,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=frame_state["_id"],
             )
             if config.dynamic_shapes
             else None,
@@ -334,6 +339,47 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 removed_nodes += 1
         log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
+    def add_symbol_bindings(self, arg: GraphArg):
+        # Insert implicit size vars as necessary.  With dynamic shapes, we
+        # maintain the invariant that every sizevar gets a direct SymInt input
+        # into the graph.  This means downstream graph transforms can assume
+        # every size variable is explicitly bound and accessible, instead of
+        # having to pull it out implicitly from tensors.
+
+        if self.export:
+            return
+
+        assert arg.fake_tensor is not None
+
+        def bind_symint(s, prop):
+            if not (
+                isinstance(s, torch.SymInt) and isinstance(s.node.expr, sympy.Symbol)
+            ):
+                return
+            # TODO: don't readd symint if we already have it in graph
+            # (this is harmless because we do remove the unused ones later)
+            proxy = self.create_graph_input(str(s.node.expr), torch.SymInt, before=True)
+            proxy.node.meta["grapharg"] = GraphArg(
+                prop(arg.source),
+                s,
+                is_unspecialized=False,
+                fake_tensor=None,
+                is_tensor=False,
+            )
+
+        for i, s in enumerate(arg.fake_tensor.size()):
+            bind_symint(
+                s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)
+            )
+        for i, s in enumerate(arg.fake_tensor.stride()):
+            bind_symint(
+                s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
+            )
+        bind_symint(
+            arg.fake_tensor.storage_offset(),
+            lambda src: TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+        )
+
     def count_calls(self):
         return count_calls(self.graph)
 
@@ -347,7 +393,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 obj = getattr(obj, k)
         return obj
 
-    def create_graph_input(self, name, type_expr=None):
+    # when before=True, we will insert this input before the most recent
+    # inserted proxy.  This is a hack to get around an ordering problem,
+    # where we first insert a tensor argument, and then insert bindings
+    # for SymInts that may occur in the tensor argument.
+    # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
+    # fixed.
+    def create_graph_input(self, name, type_expr=None, before=False):
         # unique
         if name in self.input_name_to_proxy:
             for i in itertools.count():
@@ -358,12 +410,21 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if self.input_name_to_proxy:
             prev_name = next(reversed(self.input_name_to_proxy))
-            ctx = self.graph.inserting_after(self.input_name_to_proxy[prev_name].node)
+            node = self.input_name_to_proxy[prev_name].node
+            if before:
+                ctx = self.graph.inserting_before(node)
+            else:
+                ctx = self.graph.inserting_after(node)
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
             proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
-            self.input_name_to_proxy[name] = proxy
+            if self.input_name_to_proxy and before:
+                k, v = self.input_name_to_proxy.popitem()
+                self.input_name_to_proxy[name] = proxy
+                self.input_name_to_proxy[k] = v
+            else:
+                self.input_name_to_proxy[name] = proxy
             return proxy
 
     def new_var(self, name="tmp"):
@@ -829,18 +890,53 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 elif node.op == "call_function" and node.target is operator.getitem:
                     self.remove_node(node)
 
-        for i, node in enumerate(self.placeholders):
-            if not node.users:
-                log.debug(
-                    "REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name()
-                )
-                # I'm not really sure why you need to delete these from the
-                # node since the node is going to get removed
-                if "example_value" in node.meta:
-                    del node.meta["example_value"]
-                del node.meta["grapharg"]
-                self.remove_node(node)
-                self.real_value_cache.pop(node, None)
+        def placeholder_binds_symbol(node):
+            arg = node.meta["grapharg"]
+            example = arg.example
+            if isinstance(example, torch.SymInt) and isinstance(
+                example.node.expr, sympy.Symbol
+            ):
+                return example.node.expr
+            return None
+
+        def remove_unused(node):
+            log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
+            # I'm not really sure why you need to delete these from the
+            # node since the node is going to get removed
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
+            del node.meta["grapharg"]
+            self.remove_node(node)
+            self.real_value_cache.pop(node, None)
+
+        used_symbols = set()
+        recheck_placeholders = []
+        for node in self.placeholders:
+            binds_symbol = placeholder_binds_symbol(node) is not None
+            # Don't delete symbol bindings yet
+            if binds_symbol:
+                if not node.users:
+                    recheck_placeholders.append(node)
+            else:
+                if not node.users:
+                    remove_unused(node)
+                else:
+                    # Register the free symbols as uses
+                    arg = node.meta["grapharg"]
+                    fake = (
+                        arg.fake_tensor if arg.fake_tensor is not None else arg.example
+                    )
+                    used_symbols |= free_symbols(fake)
+
+        # After removing unused graphargs, prune unused binds_symbol
+        for node in recheck_placeholders:
+            symbol = placeholder_binds_symbol(node)
+            if symbol is not None:
+                if symbol not in used_symbols:
+                    remove_unused(node)
+                else:
+                    # Make sure we delete later occurrences of the same symbol
+                    used_symbols.remove(symbol)
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
