@@ -7,6 +7,7 @@ import os
 import re
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
+from unittest.mock import patch
 
 import torch
 import torch.fx
@@ -515,25 +516,27 @@ def register_replacement(
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
-    argnames = [*inspect.signature(search_fn).parameters.keys()]
-    requires_grad = [
-        isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
-    ]
-    search_gm = trace_fn(search_fn, example_inputs)
-    pattern = fx_to_pattern(
-        search_gm,
-        ignore_types=(int, float, torch.device, torch.dtype),
-        argnames=argnames,
-        scalar_workaround=scalar_workaround,
-    )
-    assert repr(pattern) not in _seen_patterns
-    _seen_patterns.add(repr(pattern))
-    pattern = ReplacementPatternEntry(
-        pattern=pattern,
-        extra_check=check_fn,
-        normalize_args=normalize_args,
-    )
-    pattern.register(pass_dict)
+    # TODO: Revisit the functionalize_rng_ops for lowmem dropout
+    with patch("functorch.compile.config.functionalize_rng_ops", False):
+        argnames = [*inspect.signature(search_fn).parameters.keys()]
+        requires_grad = [
+            isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
+        ]
+        search_gm = trace_fn(search_fn, example_inputs)
+        pattern = fx_to_pattern(
+            search_gm,
+            ignore_types=(int, float, torch.device, torch.dtype),
+            argnames=argnames,
+            scalar_workaround=scalar_workaround,
+        )
+        assert repr(pattern) not in _seen_patterns
+        _seen_patterns.add(repr(pattern))
+        pattern = ReplacementPatternEntry(
+            pattern=pattern,
+            extra_check=check_fn,
+            normalize_args=normalize_args,
+        )
+        pattern.register(pass_dict)
 
 
 def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):

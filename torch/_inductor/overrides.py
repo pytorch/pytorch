@@ -2,6 +2,8 @@ import logging
 import random
 import weakref
 
+import functorch
+
 import torch
 from torch import _prims
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
@@ -176,5 +178,9 @@ def replace_fn(fn):
         return fn
     if config.lowmem_dropout and fn is torch.nn.functional.dropout:
         return lowmem_dropout
-    replacements = {torch.rand_like: rand_like}
+
+    replacements = {}
+    # TODO: Revisit the functionalize_rng_ops for lowmem dropout
+    if not functorch.compile.config.functionalize_rng_ops:
+        replacements.update({torch.rand_like: rand_like})
     return replacements.get(fn, fn)

@@ -4665,6 +4665,37 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_philox_rand(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "functionalization of rng ops supported only on CUDA"
+            )
+
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            a = torch.rand_like(x) * x
+            a = torch.rand_like(x) * a
+            return a
+
+        x = torch.ones(1024, device=self.device, dtype=torch.float32)
+        torch.manual_seed(123)
+        a = fn(x)
+
+        torch.manual_seed(1234)
+        b = fn(x)
+
+        torch.manual_seed(123)
+        c = fn(x)
+
+        # same seed, same values
+        self.assertTrue(torch.allclose(a, c))
+
+        # different calls, different values
+        self.assertFalse(torch.allclose(a, b))
+
+        self.assertFalse(True)
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
