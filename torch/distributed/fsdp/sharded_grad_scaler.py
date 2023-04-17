@@ -4,8 +4,8 @@ from typing import Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
+from torch.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.cuda import FloatTensor  # type: ignore[attr-defined]
-from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.optim.sgd import SGD
 
@@ -83,6 +83,7 @@ class ShardedGradScaler(GradScaler):
 
     def __init__(
         self,
+        device: str = "cuda",
         init_scale: float = 2.0**16,
         backoff_factor: float = 0.5,
         growth_factor: float = 2.0,
@@ -91,6 +92,7 @@ class ShardedGradScaler(GradScaler):
         process_group: Optional[ProcessGroup] = dist.group.WORLD,
     ):
         super().__init__(
+            device,
             init_scale=init_scale,
             backoff_factor=backoff_factor,
             growth_factor=growth_factor,
