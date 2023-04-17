@@ -49,9 +49,6 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
 
 def _sfdp_replacement_2(query, key, value, scale_factor):
     counters["inductor"]["fuse_attention"] += 1
-    import pdb
-
-    pdb.set_trace()
     return aten.scaled_dot_product_attention(
         query.contiguous(),
         key.contiguous(),
@@ -151,7 +148,7 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
 
 def _sfdp_scale_factor_check(scale_factor_op):
     def fn(match):
-        # make sure the mul(div) for the scale factor is scalar mul.
+        # make sure the mul(div) for the scale factor is scalar mul(div).
         # bmm->view->mul(div)
         matmuls = filter_nodes(match.nodes, aten.bmm)
         if len(matmuls) < 2:
@@ -170,7 +167,7 @@ def _sfdp_scale_factor_check(scale_factor_op):
         scale_factor_node = list(view_node.users.keys())[0]
         if len(scale_factor_node.args) != 2:
             return False
-        # make sure the scalar mul is a float/int. SymInt?
+        # make sure the scale_factor a float/int. SymInt?
         scale_factor = (
             scale_factor_node.args[1]
             if view_node == scale_factor_node.args[0]
