@@ -124,6 +124,7 @@ TESTS = discover_tests(
         "fx",  # executed by test_fx.py
         "jit",  # executed by test_jit.py
         "mobile",
+        "onnx_caffe2",
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
@@ -150,7 +151,8 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
-        "onnx/test_pytorch_onnx_onnxruntime_cuda.py",
+        "onnx/test_pytorch_onnx_onnxruntime_cuda",
+        "onnx/test_models",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -294,9 +296,9 @@ CI_SERIAL_LIST = [
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
-    "onnx/test_models.py",
-    "onnx/test_models_quantized_onnxruntime.py",
-    "onnx/test_models_onnxruntime.py",
+    "onnx/test_models",
+    "onnx/test_models_quantized_onnxruntime",
+    "onnx/test_models_onnxruntime",
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
