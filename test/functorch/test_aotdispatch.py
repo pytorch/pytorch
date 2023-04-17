@@ -2510,6 +2510,7 @@ symbolic_aot_autograd_failures = {
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
+    xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
@@ -2525,6 +2526,7 @@ symbolic_aot_autograd_failures = {
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.cholesky_ex', ''),  # could not find kernel for aten.linalg_solve_triangular.default
     xfail('linalg.cond', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/deco...
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
