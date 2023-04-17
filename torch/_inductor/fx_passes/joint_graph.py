@@ -5,6 +5,7 @@ import torch
 from ..._subclasses import FakeTensorMode
 from .. import config
 from ..pattern_matcher import PatternMatcherPass
+from torch._guards import detect_fake_mode
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -14,7 +15,7 @@ patterns = PatternMatcherPass()
 def lazy_init():
     from .fuse_attention import _sfdp_init
 
-    with FakeTensorMode():
+    with detect_fake_mode() or FakeTensorMode():
         _sfdp_init()
 
 
