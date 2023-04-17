@@ -15,7 +15,6 @@ static const uint32_t PHILOX_STATE_N = 7;
 struct rng_data_pod {
   std::array<uint32_t, PHILOX_STATE_N> state{1};
   uint64_t seed = default_rng_seed_val;
-  uint64_t offset = 0;
 };
 
 TORCH_API const Generator& getDefaultMPSGenerator();
