@@ -103,6 +103,13 @@ void CPUGeneratorImpl::set_offset(uint64_t offset) {
 }
 
 /**
+ * Gets the current offset of CPUGeneratorImpl.
+ */
+uint64_t CPUGeneratorImpl::get_offset() const {
+  TORCH_CHECK(false, "CPU Generator does not use offset");
+}
+
+/**
  * Gets the current seed of CPUGeneratorImpl.
  */
 uint64_t CPUGeneratorImpl::current_seed() const {

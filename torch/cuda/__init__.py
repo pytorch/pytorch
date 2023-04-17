@@ -353,7 +353,7 @@ class device_of(device):
 
 
 
-def _get_device(device: Union[int, str, torch.device] = 'cuda') -> torch.device:
+def get_device(device: Union[int, str, torch.device] = 'cuda') -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -366,7 +366,7 @@ def _get_device(device: Union[int, str, torch.device] = 'cuda') -> torch.device:
     return device
 
 
-def _get_generator(device: torch.device) -> torch._C.Generator:
+def get_generator(device: torch.device) -> torch._C.Generator:
     r"""Return the CUDA Generator object for the given device.
 
     Args:
@@ -1129,15 +1129,15 @@ __all__ = [
     'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
     'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
     'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend',
-    'CUDAPluggableAllocator', 'change_current_allocator', 'get_arch_list', 'get_device_capability', 'get_device_name',
-    'get_device_properties', 'get_gencode_flags', 'get_rng_state', 'get_rng_state_all', 'get_rng_state_offset',
-    'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma', 'init', 'initial_seed',
-    'ipc_collect', 'is_available', 'is_bf16_supported', 'is_current_stream_capturing', 'is_initialized', 'jiterator',
-    'list_gpu_processes', 'make_graphed_callables', 'manual_seed', 'manual_seed_all', 'max_memory_allocated',
-    'max_memory_cached', 'max_memory_reserved', 'mem_get_info', 'memory', 'memory_allocated', 'memory_cached',
-    'memory_reserved', 'memory_snapshot', 'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary',
-    'memory_usage', 'temperature', 'power_draw', 'clock_rate', 'nccl', 'nvtx', 'profiler', 'random',
-    'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached',
-    'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state',
-    'set_rng_state_all', 'set_rng_state_offset', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams',
-    'synchronize', 'utilization']
+    'CUDAPluggableAllocator', 'change_current_allocator', 'get_arch_list', 'get_device', 'get_device_capability',
+    'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_generator', 'get_rng_state',
+    'get_rng_state_all', 'get_rng_state_offset', 'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs',
+    'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect', 'is_available', 'is_bf16_supported',
+    'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes', 'make_graphed_callables',
+    'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
+    'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot', 'memory_stats',
+    'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power_draw', 'clock_rate', 'nccl',
+    'nvtx', 'profiler', 'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated',
+    'reset_max_memory_cached', 'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device',
+    'set_per_process_memory_fraction', 'set_rng_state', 'set_rng_state_all', 'set_rng_state_offset', 'set_stream',
+    'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']
