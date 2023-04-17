@@ -352,33 +352,6 @@ class device_of(device):
         super().__init__(idx)
 
 
-
-def get_device(device: Union[int, str, torch.device] = 'cuda') -> torch.device:
-    r"""Return the torch.device type object from the passed in device.
-
-    Args:
-        device (torch.device or int): selected device.
-    """
-    if isinstance(device, str):
-        device = torch.device(device)
-    elif isinstance(device, int):
-        device = torch.device('cuda', device)
-    return device
-
-
-def get_generator(device: torch.device) -> torch._C.Generator:
-    r"""Return the CUDA Generator object for the given device.
-
-    Args:
-        device (torch.device): selected device.
-    """
-
-    idx = device.index
-    if idx is None:
-        idx = current_device()
-    return torch.cuda.default_generators[idx]
-
-
 def set_device(device: _device_t) -> None:
     r"""Sets the current device.
 
@@ -924,6 +897,64 @@ def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
 
 
 
+def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+    r"""Return the torch.device type object from the passed in device.
+
+    Args:
+        device (torch.device or int): selected device.
+    """
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
+        device = torch.device('cuda', device)
+    return device
+
+
+def _get_generator(device: torch.device) -> torch._C.Generator:
+    r"""Return the CUDA Generator object for the given device.
+
+    Args:
+        device (torch.device): selected device.
+    """
+
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    return torch.cuda.default_generators[idx]
+
+
+def _set_rng_state_offset(offset: int, device: Union[int, str, torch.device] = 'cuda') -> None:
+    r"""Sets the random number generator state offset of the specified GPU.
+
+    Args:
+        offset (int): The desired offset
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+    """
+    final_device = _get_device(device)
+
+    def cb():
+        default_generator = _get_generator(final_device)
+        default_generator.set_offset(offset)
+
+    _lazy_call(cb)
+
+def _get_rng_state_offset(device: Union[int, str, torch.device] = 'cuda') -> int:
+    r"""Returns the random number generator state offset of the specified GPU.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state offset of.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+
+    .. warning::
+        This function eagerly initializes CUDA.
+    """
+    _lazy_init()
+    final_device = _get_device(device)
+    default_generator = _get_generator(final_device)
+    return default_generator.get_offset()
+
+
 from .memory import *  # noqa: F403
 
 
@@ -1125,19 +1156,21 @@ __all__ = [
     'IntStorage', 'IntTensor',
     'LongStorage', 'LongTensor',
     'ShortStorage', 'ShortTensor',
-    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError',
-    'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
-    'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
-    'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend',
-    'CUDAPluggableAllocator', 'change_current_allocator', 'get_arch_list', 'get_device', 'get_device_capability',
-    'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_generator', 'get_rng_state',
-    'get_rng_state_all', 'get_rng_state_offset', 'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs',
-    'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect', 'is_available', 'is_bf16_supported',
-    'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes', 'make_graphed_callables',
-    'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
-    'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot', 'memory_stats',
-    'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power_draw', 'clock_rate', 'nccl',
-    'nvtx', 'profiler', 'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated',
-    'reset_max_memory_cached', 'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device',
-    'set_per_process_memory_fraction', 'set_rng_state', 'set_rng_state_all', 'set_rng_state_offset', 'set_stream',
-    'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']
+    # offset function
+    '_get_rng_state_offset', '_set_rng_state_offset',
+    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError', 'Stream',
+    'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
+    'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream',
+    'default_generators', 'default_stream', 'device', 'device_count', 'device_of', 'empty_cache',
+    'get_allocator_backend', 'CUDAPluggableAllocator', 'change_current_allocator', 'get_arch_list',
+    'get_device_capability', 'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_rng_state',
+    'get_rng_state_all', 'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma', 'init',
+    'initial_seed', 'ipc_collect', 'is_available', 'is_bf16_supported', 'is_current_stream_capturing', 'is_initialized',
+    'jiterator', 'list_gpu_processes', 'make_graphed_callables', 'manual_seed', 'manual_seed_all',
+    'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved', 'mem_get_info', 'memory', 'memory_allocated',
+    'memory_cached', 'memory_reserved', 'memory_snapshot', 'memory_stats', 'memory_stats_as_nested_dict',
+    'memory_summary', 'memory_usage', 'temperature', 'power_draw', 'clock_rate', 'nccl', 'nvtx', 'profiler', 'random',
+    'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached',
+    'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state',
+    'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize',
+    'utilization']

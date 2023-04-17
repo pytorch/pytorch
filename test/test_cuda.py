@@ -1700,10 +1700,10 @@ except RuntimeError as e:
         self.assertEqual(before1, after1, atol=0, rtol=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_get_set_rng_state_offset(self):
+    def test_rng_state_offset(self):
         before = torch.cuda.get_rng_state()
-        torch.cuda.set_rng_state_offset(100)
-        offset = torch.cuda.get_rng_state_offset()
+        torch.cuda._set_rng_state_offset(100)
+        offset = torch.cuda._get_rng_state_offset()
         torch.cuda.set_rng_state(before)
         self.assertEqual(offset, 100)
 
