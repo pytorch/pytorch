@@ -283,8 +283,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
             random_call_index = len(tx.random_calls)
-            if random_call_index == 0:
-                tx.output.initial_random_state = random.getstate()
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.random_calls.append((self.value, args, kwargs))
@@ -445,6 +443,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if tx.output.side_effects.is_attribute_mutation(self):
+            try:
+                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                return variables.ConstantVariable(
+                    not isinstance(result, variables.DeletedVariable)
+                ).add_options(self, result)
+            except KeyError:
+                pass
         if not self.source:
             unimplemented("hasattr no source")
         options = VariableTracker.propagate(self)

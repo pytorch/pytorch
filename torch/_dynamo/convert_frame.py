@@ -2,6 +2,7 @@ import functools
 import itertools
 import logging
 import os
+import random
 import types
 import weakref
 from typing import Dict, Optional, Set
@@ -9,6 +10,7 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
@@ -95,15 +97,17 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
 def wrap_convert_context(fn):
     """
     Context manager to:
-        1) Save/restore torch random state
-        2) Save/restore torch.is_grad_enabled() state
-        3) Monkey patch torch.fx.graph_module._forward_from_src
+        1) Save/restore torch.is_grad_enabled() state
+        2) Save/restore python random state
+        3) Save/restore torch random state
+        4) Monkey patch torch.fx.graph_module._forward_from_src
     """
 
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
-        rng_state = torch.random.get_rng_state()
+        py_rng_state = random.getstate()
+        torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
@@ -114,7 +118,8 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
-            torch.random.set_rng_state(rng_state)
+            random.setstate(py_rng_state)
+            torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
@@ -201,6 +206,9 @@ def exception_handler(e, code, frame=None):
         log.error(format_error_msg(e, code, record_filename, frame))
 
 
+FRAME_COUNTER = 0
+
+
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
@@ -210,8 +218,15 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
 
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame_assert(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         increment_frame()
+        global FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
+            FRAME_COUNTER += 1
+
         code = frame.f_code
 
         if code in input_codes and (
@@ -275,10 +290,14 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
-                f"   function: {format_func_info(code)}\n"
-                f"   reasons:  {format_guard_failures(code)}\n"
-                f"to diagnose recompilation issues, see {troubleshooting_url}."
+                "torch._dynamo hit config.cache_size_limit (%s)\n"
+                "   function: %s\n"
+                "   reasons:  %s\n"
+                "to diagnose recompilation issues, see %s.",
+                config.cache_size_limit,
+                format_func_info(code),
+                format_guard_failures(code),
+                troubleshooting_url,
             )
             unimplemented("cache_size_limit reached")
 
@@ -293,6 +312,17 @@ def convert_frame_assert(
             torch.are_deterministic_algorithms_enabled()
         )
 
+        signpost_event(
+            "dynamo",
+            "_convert_frame_assert._compile",
+            {
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size,
+            },
+        )
+
         return _compile(
             frame.f_code,
             frame.f_globals,
@@ -304,6 +334,7 @@ def convert_frame_assert(
             export_constraints,
             hooks,
             frame,
+            frame_state=frame_state,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -322,6 +353,7 @@ def _compile(
     export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
+    frame_state=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
@@ -343,6 +375,7 @@ def _compile(
             export,
             export_constraints,
             mutated_closure_cell_contents,
+            frame_state=frame_state,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()
@@ -447,10 +480,12 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks)
+            result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
