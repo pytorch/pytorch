@@ -4052,7 +4052,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
-            frame_state=None,
+            frame_state={"_id": 0},
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
@@ -4465,6 +4465,7 @@ def fn():
             self.assertEqual(dummy_opt(), test[3])
 
     def test_exception_table_encode_varint(self):
+        # these numbers have no real meaning to them
         nums = [
             0b111_101010_000000,
             0b1100_111000_010101_101010,

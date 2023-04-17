@@ -1097,9 +1097,7 @@ def _get_param_id_to_param_from_optim_input(
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
     def module_fn(module, prefix, flat_param_to_fqn):
-        for param_name, param in module.named_parameters(
-            recurse=False, remove_duplicate=False
-        ):
+        for param_name, param in module.named_parameters(recurse=False):
             if type(param) is not FlatParameter:
                 continue
             fqn = clean_tensor_name(prefix + param_name)
@@ -1113,7 +1111,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         model,
         module_fn,
         return_fn,
-        [fqn for fqn, _ in model.named_parameters(remove_duplicate=False)],
+        [fqn for fqn, _ in model.named_parameters()],
         flat_param_to_fqn_ret,
     )
 
@@ -1137,7 +1135,7 @@ def _get_param_key_to_param(
             param_to_fqns is not None and flat_param_to_fqn is not None
         ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
         assert model is not None
-        for key, _ in model.named_parameters(remove_duplicate=False):
+        for key, _ in model.named_parameters():
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
     param_key_to_param: Dict[Union[str, int], nn.Parameter] = {}
@@ -1565,7 +1563,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         model,
         module_fn,
         return_fn,
-        [fqn for fqn, _ in model.named_parameters(remove_duplicate=False)],
+        [fqn for fqn, _ in model.named_parameters()],
         fqn_to_param_info,
     )
 
