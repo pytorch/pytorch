@@ -89,7 +89,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        return variables.UserMethodVariable(
+        x = variables.UserMethodVariable(
             self.cm_obj.__exit__.__func__,
             variables.UserDefinedObjectVariable(self.cm_obj, **options),
             **options,
@@ -102,6 +102,8 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ],
             {},
         )
+        tx.states_before_block.pop()
+        return x
 
     def module_name(self):
         return self.cm_obj.__module__
