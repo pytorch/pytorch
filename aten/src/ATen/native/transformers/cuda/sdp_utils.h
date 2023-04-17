@@ -533,6 +533,22 @@ inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_gpu_sm89_head_dim_128(sdp_params params, bool debug) {
+  // Memory Efficient Attention is throwing a cuda illegal memory error
+  // on sm89 when head_dim is 128.
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm89 = (dprops->major == 8) && (dprops->minor == 9);
+  if (is_sm89 && (params.query.sym_size(-1) == 128)) {
+    if (debug) {
+      TORCH_WARN(
+        "Memory Efficient Attention does not currently support head_dim == 128 on sm89",
+        "because it is throwing a cuda illegal memory error on sm89 when head_dim is 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_requires_grad_and_head_dim_gt64_and_sm_gt86(
     sdp_params params,
     bool debug) {
@@ -630,6 +646,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_gpu_sm86_head_dim_128,
+      check_gpu_sm89_head_dim_128,
       check_for_seq_len_0_nested_tensor,
       check_for_non_zero_dropout,
       check_use_deterministic_algorithms);

@@ -57,6 +57,7 @@ default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
 
 isSM86Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 6)
+isSM89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9)
 
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
@@ -1426,6 +1427,37 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM89Device, "Does not support fused SDPA or not SM89 hardware")
+    def test_memory_efficeint_sm89_failure(self):
+        device = 'cuda'
+        dtype = torch.float16
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        # See check_gpu_sm89_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, 128)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM89Device, "Does not support fused SDPA or not SM89 hardware")
+    def test_flash_backward_sm89_headdim128(self):
+        device = 'cuda'
+        dtype = torch.float16
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        # See check_requires_grad_and_head_dim_gt64_and_sm_gt80 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, 128)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
+            # Should not fail because inputs don't require grad
+            torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
+            # Should fail because inputs require grad
+            q = make_tensor(size, requires_grad=True)
+            k = make_tensor(size, requires_grad=True)
+            v = make_tensor(size, requires_grad=True)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused scaled dot product attention")
     def test_dispatch_fails_no_backend(self):
         dtype = torch.float16
@@ -1628,7 +1660,8 @@ class TestSDPA(NNTestCase):
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
             # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if isSM86Device and head_dim == 128:
+            # See check_gpu_sm89_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+            if (isSM86Device or isSM89Device) and head_dim == 128:
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
                                                                                        dropout_p=dropout_p,
                                                                                        is_causal=is_causal, scale=scale))
