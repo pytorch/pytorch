@@ -3489,12 +3489,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_scalars: Optional[List],
         unary_algorithm: Optional[str],
     ):
-        (
-            inputs,
-            constant_args,
-            _,
-            _,
-        ) = _prepare_convolution_fusion_create(
+        (inputs, constant_args, _, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.realize_input(other)
@@ -3507,7 +3502,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_scalars if unary_scalars else [1],
             unary_algorithm if unary_algorithm else "",
         ]
-
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
             inputs=inputs,
