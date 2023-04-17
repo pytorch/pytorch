@@ -592,6 +592,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.curr_node()
             self.assertEqual(node.static_input_data_ptrs, [None])
 
+        def test_amp_cache_disabled(self):
+            @torch.compile()
+            def foo(x):
+                return x + x
+
+            for _ in range(3):
+                out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            # amp cache for cudagraph outputs should be disabled
+            t2 = torch.rand([4, 4], device="cuda")
+
+            with torch.cuda.amp.autocast():
+                run_once = out @ t2
+
+                out.zero_()
+                breakpoint()
+
+                run_twice = out @ t2
+
+                self.assertNotEqual(run_once, run_twice)
+
         def test_frozen_fn(self):
             @torch.compile()
             def foo(x):

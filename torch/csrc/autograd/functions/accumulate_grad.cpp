@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace torch {

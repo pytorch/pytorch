@@ -259,6 +259,7 @@ def reset_cudagraph_trees():
 
             container.tree_manager.remove_all_cached_tensors()
 
+    torch._C._set_cudagraph_cached_tensors_enabled(False)
     container_dict.clear()
 
 
@@ -1070,6 +1071,7 @@ class CUDAGraphNode:
             assert storage_info is UnaliasedStorage
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)
+            torch._C._add_cudagraph_cached_tensor(out)
 
             self_ref = weakref.ref(self)
 
@@ -1246,7 +1248,11 @@ class CUDAGraphNode:
                 yield out
 
     def remove_node_cached_tensors(self):
+        for t in self.cached_tensor_outputs:
+            if t is not None:
+                torch._C._remove_cudagraph_cached_tensor(t)
         self.cached_tensor_outputs.clear()
+
         for i, unaliased in enumerate(self.unaliased_in_all_paths):
             if unaliased:
                 self.outputs_weakrefs[i].remove_extra_reference()
@@ -1473,6 +1479,7 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces: Dict[FunctionID, StackTraces] = {}
 
         self.warmed_up_functions: Set[FunctionID] = set()
+        torch._C._set_cudagraph_cached_tensors_enabled(True)
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
