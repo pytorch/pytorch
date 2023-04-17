@@ -104,14 +104,6 @@ def increment_frame(frame_state):
         frame_state["_id"] = TOTAL_FRAME_COUNTER
         TOTAL_FRAME_COUNTER += 1
 
-
-# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def reset_frame_count():
-    global TOTAL_FRAME_COUNTER
-    frame_phase_timing.clear()
-    TOTAL_FRAME_COUNTER = 0
-
-
 op_count = 0
 
 

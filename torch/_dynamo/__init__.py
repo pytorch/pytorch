@@ -15,7 +15,7 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
-from .utils import compilation_metrics, guard_failures, orig_code_map, reset_frame_count
+from .utils import compilation_metrics, guard_failures, orig_code_map
 
 __all__ = [
     "allow_in_graph",
@@ -53,7 +53,6 @@ def reset():
     resume_execution.ContinueExecutionCache.cache.clear()
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
-    reset_frame_count()
 
 
 def allow_in_graph(fn):
