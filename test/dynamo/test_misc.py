@@ -3312,7 +3312,7 @@ def fn():
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         opt_fn(x, y)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 5)
+        self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
@@ -4051,7 +4051,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
-            frame_state=None,
+            frame_state={"_id": 0},
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
