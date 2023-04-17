@@ -211,6 +211,9 @@ def exception_handler(e, code, frame=None):
         log.error(format_error_msg(e, code, record_filename, frame))
 
 
+FRAME_COUNTER = 0
+
+
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
@@ -224,6 +227,11 @@ def convert_frame_assert(
         frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
     ):
         increment_frame()
+        global FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
+            FRAME_COUNTER += 1
+
         code = frame.f_code
 
         if code in input_codes and (

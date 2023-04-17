@@ -22,16 +22,12 @@ class InstructionExnTabEntry:
     depth: int
     lasti: bool
 
-    @staticmethod
-    def short_inst_repr(inst: "Instruction"):
-        return f"Instruction(opname={inst.opname}, offset={inst.offset})"
-
     def __repr__(self):
         return (
-            f"InstructionExnTabEntry(start={self.short_inst_repr(self.start)}, "
-            f"end={self.short_inst_repr(self.end)}, "
-            f"target={self.short_inst_repr(self.target)}, "
-            f"depth={self.depth}, lasti={self.lasti}"
+            f"InstructionExnTabEntry(start={self.start.short_inst_repr()}, "
+            f"end={self.end.short_inst_repr()}, "
+            f"target={self.target.short_inst_repr()}, "
+            f"depth={self.depth}, lasti={self.lasti})"
         )
 
     def __eq__(self, o):
@@ -64,6 +60,9 @@ class Instruction:
 
     def __eq__(self, other):
         return id(self) == id(other)
+
+    def short_inst_repr(self):
+        return f"Instruction(opname={self.opname}, offset={self.offset})"
 
 
 def convert_instruction(i: dis.Instruction):
@@ -366,7 +365,11 @@ def check_exception_table(tab: List[ExceptionTableEntry]):
     jump table: entries are non-empty, sorted, and do not overlap.
     """
     for i in range(len(tab) - 1):
-        assert tab[i].start <= tab[i].end < tab[i + 1].start <= tab[i + 1].end
+        assert (
+            tab[i].start <= tab[i].end
+            and tab[i].end < tab[i + 1].start
+            and tab[i + 1].start <= tab[i + 1].end
+        )
 
 
 def parse_exception_table(exntab: bytes):
@@ -502,7 +505,7 @@ def devirtualize_jumps(instructions):
 
     for inst in instructions:
         if inst.opcode in jumps:
-            target = _get_instruction_front(instructions, indexof[id(inst.target)])
+            target = _get_instruction_front(instructions, indexof[inst.target])
             if inst.opcode in dis.hasjabs:
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset
@@ -585,7 +588,7 @@ def compute_exception_table(
         if inst.exn_tab_entry:
             # account for prefixed EXTENDED_ARGS
             start = _get_instruction_front(
-                instructions, indexof[id(inst.exn_tab_entry.start)]
+                instructions, indexof[inst.exn_tab_entry.start]
             ).offset
             # point to the last 2 bytes of the end instruction
             end = (
@@ -594,7 +597,7 @@ def compute_exception_table(
                 - 2
             )
             target = _get_instruction_front(
-                instructions, indexof[id(inst.exn_tab_entry.target)]
+                instructions, indexof[inst.exn_tab_entry.target]
             ).offset
             key = (start, end)
             val = (target, inst.exn_tab_entry.depth, inst.exn_tab_entry.lasti)
@@ -657,7 +660,7 @@ def check_inst_exn_tab_entries_nested(tab: List[InstructionExnTabEntry], indexof
     """
     entry_stack = []
     for entry in tab:
-        key = (indexof[id(entry.start)], indexof[id(entry.end)])
+        key = (indexof[entry.start], indexof[entry.end])
         while entry_stack and entry_stack[-1][1] < key[0]:
             entry_stack.pop()
         if entry_stack:
@@ -675,8 +678,8 @@ def propagate_inst_exn_table_entries(instructions: List[Instruction]):
     for inst in instructions:
         if inst.exn_tab_entry:
             key = (
-                indexof[id(inst.exn_tab_entry.start)],
-                indexof[id(inst.exn_tab_entry.end)],
+                indexof[inst.exn_tab_entry.start],
+                indexof[inst.exn_tab_entry.end],
             )
             if key in entries:
                 assert inst.exn_tab_entry == entries[key]
@@ -688,7 +691,7 @@ def propagate_inst_exn_table_entries(instructions: List[Instruction]):
     # Propagation of nested entries works since nested entries come later
     # in sorted order.
     for entry in sorted_entries:
-        for i in range(indexof[id(entry.start)], indexof[id(entry.end)] + 1):
+        for i in range(indexof[entry.start], indexof[entry.end] + 1):
             instructions[i].exn_tab_entry = copy.copy(entry)
 
 
@@ -710,10 +713,10 @@ def check_inst_exn_tab_entries_valid(instructions: List[Instruction]):
             assert id(inst.exn_tab_entry) not in exn_tab_entry_set
             exn_tab_entry_set.add(id(inst.exn_tab_entry))
             entry = inst.exn_tab_entry
-            assert id(entry.start) in indexof
-            assert id(entry.end) in indexof
-            assert id(entry.target) in indexof
-            assert indexof[id(entry.start)] <= i <= indexof[id(entry.end)]
+            assert entry.start in indexof
+            assert entry.end in indexof
+            assert entry.target in indexof
+            assert indexof[entry.start] <= i <= indexof[entry.end]
 
 
 def strip_extended_args(instructions: List[Instruction]):
