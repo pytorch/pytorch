@@ -29,6 +29,7 @@ BACKEND = os.environ["BACKEND"]
 
 if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
     class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
+
         def setUp(self):
             super().setUp()
             self._spawn_processes()
