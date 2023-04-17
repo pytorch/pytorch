@@ -1420,6 +1420,7 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
 
 TLS = threading.local()
 
+
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # TODO: Maybe suppress the envid if not DEBUG?
