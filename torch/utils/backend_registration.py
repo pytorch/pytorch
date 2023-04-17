@@ -129,7 +129,7 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
             **kwargs (dict): For compatibility, may contain the key ``memory_format`` argument.
         """
         device_idx = _normalization_device(custom_backend_name, device)
-        return self.to(torch.device(f'{custom_backend_name}:{device_idx}'), non_blocking, **kwargs)
+        return self.to(device=torch.device(f'{custom_backend_name}:{device_idx}'), non_blocking=non_blocking, **kwargs)
 
     _check_register_once(torch.Tensor, custom_backend_name)
     setattr(torch.Tensor, custom_backend_name, wrap_tensor_to)
