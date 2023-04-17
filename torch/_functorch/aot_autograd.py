@@ -2824,10 +2824,11 @@ def create_aot_dispatcher_function(
     # mode instead.
 
     fake_mode = detect_fake_mode(flat_args)
-    shape_env = fake_mode.shape_env
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = FakeTensorMode(shape_env=shape_env)
+    else:
+        shape_env = fake_mode.shape_env
 
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
