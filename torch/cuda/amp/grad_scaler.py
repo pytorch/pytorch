@@ -8,6 +8,13 @@ from .common import amp_definitely_not_available
 
 __all__ = ["GradScaler"]
 
+def _refresh_per_optimizer_state():
+    message = ("torch.cuda.amp.grad_scaler._refresh_per_optimizer_state "
+               "is deprecated. It will be removed in the future and "
+               "use torch.amp.grad_scaler._refresh_per_optimizer_state()")
+    warnings.warn(message)
+    return torch.amp.grad_scaler._refresh_per_optimizer_state()
+
 class GradScaler(torch.amp.GradScaler):
     r"""
     See :class:`torch.amp.GradScaler`.
