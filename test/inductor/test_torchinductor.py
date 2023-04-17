@@ -1501,6 +1501,13 @@ class CommonTemplate:
             ),
         )
 
+    # https://github.com/pytorch/pytorch/issues/98979
+    @unittest.skipIf(HAS_CUDA, "cuda failed for float64 linear")
+    def test_linear_float64(self):
+        mod = torch.nn.Sequential(torch.nn.Linear(8, 16).to(torch.float64)).eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(2, 8).to(torch.float64),))
+
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -5686,6 +5693,19 @@ class CommonTemplate:
                     torch.rand([1, 256, 50, 76]),
                     torch.rand([1, 256, 25, 38]),
                 ]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
+
+    def test_pad_view(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (0, 0, 0, 1))
+            y = y.view(*y.size()[:-2], y.size(-1), y.size(-2))
+            return y
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(x), opt_fn(x))
 

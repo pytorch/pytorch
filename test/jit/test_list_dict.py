@@ -263,7 +263,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_mapping(self):
         def fn():
-            return dict({"foo" : 1, "bar" : 2, "baz" : 3})
+            return {"foo" : 1, "bar" : 2, "baz" : 3}
 
         self.checkScript(fn, ())
 
@@ -275,7 +275,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_dict_comprehension(self):
         def fn():
-            return dict({i: chr(i + 65) for i in range(4)})
+            return {i: chr(i + 65) for i in range(4)}
 
         self.checkScript(fn, ())
 
@@ -287,7 +287,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_empty_dict_comprehension(self):
         def fn():
-            return dict({})
+            return {}
 
         self.checkScript(fn, ())
 
