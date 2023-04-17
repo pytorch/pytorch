@@ -5,13 +5,13 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Optional.h>
 
-#include <ATen/autocast_mode.h>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -78,7 +78,7 @@ bool can_accumulate_inplace(const Variable& v) {
       v.is_non_overlapping_and_dense() &&
 
       // and we hold the last reference
-      at::autocast::adjusted_use_count(v) == 1 && v.has_storage() &&
+      torch::autograd::adjusted_use_count(v) == 1 && v.has_storage() &&
       v.storage().use_count() == 1);
 }
 } // anonymous namespace

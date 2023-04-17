@@ -11,6 +11,10 @@
 #include <unordered_map>
 #include <utility>
 
+#ifndef C10_MOBILE
+#include <ATen/autocast_mode.h>
+#endif
+
 namespace torch {
 namespace autograd {
 
@@ -59,5 +63,20 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   return variable_list();
 }
+
+#ifndef C10_MOBILE
+
+size_t adjusted_use_count(const at::Tensor& t) {
+  return t.use_count() - (at::autocast::is_cudagraph_cached_tensor(t) ? 1 : 0);
+}
+
+#else
+
+size_t adjusted_use_count(const at::Tensor& t) {
+  return t.use_count();
+}
+
+#endif
+
 } // namespace autograd
 } // namespace torch

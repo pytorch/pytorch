@@ -73,7 +73,7 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-std::unordered_map<TensorImpl*, val_type> cached_casts;
+ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
 std::mutex cached_casts_mutex;
 
 
@@ -82,8 +82,8 @@ std::mutex cached_casts_mutex;
 // is invalid. If we are not using these CUDA Graphs implementations the enabled
 // flag will be false and we will avoid the hash lookup. Like `cached_casts` above,
 // we hash on the TensorImpl* and keep the pointer alive with a weakref value.
-bool cudagraph_cached_tensorimpl_set_enabled = false;
-std::unordered_map<TensorImpl*, weakref_type> cudagraph_cached_tensorimpl_set;
+bool cudagraph_cached_tensorimpls_enabled = false;
+ska::flat_hash_map<TensorImpl*, weakref_type> cudagraph_cached_tensorimpls;
 std::mutex cudagraph_cached_tensorimpl_mutex;
 
 
@@ -177,33 +177,28 @@ void set_autocast_cache_enabled(bool enabled) {
   cache_enabled = enabled;
 }
 
-
-// For gradient buffer stealing we will adjust the use count of tensors
-// which are persisted by cudagraphs, just as we need to adjust reference
-// count of tensors with hooks.
-size_t adjusted_use_count(const at::Tensor& t) {
-  auto use_count = t.use_count();
-  if (cudagraph_cached_tensorimpl_set_enabled) {
-    const std::lock_guard<std::mutex> lock(cudagraph_cached_tensorimpl_mutex);
-    use_count = use_count - cudagraph_cached_tensorimpl_set.count(t.unsafeGetTensorImpl());
+bool is_cudagraph_cached_tensor(const at::Tensor& t) {
+  if (!cudagraph_cached_tensorimpls_enabled) {
+    return false;
   }
-  return use_count;
+  const std::lock_guard<std::mutex> lock(cudagraph_cached_tensorimpl_mutex);
+  return cudagraph_cached_tensorimpls.count(t.unsafeGetTensorImpl());
 }
 
 void add_cudagraph_cached_tensor(const at::Tensor& t) {
-  TORCH_INTERNAL_ASSERT(cudagraph_cached_tensorimpl_set_enabled);
+  TORCH_INTERNAL_ASSERT(cudagraph_cached_tensorimpls_enabled);
   const std::lock_guard<std::mutex> lock(cudagraph_cached_tensorimpl_mutex);
-  cudagraph_cached_tensorimpl_set.emplace(t.unsafeGetTensorImpl(), weakref_type(t.getIntrusivePtr()));
+  cudagraph_cached_tensorimpls.emplace(t.unsafeGetTensorImpl(), weakref_type(t.getIntrusivePtr()));
 }
 
 void remove_cudagraph_cached_tensor(const at::Tensor& t) {
-  TORCH_INTERNAL_ASSERT(cudagraph_cached_tensorimpl_set_enabled);
+  TORCH_INTERNAL_ASSERT(cudagraph_cached_tensorimpls_enabled);
   const std::lock_guard<std::mutex> lock(cudagraph_cached_tensorimpl_mutex);
-  cudagraph_cached_tensorimpl_set.erase(t.unsafeGetTensorImpl());
+  cudagraph_cached_tensorimpls.erase(t.unsafeGetTensorImpl());
 }
 
 void set_cudagraph_cached_tensors_enabled(bool enabled) {
-  cudagraph_cached_tensorimpl_set_enabled = enabled;
+  cudagraph_cached_tensorimpls_enabled = enabled;
 }
 
 // Overload to catch Tensor args
@@ -218,9 +213,9 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled);
 
-    if (can_try_cache && cudagraph_cached_tensorimpl_set_enabled) {
+    if (can_try_cache && cudagraph_cached_tensorimpls_enabled) {
       const std::lock_guard<std::mutex> lock(cudagraph_cached_tensorimpl_mutex);
-      can_try_cache = !cudagraph_cached_tensorimpl_set.count(arg.unsafeGetTensorImpl());
+      can_try_cache = !cudagraph_cached_tensorimpls.count(arg.unsafeGetTensorImpl());
     }
 
     if (can_try_cache) {
