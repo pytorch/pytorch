@@ -386,8 +386,8 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
       cuda::cub::radix_sort_pairs(
-        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
-        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
+        range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
 
@@ -479,8 +479,8 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<
       // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
       cuda::cub::radix_sort_pairs(
-        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
-        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
+        range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
 
