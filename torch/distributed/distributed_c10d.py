@@ -1536,7 +1536,7 @@ def _coalescing_manager(
     cm = _CoalescingManager()
     try:
         yield cm
-    except:
+    except Exception:
         # Re-throw exception caught by code inside the context manager
         raise
     else:
@@ -1613,15 +1613,20 @@ def batch_isend_irecv(p2p_op_list):
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
-    with _coalescing_manager(group, device, async_ops=True) as cm:
+    if device.type == "cuda":
+        # NCCL style coalescing
+        with _coalescing_manager(group, device, async_ops=True) as cm:
+            for p2p_op in p2p_op_list:
+                p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
+        return cm.works
+    else:
+        # Backward support for Gloo
+        reqs = []
         for p2p_op in p2p_op_list:
-            p2p_op.op(
-                p2p_op.tensor,
-                p2p_op.peer,
-                p2p_op.group,
-                p2p_op.tag,
-            )
-    return cm.works
+            work = p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
+            if work:
+                reqs.append(work)
+        return reqs
 
 
 @exception_handler
