@@ -2,7 +2,7 @@
 from typing import Any, Callable
 
 import torch
-from torch._inductor.overrides import (
+from torch._inductor.fx_passes.pre_grad import (
     linear_permute_fusion,
     linear_transpose,
     permute_linear_fusion,
