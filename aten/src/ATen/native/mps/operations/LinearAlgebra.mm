@@ -12,10 +12,10 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
-#include <ATen/ops/mm_native.h>
-#include <ATen/ops/triangular_solve_native.h>
 #include <ATen/ops/linalg_lu_solve_native.h>
+#include <ATen/ops/mm_native.h>
 #include <ATen/ops/stack.h>
+#include <ATen/ops/triangular_solve_native.h>
 #endif
 
 #include <algorithm>
@@ -116,20 +116,13 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
 
   status_tensors.reserve(batchSize);
   pivots_list.reserve(batchSize);
-  for (const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1,
-                kInt,
-                c10::nullopt,
-                kMPS,
-                c10::nullopt));
-    pivots_list.push_back(at::zeros(numPivots,
-                kInt,
-                c10::nullopt,
-                kMPS,
-                c10::nullopt));
+  for (C10_UNUSED const auto i : c10::irange(batchSize)) {
+    status_tensors.push_back(at::zeros(1, kInt, c10::nullopt, kMPS, c10::nullopt));
+    pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
   }
 
-  std::cout << "pivots size" << pivot_sizes << "acols" << aCols << "aRows" << aRows << "aelesize" << aElemSize << std::endl;
+  std::cout << "pivots size" << pivot_sizes << "acols" << aCols << "aRows" << aRows << "aelesize" << aElemSize
+            << std::endl;
   if (A_t.numel() == 0 || LU.numel() == 0) {
     LU.zero_();
     return status_tensors;
@@ -144,8 +137,8 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
   A_ = LU.copy_(A_);
 
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
-  //id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots);
-  
+  // id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots);
+
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
@@ -153,8 +146,8 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
     @autoreleasepool {
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       MPSMatrixDecompositionLU* filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device
-                                                                     rows: aRows
-                                                                  columns: aCols] autorelease];
+                                                                                      rows:aRows
+                                                                                   columns:aCols] autorelease];
 
       MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                     columns:aCols
@@ -162,23 +155,21 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
                                                                                    rowBytes:aCols * aElemSize
                                                                                 matrixBytes:aRows * aCols * aElemSize
                                                                                    dataType:getMPSDataType(A_)];
-      MPSMatrixDescriptor* pivotsMatrixDesc =
-          [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                columns:numPivots
-                                               matrices:batchSize
-                                               rowBytes:numPivots * sizeof(uint32_t)
-                                            matrixBytes:numPivots * sizeof(uint32_t)
-                                               dataType:MPSDataTypeUInt32];
-      
+      MPSMatrixDescriptor* pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                    columns:numPivots
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:numPivots * sizeof(uint32_t)
+                                                                                matrixBytes:numPivots * sizeof(uint32_t)
+                                                                                   dataType:MPSDataTypeUInt32];
+
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
         MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
                                                               offset:(A_.storage_offset() + aBatchOffset) * aElemSize
                                                           descriptor:sourceMatrixDesc] autorelease];
-        MPSMatrix* pivotIndices =
-            [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
-                                        offset:0
-                                    descriptor:pivotsMatrixDesc] autorelease];
+        MPSMatrix* pivotIndices = [[[MPSMatrix alloc] initWithBuffer:getMTLBufferStorage(pivots_list[i])
+                                                              offset:0
+                                                          descriptor:pivotsMatrixDesc] autorelease];
         MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
                                                                 offset:(A_.storage_offset() + aBatchOffset) * aElemSize
                                                             descriptor:sourceMatrixDesc] autorelease];
@@ -187,8 +178,7 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
                          sourceMatrix:sourceMatrix
                          resultMatrix:solutionMatrix
                          pivotIndices:pivotIndices
-                         status:statusBuffer
-                       ];
+                               status:statusBuffer];
       }
       mpsStream->commit(true);
     }
@@ -201,11 +191,11 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
 }
 
 void linalg_lu_solve_out_mps_impl(const Tensor& LU,
-                                     const Tensor& pivots,
-                                     const Tensor& B,
-                                     bool left,
-                                     bool adjoint,
-                                     const Tensor& out){
+                                  const Tensor& pivots,
+                                  const Tensor& B,
+                                  bool left,
+                                  bool adjoint,
+                                  const Tensor& out) {
   using namespace mps;
 
   if (LU.numel() == 0 || B.numel() == 0 || out.numel() == 0) {
@@ -258,18 +248,18 @@ void linalg_lu_solve_out_mps_impl(const Tensor& LU,
                                                rowBytes:bCols * bElemSize
                                             matrixBytes:bRows * bCols * bElemSize
                                                dataType:getMPSDataType(B_)];
-      MPSMatrixDescriptor* pivotsMatrixDesc =
-          [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                columns:numPivots
-                                               matrices:batchSize
-                                               rowBytes:numPivots * sizeof(uint32_t)
-                                            matrixBytes:numPivots * sizeof(uint32_t)
-                                               dataType:MPSDataTypeUInt32];
+      MPSMatrixDescriptor* pivotsMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                    columns:numPivots
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:numPivots * sizeof(uint32_t)
+                                                                                matrixBytes:numPivots * sizeof(uint32_t)
+                                                                                   dataType:MPSDataTypeUInt32];
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
         const uint64_t pivotsBatchOffset = i * numPivots;
-        std::cout << "aBatchOffset " << aBatchOffset << "bBatchOffset " << bBatchOffset << "pivots " << pivotsBatchOffset  << std::endl;
+        std::cout << "aBatchOffset " << aBatchOffset << "bBatchOffset " << bBatchOffset << "pivots "
+                  << pivotsBatchOffset << std::endl;
 
         MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
                                                               offset:(A_.storage_offset() + aBatchOffset) * aElemSize
@@ -282,9 +272,10 @@ void linalg_lu_solve_out_mps_impl(const Tensor& LU,
             [[[MPSMatrix alloc] initWithBuffer:pivotIndicesBuffer
                                         offset:(pivots_.storage_offset() + pivotsBatchOffset) * sizeof(uint32_t)
                                     descriptor:pivotsMatrixDesc] autorelease];
-        MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
-                                                                offset:(out_.storage_offset() + bBatchOffset) * bElemSize
-                                                            descriptor:rightHandSideMatrixDesc] autorelease];
+        MPSMatrix* solutionMatrix =
+            [[[MPSMatrix alloc] initWithBuffer:outBuffer
+                                        offset:(out_.storage_offset() + bBatchOffset) * bElemSize
+                                    descriptor:rightHandSideMatrixDesc] autorelease];
 
         [filter encodeToCommandBuffer:commandBuffer
                          sourceMatrix:sourceMatrix
@@ -295,7 +286,7 @@ void linalg_lu_solve_out_mps_impl(const Tensor& LU,
       mpsStream->commit(true);
     }
   });
-  //if (!out.is_contiguous()) {
+  // if (!out.is_contiguous()) {
   out.copy_(out_);
   std::cout << "Post A:" << A_ << std::endl;
   std::cout << "Post B:" << B_ << std::endl;
@@ -863,7 +854,7 @@ Tensor& linalg_solve_out_mps_impl(const Tensor& A,
   if (!B_t.is_contiguous()) {
     B_ = B_t.clone(at::MemoryFormat::Contiguous);
   }
-  Tensor 
+  Tensor
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> bBuffer = getMTLBufferStorage(B_);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
@@ -1168,7 +1159,8 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out_mps)(const Tensor& LU,
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   auto status_tensors = mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
   for (const auto i : c10::irange(status_tensors.size())) {
-    TORCH_CHECK(status_tensors[i].item<int>() == 0, "lu_factor(): LU factorization failure:", status_tensors[i].item<int>());
+    TORCH_CHECK(
+        status_tensors[i].item<int>() == 0, "lu_factor(): LU factorization failure:", status_tensors[i].item<int>());
   }
   return std::tie(LU, pivots);
 }
@@ -1177,17 +1169,14 @@ std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
   Tensor pivots = at::empty({0}, A.options().dtype(kInt));
   auto status_tensors = mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
   for (const auto i : c10::irange(status_tensors.size())) {
-    TORCH_CHECK(status_tensors[i].item<int>() == 0, "lu_factor(): LU factorization failure:", status_tensors[i].item<int>());
+    TORCH_CHECK(
+        status_tensors[i].item<int>() == 0, "lu_factor(): LU factorization failure:", status_tensors[i].item<int>());
   }
   return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
-TORCH_IMPL_FUNC(linalg_lu_solve_out_mps)(const Tensor& LU,
-                                     const Tensor& pivots,
-                                     const Tensor& B,
-                                     bool left,
-                                     bool adjoint,
-                                     const Tensor& result) {
+TORCH_IMPL_FUNC(linalg_lu_solve_out_mps)
+(const Tensor& LU, const Tensor& pivots, const Tensor& B, bool left, bool adjoint, const Tensor& result) {
   // Trivial case
   if (result.numel() == 0) {
     return;
@@ -1198,9 +1187,9 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out_mps)(const Tensor& LU,
     adjoint = !adjoint;
     result.transpose_(-2, -1);
   }
-  
+
   // Copy B (or B^H) into result
-  //if (!result.is_same(B)) {
+  // if (!result.is_same(B)) {
   //  result.copy_(left ? B : B.mH());
   //}
 
