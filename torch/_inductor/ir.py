@@ -2716,7 +2716,7 @@ class ExternKernel(InputsKernel):
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
-        if config.size_asserts and not V.graph.cpp_wrapper:
+        if config.size_asserts:
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -3258,7 +3258,6 @@ def _prepare_convolution_fusion_create(
         convert_shape_to_inductor(output_stride),
     )
     constant_args = [padding, stride, dilation, groups]
-
     if transposed:
         constant_args.insert(1, output_padding)
 
@@ -3270,17 +3269,20 @@ def _prepare_convolution_fusion_create(
 
 
 class ConvolutionUnary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_pointwise"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_pointwise",
-        cpp_kernel="mkldnn::_convolution_pointwise",
     ):
-        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_pointwise",
+            cpp_kernel="mkldnn::_convolution_pointwise",
+        )
         self.cpp_kernel_key = "convolution_pointwise"
         self.cpp_op_schema = """
             at::Tensor(
@@ -3320,7 +3322,6 @@ class ConvolutionUnary(ExternKernelAlloc):
         scalars,
         algorithm,
     ):
-        kernel = "torch.ops.mkldnn._convolution_pointwise"
         (
             inputs,
             constant_args,
@@ -3335,23 +3336,25 @@ class ConvolutionUnary(ExternKernelAlloc):
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 
 class ConvolutionBinary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_pointwise.binary",
-        cpp_kernel="mkldnn::_convolution_pointwise",
         cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+            cpp_kernel="mkldnn::_convolution_pointwise",
+        )
         self.cpp_kernel_overlad_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary"
         self.cpp_op_schema = """
@@ -3400,7 +3403,6 @@ class ConvolutionBinary(ExternKernelAlloc):
         unary_scalars: Optional[List],
         unary_algorithm: Optional[str],
     ):
-        kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
         (
             inputs,
             constant_args,
@@ -3422,26 +3424,26 @@ class ConvolutionBinary(ExternKernelAlloc):
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 
 class ConvolutionBinaryInplace(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
-
     def __init__(
         self,
         kernel_layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
-        cpp_kernel="mkldnn::_convolution_pointwise_",
     ):
         # TODO: fix me
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
         super().__init__(
-            kernel_layout, reordered_inputs, constant_args, None, kernel, cpp_kernel
+            kernel_layout,
+            reordered_inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
+            cpp_kernel="mkldnn::_convolution_pointwise_",
         )
         self.cpp_kernel_overlad_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary_"
@@ -3493,7 +3495,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_scalars: Optional[List],
         unary_algorithm: Optional[str],
     ):
-        kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
         (
             inputs,
             constant_args,
@@ -3517,7 +3518,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             kernel_layout=MutationLayout(inputs[1]),
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 

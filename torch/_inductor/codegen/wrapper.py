@@ -578,7 +578,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(self.wrap_kernel_call(name, call_args))
 
     def generate_size_asserts(self, name, size, stride):
-        return f"assert_size_stride({name}, {size}, {stride})"
+        return f"assert_size_stride({name}, {size}, {stride}){self.ending}"
 
     def call_kernel(self, name: str, kernel: Kernel):
         tmp = IndentedBuffer()
@@ -827,9 +827,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
         self.header.splice(f"\n{kernel}\n")
-
-    def generate_size_asserts(self, name, size, stride):
-        return f"assert_size_stride({name}, {size}, {stride});"
 
     def generate_return(self, output_refs):
         self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
