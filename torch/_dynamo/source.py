@@ -328,7 +328,7 @@ class GetItemSource(Source):
                 and self.index.__reduce__() == other.index.__reduce__()
             )
 
-        return super().__eq__(self, other)
+        return super().__eq__(other)
 
     def guard_source(self):
         return self.base.guard_source()

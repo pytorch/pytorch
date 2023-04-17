@@ -4832,6 +4832,9 @@ def fn():
         # s3 should be different
         self.assertTrue(s3 not in some_set)
 
+        self.assertTrue(s == s2)
+        self.assertTrue(s != s3)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
