@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <stdexcept>
-#include <unordered_map>
 #include <utility>
 
 #ifndef C10_MOBILE
