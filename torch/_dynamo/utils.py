@@ -95,7 +95,7 @@ def dynamo_profiled(func):
 frame_phase_timing = collections.OrderedDict()
 
 TOTAL_FRAME_COUNTER = 0
-torch._logging._internal.register_formatter_prefix_fn(lambda: f"frame {TOTAL_FRAME_COUNTER}: ")
+torch._logging._internal.register_formatter_prefix_fn(lambda: f"{TOTAL_FRAME_COUNTER}: ")
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def increment_frame(frame_state):
