@@ -10,8 +10,6 @@ Global flags for aot autograd
 import os
 import sys
 
-use_functionalize = True
-
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False

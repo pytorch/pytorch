@@ -15,14 +15,9 @@ log = logging.getLogger(__name__)
 
 def aot_autograd(**kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
-        import functorch.compile
-
         # Hack to get around circular import problems with aot_eager_decomp_partition
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()
-
-        # TODO: stop monkeypatching here (without even cleaning up, UGH!)
-        functorch.compile.config.use_functionalize = True
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
