@@ -28,6 +28,57 @@ from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
 
 
+def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
+    """Remove test environment prefix added to module.
+
+    Remove prefix to normalize scope names, since different test environments add
+    prefixes with slight differences.
+
+    Example:
+
+        >>> _remove_test_environment_prefix_from_scope_name(
+        >>>     "test_utility_funs.M"
+        >>> )
+        "M"
+        >>> _remove_test_environment_prefix_from_scope_name(
+        >>>     "__main__.M"
+        >>> )
+        "M"
+    """
+    prefixes_to_remove = ["test_utility_funs.", "__main__."]
+    for prefix in prefixes_to_remove:
+        scope_name = scope_name.replace(prefix, "")
+    return scope_name
+
+
+class _N(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(x)
+
+
+class _M(torch.nn.Module):
+    def __init__(self, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        self.lns = torch.nn.ModuleList(
+            [torch.nn.LayerNorm(3, eps=float(i)) for i in range(num_layers)]
+        )
+        self.gelu1 = torch.nn.GELU()
+        self.gelu2 = torch.nn.GELU()
+        self.relu = _N()
+
+    def forward(self, x, y, z):
+        res1 = self.gelu1(x)
+        res2 = self.gelu2(y)
+        for ln in self.lns:
+            z = ln(z)
+        return res1 + res2, self.relu(z)
+
+
 class _BaseTestCase(pytorch_test_common.ExportTestCase):
     def _model_to_graph(
         self,
@@ -1064,75 +1115,38 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
     def test_node_scope(self):
-        class N(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.relu(x)
-
-        class M(torch.nn.Module):
-            def __init__(self, num_layers):
-                super().__init__()
-                self.num_layers = num_layers
-                self.lns = torch.nn.ModuleList(
-                    [torch.nn.LayerNorm(3, eps=float(i)) for i in range(num_layers)]
-                )
-                self.gelu1 = torch.nn.GELU()
-                self.gelu2 = torch.nn.GELU()
-                self.relu = N()
-
-            def forward(self, x, y, z):
-                res1 = self.gelu1(x)
-                res2 = self.gelu2(y)
-                for ln in self.lns:
-                    z = ln(z)
-                return res1 + res2, self.relu(z)
-
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
 
-        model = M(3)
+        model = _M(3)
         expected_scope_names = {
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.activation.GELU::gelu1",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.activation.GELU::gelu2",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.normalization.LayerNorm::lns.0",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.normalization.LayerNorm::lns.1",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.N::relu/"
-            "torch.nn.modules.activation.ReLU::relu",
-            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::",
+            "_M::/torch.nn.modules.activation.GELU::gelu1",
+            "_M::/torch.nn.modules.activation.GELU::gelu2",
+            "_M::/torch.nn.modules.normalization.LayerNorm::lns.0",
+            "_M::/torch.nn.modules.normalization.LayerNorm::lns.1",
+            "_M::/torch.nn.modules.normalization.LayerNorm::lns.2",
+            "_M::/_N::relu/torch.nn.modules.activation.ReLU::relu",
+            "_M::",
         }
 
         graph, _, _ = self._model_to_graph(
             model, (x, y, z), input_names=[], dynamic_axes={}
         )
         for node in graph.nodes():
-            self.assertIn(node.scopeName(), expected_scope_names)
-
-        expected_torch_script_scope_names = {
-            "test_utility_funs.M::/torch.nn.modules.activation.GELU::gelu1",
-            "test_utility_funs.M::/torch.nn.modules.activation.GELU::gelu2",
-            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.0",
-            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.1",
-            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.M::/test_utility_funs.N::relu/torch.nn.modules.activation.ReLU::relu",
-            "test_utility_funs.M::",
-        }
+            self.assertIn(
+                _remove_test_environment_prefix_from_scope_name(node.scopeName()),
+                expected_scope_names,
+            )
 
         graph, _, _ = self._model_to_graph(
             torch.jit.script(model), (x, y, z), input_names=[], dynamic_axes={}
         )
         for node in graph.nodes():
-            self.assertIn(node.scopeName(), expected_torch_script_scope_names)
+            self.assertIn(
+                _remove_test_environment_prefix_from_scope_name(node.scopeName()),
+                expected_scope_names,
+            )
 
     def test_scope_of_constants_when_combined_by_cse_pass(self):
         layer_num = 3
@@ -1169,7 +1183,7 @@ class TestUtilityFuns(_BaseTestCase):
         #       It should expect 1 constant, with same scope as root.
         scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
         expected_root_scope_name = f"{scope_prefix}.N::"
-        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_layer_scope_name = f"{scope_prefix}._M::layers"
         expected_constant_scope_name = [
             f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
             for i in range(layer_num)
@@ -1219,7 +1233,7 @@ class TestUtilityFuns(_BaseTestCase):
         )
         scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
         expected_root_scope_name = f"{scope_prefix}.N::"
-        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_layer_scope_name = f"{scope_prefix}._M::layers"
         expected_add_scope_names = [
             f"{expected_root_scope_name}/{expected_layer_scope_name}.0"
         ]
