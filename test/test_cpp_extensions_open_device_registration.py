@@ -12,6 +12,7 @@ import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
+
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
 TEST_CUDNN = False
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
@@ -36,6 +37,10 @@ class DummyModule(object):
     @staticmethod
     def device_count() -> int:
         return 1
+
+    @staticmethod
+    def current_device() -> int:
+        return 0
 
     @staticmethod
     def get_rng_state(device: Union[int, str, torch.device] = 'foo') -> torch.Tensor:
@@ -179,6 +184,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # check UntypedStorage
         z2 = y.untyped_storage()
         self.assertFalse(z2.is_foo)
+        # check case if Module has current_device
+        torch._register_device_module('foo', DummyModule)
         z2 = z2.foo()
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z2.is_foo)

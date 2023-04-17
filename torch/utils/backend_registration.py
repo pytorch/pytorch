@@ -4,7 +4,6 @@ from typing import List, Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
-
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     rename_privateuse1_backend(backend_name) -> None
@@ -225,7 +224,8 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
                               device=None, non_blocking=False, **kwargs) -> torch.storage.TypedStorage:
         torch.storage._warn_typed_storage_removal()
         if unsupported_dtype and self.dtype in unsupported_dtype:
-            raise RuntimeError(f"Cannot create {custom_backend_name} storage as {self.dtype} dtype is not supported by this backend")
+            raise RuntimeError(f"Cannot create {custom_backend_name} storage "
+                               f"as {self.dtype} dtype is not supported by this backend")
         custom_backend_storage: torch.UntypedStorage = getattr(
             self._untyped_storage, custom_backend_name)(device, non_blocking, **kwargs)
         return self._new_wrapped_storage(custom_backend_storage)
