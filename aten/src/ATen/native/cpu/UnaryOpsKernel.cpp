@@ -469,7 +469,7 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "kaiser_window_cpu", [&](){
       const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
       const scalar_t beta_ = static_cast<scalar_t>(beta);
       cpu_kernel(iter, [=](scalar_t a){
