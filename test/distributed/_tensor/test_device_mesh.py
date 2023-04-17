@@ -166,7 +166,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             # make the random seed same across rank
             torch.manual_seed(0)
             global_tensor = torch.randn(scatter_tensor_shape, device=self.device_type)
-            splitted_list, _, _ = shard_placement._split_tensor(
+            splitted_list, _ = shard_placement._split_tensor(
                 global_tensor, mesh.size(), with_padding=True, contiguous=True
             )
             recv_tensor = torch.empty_like(splitted_list[mesh.get_rank()])
@@ -192,7 +192,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             for _ in range(self.world_size - len(tensor_splitted_list)):
                 tensor_splitted_list.append(torch.tensor([], device=self.device_type))
 
-            padded_tensor_list, _, pad_sizes = shard_placement._split_tensor(
+            padded_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_scatter,
                 device_mesh.size(),
                 with_padding=True,
@@ -236,7 +236,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
         for shard_dim in range(tensor_to_split.ndim):
             shard_placement = Shard(shard_dim)
-            tensor_padded_list, pad_idx, pad_sizes = shard_placement._split_tensor(
+            tensor_padded_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_split,
                 device_mesh.size(),
                 with_padding=True,
@@ -291,7 +291,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             for _ in range(self.world_size - len(tensor_splitted_list)):
                 tensor_splitted_list.append(torch.tensor([], device=self.device_type))
 
-            padded_tensor_list, pad_idx, pad_sizes = shard_placement._split_tensor(
+            padded_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_scatter,
                 device_mesh.size(),
                 with_padding=True,

@@ -39,7 +39,7 @@ class Shard(Placement):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], int, List[int]]:
+    ) -> Tuple[List[torch.Tensor], List[int]]:
         # NOTE: For with_padding option, we pad the tensor on each rank before calling
         # the collectives (i.e. scatter/all_gather, etc.). This is because for gloo
         # backend, it does not support uneven collectives, nccl supports some, but
@@ -65,18 +65,9 @@ class Shard(Placement):
             tensor_list[idx].size(self.dim) if idx < len(tensor_list) else 0
             for idx in range(num_chunks)
         ]
-        # Get idx start to pad
-        idx_start_to_pad = next(
-            (
-                idx
-                for idx, _ in enumerate(chunk_sizes)
-                if idx > 0 and chunk_sizes[idx] < chunk_sizes[idx - 1]
-            ),
-            0,
-        )
         # Compute pad size on each chunk
         pad_sizes = [
-            full_chunk_size - chunk_size if idx >= idx_start_to_pad else 0
+            full_chunk_size - chunk_size
             for idx, chunk_size in enumerate(chunk_sizes)
         ]
 
@@ -89,7 +80,7 @@ class Shard(Placement):
         for _ in range(num_empty_tensors):
             tensor_list.append(empty_tensor)
 
-        if idx_start_to_pad != -1 and with_padding or contiguous:
+        if with_padding or contiguous:
             shard_list = []
             for shard, pad_size in zip(tensor_list, pad_sizes):
                 # Fill the empty tensor with zeroes with padding.
@@ -99,9 +90,9 @@ class Shard(Placement):
                     shard = self._pad_tensor(shard, pad_size)
                 shard = shard.contiguous() if contiguous else shard
                 shard_list.append(shard)
-            return shard_list, idx_start_to_pad, pad_sizes
+            return shard_list, pad_sizes
         else:
-            return tensor_list, idx_start_to_pad, pad_sizes
+            return tensor_list, pad_sizes
 
     def _pad_tensor(
         self,
