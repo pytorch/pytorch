@@ -46,7 +46,6 @@ class DTensorAPITest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
-
             tensor_to_shard = torch.randn(
                 3 * self.world_size, 3, requires_grad=requires_grad
             )
