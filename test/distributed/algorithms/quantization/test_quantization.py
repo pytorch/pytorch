@@ -309,6 +309,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
     classname_with_backend = f"{DistQuantizationTests.__name__}{BACKEND.upper()}"
     globals()[classname_with_backend] = globals()[DistQuantizationTests.__name__]
     del globals()[DistQuantizationTests.__name__]
+    DistQuantizationTests.__name__ = classname_with_backend
+
 
 if __name__ == "__main__":
     run_tests()
