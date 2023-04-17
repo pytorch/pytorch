@@ -258,14 +258,18 @@ Weight Averaging (SWA and EMA)
 ------------------------------
 
 :mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA). In particular,
-:class:`torch.optim.swa_utils.AveragedModel` class implements SWA and EMA models,
+the :class:`torch.optim.swa_utils.AveragedModel` class implements SWA and EMA models,
 :class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and
 :func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA/EMA batch
 normalization statistics at the end of training.
 
 SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_.
 
+EMA is a widely known technique to reduce the training time by reducing the number of weight updates needed. It is a variation of `Polyak averaging`_.
+
 .. _`Averaging Weights Leads to Wider Optima and Better Generalization`: https://arxiv.org/abs/1803.05407
+
+.. _`Polyak averaging`: https://epubs.siam.org/doi/abs/10.1137/0330046
 
 Constructing averaged models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -278,14 +282,24 @@ You can create an SWA averaged model by running:
 
 EMA models are constructed by specifying the ``multi_avg_fn`` argument as follows:
 
+>>> decay = 0.999
 >>> averaged_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
 
+Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to ``get_ema_multi_avg_fn``, the default is 0.999.
+
+``get_ema_multi_avg_fn`` returns a function that applies the following EMA equation to the weights:
+
+.. math:: W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t
+
+where alpha is the EMA decay.
 
 Here the model ``model`` can be an arbitrary :class:`torch.nn.Module` object. ``averaged_model``
 will keep track of the running averages of the parameters of the ``model``. To update these
-averages, you can use the :func:`update_parameters` function:
+averages, you should use the :func:`update_parameters` function:
 
 >>> averaged_model.update_parameters(model)
+
+For SWA and EMA, this call is usually done right after the optimizer ``step()``. In the case of SWA, this is usually skipped for some numbers of steps at the beginning of the training.
 
 Custom averaging strategies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -295,19 +309,18 @@ the parameters that you provide, but you can also use custom averaging functions
 ``avg_fn`` or ``multi_avg_fn`` parameters:
 
 - ``avg_fn`` allows defining a function operating on each parameter tuple (averaged parameter, model parameter) and should return the new averaged parameter.
-- ``multi_avg_fn`` allows defining more efficient operations acting on multiple (averaged parameter, model parameter) tuples at the same time, for example using the ``torch._foreach*`` functions. This function should update the averaged parameters in-place.
-
+- ``multi_avg_fn`` allows defining more efficient operations acting on a tuple of parameter lists, (averaged parameter list, model parameter list), at the same time, for example using the ``torch._foreach*`` functions. This function must update the averaged parameters in-place.
 
 In the following example ``ema_model`` computes an exponential moving average using the ``avg_fn`` parameter:
 
 >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
->>>         0.1 * averaged_model_parameter + 0.9 * model_parameter
+>>>         0.9 * averaged_model_parameter + 0.1 * model_parameter
 >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
 
 
 In the following example ``ema_model`` computes an exponential moving average using the more efficient ``multi_avg_fn`` parameter:
 
->>> ema_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(decay))
+>>> ema_model = AveragedModel(model, multi_avg_fn=get_ema_multi_avg_fn(0.9))
 
 
 SWA learning rate schedules
@@ -390,7 +403,7 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 >>>           optimizer.zero_grad()
 >>>           loss_fn(model(input), target).backward()
 >>>           optimizer.step()
->>>           swa_model.update_parameters(model)
+>>>           ema_model.update_parameters(model)
 >>>
 >>> # Update bn statistics for the ema_model at the end
 >>> torch.optim.swa_utils.update_bn(loader, ema_model)

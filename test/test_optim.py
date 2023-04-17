@@ -4010,8 +4010,9 @@ class TestSWAUtils(TestCase):
             torch.nn.Linear(5, 10),
         ).to(net_device)
 
+        ema_decay = 0.999
         if ema:
-            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(0.999))
+            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
         else:
             averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_swa_multi_avg_fn())
 
@@ -4022,7 +4023,7 @@ class TestSWAUtils(TestCase):
             for p, p_avg in zip(dnn.parameters(), averaged_params):
                 p.detach().add_(torch.randn_like(p))
                 if ema:
-                    p_avg += p.detach() * 0.999 ** (n_updates - i - 1) * (0.001 if i > 0 else 1.0)
+                    p_avg += p.detach() * ema_decay ** (n_updates - i - 1) * ((1 - ema_decay) if i > 0 else 1.0)
                 else:
                     p_avg += p.detach() / n_updates
             averaged_dnn.update_parameters(dnn)
@@ -4053,8 +4054,9 @@ class TestSWAUtils(TestCase):
         )
         dnn[0].cuda()
         dnn[1].cpu()
+        ema_decay = 0.999
         if ema:
-            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(0.999))
+            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
         else:
             averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_swa_multi_avg_fn())
 
@@ -4064,7 +4066,7 @@ class TestSWAUtils(TestCase):
             for p, p_avg in zip(dnn.parameters(), averaged_params):
                 p.detach().add_(torch.randn_like(p))
                 if ema:
-                    p_avg += p.detach() * 0.999 ** (n_updates - i - 1) * (0.001 if i > 0 else 1.0)
+                    p_avg += p.detach() * ema_decay ** (n_updates - i - 1) * ((1 - ema_decay) if i > 0 else 1.0)
                 else:
                     p_avg += p.detach() / n_updates
             averaged_dnn.update_parameters(dnn)
@@ -4107,13 +4109,13 @@ class TestSWAUtils(TestCase):
             torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10),
         )
-        alpha = 0.9
+        decay = 0.9
 
         if use_multi_avg_fn:
-            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(alpha))
+            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(decay))
         else:
             def avg_fn(p_avg, p, n_avg):
-                return alpha * p_avg + (1 - alpha) * p
+                return decay * p_avg + (1 - decay) * p
 
             averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn)
 
@@ -4127,7 +4129,7 @@ class TestSWAUtils(TestCase):
                     updated_averaged_params.append(p.clone())
                 else:
                     updated_averaged_params.append(
-                        (p_avg * alpha + p * (1 - alpha)).clone()
+                        (p_avg * decay + p * (1 - decay)).clone()
                     )
             for b in dnn.buffers():
                 if b.size() != torch.Size([]):
@@ -4149,13 +4151,13 @@ class TestSWAUtils(TestCase):
             torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10),
         )
-        alpha = 0.9
+        decay = 0.9
 
         if use_multi_avg_fn:
-            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(alpha), use_buffers=True)
+            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(decay), use_buffers=True)
         else:
             def avg_fn(p_avg, p, n_avg):
-                return alpha * p_avg + (1 - alpha) * p
+                return decay * p_avg + (1 - decay) * p
 
             averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
         
@@ -4176,7 +4178,7 @@ class TestSWAUtils(TestCase):
                     updated_averaged_params.append(p.clone())
                 else:
                     updated_averaged_params.append(
-                        (p_avg * alpha + p * (1 - alpha)).clone()
+                        (p_avg * decay + p * (1 - decay)).clone()
                     )
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
