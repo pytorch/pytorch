@@ -1,11 +1,12 @@
 import copy
+import logging
 from typing import Callable, Optional
 
 import triton
 
 from .utils import triton_config_to_hashable
 
-DEBUG = True
+log = logging.getLogger(__name__)
 
 
 def get_field(config, name):
@@ -51,8 +52,7 @@ class CoordescTuner:
     def call_func(self, func, config):
         found = self.lookup_in_cache(config)
         if found is not None:
-            if DEBUG:
-                print("  CACHED")
+            log.debug("  CACHED")
             return found
         timing = func(config)
         self.cache_benchmark_result(config, timing)
@@ -110,11 +110,10 @@ class CoordescTuner:
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 
-        if DEBUG:
-            print(f"= Do coordinate descent tuning for {self.name} =")
-            print(
-                f"Baseline Config {baseline_config}, baseline timing {baseline_timing}"
-            )
+        log.debug("= Do coordinate descent tuning for %s =", self.name)
+        log.debug(
+            "Baseline Config %s, baseline timing %f", baseline_config, baseline_timing
+        )
         improved = True
         best_config = baseline_config
         best_timing = baseline_timing
@@ -135,27 +134,32 @@ class CoordescTuner:
                 for next_val in candidate_values:
                     candidate_config = copy.deepcopy(best_config)
                     set_field(candidate_config, name, next_val)
-                    if DEBUG:
-                        print(f"Try config {candidate_config}")
+                    log.debug("Try config %s", candidate_config)
                     try:
                         candidate_timing = self.call_func(func, candidate_config)
                     except Exception as e:
-                        if DEBUG:
-                            print(f"Got exception {e}")
+                        log.debug("Got exception %s", e)
                         continue
 
                     if self.has_improvement(best_timing, candidate_timing):
                         improved = True
-                        if DEBUG:
-                            print(
-                                f"Tune from {best_config} {best_timing} -> {candidate_config} {candidate_timing}"
-                            )
+                        log.debug(
+                            "Tune from %s %f -> %s %f",
+                            best_config,
+                            best_timing,
+                            candidate_config,
+                            candidate_timing,
+                        )
                         best_timing = candidate_timing
                         best_config = candidate_config
 
-        if DEBUG:
-            print(
-                f"Improve from {baseline_config} {baseline_timing} -> {best_config} {best_timing}, {baseline_timing / best_timing:.3f}x"  # noqa: B950 line too long
-            )
+        log.debug(
+            "Improve from %s %f -> %s %f, %.3fx",
+            baseline_config,
+            baseline_timing,
+            best_config,
+            best_timing,
+            baseline_timing / best_timing,
+        )
 
         return best_config

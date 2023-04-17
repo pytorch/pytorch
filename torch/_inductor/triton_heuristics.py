@@ -45,8 +45,6 @@ else:
     KernelInterface = object
     triton = None
 
-DEBUG = False
-
 
 class HeuristicType(Enum):
     POINTWISE = auto()
@@ -74,10 +72,10 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
 
-        if DEBUG:
-            print(f"CachingAutotuner gets {len(self.configs)} configs")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("CachingAutotuner gets %d configs", len(self.configs))
             for c in self.configs:
-                print(c)
+                log.debug(c)
 
         self.launchers = []
         self.lock = threading.Lock()
@@ -206,17 +204,17 @@ class CachingAutotuner(KernelInterface):
     def benchmark_all_configs(self, *args, **kwargs):
         cloned_args = self.clone_args(*args)
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
+            launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
         }
 
         for k, v in timings.items():
             self.coordesc_tuner.cache_benchmark_result(k.config, v)
 
-        if DEBUG:
-            print("Benchmark all input configs get:")
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug("Benchmark all input configs get:")
             for k, v in timings.items():
-                print(f"{k.config}: {v}")
+                log.debug("%s: %f", k.config, v)
 
         return timings
 
@@ -246,6 +244,16 @@ class CachingAutotuner(KernelInterface):
         CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
+        """
+        Coordinate descent tuning can be run with or without max-autotune.
+
+        The only difference between these two is the starting config for coordinate_descent tuning.
+        E.g., assuming regular autotune only get one config C1; while max-autotune get 4 configs C1, C2, C3, C4
+        and max-autotune figure out C3 is the best.
+
+        Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
+        while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
+        """
         if self.heuristic_type == HeuristicType.TEMPLATE:
             # skip triton template
             return launcher
@@ -257,7 +265,7 @@ class CachingAutotuner(KernelInterface):
             with self.lock:
                 launcher = self._precompile_config(config, None)
             config2launcher[config] = launcher
-            return self.bench(launcher, *cloned_args, **kwargs)[0]
+            return self.bench(launcher, *cloned_args, **kwargs)
 
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
@@ -353,7 +361,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)[0]
+            ms = self.bench(launcher, *args, grid=grid)
             num_in_out_ptrs = len(
                 [
                     arg_name
@@ -454,9 +462,9 @@ def cached_autotune(
                         }
                     )
                 )
-            if DEBUG:
+            if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
-                print(f"Save {type_str} tuning result to {cache_filename}")
+                log.debug("Save %s tuning result to %s", type_str, cache_filename)
 
     else:
         save_cache_hook = None
