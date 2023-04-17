@@ -149,7 +149,7 @@ static bool getDisableAddmmCudaLt() {
 uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
+  uintptr_t address = reinterpret_cast<uintptr_t>(t.const_data_ptr());
   for (; alignment < 4; alignment *= 2) {
     if (address % (alignment * 2)) {
       return alignment;
@@ -305,7 +305,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               mat1_ld,
               mat2_->data_ptr<scalar_t>(),
               mat2_ld,
-              self.data_ptr<scalar_t>(),
+              self.const_data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
 #if 0
@@ -560,11 +560,11 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::cuda::blas::dot<scalar_t>(
             handle,
             n,
-            self.data_ptr<scalar_t>(),
+            self.const_data_ptr<scalar_t>(),
             incx,
-            other.data_ptr<scalar_t>(),
+            other.const_data_ptr<scalar_t>(),
             incy,
-            result.data_ptr<scalar_t>());
+            result.mutable_data_ptr<scalar_t>());
 
         return result;
       });
@@ -609,11 +609,11 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     at::cuda::blas::vdot<scalar_t>(
         handle,
         n,
-        self.data_ptr<scalar_t>(),
+        self.const_data_ptr<scalar_t>(),
         incx,
-        other.data_ptr<scalar_t>(),
+        other.const_data_ptr<scalar_t>(),
         incy,
-        result.data_ptr<scalar_t>());
+        result.mutable_data_ptr<scalar_t>());
 
     return result;
   });
