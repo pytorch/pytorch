@@ -508,7 +508,8 @@ std::vector<int64_t> _output_size(
     const at::Tensor& input,
     size_t dim,
     const IValue& size,
-    const IValue& scale_factors) {
+    const IValue& scale_factors,
+    bool round_with_scale_factor = false) {
   if (!size.isNone()) {
     if (size.isInt()) {
       std::vector<int64_t> repeated(dim, size.toInt());
@@ -524,8 +525,9 @@ std::vector<int64_t> _output_size(
     scale_repeated = scale_factors.toDoubleVector();
   }
   std::vector<int64_t> ret;
+  const double d = round_with_scale_factor ? 0.5 : 0.0;
   for (const auto i : c10::irange(dim)) {
-    ret.push_back(std::floor(input.size(i + 2) * scale_repeated[i]));
+    ret.push_back(std::floor(d + input.size(i + 2) * scale_repeated[i]));
   }
   return ret;
 }
@@ -632,15 +634,15 @@ at::Tensor interpolate(
     return at::upsample_nearest2d(
         input,
         _output_size(input, 2, size, scale_factors),
-        scale_factors_1,
-        scale_factors_2);
+        c10::make_optional(scale_factors_1),
+        c10::make_optional(scale_factors_2));
   if (input_dim == dim3d && mode == "nearest")
     return at::upsample_nearest3d(
         input,
         _output_size(input, 3, size, scale_factors),
-        scale_factors_1,
-        scale_factors_2,
-        scale_factors_3);
+        c10::make_optional(scale_factors_1),
+        c10::make_optional(scale_factors_2),
+        c10::make_optional(scale_factors_3));
   if (input_dim == dim1d && mode == "area")
     return at::adaptive_avg_pool1d(
         input, _output_size(input, 1, size, scale_factors));
@@ -669,15 +671,15 @@ at::Tensor interpolate(
         input,
         _output_size(input, 2, size, scale_factors),
         *align_corners,
-        scale_factors_1,
-        scale_factors_2);
+        c10::make_optional(scale_factors_1),
+        c10::make_optional(scale_factors_2));
   if (input_dim == dim2d && mode == "bicubic")
     return at::upsample_bicubic2d(
         input,
         _output_size(input, 2, size, scale_factors),
         *align_corners,
-        scale_factors_1,
-        scale_factors_2);
+        c10::make_optional(scale_factors_1),
+        c10::make_optional(scale_factors_2));
   if (input_dim == dim2d && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == dim3d && mode == "linear")
@@ -691,9 +693,9 @@ at::Tensor interpolate(
         input,
         _output_size(input, 3, size, scale_factors),
         *align_corners,
-        scale_factors_1,
-        scale_factors_2,
-        scale_factors_3);
+        c10::make_optional(scale_factors_1),
+        c10::make_optional(scale_factors_2),
+        c10::make_optional(scale_factors_3));
 
   AT_ERROR(
       "Input Error: Only 3D, 4D and 5D input Tensors supported",
