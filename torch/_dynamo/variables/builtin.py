@@ -479,6 +479,16 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
 
+                if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                    # Standard indexing will force specialization due to
+                    # __index__.  Rewrite as a regular torch op which will
+                    # trace fine
+                    fn, args = torch.select, [
+                        args[0],
+                        variables.ConstantVariable(0),
+                        args[1],
+                    ]
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -1178,7 +1188,9 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(value, variables.TensorVariable):
             return value.get_real_value()
         elif isinstance(value, variables.BaseListVariable):
-            return value.python_type()([self._raw_value_to_format(x) for x in value.items])
+            return value.python_type()(
+                [self._raw_value_to_format(x) for x in value.items]
+            )
         else:
             unimplemented(f"call_format with value {value}")
 
