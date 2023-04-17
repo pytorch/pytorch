@@ -58,7 +58,7 @@ def pt_operator_library(
             rule_name = name,
             model_name = model_name,
             dep_graph_yaml = "none" if IS_OSS else "$(location fbsource//xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",
-            models_yaml = "none" if IS_OSS else "$(location fbsource//xplat/pytorch_models/build:all_mobile_model_configs)/all_mobile_model_configs.yaml ",
+            models_yaml = "none" if IS_OSS else "$(location fbsource//xplat/pytorch_models:all_mobile_model_configs)/build/all_mobile_model_configs.yaml ",
             optionally_root_ops = "--root_ops " + (",".join(ops)) if len(ops) > 0 else "",
             optionally_training_root_ops = "--training_root_ops " + (",".join(ops)) if len(ops) > 0 and train else "",
             optionally_model_versions = "--model_versions " + (",".join(model_versions)) if model_versions != None else "",

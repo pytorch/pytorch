@@ -3310,66 +3310,6 @@ TEST_F(VulkanAPITest, upsample_nearest2d) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, upsample_bilinear2d_align_false_small) {
-  const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {4, 6}, false);
-
-  const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {4, 6}, false);
-
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, upsample_bilinear2d_align_false_large) {
-  const auto in_cpu = at::rand({1, 7, 25, 25}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {45, 45}, false);
-
-  const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {45, 45}, false);
-
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, upsample_bilinear2d_align_true_small) {
-  const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {4, 6}, true);
-
-  const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {4, 6}, true);
-
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, upsample_bilinear2d_align_true_large) {
-  const auto in_cpu = at::rand({1, 7, 25, 25}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {45, 45}, true);
-
-  const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {45, 45}, true);
-
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
 void test_unbind(const at::IntArrayRef input_shape, int64_t dim) {
   const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::unbind(in_cpu, dim);

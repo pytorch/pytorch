@@ -724,8 +724,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         if self.world_size < MIN_WORLD_SIZE:
             common_distributed.logger.info(
                 "Skipping `test_nondefault_process_group()` since world size "
-                "of %s is less than %s",
-                self.world_size, MIN_WORLD_SIZE
+                f"of {self.world_size} is less than {MIN_WORLD_SIZE}"
             )
             return
         BACKEND = dist.Backend.GLOO

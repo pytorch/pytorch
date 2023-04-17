@@ -1,11 +1,16 @@
 //  Copyright © 2022 Apple Inc.
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
+#include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/RNN.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #import <MetalPerformanceShadersGraph/MPSGraphRNNOps.h>
+#include <torch/library.h>
 
 namespace at::native {
 

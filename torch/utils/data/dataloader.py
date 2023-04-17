@@ -34,6 +34,7 @@ from . import (
     Dataset,)
 
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 
 from . import _utils
 
@@ -97,7 +98,6 @@ def _get_distributed_settings():
 
 
 def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
-    global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
     assert info is not None
     total_workers = info.num_workers
@@ -105,10 +105,10 @@ def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
-    total_workers *= world_size
-    global_worker_id = global_worker_id * world_size + rank_id
-    # For BC, use default SHARDING_PRIORITIES
-    torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
+    torch.utils.data.graph_settings.apply_sharding(
+        datapipe, world_size, rank_id, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
+    torch.utils.data.graph_settings.apply_sharding(
+        datapipe, total_workers, worker_id, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
 
@@ -163,8 +163,9 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (Callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If ``None``,
-            the default multiprocessing context of your operating system will be used. (default: ``None``)
+        multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
+            ``None``, the default `multiprocessing context`_ of your operating system will
+            be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
             ``base_seed`` for workers. (default: ``None``)
@@ -205,6 +206,9 @@ class DataLoader(Generic[T_co]):
 
     .. warning:: See :ref:`reproducibility`, and :ref:`dataloader-workers-random-seed`, and
                  :ref:`data-loading-randomness` notes for random seed related questions.
+
+    .. _multiprocessing context:
+        https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
     dataset: Dataset[T_co]
     batch_size: Optional[int]
@@ -398,7 +402,8 @@ class DataLoader(Generic[T_co]):
                             ('multiprocessing_context option '
                              'should specify a valid start method in {!r}, but got '
                              'multiprocessing_context={!r}').format(valid_start_methods, multiprocessing_context))
-                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
+                    # error: Argument 1 to "get_context" has incompatible type "Union[str, bytes]"; expected "str"  [arg-type]
+                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)  # type: ignore[arg-type]
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
                     raise TypeError(('multiprocessing_context option should be a valid context '
@@ -662,8 +667,8 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   Taking care of distributed sharding
         if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            # For BC, use default SHARDING_PRIORITIES
-            torch.utils.data.graph_settings.apply_sharding(self._dataset, self._world_size, self._rank)
+            torch.utils.data.graph_settings.apply_sharding(
+                self._dataset, self._world_size, self._rank, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
 
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)
@@ -1046,9 +1051,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
             if self._pin_memory_device == "xpu":
                 current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
-            elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
-                custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
-                current_device = custom_device_mod.current_device()
             else:
                 current_device = torch.cuda.current_device()  # choose cuda for default
             pin_memory_thread = threading.Thread(

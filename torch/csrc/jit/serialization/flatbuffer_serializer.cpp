@@ -185,23 +185,18 @@ class FlatbufferSerializer {
     // but without relying on aten::nonzero operator being present in the
     // binary.
     bool operator()(const IValue& lhs, const IValue& rhs) const {
-      // The only case we don't return bool is for tensor comparison. Lets do
-      // pointer comparison here.
-      if (lhs.isTensor() || rhs.isTensor()) {
-        if (lhs.isTensor() && rhs.isTensor()) {
-          return (&lhs.toTensor()) == (&rhs.toTensor());
-        }
-        return false;
-      }
       IValue eq = lhs.equals(rhs);
       if (eq.isBool()) {
         return eq.toBool();
       }
-      return false;
+      // The only case we don't return bool is for tensor comparison. Lets do
+      // pointer comparison here.
+      return (&lhs.toTensor()) == (&rhs.toTensor());
     }
   };
 
   std::unordered_map<IValue, uint32_t, IValueHash, IValueEqual> cached_ivalues_;
+
   const mobile::CompilationUnit* mcu_ = nullptr;
 };
 
@@ -683,20 +678,18 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
     if (iter != cached_ivalues_.end()) {
       return iter->second;
     }
-  } catch (...) {
-    // Threw if ivalue is not hashable or
-    // if ivalue is don't have proper operator==
-    // we don't care catchall because either case we want to skip hashing
+  } catch (const std::runtime_error&) {
+    // Threw if ivalue is not hashable
+  } catch (const c10::Error&) {
+    // Threw if ivalue is don't have proper operator==
   }
 
   auto offset = iValueToFB(fbb, ivalue);
   uint32_t index = insertIValue(offset);
   try {
     cached_ivalues_[ivalue] = index;
-  } catch (...) {
-    // Threw if ivalue is not hashable or
-    // if ivalue is don't have proper operator==
-    // we don't care catchall because either case we want to skip hashing
+  } catch (const std::runtime_error&) {
+  } catch (const c10::Error&) {
   }
 
   return index;

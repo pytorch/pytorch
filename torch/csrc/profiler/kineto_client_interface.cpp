@@ -23,7 +23,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
   void init() override {}
 
   void prepare(
-      bool report_input_shapes = false,
+      bool report_input_shapes = true,
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
@@ -56,9 +56,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
   }
 
  private:
-  // Temporarily disable shape collection until
-  // we re-roll out the feature for on-demand cases
-  bool reportInputShapes_{false};
+  bool reportInputShapes_{true};
   bool profileMemory_{false};
   bool withStack_{false};
   bool withFlops_{false};

@@ -117,7 +117,8 @@ class UnBatcherIterDataPipe(IterDataPipe):
 
     def __iter__(self):
         for element in self.datapipe:
-            yield from self._dive(element, unbatch_level=self.unbatch_level)
+            for i in self._dive(element, unbatch_level=self.unbatch_level):
+                yield i
 
     def _dive(self, element, unbatch_level):
         if unbatch_level < -1:
@@ -125,7 +126,8 @@ class UnBatcherIterDataPipe(IterDataPipe):
         if unbatch_level == -1:
             if isinstance(element, (list, DataChunk)):
                 for item in element:
-                    yield from self._dive(item, unbatch_level=-1)
+                    for i in self._dive(item, unbatch_level=-1):
+                        yield i
             else:
                 yield element
         elif unbatch_level == 0:
@@ -133,7 +135,8 @@ class UnBatcherIterDataPipe(IterDataPipe):
         else:
             if isinstance(element, (list, DataChunk)):
                 for item in element:
-                    yield from self._dive(item, unbatch_level=unbatch_level - 1)
+                    for i in self._dive(item, unbatch_level=unbatch_level - 1):
+                        yield i
             else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 

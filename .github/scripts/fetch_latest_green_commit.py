@@ -35,7 +35,7 @@ def get_latest_commits() -> List[str]:
             "git",
             "rev-list",
             f"{latest_viable_commit}^..HEAD",
-            "--remotes=*origin/main",
+            "--remotes=*origin/master",
         ],
         encoding="ascii",
     ).splitlines()

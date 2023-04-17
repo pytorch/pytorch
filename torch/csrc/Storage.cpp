@@ -108,11 +108,7 @@ static PyObject* THPStorage_pynew(
 #endif
     } else if (device.type() == at::DeviceType::XPU) {
       allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::HPU) {
-      allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::Meta) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::PrivateUse1) {
       allocator = c10::GetAllocator(device.type());
     } else {
       TORCH_CHECK(
@@ -175,7 +171,7 @@ static PyObject* THPStorage_pynew(
         uint8_t value = THPByteUtils_unpackReal(item.get());
         const auto& storage = THPStorage_Unpack(self);
         if (allocator == c10::GetDefaultCPUAllocator()) {
-          static_cast<uint8_t*>(storage.mutable_data())[i] = value;
+          storage.unsafe_data<uint8_t>()[i] = value;
         } else {
           // TODO: this might be slow - consider batched updates?
           storage_set(storage, i, value);
@@ -238,7 +234,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     }
 
     const auto& storage = THPStorage_Unpack(self);
-    auto data = static_cast<uint8_t*>(storage.mutable_data());
+    uint8_t* data = storage.data<uint8_t>();
 
     at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
     c10::raw::intrusive_ptr::incref(old_storage_impl);

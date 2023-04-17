@@ -118,7 +118,7 @@ private:
     dst->Resize(dims);
     dst->ShareExternalPointer(
         at::DataPtr(
-            src_impl->mutable_data(),
+            src_impl->data(),
             static_cast<void*>(src_impl),
             [](void* t_ptr) -> void {
               at::TensorImpl* local_impl = static_cast<at::TensorImpl*>(t_ptr);

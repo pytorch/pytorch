@@ -60,9 +60,6 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             else:
                 self.fail(f"Unexpected dtype {str(tensor.dtype)} for error {err}")
 
-            # Ensure sequence number is logged in error
-            self.assertTrue("SequenceNumber" in err)
-
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
         # and report an issue with rank 1.

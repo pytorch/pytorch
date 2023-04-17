@@ -300,14 +300,15 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
 
+static PyObject* noargs = NULL; /* cached empty tuple */
+static PyObject* dotzerokey = NULL; /* ".0" */
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
 static PyObject* profiler_start_hook = NULL;
 static PyObject* profiler_end_hook = NULL;
 static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
-size_t cache_entry_extra_index = -1;
-size_t dynamic_frame_state_extra_index = -2;
+size_t extra_index = -1;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
@@ -407,15 +408,14 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 static inline PyObject* call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
-    long cache_len,
-    PyObject* frame_state) {
+    long cache_len) {
 
 #if IS_PYTHON_3_11_PLUS
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
 #else
   PyFrameObject* frame = _frame;
 #endif
-  PyObject* args = Py_BuildValue("(OlO)", frame, cache_len, frame_state);
+  PyObject* args = Py_BuildValue("(Ol)", frame, cache_len);
   if (args == NULL) {
     return NULL;
   }
@@ -456,32 +456,23 @@ static void destroy_cache_entry(CacheEntry* e) {
   free(e);
 }
 
-inline static CacheEntry* get_cache_entry(PyCodeObject* code) {
+inline static CacheEntry* get_extra(PyCodeObject* code) {
   CacheEntry* extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void*)&extra);
+  _PyCode_GetExtra((PyObject*)code, extra_index, (void*)&extra);
   return extra;
 }
 
-inline static void set_cache_entry(PyCodeObject* code, CacheEntry* extra) {
+inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
   // TODO(jansel): would it be faster to bypass this?
-  _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, extra);
+  _PyCode_SetExtra((PyObject*)code, extra_index, extra);
 }
 
-inline static PyObject* get_frame_state(PyCodeObject* code) {
-  PyObject* extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, dynamic_frame_state_extra_index, (void*)&extra);
-  return extra;
-}
-
-inline static void set_frame_state(PyCodeObject* code, PyObject* extra) {
-  // TODO(jansel): would it be faster to bypass this?
-  _PyCode_SetExtra((PyObject*)code, dynamic_frame_state_extra_index, extra);
-}
-
+#ifdef TORCHDYNAMO_DEBUG
 inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
   DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
+#endif
 
 static PyObject* call_guard_fail_hook(
     PyObject* hook,
@@ -531,7 +522,17 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
-  PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
+  PyObject* dotzero = PyDict_GetItem(f_locals, dotzerokey);
+  PyObject* valid = NULL;
+  if (unlikely(dotzero != NULL)) {
+    // .0 is a special variable name used for implicit args
+    PyObject* args = PyTuple_Pack(1, dotzero);
+    if (args == NULL) return NULL;
+    valid = PyObject_Call(e->check_fn, args, f_locals);
+    Py_DECREF(args);
+  } else {
+    valid = PyObject_Call(e->check_fn, noargs, f_locals);
+  }
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
@@ -551,10 +552,10 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // If the hit cache entry is not the head of the linked list,
     // move it to the head
     if (prev != NULL) {
-        CacheEntry* extra = get_cache_entry(frame->f_code);
+        CacheEntry* extra = get_extra(frame->f_code);
         prev->next = e->next;
         e->next = extra;
-        set_cache_entry(frame->f_code, e);
+        set_extra(frame->f_code, e);
     }
     return (PyObject*)e->code;
   }
@@ -591,77 +592,27 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
-  #if IS_PYTHON_3_11_PLUS
-  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
-  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
-  #else
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
-  #endif
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
-  Py_XINCREF(frame->f_func->func_closure);
-  shadow->f_func->func_closure = frame->f_func->func_closure;
-  // NOTE: in Python 3.11.1+, PyFrame_New changes prev_instr, causing
-  // Python runtime errors, so we revert the change.
-  // See https://github.com/python/cpython/pull/97886.
-  // TODO if there are more shadow frame related bugs in the future,
-  // consider not using PyFrame_New.
-  shadow->prev_instr = _PyCode_CODE(shadow->f_code) - 1;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
   if (shadow == NULL) {
-    Py_DECREF(shadow_obj);
     return NULL;
   }
 
   #if IS_PYTHON_3_11_PLUS
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
-
-  // copy from old fastlocals to new fastlocals:
-  // for i, name in enumerate(localsplusnames_new):
-  //   name_to_idx[name] = i
-  // for i, name in enumerate(localsplusnames_old):
-  //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
-  PyObject* name_to_idx = PyDict_New();
-  if (name_to_idx == NULL) {
-    DEBUG_TRACE0("unable to create localsplus name dict");
-    Py_DECREF(shadow_obj);
-    return NULL;
-  }
-
-  for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
-    PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
-    PyObject *idx = PyLong_FromSsize_t(i);
-    if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
-      Py_DECREF(shadow_obj);
-      Py_DECREF(name_to_idx);
-      return NULL;
-    }
-  }
-
-  for (Py_ssize_t i = 0; i < frame->f_code->co_nlocalsplus; i++) {
-    PyObject *name = PyTuple_GET_ITEM(frame->f_code->co_localsplusnames, i);
-    PyObject *idx = PyDict_GetItem(name_to_idx, name);
-    Py_ssize_t new_i = PyLong_AsSsize_t(idx);
-    if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
-      Py_DECREF(shadow_obj);
-      Py_DECREF(name_to_idx);
-      return NULL;
-    }
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[new_i] = fastlocals_old[i];
-  }
-
-  Py_DECREF(name_to_idx);
   #else
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
+  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -672,7 +623,6 @@ inline static PyObject* eval_custom_code(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
-  #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
   Py_DECREF(shadow_obj);
@@ -702,22 +652,14 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
-  #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
-      "begin %s %s %i %i",
-      name(frame),
-      PyUnicode_AsUTF8(frame->f_code->co_filename),
-      frame->f_code->co_firstlineno,
-      _PyInterpreterFrame_LASTI(frame));
-  #else
-  DEBUG_TRACE(
-      "begin %s %s %i %i %i",
+      "begin %s %s %i %i %i %i",
       name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_lineno,
       frame->f_lasti,
-      frame->f_iblock);
-  #endif
+      frame->f_iblock,
+      frame->f_executing);
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
@@ -744,7 +686,7 @@ static PyObject* _custom_eval_frame(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
-  CacheEntry* extra = get_cache_entry(frame->f_code);
+  CacheEntry* extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
@@ -805,16 +747,10 @@ static PyObject* _custom_eval_frame(
   }
   // cache miss
 
-  PyObject *frame_state = get_frame_state(frame->f_code);
-  if (frame_state == NULL) {
-    // TODO(voz): Replace this dict with a real FrameState object.
-    frame_state = PyDict_New();
-    set_frame_state(frame->f_code, frame_state);
-  }
   // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
   // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
-      call_callback(callback, frame, cache_size(extra), frame_state);
+      call_callback(callback, frame, cache_size(extra));
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
@@ -828,7 +764,7 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("create cache %s", name(frame));
     extra = create_cache_entry(extra, result);
     Py_DECREF(result);
-    set_cache_entry(frame->f_code, extra);
+    set_extra(frame->f_code, extra);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_custom_code(tstate, frame, extra->code, throw_flag);
@@ -836,7 +772,7 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("create skip %s", name(frame));
     Py_DECREF(result);
     destroy_cache_entry(extra);
-    set_cache_entry(frame->f_code, SKIP_CODE);
+    set_extra(frame->f_code, SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return eval_frame_default(tstate, frame, throw_flag);
@@ -920,11 +856,8 @@ static PyObject* reset_code(PyObject* dummy, PyObject* args) {
     return NULL;
   }
 
-  destroy_cache_entry(get_cache_entry((PyCodeObject*)code));
-  PyObject* frame_state = get_frame_state((PyCodeObject*)code);
-  Py_XDECREF(frame_state);
-  set_cache_entry((PyCodeObject*)code, NULL);
-  set_frame_state((PyCodeObject*)code, NULL);
+  destroy_cache_entry(get_extra((PyCodeObject*)code));
+  set_extra((PyCodeObject*)code, NULL);
   Py_RETURN_NONE;
 }
 
@@ -948,7 +881,7 @@ static PyObject* skip_code(PyObject* dummy, PyObject* args) {
     PyErr_SetString(PyExc_TypeError, "expected a code object");
     return NULL;
   }
-  set_cache_entry((PyCodeObject*)obj, SKIP_CODE);
+  set_extra((PyCodeObject*)obj, SKIP_CODE);
   Py_RETURN_NONE;
 }
 
@@ -1032,8 +965,7 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
-  cache_entry_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
-  dynamic_frame_state_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);
@@ -1041,6 +973,8 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   Py_INCREF(Py_None);
   eval_frame_callback_set(Py_None);
 
+  noargs = PyTuple_New(0);
+  dotzerokey = PyUnicode_InternFromString(".0");
   PyObject* module = PyModule_Create(&_module);
 
 #if IS_PYTHON_3_11_PLUS

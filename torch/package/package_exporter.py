@@ -670,7 +670,6 @@ class PackageExporter:
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"
-                        or opcode.name == "BINUNICODE"
                         or opcode.name == "BINUNICODE8"
                     ):
                         assert isinstance(arg, str)

@@ -12,9 +12,6 @@ log = logging.getLogger(__name__)
 
 __all__ = ["ValueRanges", "ValueRangeAnalysis"]
 
-class ValueRangeError(RuntimeError):
-    pass
-
 
 # Like sympify, but supports less stuff, and also ensures that direct
 # sympy expressions don't have free variables
@@ -70,8 +67,7 @@ class ValueRanges:
         upper = simple_sympify(upper)
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
-        if not sympy_generic_le(lower, upper):
-            raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
+        assert sympy_generic_le(lower, upper)
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
@@ -80,10 +76,6 @@ class ValueRanges:
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
-
-    # Intersection
-    def __and__(self, other):
-        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
@@ -430,5 +422,5 @@ class ValueRangeAnalysis:
         return ValueRanges.increasing_map(x, fn)
 
     def __getattr__(self, name):
-        log.warning("unhandled ValueRange op %s", name)
+        log.warning(f"unhandled ValueRange op {name}")
         return self.default_handler

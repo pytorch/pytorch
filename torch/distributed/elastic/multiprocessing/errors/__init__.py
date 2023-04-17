@@ -112,13 +112,13 @@ class ProcessFailure:
                 with open(self.error_file, "r") as fp:
                     self.error_file_data = json.load(fp)
                     log.debug(
-                        "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
+                        f"User process failed with error data: {json.dumps(self.error_file_data, indent=2)}"
                     )
                     self.message, self.timestamp = self._get_error_data(
                         self.error_file_data
                     )
             except Exception:
-                log.exception("Failed to parse reply file: %s", self.error_file)
+                log.exception(f"Failed to parse reply file: {self.error_file}")
                 raise
         else:
             self._set_no_reply_file()
@@ -351,10 +351,9 @@ def record(
                 else:
                     log.info(
                         (
-                            "local_rank %s FAILED with no error file."
-                            " Decorate your entrypoint fn with @record for traceback info."
-                            " See: https://pytorch.org/docs/stable/elastic/errors.html",
-                            rank
+                            f"local_rank {rank} FAILED with no error file."
+                            f" Decorate your entrypoint fn with @record for traceback info."
+                            f" See: https://pytorch.org/docs/stable/elastic/errors.html"
                         )
                     )
                 raise

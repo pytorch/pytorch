@@ -1,8 +1,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/bit_cast.h>
-
 #include <cstring>
 #include <limits>
 
@@ -34,7 +32,7 @@ inline C10_HOST_DEVICE Half::Half(float value)
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       x(__half_as_short(__float2half(value)))
 #elif defined(__SYCL_DEVICE_ONLY__)
-      x(c10::bit_cast<uint16_t>(sycl::half(value)))
+      x(sycl::bit_cast<uint16_t>(sycl::half(value)))
 #else
       x(detail::fp16_ieee_from_fp32_value(value))
 #endif
@@ -47,7 +45,7 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return __half2float(*reinterpret_cast<const __half*>(&x));
 #elif defined(__SYCL_DEVICE_ONLY__)
-  return float(c10::bit_cast<sycl::half>(x));
+  return float(sycl::bit_cast<sycl::half>(x));
 #else
   return detail::fp16_ieee_to_fp32_value(x);
 #endif
@@ -104,7 +102,7 @@ inline C10_HOST_DEVICE Half operator-(const Half& a) {
     defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
 #elif defined(__SYCL_DEVICE_ONLY__)
-  return -c10::bit_cast<sycl::half>(a);
+  return -sycl::bit_cast<sycl::half>(a);
 #else
   return -static_cast<float>(a);
 #endif

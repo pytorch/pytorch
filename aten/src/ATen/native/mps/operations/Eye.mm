@@ -1,11 +1,11 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ATen.h>
+#include <ATen/Tensor.h>
+#include <ATen/Utils.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/eye_native.h>
-#endif
+#include <c10/util/Optional.h>
+#include <torch/library.h>
+
 // Steps to add op for MPS backend:
 // 1. Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
 // 2. Define the function interface for the MPS backend similar to other

@@ -127,14 +127,12 @@ static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
 }
 
 inline Value GetSymIntValue(c10::SymInt a) {
-  if (auto ma = a.maybe_as_int()) {
-    return Value(MakeScalar(*ma, at::kLong), 0);
-  } else {
-    return Value(
-        dynamic_cast<torch::lazy::SymNodeImpl*>(a.toSymNodeImplUnowned())
-            ->node_,
-        0);
-  }
+  return Value(
+      a.is_symbolic()
+          ? dynamic_cast<torch::lazy::SymNodeImpl*>(a.toSymNodeImpl().get())
+                ->node_
+          : MakeScalar(a.as_int_unchecked(), at::kLong),
+      0);
 }
 
 // TODO: this should return Value

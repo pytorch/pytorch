@@ -1,6 +1,5 @@
 import os
 import textwrap
-from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
@@ -74,34 +73,6 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
-class RecompileError(TorchDynamoException):
-    pass
-
-
-class UserErrorType(Enum):
-    DYNAMIC_CONTROL_FLOW = auto()
-    ANTI_PATTERN = auto()
-    STANDARD_LIBRARY = auto()
-    CONSTRAIN_VIOLATION = auto()
-
-
-class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg):
-        """
-        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
-        The error message should tell user about next actions.
-
-        error_type: Type of user error
-        msg: Actionable error message
-        """
-        super().__init__(msg)
-        self.error_type = error_type
-
-
-class IncorrectUsage(Exception):
-    pass
-
-
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
@@ -164,7 +135,7 @@ def augment_exc_message(exc, msg="\n"):
             "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
+    old_msg = "" if len(exc.args) == 0 else exc.args[0]
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]

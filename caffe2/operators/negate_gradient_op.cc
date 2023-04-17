@@ -8,7 +8,7 @@ OPERATOR_SCHEMA(NegateGradient)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
-NegateGradient operator in forward pass simply copies input to the
+NegagteGradient operator in forward pass simply copies input to the
 output, and in backward pass, flips the sign of the output gradient
 )DOC");
 

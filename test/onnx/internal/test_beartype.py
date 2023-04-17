@@ -3,6 +3,8 @@
 
 import unittest
 
+import torch
+from torch.onnx import _exporter_states
 from torch.onnx._internal import _beartype
 from torch.testing._internal import common_utils
 
@@ -33,7 +35,7 @@ def func_with_incorrect_type_hint(x: int) -> str:
 class TestBeartype(common_utils.TestCase):
     def test_create_beartype_decorator_returns_no_op_decorator_when_disabled(self):
         decorator = _beartype._create_beartype_decorator(
-            _beartype.RuntimeTypeCheckState.DISABLED,
+            _exporter_states.RuntimeTypeCheckState.DISABLED,
         )
         decorated = decorator(func_with_incorrect_type_hint)
         decorated("string_input")  # type: ignore[arg-type]
@@ -41,10 +43,10 @@ class TestBeartype(common_utils.TestCase):
     @skip_if_beartype_not_installed
     def test_create_beartype_decorator_warns_when_warnings(self):
         decorator = _beartype._create_beartype_decorator(
-            _beartype.RuntimeTypeCheckState.WARNINGS,
+            _exporter_states.RuntimeTypeCheckState.WARNINGS,
         )
         decorated = decorator(func_with_incorrect_type_hint)
-        with self.assertWarns(_beartype.CallHintViolationWarning):
+        with self.assertWarns(torch.onnx.errors.CallHintViolationWarning):
             decorated("string_input")  # type: ignore[arg-type]
 
     @common_utils.parametrize("arg", [1, "string_input"])
@@ -53,7 +55,7 @@ class TestBeartype(common_utils.TestCase):
         import beartype
 
         decorator = _beartype._create_beartype_decorator(
-            _beartype.RuntimeTypeCheckState.ERRORS,
+            _exporter_states.RuntimeTypeCheckState.ERRORS,
         )
         decorated = decorator(func_with_incorrect_type_hint)
         with self.assertRaises(beartype.roar.BeartypeCallHintViolation):
@@ -69,7 +71,7 @@ class TestBeartype(common_utils.TestCase):
             return x  # type: ignore[return-value]
 
         decorator = _beartype._create_beartype_decorator(
-            _beartype.RuntimeTypeCheckState.WARNINGS,
+            _exporter_states.RuntimeTypeCheckState.WARNINGS,
         )
         decorated = decorator(func_with_incorrect_type_hint_and_side_effect)
         decorated("string_input")  # type: ignore[arg-type]

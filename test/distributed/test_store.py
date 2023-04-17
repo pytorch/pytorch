@@ -335,7 +335,7 @@ class MyPythonStore(dist.Store):
         self.store = {}
 
     def set(self, key, value):
-        if not isinstance(key, (str, bytes)):
+        if not isinstance(key, str):
             raise AssertionError("Expected set to be called with string key")
         if type(value) is not bytes:
             raise AssertionError("Expected set to be called with bytes value")

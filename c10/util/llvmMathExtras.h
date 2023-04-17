@@ -12,8 +12,6 @@
 
 #pragma once
 
-#include <c10/util/bit_cast.h>
-
 #include <algorithm>
 #include <cassert>
 #include <climits>
@@ -617,8 +615,11 @@ inline double BitsToDouble(uint64_t Bits) {
 
 /// This function takes a 32-bit integer and returns the bit equivalent float.
 inline float BitsToFloat(uint32_t Bits) {
-  // TODO: Use std::bit_cast once C++20 becomes available.
-  return c10::bit_cast<float>(Bits);
+  // TODO: Use bit_cast once C++20 becomes available.
+  float F;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Unexpected type sizes");
+  memcpy(&F, &Bits, sizeof(Bits));
+  return F;
 }
 
 /// This function takes a double and returns the bit equivalent 64-bit integer.

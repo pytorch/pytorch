@@ -255,13 +255,13 @@ public:
   // releases all the cached buffers and their associated heaps
   void emptyCache();
   // returns true if buffer was allocated from the shared pool
-  bool isSharedBuffer(const void* ptr);
+  bool isSharedBuffer(void* ptr);
   // get the requested unaligned size of an MTLBuffer
-  ssize_t getUnalignedBufferSize(const void* ptr);
+  ssize_t getUnalignedBufferSize(void* ptr);
   // set the shape of a base tensor from a view tensor
-  void setBufferShape(const void* ptr, const IntArrayRef& shape);
+  void setBufferShape(void* ptr, const IntArrayRef& shape);
   // retrieve the shape of a base tensor from a view tensor
-  IntArrayRef getBufferShape(const void* ptr);
+  IntArrayRef getBufferShape(void* ptr);
   // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // this indicates how far (in Megabytes) the current total allocations are from the
@@ -304,7 +304,7 @@ private:
   const id<MTLDevice> m_device;
   std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
-  ska::flat_hash_map<const void*, BufferBlock*> m_allocated_buffers;
+  ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
   BufferPool m_large_pool_shared, m_large_pool_private;
   // unallocated cached buffers 1 MB or smaller
@@ -342,7 +342,7 @@ private:
   void init_allocator();
   HeapBlock* get_free_heap(AllocParams& params);
   bool get_free_buffer(AllocParams& params);
-  BufferBlock* get_allocated_buffer_block(const void* ptr);
+  BufferBlock* get_allocated_buffer_block(void* ptr);
   BufferBlock* alloc_buffer_block(size_t size, uint32_t usage);
   bool alloc_buffer(AllocParams& params);
   void free_buffer(BufferBlock* buffer_block);

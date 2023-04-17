@@ -15,7 +15,6 @@
 #else
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
-#include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -557,7 +556,7 @@ vTensor pack_biases(
       quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
   };
 
-  if (quantized && bias->scalar_type() != c10::kFloat) {
+  if (quantized) {
     v_bias.set_is_quantized();
     v_bias.set_scale(bias_rearranged.q_scale());
     v_bias.set_zero_point(bias_rearranged.q_zero_point());
@@ -1013,22 +1012,11 @@ Tensor run_conv2d_context_impl(
   const vTensor& v_input = convert(input_arg);
 
   // Extract everything from the PackedContext
-  const Tensor weight =
-      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor();
-  const vTensor& v_weight = convert(weight);
+  const vTensor& v_weight = convert(
+      conv_context->get_val(Conv2dPackedContext::Packed::Weight).toTensor());
 
-  const auto quantized =
-      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
-
-  Tensor bias =
-      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor();
-  if (quantized && bias.scalar_type() == c10::kFloat) {
-    bias = at::quantize_per_tensor(
-        bias, v_weight.get_scale() * v_input.get_scale(), 0, c10::kQInt32);
-    conv_context->set_val(Conv2dPackedContext::Packed::Bias, bias);
-  }
-
-  const vTensor& v_bias = convert(bias);
+  const vTensor& v_bias = convert(
+      conv_context->get_val(Conv2dPackedContext::Packed::Bias).toTensor());
 
   const auto overlay_region =
       conv_context->get_val(Conv2dPackedContext::Packed::OverlayRegion)
@@ -1047,6 +1035,8 @@ Tensor run_conv2d_context_impl(
 
   const auto transposed =
       conv_context->get_val(Conv2dPackedContext::Packed::isTransposed).toBool();
+  const auto quantized =
+      conv_context->get_val(Conv2dPackedContext::Packed::isQuantized).toBool();
 
   const float output_min = safe_downcast<float>(
       conv_context->get_val(Conv2dPackedContext::Packed::OutputMin).toDouble());

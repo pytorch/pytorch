@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -61,7 +64,7 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # control store vs recompute heuristic
-# For fanouts, rematerialization can lead to exponential blowup. So, have
+# For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
@@ -90,12 +93,6 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
-# Enable split reductions for better utilization when the dimension
-# being reduced over is large (by splitting it)
-split_reductions = True
-
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -132,11 +129,13 @@ def decide_compile_threads():
 
 compile_threads = decide_compile_threads()
 
-# gemm autotuning global cache dir
+# autotuning global cache path
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil
+
+    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
 else:
-    global_cache_dir = None
+    global_cache_path = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -165,10 +164,6 @@ disable_cpp_codegen = is_fbcode()
 class cpp:
     # set to torch.get_num_threads()
     threads = -1
-
-    # Do not generate loops when the condition doesn't hold, like:
-    # for(long i0=4096; i0<4096; i0+=1)
-    no_redundant_loops = True
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
@@ -203,10 +198,10 @@ class triton:
     cudagraph_trees = False
 
     # assertions not on the fast path, steady state
-    slow_path_cudagraph_asserts = False
+    fast_cudagraph_asserts = True
 
     # assertions on the fast path
-    fast_path_cudagraph_asserts = False
+    slow_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
@@ -235,7 +230,7 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES") == "1"
+    unique_kernel_names = False
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
@@ -247,15 +242,9 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
-    # hint to Triton when arguments are divisible by 16
-    divisible_by_16 = True
-
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
-
-    # Store the generated cubin files for cpp wrapper code to load
-    store_cubin = False
 
 
 # create a directory containing lots of debug information
@@ -264,7 +253,7 @@ class trace:
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
-    debug_log = False
+    debug_log = True
 
     # Save python logger call >=logging.INFO
     info_log = False

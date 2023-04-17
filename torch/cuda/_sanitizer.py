@@ -142,6 +142,10 @@ class CUDASanitizerErrors(Exception):
         return f"detected {len(self.errors)} errors"
 
 
+def format_log_message(message: str) -> str:
+    return " ".join(line.strip() for line in message.strip().splitlines())
+
+
 @dataclass
 class TensorInfo:
     r"""Stores information about a single tensor and recent accesses to it.
@@ -165,21 +169,27 @@ class _TensorsAccessed:
     def ensure_tensor_exists(self, data_ptr: DataPtr) -> None:
         if data_ptr not in self.accesses:
             logger.info(
-                "Found tensor with pointer: %s, but no matching tensor "
-                "allocation in the trace. Backfilling the trace now. "
-                "Perhaps the sanitizer was enabled after some torch operations?",
-                data_ptr
+                format_log_message(
+                    f"""
+                    Found tensor with pointer: {data_ptr}, but no matching tensor
+                    allocation in the trace. Backfilling the trace now.
+                    Perhaps the sanitizer was enabled after some torch operations?
+                    """
+                )
             )
             self.create_tensor(data_ptr, None)
 
     def ensure_tensor_does_not_exist(self, data_ptr: DataPtr) -> None:
         if data_ptr in self.accesses:
             logger.info(
-                "Found duplicate tensor allocation in the trace for tensor with "
-                "pointer: %s. Assuming the trace for tensor deallocation "
-                "wasn't caught and backfilling it now. "
-                "Perhaps the sanitizer was enabled after some torch operations?",
-                data_ptr
+                format_log_message(
+                    f"""
+                    Found duplicate tensor allocation in the trace for tensor with
+                    pointer: {data_ptr}. Assuming the trace for tensor deallocation
+                    wasn't caught and backfilling it now.
+                    Perhaps the sanitizer was enabled after some torch operations?
+                    """
+                )
             )
             self.delete_tensor(data_ptr)
 
@@ -223,41 +233,53 @@ class StreamSynchronizations:
     def _ensure_stream_exists(self, stream: StreamId) -> None:
         if stream not in self.current_sync_states:
             logger.info(
-                "Found Stream with id: %s, but no matching stream "
-                "creation in the trace. Backfilling the trace now. "
-                "Perhaps the sanitizer was enabled after some torch operations?",
-                stream
+                format_log_message(
+                    f"""
+                    Found Stream with id: {stream}, but no matching stream
+                    creation in the trace. Backfilling the trace now.
+                    Perhaps the sanitizer was enabled after some torch operations?
+                    """
+                )
             )
             self.create_stream(stream)
 
     def _ensure_event_exists(self, event: EventId) -> None:
         if event not in self.recorded_sync_states:
             logger.info(
-                "Found Event with id: %s, but no matching event "
-                "creation in the trace. Backfilling the trace now. "
-                "Perhaps the sanitizer was enabled after some torch operations?",
-                event
+                format_log_message(
+                    f"""
+                    Found Event with id: {event}, but no matching event
+                    creation in the trace. Backfilling the trace now.
+                    Perhaps the sanitizer was enabled after some torch operations?
+                    """
+                )
             )
             self.create_event(event)
 
     def _ensure_event_does_not_exist(self, event: EventId) -> None:
         if event in self.recorded_sync_states:
             logger.info(
-                "Found duplicate event creation in the trace for event with "
-                "id: %s. Assuming the trace for event deletion wasn't caught "
-                "and backfilling it now. "
-                "Perhaps the sanitizer was enabled after some torch operations?",
-                event
+                format_log_message(
+                    f"""
+                    Found duplicate event creation in the trace for event with
+                    id: {event}. Assuming the trace for event deletion wasn't caught
+                    and backfilling it now.
+                    Perhaps the sanitizer was enabled after some torch operations?
+                    """
+                )
             )
             self.delete_event(event)
 
     def create_stream(self, stream: StreamId) -> None:
         if stream in self.current_sync_states:
             logger.info(
-                "Found duplicate Stream creation in the trace for Stream with "
-                "id: %s. PyTorch Streams are only created once, so this "
-                "trace entry is ignored.",
-                stream
+                format_log_message(
+                    f"""
+                    Found duplicate Stream creation in the trace for Stream with
+                    id: {stream}. PyTorch Streams are only created once, so this
+                    trace entry is ignored.
+                    """
+                )
             )
         else:
             self.host_sync_state[stream] = 0

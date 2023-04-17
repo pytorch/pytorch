@@ -155,7 +155,6 @@ endif()
 
 # ---[ BLAS
 
-set(AT_MKLDNN_ACL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -1730,7 +1729,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1738,9 +1736,6 @@ if(NOT INTERN_BUILD_MOBILE)
         "Not compiling with MKLDNN. "
         "Turn this warning off by USE_MKLDNN=OFF.")
       set(USE_MKLDNN OFF)
-    endif()
-    if(USE_MKLDNN_ACL)
-      set(AT_MKLDNN_ACL_ENABLED 1)
     endif()
   endif()
   if(USE_MKLDNN)
@@ -1805,8 +1800,6 @@ if(NOT INTERN_BUILD_MOBILE)
   else(NOT C_HAS_THREAD)
     add_compile_options(-DTH_HAVE_THREAD)
   endif(NOT C_HAS_THREAD)
-
-  find_package(ZVECTOR) # s390x simd support
 endif()
 
 #

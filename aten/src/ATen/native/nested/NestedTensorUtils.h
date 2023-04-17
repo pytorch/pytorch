@@ -363,7 +363,7 @@ inline Tensor wrap_tensor_node(
                   // for a certain tensor
                   if (tensor_node.children(i).numel() > 0) {
                     memcpy(
-                        nt_buffer.mutable_data_ptr<scalar_t>() + start_offsets[i],
+                        nt_buffer.data_ptr<scalar_t>() + start_offsets[i],
                         tensor_node.children(i).data_ptr<scalar_t>(),
                         tensor_node.children(i).numel() * sizeof(scalar_t));
                   }
@@ -374,7 +374,7 @@ inline Tensor wrap_tensor_node(
     for (size_t i = 0; i < tensor_node.degree(); ++i) {
       auto tensor_sizes = tensor_node.children(i).sizes();
       for (int64_t tensor_size : tensor_sizes) {
-        nt_sizes.mutable_data_ptr<int64_t>()[sizes_offset++] = tensor_size;
+        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_size;
       }
     }
     options = nt_buffer.options().merge_in(options_);

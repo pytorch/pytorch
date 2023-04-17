@@ -3,7 +3,6 @@ import dis
 import functools
 import logging
 import os.path
-import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -107,8 +106,6 @@ def requires_bwd_pass(out):
         return any([requires_bwd_pass(x) for x in out])
     elif out is None:
         return False
-    elif isinstance(out, int):
-        return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
@@ -148,7 +145,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks, _):
+def debug_insert_nops(frame, cache_size, hooks):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -298,11 +295,3 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass
-
-
-# temporary decorator to skip failing 3.11 dynamo tests
-def skipIfPy311(fn):
-    if sys.version_info < (3, 11):
-        return fn
-    else:
-        return unittest.skip(fn)

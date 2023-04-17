@@ -129,7 +129,7 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   // in the application.
   void runCollectiveChecks(
       OpType op_type,
-      const std::vector<at::Tensor>& tensors);
+      const std::vector<at::Tensor>& tensors) const;
 };
 } // namespace c10d
 

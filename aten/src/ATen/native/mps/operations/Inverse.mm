@@ -1,14 +1,8 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ATen.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/linalg_inv_ex.h>
-#include <ATen/ops/linalg_inv_ex_native.h>
-#endif
+#include <c10/util/Optional.h>
+#include <torch/library.h>
 
 namespace at::native {
 

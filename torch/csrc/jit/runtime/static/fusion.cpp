@@ -287,7 +287,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
 
   // Try to merge adjacent fusion groups together. Because we have only merged
   // by looking at graph inputs, without this we would not attempt to merge
-  // adjacent fusion groups that don't have a dependency on each other
+  // adjacent fusion groups that don't have a depdency on each other
 
   std::vector<Node*> initial_fusion_groups;
   for (Node* n : block->nodes()) {
@@ -303,7 +303,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
     // Try merging the just created fusion group into the previous one.
     // If it did not work, then put the previous fusion group into
     // fusion_groups vector - we will not touch it anymore in this loop.
-    // If merging succeeded, save the merged group as the "previous" fusion
+    // If merging suceeded, save the merged group as the "previous" fusion
     // group so that we can try to merge the next one into it.
 
     Node* fusion_group = initial_fusion_groups[i];

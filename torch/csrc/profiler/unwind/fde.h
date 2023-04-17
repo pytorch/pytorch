@@ -202,9 +202,7 @@ struct FDE {
   }
 
   TableState readUpTo(uint64_t addr) {
-    if (addr < low_pc_ || addr > high_pc_) {
-      throw UnwindError("Address not in range");
-    }
+    TORCH_INTERNAL_ASSERT(low_pc_ <= addr && addr <= high_pc_, "NOT IN RANGE?");
     if (LOG) {
       (*out_) << "readUpTo " << (void*)addr << " for " << library_name_
               << " at " << (void*)load_bias_ << "\n";

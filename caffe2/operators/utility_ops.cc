@@ -490,7 +490,7 @@ OPERATOR_SCHEMA(GatherRanges)
 Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
 corresponding ranges into a 1-D tensor OUTPUT.
 
-RANGES dimensions description:
+RANGES dimentions description:
 1: represents list of examples within a batch
 2: represents list features
 3: two values which are start and length or a range (to be applied on DATA)

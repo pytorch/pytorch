@@ -68,7 +68,8 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
             yield x  # type: ignore[misc]
     elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
-            yield from _iter_tensors(elem, only_requiring_grad)
+            for result in _iter_tensors(elem, only_requiring_grad):
+                yield result
 
 
 def _densify(x):

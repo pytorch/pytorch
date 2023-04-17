@@ -20,10 +20,6 @@ class VulkanPackedContext {
     return packed_.get(i);
   }
 
-  inline void set_val(int64_t i, c10::IValue val) const {
-    return packed_.set(i, val);
-  }
-
   virtual const c10::impl::GenericList unpack() const = 0;
 
   virtual ~VulkanPackedContext() = default;

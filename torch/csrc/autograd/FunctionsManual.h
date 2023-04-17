@@ -92,11 +92,6 @@ Tensor _nested_from_padded_backward(
     const Tensor& grad,
     const Tensor& input,
     const bool do_transform_0213);
-std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
-    const variable_list& grads,
-    const Tensor& self,
-    const Tensor& grad_output,
-    const Tensor& weight);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -173,7 +168,6 @@ at::Tensor nansum_backward(
     at::OptionalIntArrayRef dims,
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
-std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list);
 at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(
     const at::Tensor& grad,
@@ -408,7 +402,6 @@ at::Tensor max_pool_double_backward(
     const at::Tensor& grad,
     const at::Tensor& indices,
     int dim);
-at::Tensor error_for_max_pool2d_double_backward();
 at::Tensor glu_double_backward(
     const at::Tensor& grad,
     const at::Tensor& grad_output,

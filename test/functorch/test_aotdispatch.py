@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: pt2"]
+# Owner(s): ["module: functorch"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -24,7 +24,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
 from functorch import (
@@ -234,16 +234,6 @@ class TestPythonKey(AOTTestCase):
         grads2 = [a.grad for a in mod.parameters()]
         self.assertEqual(grads, grads2)
 
-def get_base(t):
-    return t._base if t._is_view() else t
-
-def is_in_base(t, maybe_tensors):
-    t_base = get_base(t)
-    for maybe_tensor in maybe_tensors:
-        if isinstance(maybe_tensor, torch.Tensor):
-            if t_base is get_base(maybe_tensor):
-                return True
-    return False
 
 class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
@@ -330,9 +320,10 @@ class TestAOTAutograd(AOTTestCase):
                 if isinstance(ref_o, torch.Tensor):
                     self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                     self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
-                    ref_is_view_of_non_interm = is_in_base(ref_o, graph_inps) or is_in_base(ref_o, ref_out)
-                    test_is_view_of_non_interm = is_in_base(test_o, graph_inps_copy) or is_in_base(test_o, test_out)
-                    self.assertEqual(ref_is_view_of_non_interm, test_is_view_of_non_interm)
+                    if ref_o.requires_grad:
+                        # _is_view() should probably unconditionally be the same,
+                        # but in practice I don't think this matters for tensors that don't require grad
+                        self.assertEqual(ref_o._is_view(), test_o._is_view())
                     self.assertEqual(ref_o, test_o)
                     if test_mutation:
                         # This tests that autograd meta is set properly on the output we can
@@ -405,7 +396,7 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
-    def test_embedding_bag_view_dynamic(self):
+    def test_embedding_bag_view(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
 
@@ -419,10 +410,7 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
-        self.verify_aot_autograd(F(), [x, y], dynamic=False)
         self.verify_aot_autograd(F(), [x, y], dynamic=True)
-
-
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
@@ -455,26 +443,6 @@ def forward(self, primals_1):
             out_ref = f(*inp)
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
-
-    def test_outputs_are_aliased(self):
-        # Tensor, None, int
-        def f(a):
-            b = a.mul(2)
-            c = b.view(-1)
-            return b, c
-        f_compiled = aot_function(f, nop)
-        for req_grad in [True, False]:
-            inp = torch.ones(3, requires_grad=req_grad)
-            out_ref = f(inp)
-            out_test = f_compiled(inp)
-            self.assertEqual(out_ref[0], out_test[0])
-            self.assertEqual(out_ref[1], out_test[1])
-            # Try mutating one of the outputs, which is aliased.
-            out_ref[0].mul_(3)
-            out_test[0].mul_(3)
-            # Assert that the aliasing relationship was preserved
-            self.assertEqual(out_ref[0], out_test[0])
-            self.assertEqual(out_ref[1], out_test[1])
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_is_output(self):
@@ -792,9 +760,8 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
-    view = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
-    return [_unsafe_view]""")
+    view = torch.ops.aten.view.default(mul, [-1])
+    return [view, mul]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_intermediate_no_grad(self):
@@ -960,10 +927,9 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3)
     mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1])
-    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
+    transpose = torch.ops.aten.transpose.int(mul_1, 1, 0)
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
-    return [view, _unsafe_view, transpose_1, mul]""")
+    return [view, transpose, transpose_1, mul, mul_1]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_all_alias_types(self):
@@ -1435,8 +1401,8 @@ def forward(self, primals_1, primals_2):
         # (Otherwise, autograd will plumb a None as the value of the grad_output,
         # which causes inductor to complain).
         self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
-def forward(self, tangents_1):
-    return [tangents_1]""")
+def forward(self, arg0_1):
+    return (arg0_1,)""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_no_grad_input_output(self):
@@ -1933,7 +1899,7 @@ def forward(self, tangents_1):
             def forward(self, x):
                 y = self.buffer.add_(3)
                 y.resize_([20])
-                assert y.shape == self.buffer.shape
+                assert(y.shape == self.buffer.shape)
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
@@ -2498,8 +2464,6 @@ aot_autograd_failures = {
     skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
-    # overrides atol=1e-4, rtol=1e-5 would do as well
-    decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
 }
 
 symbolic_aot_autograd_failures = {
@@ -2509,12 +2473,36 @@ symbolic_aot_autograd_failures = {
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
+    xfail('column_stack', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
+    xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
+    xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
+    xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.fftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.fftshift', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.hfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.hfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.hfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ifft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ifft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ifftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ifftshift', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ihfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ihfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.ihfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.irfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.irfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.irfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.rfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2525,6 +2513,7 @@ symbolic_aot_autograd_failures = {
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.cholesky_ex', ''),  # could not find kernel for aten.linalg_solve_triangular.default
     xfail('linalg.cond', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/deco...
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
@@ -2555,6 +2544,7 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
+    xfail('logcumsumexp', ''),  # aten.logcumsumexp.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
@@ -2617,6 +2607,7 @@ symbolic_aot_autograd_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
@@ -2630,6 +2621,7 @@ symbolic_aot_autograd_failures = {
     xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd_lowrank', ''),  # could not find kernel
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2663,18 +2655,13 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
     try:
         reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
+        call_forwards_backwards(compiled_f)
+        compiled_grad = get_grads(args)
 
         reset_grads()
-        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all([x is None for x in orig_grad]):
-            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f)
-        else:
-            call_forwards_backwards(compiled_f)
-            compiled_grad = get_grads(args)
-            self.assertEqual(orig_grad, compiled_grad)
+        call_forwards_backwards(f)
+        orig_grad = get_grads(args)
+        self.assertEqual(orig_grad, compiled_grad)
 
         def create_new_arg(x):
             if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
@@ -2684,18 +2671,13 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
         args = pytree.tree_map(create_new_arg, args)
 
         reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
+        call_forwards_backwards(compiled_f)
+        compiled_grad = get_grads(args)
 
         reset_grads()
-        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all([x is None for x in orig_grad]):
-            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f)
-        else:
-            call_forwards_backwards(compiled_f)
-            compiled_grad = get_grads(args)
-            self.assertEqual(orig_grad, compiled_grad)
+        call_forwards_backwards(f)
+        orig_grad = get_grads(args)
+        self.assertEqual(orig_grad, compiled_grad)
     except DynamicOutputShapeException:
         self.skipTest("Dynamic output shape operation in trace")
 
@@ -2812,7 +2794,7 @@ aot_autograd_module_failures = set({
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
                            # to a causal mask tensor, to see if Boolean is_causal should be set
-                           # for TransformerEncoder layers, MHA and sdp custom kernels
+                           # for TrnasformerEncoder layers, MHA and sdp custom kernels
                            # (this bubbles up to Transformer)
 })
 
@@ -2832,15 +2814,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
-                         # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.LocalResponseNorm,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.AvgPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MaxPool3d,  # torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                         # aten.max_pool3d_with_indices.default
 }
 
 

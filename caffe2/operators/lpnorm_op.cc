@@ -152,7 +152,7 @@ supports l1 and l2 norm) determined by the argument p.
     .Arg("p", "Order of the norm in p-norm")
     .Arg(
         "average",
-        "whether we calculate norm or averaged_norm."
+        "whehther we calculate norm or averaged_norm."
         "The Lp_averaged_norm(x) is defined as"
         "Lp_averaged_normgradient(x) = LpNormGradient(x) / size(x)");
 

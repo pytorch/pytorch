@@ -61,7 +61,7 @@ def main():
             utilization, mm_conv_utilization = compute_utilization(filenames, total_length)
             print(f"{modelname}, {utilization}, {mm_conv_utilization}")
         except BaseException:
-            logging.exception("%s, ERROR", filename)
+            logging.exception(f"{filename}, ERROR")
             print(f"{filename}, ERROR")
 
 if __name__ == "__main__":

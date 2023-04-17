@@ -49,7 +49,7 @@ using TensorImplAddress = strong::type<
     strong::boolean>;
 
 using StorageImplData = strong::type<
-    const void*,
+    void*,
     struct StorageImplData_,
     strong::regular,
     strong::hashable,

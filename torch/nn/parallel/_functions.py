@@ -92,7 +92,7 @@ class Scatter(Function):
         streams = None
         if torch.cuda.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            streams = [_get_stream(torch.device("cuda", device)) for device in target_gpus]
+            streams = [_get_stream(device) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
@@ -109,18 +109,16 @@ class Scatter(Function):
 
 
 # background streams used for copying
-_streams: Optional[List[Optional[torch.Stream]]] = None
+_streams: Optional[List[Optional[torch.cuda.Stream]]] = None
 
-def _get_stream(device: torch.device):
-    """Gets a background stream for copying between CPU and target device"""
+
+def _get_stream(device: int):
+    """Gets a background stream for copying between CPU and GPU"""
     global _streams
-    if device.type == "cpu":
-        return None
-    device_mod = getattr(torch, device.type, None)
-    if device_mod is None:
+    if device == -1:
         return None
     if _streams is None:
-        _streams = [None] * device_mod.device_count()
-    if _streams[device.index] is None:
-        _streams[device.index] = device_mod.Stream(device.index)
-    return _streams[device.index]
+        _streams = [None] * torch.cuda.device_count()
+    if _streams[device] is None:
+        _streams[device] = torch.cuda.Stream(device)
+    return _streams[device]
