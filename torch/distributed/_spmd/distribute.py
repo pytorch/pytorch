@@ -16,6 +16,7 @@ from typing import (
 )
 
 import torch
+import torch.distributed._spmd.experimental_ops
 import torch.fx as fx
 import torch.nn as nn
 from torch._functorch.aot_autograd import aot_module, make_boxed_func
@@ -25,13 +26,19 @@ from torch.distributed._spmd.comm_tensor import _get_tracer
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
-from torch.distributed._spmd.experimental_ops import *  # noqa: F401, F403
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+
+from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
     _operator_dispatch,
 )
-from torch.distributed._tensor.placement_types import _Partial, Placement
+from torch.distributed._tensor.op_schema import OpSchema
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
