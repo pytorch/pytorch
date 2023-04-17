@@ -25,12 +25,15 @@ at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
   }
 }
 
-std::tuple<at::Tensor,optional<int64_t>>
-mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
-          optional<int64_t> target_bdim, int64_t reduction) {
+// Useful for many loss functions
+template <typename Func>
+static std::tuple<at::Tensor,optional<int64_t>>
+loss_batch_rule_helper(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction,
+          Func loss_fn) {
   auto self_ = flatten_logical(self, self_bdim);
   auto target_ = flatten_logical(target, target_bdim);
-  auto result = at::mse_loss(self_, target_, Reduction::None);
+  auto result = loss_fn(self_, target_, Reduction::None);
   if (result.dim() == 1) {
     return std::make_tuple(result, 0);
   } else if (reduction == Reduction::None) {
@@ -44,6 +47,33 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
     return std::make_tuple(result.mean(-1), 0);
   }
   TORCH_INTERNAL_ASSERT(false);
+};
+
+std::tuple<at::Tensor,optional<int64_t>>
+mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction) {
+  return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
+                                reduction, [](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
+                                  return at::mse_loss(self, target, reduction);
+                                });
+};
+
+std::tuple<at::Tensor,optional<int64_t>>
+huber_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction, double delta) {
+  return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
+                                reduction, [delta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
+                                  return at::huber_loss(self, target, reduction, delta);
+                                });
+};
+
+std::tuple<at::Tensor,optional<int64_t>>
+smooth_l1_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction, double beta) {
+  return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
+                                reduction, [beta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
+                                  return at::smooth_l1_loss(self, target, reduction, beta);
+                                });
 };
 
 static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -282,7 +312,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);
   m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT(mse_loss, mse_loss_batch_rule);
-  // mse_loss_backwards uses a decomposition for its batch rule
+  // mse_loss_backward uses a decomposition for its batch rule
+  VMAP_SUPPORT(huber_loss, huber_loss_batch_rule);
+  // huber_loss_backward uses a decomposition for its batch rule
+  VMAP_SUPPORT(smooth_l1_loss, smooth_l1_loss_batch_rule);
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }

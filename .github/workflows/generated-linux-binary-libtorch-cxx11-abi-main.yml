@@ -2,12 +2,12 @@
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-binary-libtorch-pre-cxx11
+name: linux-binary-libtorch-cxx11-abi
 
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - 'ciflow/trunk/*'
   workflow_dispatch:
@@ -18,7 +18,7 @@ env:
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
-  BUILD_ENVIRONMENT: linux-binary-libtorch-pre-cxx11
+  BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -27,11 +27,11 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: linux-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  libtorch-cpu-shared-with-deps-pre-cxx11-build:
+  libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
@@ -42,17 +42,17 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
-      build_name: libtorch-cpu-shared-with-deps-pre-cxx11
-      build_environment: linux-binary-libtorch-pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
+  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
@@ -62,11 +62,11 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
-      build_name: libtorch-cpu-shared-with-deps-pre-cxx11
-      build_environment: linux-binary-libtorch-pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
