@@ -1,3 +1,4 @@
+import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -261,13 +262,14 @@ def build_data_parallel_strategies(
     """
     activation_idx = num_params + num_states
     non_compute_ops = [
-        torch.ops._spmd.tag_grad.default,
         aten.ones_like.default,
         aten.t.default,
         aten.view.default,
         aten.reshape.default,
         aten.detach.default,
         aten.clone.default,
+        torch.ops._spmd.tag_grad.default,
+        operator.getitem,
     ]
 
     dp_strategy_map = {}
@@ -356,7 +358,6 @@ def build_data_parallel_strategies(
             # param + activation (param must be replicate, act be sharded) -> out: activation
             # param/state + grad (param/state/grad be the same spec) -> out: param/state
             # param + state -> out: param
-
             if node.target in non_compute_ops:
                 input_nodes = node.all_input_nodes
                 assert (
@@ -367,7 +368,10 @@ def build_data_parallel_strategies(
                     input_nodes[0]
                 ].reduction_over_batch
 
-                if arg_node_type == NodeType.PARAM:
+                if node.target == operator.getitem:
+                    # for getitem call, just forward the strategy from the input
+                    dp_strategy_map[node] = dp_strategy_map[node.args[0]]
+                elif arg_node_type == NodeType.PARAM:
                     replica_strategy = _gen_replicate_strategy(mesh)
                     dp_strategy_map[node] = DataParallelStrategy(
                         NodeType.PARAM, [replica_strategy]
@@ -499,6 +503,10 @@ def build_data_parallel_strategies(
                     dp_strategy_map[node] = DataParallelStrategy(
                         output_node_type, [replica_strategy, shard_strategy]
                     )
+                elif NodeType.PARAM in input_node_types:
+                    # at this point, inputs should only have parameters, the
+                    # strategy of this node would be the same as the input
+                    dp_strategy_map[node] = dp_strategy_map[input_args[0]]
                 else:
                     raise RuntimeError(
                         f"Unrecognized node: {node} with input node types: {input_node_types}."
@@ -624,15 +632,13 @@ def partitioner(graph: GraphModule) -> GraphModule:
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
                 local_val = _to_local_shard(node.meta["val"], out_spec)
-                local_tensor_meta = _extract_tensor_metadata(local_val)
+                # local_tensor_meta = _extract_tensor_metadata(local_val)
                 # update metadata
                 node.meta["val"] = local_val
-                node.meta["tensor_meta"] = local_tensor_meta
+                # node.meta["tensor_meta"] = local_tensor_meta
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
-            # for view related op that needs shape, adjust shape if needed
-            full_tensor = node.meta["val"]
-            full_shape = full_tensor.shape
+            output_val = node.meta["val"]
 
             # check if there's misaligned sharding, insert reshard if there is
             expected_input_specs = node_sharding.input_specs
@@ -645,11 +651,13 @@ def partitioner(graph: GraphModule) -> GraphModule:
                     else expected_input_specs[idx]
                 )
                 if input_arg_spec != desired_spec:
+                    input_full_shape = input_arg.meta["tensor_meta"].shape
+
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
                         return _redistribute_with_local_tensor(
                             local_tensor,
-                            full_shape,
+                            input_full_shape,
                             out_spec.mesh,
                             input_arg_spec.placements,
                             desired_spec.placements,
@@ -667,24 +675,41 @@ def partitioner(graph: GraphModule) -> GraphModule:
                         )
                     node.replace_input_with(input_arg, output_node)
             if node.target in shape_adjustment_ops:
+                # for view related op that needs shape, adjust shape if needed
+                assert isinstance(output_val, torch.Tensor)
                 local_shape = compute_local_shape(
-                    full_shape, out_spec.mesh, out_spec.placements
+                    output_val.shape, out_spec.mesh, out_spec.placements
                 )
                 node.update_arg(1, local_shape)
 
-            # convert output to local shard
+            # convert output tensor to local shard
             # note that if the output is already local, we don't need to convert
-            if not hasattr(out_spec, "from_local"):
-                local_val = _to_local_shard(full_tensor, out_spec)
-                local_tensor_meta = _extract_tensor_metadata(local_val)
-                # update metadata
-                node.meta["val"] = local_val
-                node.meta["tensor_meta"] = local_tensor_meta
+            if isinstance(output_val, list):
+                new_local_list = []
+                for tensor_val in output_val:
+                    local_val = _to_local_shard(tensor_val, out_spec)
+                    new_local_list.append(local_val)
+                node.meta["val"] = new_local_list
+            else:
+                if isinstance(output_val, torch.Tensor):
+                    if not hasattr(out_spec, "from_local"):
+                        local_val = _to_local_shard(output_val, out_spec)
+                        node.meta["val"] = local_val
+                else:
+                    raise RuntimeError(f"Output type {type(output_val)} not supported!")
 
         elif node.op == "output":
             break
         else:
             raise RuntimeError(f"op code {node} not supported")
+
+    # clean up the graph by removing sharding and partitioning related metadata
+    for node in graph.graph.nodes:
+        if "sharding" in node.meta:
+            del node.meta["sharding"]
+        if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor):
+            local_tensor_meta = _extract_tensor_metadata(node.meta["val"])
+            node.meta["tensor_meta"] = local_tensor_meta
 
     graph.graph.lint()
     graph.recompile()
