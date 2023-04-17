@@ -195,6 +195,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
+    def int_minimum(a, b):
+        return f"tl.where({a} < {b}, {a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"tl.where({a} > {b}, {a}, {b})"
+
+    @staticmethod
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
 
@@ -1297,7 +1305,7 @@ class TritonKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
+                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(
                 f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"
