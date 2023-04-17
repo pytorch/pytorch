@@ -842,7 +842,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
