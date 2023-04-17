@@ -540,6 +540,10 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
+        from torch._functorch.aot_autograd import get_aot_graph_name
+        graph_name = get_aot_graph_name()
+
+        # TODO: Why do we have to save the orig_graph?
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
         inner_compiled_fn = None
@@ -578,7 +582,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                 if inner_compiled_fn is None:
                     inner_compiled_fn = compiler_fn(gm, example_inputs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
-                    log.warning("Accuracy failed for the AOT Autograd graph")
+                    log.warning("Accuracy failed for the AOT Autograd graph %s", graph_name)
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
                         copy_tensor_attrs,
