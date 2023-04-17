@@ -223,9 +223,6 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "macos-12" },
           { config: "default", shard: 4, num_shards: 4, runner: "macos-12" },
         ]}
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-x86-64-test:
     name: macos-12-py3-x86-64
@@ -235,9 +232,6 @@ jobs:
       build-environment: macos-12-py3-x86-64
       test-matrix: ${{ needs.macos-12-py3-x86-64-build.outputs.test-matrix }}
       arch: x86_64
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   macos-12-py3-x86-64-lite-interpreter-build-test:
     name: macos-12-py3-x86-64-lite-interpreter
@@ -252,9 +246,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
         ]}
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   android-emulator-build-test:
     name: android-emulator-build-test
