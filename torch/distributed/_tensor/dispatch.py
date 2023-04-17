@@ -164,14 +164,14 @@ def _operator_dispatch(
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
-        # 1. if the return type is scalar, set the local result to None.
-        # The local results from all devices will then be all-gathered
-        # and a reduce op will be performed on the list of results
-        # with appropriate operators:
-        #   for bool type, we by default use AND to reduce;
-        #   we can extend for more ops if necessary.
-        # 2. if the return type is Tensor or List[Tensor], return empty
-        # tensor(s) with correct dtype.
+        #   1. if the return type is scalar, set the local result to None.
+        #   The local results from all devices will then be all-gathered
+        #   and a reduce op will be performed on the list of results
+        #   with appropriate operators:
+        #       for bool type, we by default use AND to reduce;
+        #       we can extend for more ops if necessary.
+        #   2. if the return type is Tensor or List[Tensor], return empty
+        #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
         ret_list = op_schema.func_schema.returns
         if len(ret_list) != 1:
