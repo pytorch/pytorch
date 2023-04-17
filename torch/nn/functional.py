@@ -3896,7 +3896,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
                 )
-            if not torch.jit.is_scripting() and not all(isinstance(x, (int, torch.SymInt)) for x in size)):
+            if not torch.jit.is_scripting() and not all(isinstance(x, (int, torch.SymInt)) for x in size):
                 raise TypeError(
                     "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
                     f"Tuple[int, int, int], but got size with types {[type(x) for x in size]}"
