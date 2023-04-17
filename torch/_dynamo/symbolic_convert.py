@@ -2030,6 +2030,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
+        if isinstance(func, NestedUserFunctionVariable) and func.closure is not None:
+            cvs = [cv.name for cv in func.closure.items if isinstance(cv, ClosureVariable) and cv.name != "self"]
+            if cvs:
+                code = func.get_code()
+                unimplemented(
+                    f"Cannot inline nested function '{code.co_name}' at {code.co_filename}:{code.co_firstlineno} "
+                    f"because it closes over variables {cvs}. "
+                    f"Please rewrite '{code.co_name}' to take {cvs} as additional arguments."
+                )
+
+
     @staticmethod
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
