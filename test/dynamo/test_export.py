@@ -2588,6 +2588,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "max_val"):
             gm(torch.tensor(9))
 
+
 common_utils.instantiate_parametrized_tests(ExportTests)
 
 if __name__ == "__main__":
