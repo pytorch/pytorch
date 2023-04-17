@@ -1,16 +1,32 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/all_native.h>
+#include <ATen/ops/amax_native.h>
+#include <ATen/ops/amin_native.h>
+#include <ATen/ops/any_native.h>
+#include <ATen/ops/argmax_native.h>
+#include <ATen/ops/argmin_native.h>
+#include <ATen/ops/max_native.h>
+#include <ATen/ops/mean_native.h>
+#include <ATen/ops/median.h>
+#include <ATen/ops/min_native.h>
+#include <ATen/ops/norm_native.h>
+#include <ATen/ops/prod_native.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/sum_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -533,12 +549,12 @@ Tensor std_var_common_impl_mps(const Tensor& input_t,
     }
   }
 
-  Tensor output_t = at::native::empty_mps(IntArrayRef(output_shape.data(), num_output_dims),
-                                          input_t.scalar_type(),
-                                          c10::nullopt,
-                                          kMPS,
-                                          c10::nullopt,
-                                          c10::nullopt);
+  Tensor output_t = at::empty(IntArrayRef(output_shape.data(), num_output_dims),
+                              input_t.scalar_type(),
+                              c10::nullopt,
+                              kMPS,
+                              c10::nullopt,
+                              c10::nullopt);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
     return output_t;
@@ -615,7 +631,7 @@ Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, 
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
-  Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t = at::empty({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -821,14 +837,13 @@ std::tuple<Tensor, Tensor> min_max_mps_impl(const Tensor& input_t,
   Tensor output_t;
   Tensor indices_t;
   if (!keepdim) {
-    output_t = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices_t = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    output_t =
+        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    indices_t = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   } else {
-    output_t = at::native::empty_mps(
+    output_t = at::empty(
         IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices_t = at::native::empty_mps(
+    indices_t = at::empty(
         IntArrayRef(vec_apparent_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   }
 
@@ -991,8 +1006,8 @@ Tensor nansum_mps(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, c10
 }
 
 Tensor trace_mps_out(const Tensor& self) {
-  Tensor output_t = at::native::empty_mps(
-      {}, get_dtype_from_self(self, c10::nullopt, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t =
+      at::empty({}, get_dtype_from_self(self, c10::nullopt, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   std::vector<int64_t> dims(self.dim());
   std::iota(dims.begin(), dims.end(), 0);
@@ -1027,8 +1042,8 @@ Tensor prod_mps(const Tensor& self, c10::optional<ScalarType> opt_dtype) {
   std::vector<int64_t> dims(self.dim());
   std::iota(dims.begin(), dims.end(), 0);
 
-  Tensor output_t = at::native::empty_mps(
-      {}, get_dtype_from_self(self, opt_dtype, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t =
+      at::empty({}, get_dtype_from_self(self, opt_dtype, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   mps::reduction_out_mps(self,
                          IntArrayRef(dims),
@@ -1057,8 +1072,8 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  Tensor output_t = at::native::empty_mps(
-      IntArrayRef(output_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t =
+      at::empty(IntArrayRef(output_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   mps::reduction_out_mps(self,
                          dims,
                          false,
@@ -1552,7 +1567,7 @@ Tensor median_mps(const Tensor& input_t) {
 
   apparent_input_shape[0] = [NSNumber numberWithInt:num_in_elements];
 
-  Tensor output_t = at::native::empty_mps({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor output_t = at::empty({}, input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -1768,14 +1783,13 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
   }
 
   if (!keepdim) {
-    values = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices = at::native::empty_mps(
-        IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    values =
+        at::empty(IntArrayRef(vec_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+    indices = at::empty(IntArrayRef(vec_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   } else {
-    values = at::native::empty_mps(
+    values = at::empty(
         IntArrayRef(vec_apparent_out_shape), input_t.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-    indices = at::native::empty_mps(
+    indices = at::empty(
         IntArrayRef(vec_apparent_out_shape), ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   }
 
