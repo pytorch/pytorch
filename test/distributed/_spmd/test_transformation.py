@@ -223,7 +223,7 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step(
+        self._test_train_step(
             train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
         )
 
