@@ -35,7 +35,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
-
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
     r"""
@@ -155,6 +154,37 @@ class TestTransformers(NNTestCase):
                 test_eval_bool = encoder(test, src_key_padding_mask=pad_mask)
                 l1_bool = nn.L1Loss()(test_train_bool[:, 0:2, :], test_eval_bool[:, 0:2, :]).item()
                 self.assertTrue(l1_bool < 1e-4, "Eval/Train difference in pad_mask BOOL")
+
+    @parametrize("device", device_list)
+    @parametrize("attn_mask_dim", [2, 3, None])
+    @parametrize("key_padding_mask_dim", [2, None])
+    def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim):
+        with torch.no_grad():
+            B = 2
+            L = 4
+            D = 8
+            H = 4
+
+
+            if attn_mask_dim == 2:
+                attn_mask = torch.randn(L, L, device=device) > 0
+            elif attn_mask_dim == 3:
+                attn_mask = torch.randn(B * H, L, L, device=device) > 0
+            elif attn_mask_dim is None:
+                attn_mask = None
+
+            if key_padding_mask_dim == 2:
+                key_padding_mask = torch.randn(B, L, device=device) > 0
+            elif key_padding_mask_dim is None:
+                key_padding_mask = None
+
+            mha = nn.MultiheadAttention(D, H, batch_first=True, device=device)
+            X = torch.randn(B, L, D, device=device)
+
+            mha.train()  # disable fast path
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+            mha.eval()  # enable fast path
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
 
     @parametrize("device", device_list)
     @parametrize("nhead", [1, 4, 8])

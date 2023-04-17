@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches:
-      - master
       - main
       - release/*
       - landchecks/*
@@ -355,7 +354,7 @@ jobs:
         ]}
 
   linux-focal-rocm5_4_2-py3_8-build:
-    # don't run build twice on master
+    # don't run build twice on main
     if: github.event_name == 'pull_request'
     name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_linux-build.yml

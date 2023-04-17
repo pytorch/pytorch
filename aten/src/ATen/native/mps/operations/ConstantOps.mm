@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
@@ -13,7 +13,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   Tensor output = self;
   bool needsCopyToOutput = false;
   if (!self.is_contiguous() || self.storage_offset()) {
-    output = empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS);
+    output = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }
 
