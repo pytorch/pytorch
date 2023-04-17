@@ -173,6 +173,7 @@ at::Tensor nansum_backward(
     at::OptionalIntArrayRef dims,
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
+std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list);
 at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(
     const at::Tensor& grad,
