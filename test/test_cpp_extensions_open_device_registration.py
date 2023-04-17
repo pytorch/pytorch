@@ -39,10 +39,6 @@ class DummyModule(object):
         return 1
 
     @staticmethod
-    def current_device() -> int:
-        return 0
-
-    @staticmethod
     def get_rng_state(device: Union[int, str, torch.device] = 'foo') -> torch.Tensor:
         # create a tensor using our custom device object.
         return torch.empty(4, 4, device="foo")
@@ -184,8 +180,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # check UntypedStorage
         z2 = y.untyped_storage()
         self.assertFalse(z2.is_foo)
-        # check case if Module has current_device
-        torch._register_device_module('foo', DummyModule)
         z2 = z2.foo()
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z2.is_foo)
