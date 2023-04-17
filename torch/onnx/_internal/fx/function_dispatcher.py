@@ -188,7 +188,6 @@ _ATENLIB_FUNCTIONS = {
     "aten::rsqrt": ops.core.aten_rsqrt,
     "aten::rsub": ops.core.aten_rsub,
     "aten::scalar_tensor": ops.core.aten_scalar_tensor,
-    "aten::scaled_dot_product_attention_bool_mask": ops.nn.aten_scaled_dot_product_attention_bool_mask,
     "aten::scaled_dot_product_attention": ops.nn.aten_scaled_dot_product_attention,
     "aten::scatter_add": ops.core.aten_scatter_add,
     "aten::scatter_reduce": ops.core.aten_scatter_reduce,
