@@ -2803,7 +2803,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(torch.ones([]), normalize), torch.ones([]).sin().cos())
 
-    @skipIfPy311
     def test_functools_wraps(self):
         def cool_name(x):
             return x.sin()
