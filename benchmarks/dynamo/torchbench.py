@@ -73,8 +73,6 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
-    # https://github.com/pytorch/pytorch/issues/99201
-    "opacus_cifar10",
 }
 
 SKIP_FOR_CUDA = {
@@ -89,8 +87,6 @@ SKIP_TRAIN = {
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
-    # Unusual training setup
-    "opacus_cifar10",
     "maml",
     # segfault: Internal Triton PTX codegen error
     "timm_efficientdet",
