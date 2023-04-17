@@ -35,7 +35,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'flake8==6.0.0',
     'flake8-bugbear==23.3.23',
-    'flake8-comprehensions==3.11.1',
+    'flake8-comprehensions==3.12.0',
     'flake8-executable==2.1.3',
     'flake8-logging-format==0.9.0',
     'flake8-pyi==23.3.1',
@@ -623,7 +623,6 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
-    'c10/cuda/CUDACachingAllocator.cpp',
 ]
 command = [
     'python3',
@@ -658,8 +657,8 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=cudaSetDevice(',
-    '--pattern=cudaGetDevice(',
+    '--pattern=cudaSetDevice',
+    '--pattern=cudaGetDevice',
     '--linter-name=RAWCUDADEVICE',
     '--error-name=raw CUDA API usage',
     """--error-description=\
