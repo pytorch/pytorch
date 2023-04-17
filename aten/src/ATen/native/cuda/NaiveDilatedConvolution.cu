@@ -275,7 +275,7 @@ void slow_conv_dilated_all_cuda_template(
             // Extract columns:
             hvol2col<scalar_t, dim>(
                 stream,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -283,7 +283,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                columns.data_ptr<scalar_t>());
+                columns.mutable_data_ptr<scalar_t>());
             /* For gemm argument derivation, see
                slow_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
@@ -347,7 +347,7 @@ void slow_conv_dilated_all_cuda_template(
             // Extract columns:
             hvol2col<scalar_t, dim>(
                 stream,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -355,7 +355,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                columns.data_ptr<scalar_t>());
+                columns.mutable_data_ptr<scalar_t>());
             scalar_t scale = static_cast<scalar_t>(
                 1); // TODO: expose as argument?
             /* For gemm argument derivation, see
