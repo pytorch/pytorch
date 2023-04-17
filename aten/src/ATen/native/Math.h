@@ -1473,9 +1473,8 @@ calc_i0(T _x) {
   return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
+// Upcast bfloat16 input to float for numerical accuracy purposes
 static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
-static inline c10::Half calc_i0(c10::Half a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
@@ -1506,10 +1505,6 @@ calc_i1(T _x) {
   return (_x < T{0.0}) ? -out : out;
 }
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline c10::BFloat16 calc_i1(c10::BFloat16 a) { return calc_i1(static_cast<float>(a)); }
-static inline c10::Half calc_i1(c10::Half a) { return calc_i1(static_cast<float>(a)); }
-
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
@@ -1538,10 +1533,6 @@ calc_i1e(T _x) {
   const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline c10::BFloat16 calc_i1e(c10::BFloat16 a) { return calc_i1e(static_cast<float>(a)); }
-static inline c10::Half calc_i1e(c10::Half a) { return calc_i1e(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1e function in the Cephes Math Library.
@@ -1674,10 +1665,6 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   }
   return x;
 }
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 calc_ndtri(c10::BFloat16 a) { return calc_ndtri(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half calc_ndtri(c10::Half a) { return calc_ndtri(static_cast<float>(a)); }
 
 /* The next function is taken from http://ab-initio.mit.edu/Faddeev */
 
@@ -2186,10 +2173,6 @@ calc_erfcx(T x)
   }
 }
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline c10::BFloat16 calc_erfcx(c10::BFloat16 a) { return calc_erfcx(static_cast<float>(a)); }
-static inline c10::Half calc_erfcx(c10::Half a) { return calc_erfcx(static_cast<float>(a)); }
-
 /*
  * Logarithm of Gaussian cumulative distribution function.
 
@@ -2206,10 +2189,6 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
     return std::log1p(-std::erfc(t) / 2);
   }
 }
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 calc_log_ndtr(c10::BFloat16 a) { return calc_log_ndtr(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half calc_log_ndtr(c10::Half a) { return calc_log_ndtr(static_cast<float>(a)); }
 
 template<typename T>
 static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
@@ -2502,10 +2481,6 @@ static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
     return (pp / pq * std::cos(x - T(0.785398163397448309615660845819875721)) - T(5.0) / x * (qp / qq) * std::sin(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
 } // bessel_j0_forward(T x)
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 bessel_j0_forward(c10::BFloat16 a) { return bessel_j0_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half bessel_j0_forward(c10::Half a) { return bessel_j0_forward(static_cast<float>(a)); }
-
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
     static const T PP[] = {
@@ -2613,10 +2588,6 @@ static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
 
     return (pp / pq * std::cos(x - T(2.356194490192344928846982537459627163)) - T(5.0) / x * (qp / qq) * std::sin(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
 } // bessel_j1_forward(T x)
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 bessel_j1_forward(c10::BFloat16 a) { return bessel_j1_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half bessel_j1_forward(c10::Half a) { return bessel_j1_forward(static_cast<float>(a)); }
 
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
@@ -2733,10 +2704,6 @@ static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
     return (pp / pq * std::sin(x - T(0.785398163397448309615660845819875721)) + T(5.0) / x * (qp / qq) * std::cos(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
 } // bessel_y0_forward(T x)
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 bessel_y0_forward(c10::BFloat16 a) { return bessel_y0_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half bessel_y0_forward(c10::Half a) { return bessel_y0_forward(static_cast<float>(a)); }
-
 template<typename T>
 static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
     static const T PP[] = {
@@ -2850,10 +2817,6 @@ static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
 
     return (pp / pq * std::sin(x - T(2.356194490192344928846982537459627163)) + T(5.0) / x * (qp / qq) * std::cos(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
 } // bessel_y1_forward(T x)
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 bessel_y1_forward(c10::BFloat16 a) { return bessel_y1_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half bessel_y1_forward(c10::Half a) { return bessel_y1_forward(static_cast<float>(a)); }
 
 template<typename T>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
@@ -3292,10 +3255,6 @@ static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
     return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
 } // modified_bessel_i0_forward(T x)
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 modified_bessel_i0_forward(c10::BFloat16 a) { return modified_bessel_i0_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half modified_bessel_i0_forward(c10::Half a) { return modified_bessel_i0_forward(static_cast<float>(a)); }
-
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
     static const T A[] = {
@@ -3392,10 +3351,6 @@ static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
     return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
 } // modified_bessel_i1_forward(T x)
 
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 modified_bessel_i1_forward(c10::BFloat16 a) { return modified_bessel_i1_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half modified_bessel_i1_forward(c10::Half a) { return modified_bessel_i1_forward(static_cast<float>(a)); }
-
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
     static const T A[] = {
@@ -3472,10 +3427,6 @@ static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
 
     return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
 } // modified_bessel_k0_forward(T x)
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 modified_bessel_k0_forward(c10::BFloat16 a) { return modified_bessel_k0_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half modified_bessel_k0_forward(c10::Half a) { return modified_bessel_k0_forward(static_cast<float>(a)); }
 
 template<typename T>
 static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
@@ -3554,10 +3505,6 @@ static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
 
     return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
 } // modified_bessel_k1_forward(T x)
-
-// Upcast bfloat16/half input to float for numerical accuracy purposes
-static inline C10_HOST_DEVICE c10::BFloat16 modified_bessel_k1_forward(c10::BFloat16 a) { return modified_bessel_k1_forward(static_cast<float>(a)); }
-static inline C10_HOST_DEVICE c10::Half modified_bessel_k1_forward(c10::Half a) { return modified_bessel_k1_forward(static_cast<float>(a)); }
 
 template<typename T>
 static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {

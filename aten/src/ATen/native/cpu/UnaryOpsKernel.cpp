@@ -352,7 +352,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); },
@@ -361,7 +361,7 @@ static void sinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void cosh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); },
@@ -425,7 +425,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else if (n == 1) {
     trigamma_kernel(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
           iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
@@ -460,12 +460,23 @@ static void nan_to_num_kernel(
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
-    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
-    cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "kaiser_window_cpu", [&]() {
+      const float alpha = static_cast<float>((window_length - 1) / 2.0);
+      const float beta_ = static_cast<float>(beta);
+      cpu_kernel(iter, [=](scalar_t a){
+          return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<float>(a) - alpha) / alpha, static_cast<float>(2.0)))) / calc_i0(beta_);
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
+      const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+      const scalar_t beta_ = static_cast<scalar_t>(beta);
+      cpu_kernel(iter, [=](scalar_t a){
+          return calc_i0(beta_ * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(beta_);
+      });
+    });
+  }
 }
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
@@ -480,8 +491,8 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
 }
 
 static void entr_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "entr_cpu", [&] {
         cpu_kernel(iter, [](scalar_t x) -> scalar_t {
           if (at::_isnan(x)) {
             return x;
@@ -514,16 +525,14 @@ static void frexp_kernel(TensorIteratorBase& iter) {
 
 static void ndtri_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "ndtri_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "ndtri_cpu", [&]() {
         cpu_kernel(iter, [](scalar_t x) { return calc_ndtri(x); });
       });
 }
 
 static void log_ndtr_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "log_ndtr_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "log_ndtr_cpu", [&]() {
         cpu_kernel(iter, [](scalar_t x) { return calc_log_ndtr(x); });
       });
 }
@@ -541,32 +550,29 @@ static void i0e_kernel(TensorIteratorBase& iter) {
 
 static void i1_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "i1_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t x) { return calc_i1(x); });
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x) { return calc_i1(x); });
   });
 }
 
 static void i1e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "i1e_cpu", [&]() {
-        cpu_kernel(iter, [](scalar_t x) { return calc_i1e(x); });
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1e_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x) { return calc_i1e(x); });
   });
 }
 
 static void erfcx_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.common_dtype(), "erfcx_cpu", [&]() {
-        cpu_kernel(
-          iter,
-          [](scalar_t a) -> scalar_t { return calc_erfcx(a); });
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "erfcx_cpu", [&]() {
+    cpu_kernel(
+      iter,
+      [](scalar_t a) -> scalar_t { return calc_erfcx(a); });
   });
 }
 
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kBFloat16, kHalf, iter.dtype(), "round_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
         bool neg_flag = false;
         scalar_t ten_pow_decimals;
         if (decimals < 0) {
@@ -584,88 +590,80 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
 static void bessel_j0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "bessel_j0_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return bessel_j0_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_j0_forward(x);
+        });
     });
 } // bessel_j0_kernel(TensorIteratorBase& iterator)
 
 static void bessel_j1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "bessel_j1_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return bessel_j1_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_j1_forward(x);
+        });
     });
 } // bessel_j1_kernel(TensorIteratorBase& iterator)
 
 static void bessel_y0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "bessel_y0_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return bessel_y0_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_y0_forward(x);
+        });
     });
 } // bessel_y0_kernel(TensorIteratorBase& iterator)
 
 static void bessel_y1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "bessel_y1_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return bessel_y1_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_y1_forward(x);
+        });
     });
 } // bessel_y1_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_i0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return modified_bessel_i0_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_i0_forward(x);
+        });
     });
 } // modified_bessel_i0_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_i1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return modified_bessel_i1_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_i1_forward(x);
+        });
     });
 } // modified_bessel_i1_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_k0_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return modified_bessel_k0_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_k0_forward(x);
+        });
     });
 } // modified_bessel_k0_kernel(TensorIteratorBase& iterator)
 
 static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
-          cpu_kernel(iterator, [](scalar_t x) {
-              return modified_bessel_k1_forward(x);
-          });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_k1_forward(x);
+        });
     });
 } // modified_bessel_k1_kernel(TensorIteratorBase& iterator)
 
