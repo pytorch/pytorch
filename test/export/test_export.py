@@ -143,9 +143,7 @@ class TestExport(TestCase):
 
             def forward(self, x, y):
                 self.buffer1.add_(2)
-                x.add_(3.0)
-                # z = x.clone()
-                # t = z.squeeze()
+                x.add_(3)
                 assert x[0][0] == 4
                 return x.sum() + self.buffer1.sum()
 

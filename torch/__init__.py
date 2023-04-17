@@ -343,10 +343,7 @@ class SymBool:
         self.node = node
 
     def __bool__(self):
-        try:
-            return self.node.bool_()
-        except:
-            return True
+        return self.node.bool_()
 
     def __int__(self):
         return builtins.int(self.node.bool_())

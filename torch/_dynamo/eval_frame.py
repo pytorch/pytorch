@@ -963,11 +963,15 @@ def export(
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
+    print("BEFORE", graph.graph)
+
     graph = _AddRuntimeAssertsInInputConstraint(
         graph,
         constraints,
         flat_args,
     ).transform()
+
+    print("AFTER", graph.graph)
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
@@ -996,8 +1000,7 @@ def export(
         matched_output_elements_positions,
     ).transform()
 
-    new_graph.graph.eliminate_dead_code()
-    new_graph.recompile()
+    print(new_graph.graph)
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object

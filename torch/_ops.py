@@ -395,10 +395,7 @@ class OpOverload(OperatorBase):
         )
 
     def __call__(self, *args, **kwargs):
-        print(self._name, args, kwargs)
-        result = self._op(*args, **kwargs or {})
-        #print(result, self._op, args, kwargs)
-        return result
+        return self._op(*args, **kwargs or {})
 
     def __hash__(self):
         return hash(self._op)

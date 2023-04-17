@@ -30,6 +30,7 @@ class ExportedProgram:
 
     def __call__(self, *args):
         flat_args, _ = pytree.tree_flatten(args)
+        print(self.fw_module.graph)
         output = self.fw_module(*flat_args)
         # Replay the mutations, we don't want to do this in the graph itself
         # as it would break the "functional" invariant.
