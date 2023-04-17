@@ -10,10 +10,11 @@ from torch.distributed._spmd.graph_utils import (
     get_output,
     is_leaf_subgraph,
 )
+from torch.distributed._spmd.partial_lower import partial_lower
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -486,32 +487,43 @@ class IterGraph(fx.Graph):
             ), f"The actual target node is None, {target_node}."
             actual_target_node.append(actual_node)
 
-    def node_update_arg(self, node: fx.Node, idx: int, arg: Argument) -> None:
+    def node_set_args(self, node: fx.Node, args: Tuple[Argument, ...]) -> None:
         if self._freeze_cross_iter_movement:
-            node.update_arg(int, arg)
+            node.args = args
             return
 
-        setup_arg = tree_map(
-            lambda _arg: self._lookup_node(_arg, self.setup_graph)
-            if isinstance(_arg, fx.Node)
-            else _arg,
-            arg,
+        setup_args = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), args
         )
         setup_node = self._lookup_node(node, self.setup_graph)
-        assert setup_node is not None, "setup_node is None"
-        setup_node.update_arg(idx, setup_arg)
-
-        node.update_arg(idx, arg)
-
-        cleanup_arg = tree_map(
-            lambda _arg: self._lookup_node(_arg, self.cleanup_graph)
-            if isinstance(_arg, fx.Node)
-            else _arg,
-            arg,
+        assert setup_node is not None
+        setup_node.args = setup_args
+        cleanup_args = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), args
         )
         cleanup_node = self._lookup_node(node, self.cleanup_graph)
-        assert cleanup_node is not None, "cleanup_node is None"
-        cleanup_node.update_arg(idx, cleanup_arg)
+        assert cleanup_node is not None
+        cleanup_node.args = cleanup_args
+        node.args = args
+
+    def node_set_kwargs(self, node: fx.Node, kwargs: Dict[str, Argument]) -> None:
+        if self._freeze_cross_iter_movement:
+            node.kwargs = kwargs
+            return
+
+        setup_kwargs = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), kwargs
+        )
+        setup_node = self._lookup_node(node, self.setup_graph)
+        assert setup_node is not None
+        setup_node.kwargs = setup_kwargs
+        cleanup_kwargs = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), kwargs
+        )
+        cleanup_node = self._lookup_node(node, self.cleanup_graph)
+        assert cleanup_node is not None
+        cleanup_node.kwargs = cleanup_kwargs
+        node.kwargs = kwargs
 
     def node_replace_all_uses_with(
         self,
@@ -614,7 +626,7 @@ class IterGraphModule(nn.Module):
     data dependency for all 3 graphs.
     """
 
-    def __init__(self, main_gm: fx.GraphModule) -> None:
+    def __init__(self, main_gm: fx.GraphModule, enable_inductor: bool = False) -> None:
         super().__init__()
 
         def _copy_gm(src: fx.GraphModule, graph: fx.Graph) -> fx.GraphModule:
@@ -633,13 +645,22 @@ class IterGraphModule(nn.Module):
         self._max_iters = 0
         self._previous_output: Tuple[Any, ...] = tuple()
         self._num_extra_output = 0
+        self._is_frozen = False
+        self._enable_inductor = enable_inductor
 
     def setup(self, max_iters: int = 0) -> None:
         """
-        This method is used to tell IterGraphModule the iterations to train so
-        that IterGraphModule knows which iteration is the last one and can do
-        proper cleanup.
+        Must be called before the forward() is called. This method setups
+        the internal states and also get the signal from users that what
+        is the maximum iteration count.
         """
+        if not self._is_frozen:
+            self.graph.freeze_cross_iter_movement()
+            self._num_extra_output = self.graph.num_extra_output
+            if self._enable_inductor:
+                self.main_gm = partial_lower(self.main_gm)
+            self._is_frozen = True
+
         # TODO: There are cases where max_iters is not known or not precise,
         # e.g., data is depleted. One suggestion from the reviewer is to
         # add one extra argument to forward(..., last_iter: bool = False) to
@@ -694,6 +715,7 @@ class IterGraphModule(nn.Module):
         return self.main_gm.recompile()
 
     def freeze_cross_iter_movement(self) -> None:
+        # TODO: remove this API once it is not used.
         self.graph.freeze_cross_iter_movement()
         self._num_extra_output = self.graph.num_extra_output
 

@@ -613,6 +613,21 @@ class CudaReproTests(TestCase):
                 rn = fn(idx, values)
                 self.assertEqual(r1, rn, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/96406
+    def test_linear_cpu_input(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, data):
+                data = data.to("cuda")
+                return self.linear(data)
+
+        mod = Model().cuda().eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(4, 4),))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
