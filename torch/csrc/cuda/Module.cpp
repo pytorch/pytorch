@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
@@ -1078,6 +1079,18 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     auto data_ptr = storage_impl->data_ptr().get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
+  });
+
+  m.def("_set_cudagraph_cached_tensors_enabled", [](bool enabled) {
+    at::autocast::set_cudagraph_cached_tensors_enabled(enabled);
+  });
+
+  m.def("_add_cudagraph_cached_tensor", [](const at::Tensor& t) {
+    at::autocast::add_cudagraph_cached_tensor(t);
+  });
+
+  m.def("_remove_cudagraph_cached_tensor", [](const at::Tensor& t) {
+    at::autocast::remove_cudagraph_cached_tensor(t);
   });
 
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
