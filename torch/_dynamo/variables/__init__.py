@@ -1,6 +1,14 @@
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
+from .ctx_manager import (
+    ContextWrappingVariable,
+    CUDAStreamContextVariable,
+    CUDAStreamVariable,
+    DeterministicAlgorithmsVariable,
+    GradModeVariable,
+    WithExitFunctionVariable,
+)
 from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
@@ -17,15 +25,11 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    BlackHoleVariable,
     ClosureVariable,
-    ContextWrappingVariable,
-    CUDAStreamContextVariable,
-    CUDAStreamVariable,
-    DeterministicAlgorithmsVariable,
+    DeletedVariable,
     GetAttrVariable,
-    GradModeVariable,
     InspectSignatureVariable,
     LambdaVariable,
     NewCellVariable,
@@ -34,7 +38,6 @@ from .misc import (
     PythonModuleVariable,
     SuperVariable,
     UnknownVariable,
-    WithExitFunctionVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
@@ -47,9 +50,9 @@ from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
+    "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BaseListVariable",
-    "BlackHoleVariable",
     "BuiltinVariable",
     "ClosureVariable",
     "ConstantVariable",
@@ -57,11 +60,12 @@ __all__ = [
     "ContextWrappingVariable",
     "DataClassVariable",
     "DefaultDictVariable",
+    "DeletedVariable",
+    "DeterministicAlgorithmsVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
-    "DeterministicAlgorithmsVariable",
     "InspectSignatureVariable",
     "LambdaVariable",
     "ListIteratorVariable",

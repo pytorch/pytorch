@@ -964,14 +964,18 @@ elseif(USE_CUDA)
         torch_cpu
         torch_cuda
     )
-    if(CAFFE2_USE_MKL)
-      target_link_libraries(torch_cuda_linalg PRIVATE caffe2::mkl)
-    endif()
     if($ENV{ATEN_STATIC_CUDA})
-      target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver_static
-          ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-      )
+      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+        )
+      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+        )
+      endif()
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver
@@ -1529,9 +1533,7 @@ if(BUILD_SHARED_LIBS)
   if(USE_MPI)
       target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
   endif()
-  if(CAFFE2_USE_MKL)
-    target_link_libraries(torch_global_deps caffe2::mkl)
-  endif()
+  target_link_libraries(torch_global_deps ${MKL_LIBRARIES})
   # The CUDA libraries are linked here for a different reason: in some
   # cases we load these libraries with ctypes, and if they weren't opened
   # with RTLD_GLOBAL, we'll do the "normal" search process again (and
@@ -1663,9 +1665,6 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     if(NOT MSVC)
       target_compile_options(${test_name} PRIVATE -Wno-unused-variable)
-    endif()
-    if(CAFFE2_USE_MKL)
-      target_link_libraries(${test_name} torch_library caffe2::mkl)
     endif()
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
