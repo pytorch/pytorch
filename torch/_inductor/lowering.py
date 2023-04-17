@@ -38,7 +38,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_list, sympy_product
+from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -682,6 +682,11 @@ def permute(x, dims):
 def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
+    dim_size = x.get_size()[dim]
+    if start < -dim_size:
+        start = 0
+    if end < -dim_size:
+        end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
@@ -724,6 +729,7 @@ def roll(a, shifts, dims=tuple()):
         return roll(first_dim_rolled, tail_shifts, tail_dims)
 
     (dim,) = dims
+    # TODO: Avoid guarding on shape here
     size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
     start = (size - shifts[0]) % size
     a_loader = a.make_loader()
@@ -793,6 +799,8 @@ def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
+        # TODO: We don't have to guard on sizes per se, but the number
+        # of splits must stay constant
         sizes = V.graph.sizevars.guard_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
@@ -849,6 +857,7 @@ def _validate_dim(x, dim, offset=0):
 @register_lowering(aten.glu)
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
+    # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
@@ -1089,15 +1098,16 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
-    if train:
+    assert train and p not in (0, 1), "inference should have been handled as a decomp"
+    if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
-
-    return x, ones_like(x, dtype=torch.bool)
+    else:
+        bool_mask = gt(rand_like(x), p)
+        bool_mask.realize()
+        res = mul(mul(bool_mask, x), float(1.0 / (1.0 - p)))
+        return res, bool_mask
 
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
@@ -1281,6 +1291,7 @@ make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.cumsum, require_dense, warn=False)
+make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1315,11 +1326,9 @@ make_fallback(aten.addmv, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
-make_fallback(aten.count_nonzero)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.cumprod)
-make_fallback(aten.deg2rad)
+make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.diagonal_copy, warn=False)
 make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
@@ -1374,7 +1383,6 @@ make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
-make_fallback(aten.rad2deg)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
 make_fallback(aten.replication_pad1d)
@@ -1779,9 +1787,9 @@ def constant_like(fill_value):
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
-if not config.fallback_random:
-    rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-    randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
+zeros_like = create_tensor_like(tensor_constructor(0))
+rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
+randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):
@@ -2138,32 +2146,36 @@ def scatter(x, dim: int, index, src, **kwargs):
 def scatter_fallback(
     fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
 ):
-    if reduce not in {None, "sum"} or (
-        reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
+    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+    if (
+        reduce not in {None, reduce_ty}
+        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
+        or torch.are_deterministic_algorithms_enabled()
     ):
-        self.realize()
-        return fallback_handler(fn)(
-            self, dim, index, src, reduce=reduce, include_self=include_self
+        ir.ScatterFallback(
+            fn, self, dim, index, src, reduce=reduce, include_self=include_self
         )
+        return self
 
     return None
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-    if reduce == "add":
-        reduce = "sum"
-    elif reduce == "multiply":
-        reduce = "prod"
-    else:
-        assert reduce is None
+    assert reduce in {None, "add", "multiply"}
 
     fallback_result = scatter_fallback(
-        aten.scatter_, self, dim, index, src, reduce=reduce
+        "aten.scatter_", self, dim, index, src, reduce=reduce
     )
 
     if fallback_result:
         return fallback_result
+
+    if reduce == "add":
+        reduce = "sum"
+    elif reduce == "multiply":
+        reduce = "prod"
+
     return scatter_reduce_(self, dim, index, src, reduce)
 
 
@@ -2182,15 +2194,12 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
     return scatter_reduce_(clone(x), dim, index, src, reduction_type, **kwargs)
 
 
-fallback_scatter_reduce_ = fallback_handler(aten.scatter_reduce_)
-
-
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
 
     fallback_result = scatter_fallback(
-        aten.scatter_reduce_,
+        "aten.scatter_reduce_",
         self,
         dim,
         index,
@@ -2564,7 +2573,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
 
 @register_lowering(prims.rev.default)
 def rev(x, dims):
-    # note - dims pre-canoncalized
+    # note - dims pre-canonicalized
     x_loader = x.make_loader()
     sizes = x.get_size()
 
@@ -2709,9 +2718,9 @@ def max_pool2d_with_indices(
         padding = [0, 0]
     if not stride:
         stride = kernel_size
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -2880,10 +2889,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -2893,10 +2902,14 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32)))
+                        ops.int_minimum(
+                            ph, ops.sub(phend, ops.constant(1, torch.int32))
+                        )
                     ),
                     ops.indirect_indexing(
-                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32)))
+                        ops.int_minimum(
+                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
+                        )
                     ),
                 ]
 
@@ -3122,9 +3135,9 @@ def avg_pool2d(
         stride = kernel_size
     if not padding:
         padding = [0, 0]
-    kernel_size = pad_list(kernel_size)
-    stride = pad_list(stride)
-    padding = pad_list(padding)
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
 
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
@@ -3282,18 +3295,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.minimum(
+        hend = ops.int_minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.minimum(
+        wend = ops.int_minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3310,10 +3323,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3331,12 +3344,12 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 )
                             ),
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 )
                             ),
@@ -3530,29 +3543,27 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-def _is_ir_node_and_cuda(x):
-    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
-        return True
-
-    return False
+fallback_pow = fallback_handler(aten.pow)
 
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
-        assert a.get_dtype() in (
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
-    elif isinstance(b, int) and -32 < b < 32:
-        # Optimize away small fixed powers
+
+    # Type promotion ensures all tensor arguments have the same type
+    dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
+    is_integer_pow = is_integer_dtype(dtype)
+
+    # Optimize away small fixed powers, or for integers avoid falling back to ATen
+    embed_exponent = isinstance(b, int) and (
+        -32 < b < 32 or (is_integer_pow and b >= 0)
+    )
+    if embed_exponent:
         loader = a.make_loader()
 
         def fn(idx):
@@ -3570,6 +3581,10 @@ def pow(a, b):
             return full_like(b, 1)
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
+
+    if is_integer_pow:
+        # ops.pow doesn't work for integers
+        return fallback_pow(a, b)
 
     return pow_native(a, b)
 
@@ -3788,7 +3803,7 @@ register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 register_pointwise(aten.le, override_return_dtype=torch.bool)
 register_pointwise(aten.lt, override_return_dtype=torch.bool)
 register_pointwise(aten.ge, override_return_dtype=torch.bool)
-register_pointwise(aten.gt, override_return_dtype=torch.bool)
+gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(

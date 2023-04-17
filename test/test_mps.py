@@ -37,13 +37,15 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, OpDTypes
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
 from itertools import product
 
+test_consistency_op_db = copy.deepcopy(op_db)
+test_error_inputs_op_db = copy.deepcopy(op_db)
 
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
 _ref_test_ops = tuple(
@@ -75,13 +77,13 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
-        'trace': [torch.float32],  # missing in place aten::index_fill_.int_Tensor
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
+        'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -424,7 +426,6 @@ def mps_ops_modifier(ops):
         'igamma': None,
         'igammac': None,
         'index_copy': None,
-        'index_fill': None,
         'index_reduce': None,
         'isin': None,
         'isneginf': None,
@@ -598,6 +599,7 @@ def mps_ops_modifier(ops):
         'linalg.matrix_rankhermitian': None,
         'linalg.pinv': None,
         'linalg.pinvhermitian': None,
+        'nonzero_static': None,
 
         # MPS: input sizes must be divisible by output sizes
         'nn.functional.adaptive_avg_pool1d': None,
@@ -741,6 +743,57 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
+        yield op
+
+def mps_ops_error_inputs_modifier(ops):
+    # Error input samples do not take a dtype argument.
+    XFAILLIST = {
+        # Exceptions are not raised
+        '__rmod__',
+        '__rsub__',
+        'bernoulli',
+        'clamp_max',
+        'clamp_min',
+        'index_add',
+        'trace',
+        'nn.functional.max_pool2d',
+        'nn.functional.gelu',
+        'masked_scatter',
+
+        # unsupported float64 dtype
+        'cat',
+        'complex',
+        'multinomial',
+        'nn.functional.conv1d',
+        'nn.functional.conv2d',
+        'gather',
+        'scatter',
+        'scatter_add',
+
+        # unsupported complex dtypes
+        'masked_fill',
+        'gradient',
+        'fft.hfft',
+        'fft.irfft',
+
+        # MPS does not support tensor dimensions > 16
+        'amax',
+        'amin',
+
+        # unimplemented
+        'logcumsumexp',
+    }
+
+    def addDecorator(op, d) -> None:
+        op.decorators = list(op.decorators) if op.decorators is not None else []
+        op.decorators.append(d)
+
+    for op in ops:
+        if op.error_inputs_func is None:
+            continue
+        key = op.name + op.variant_test_name
+        if key in XFAILLIST:
+            addDecorator(op, DecorateInfo(unittest.expectedFailure))
         yield op
 
 # Same logic as test_cuda.py
@@ -1949,6 +2002,16 @@ class TestMPS(TestCaseMPS):
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
 
+    def test_batch_norm_backward(self):
+        inputs = torch.rand(1, 8, 4, 4, device='mps', requires_grad=True)
+        x = torch.nn.BatchNorm2d(8).to("mps")
+        y = torch.nn.BatchNorm2d(8).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
         b = a.reshape((3, 3))
@@ -2950,8 +3013,9 @@ class TestMPS(TestCaseMPS):
 
     def test_repeat_interleave(self, device="mps"):
         x = torch.tensor([0, 1, 2, 3], device=device)
-        expected = torch.tensor([1, 2, 2, 3, 3, 3], dtype=torch.int32, device=device)
-        self.assertEqual(torch.repeat_interleave(x), expected)
+        expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
+        # Prior to macos 13.3, input of dtype=torch.int64 returns dtype=torch.int32
+        self.assertEqual(torch.repeat_interleave(x), expected, exact_dtype=product_version >= 13.3)
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.arange(4, device=device).reshape(2, 2))
@@ -7174,7 +7238,7 @@ class TestNLLLoss(TestCaseMPS):
         self.assertTrue(current_alloc_after > current_alloc_before)
         self.assertTrue(driver_alloc_after > driver_alloc_before)
 
-    # Test random_.to and random_.from
+    # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
 
@@ -7182,14 +7246,20 @@ class TestNLLLoss(TestCaseMPS):
 
             # We can't check reliably the mean and std.
             # Just make sure we don't return constant values
-            self.assertNotEqual(mps_out.to('cpu').float().mean(), 0.)
-            self.assertNotEqual(mps_out.to('cpu').float().std(), 0.)
+            self.assertNotEqual(mps_out.float().mean().item(), 0.)
+            self.assertNotEqual(mps_out.float().std().item(), 0.)
 
         helper([100, 100], 0, 10)
         helper([100, 100], 23, 89)
         helper([100, 100], 23, 89, dtype=torch.float32)
         helper([100, 100], 23, 89, dtype=torch.int64)
         helper([100, 100], 0, 2, dtype=torch.bool)
+
+        # Test random_
+        for dtype in [torch.bool, torch.int8, torch.uint8, torch.int32, torch.float16, torch.float32]:
+            x = torch.empty(10, 10, dtype=dtype, device='mps')
+            x.random_()
+            self.assertNotEqual(x.max().item(), 0)
 
     # Test exponential
     def test_exponential(self):
@@ -10206,7 +10276,7 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(mps_ops_modifier(op_db), allowed_dtypes=MPS_DTYPES)
+    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
@@ -10258,7 +10328,7 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
-    @ops(mps_ops_grad_modifier(copy.deepcopy(op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
+    @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
@@ -10358,6 +10428,30 @@ class TestConsistency(TestCaseMPS):
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
+
+class TestErrorInputs(TestCaseMPS):
+    @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
+    def test_error_inputs(self, device, op):
+        self.assertEqual(device, "mps")
+
+        mps_samples = op.error_inputs(device)
+
+        for mps_sample in mps_samples:
+            mps_sample_input = mps_sample.sample_input
+            error_type = mps_sample.error_type
+            error_regex = mps_sample.error_regex
+
+            mps_args = [mps_sample_input.input] + list(mps_sample_input.args)
+            mps_kwargs = mps_sample_input.kwargs
+
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                mps_args[1] = mps_args[1].cpu()
+
+            with self.assertRaisesRegex(error_type, error_regex):
+                op(*mps_args, **mps_kwargs)
+
+
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
@@ -10416,6 +10510,7 @@ class TestCommon(TestCase):
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
+instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == "__main__":

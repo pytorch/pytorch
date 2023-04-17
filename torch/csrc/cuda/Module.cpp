@@ -1,7 +1,13 @@
 #include <ATen/ATen.h>
+#include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <pybind11/pytypes.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
+
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
@@ -97,12 +103,24 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   }
 
   torch::utils::cuda_lazy_init();
-  auto current_device = c10::cuda::current_device();
-  if (current_device != device) {
-    THCPModule_setDevice(device);
+  int current_device = c10::cuda::ExchangeDevice(device);
+
+  return THPUtils_packInt32(current_device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
+  int64_t device = THPUtils_unpackLong(arg);
+  if (device < 0) {
+    return THPUtils_packInt32(-1);
   }
 
-  return THPUtils_packInt32(static_cast<int>(current_device));
+  torch::utils::cuda_lazy_init();
+  int current_device = c10::cuda::MaybeExchangeDevice(device);
+
+  return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
 }
 
@@ -855,6 +873,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "multi_processor_count", &cudaDeviceProp::multiProcessorCount)
       .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
+      .def_readonly(
+          "max_threads_per_multi_processor",
+          &cudaDeviceProp::maxThreadsPerMultiProcessor)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -1058,6 +1079,79 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto data_ptr = storage_impl->data_ptr().get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
+
+  m.def(
+      "_map_Storage_Refs",
+      [](const py::sequence& outputs,
+         const py::list& outputs_persistent_storage,
+         py::list output_refs,
+         py::list output_data_ptrs) {
+        TORCH_CHECK(outputs.size() == outputs_persistent_storage.size());
+
+        for (size_t i = 0, end = outputs.size(); i < end; ++i) {
+          if (!outputs_persistent_storage[i].is_none() ||
+              outputs[i].is_none()) {
+            output_refs.append(py::none());
+            output_data_ptrs.append(py::none());
+            continue;
+          }
+
+          auto t = outputs[i].cast<at::Tensor>();
+          c10::StorageImpl* storage = t.storage().unsafeGetStorageImpl();
+          auto weak = c10::raw::intrusive_ptr::make_weak(storage);
+          output_refs.append(reinterpret_cast<size_t>(weak));
+          output_data_ptrs.append(
+              reinterpret_cast<size_t>(storage->data_ptr().get()));
+        }
+      });
+
+  m.def(
+      "_construct_Tensors_From_Storage_and_Metadata",
+      [](const py::list& storages,
+         const py::list& metadatas,
+         py::list& outputs) {
+        TORCH_CHECK(storages.size() == metadatas.size());
+        for (size_t i = 0, end = storages.size(); i < end; ++i) {
+          const auto& maybe_metadata = metadatas[i];
+
+          if (maybe_metadata.is_none()) {
+            outputs.append(py::none());
+            continue;
+          }
+
+          const py::dict& metadata = maybe_metadata.cast<py::dict>();
+          c10::Storage s;
+          if (storages[i].is_none()) {
+            s = c10::Storage(
+                c10::Storage::use_byte_size_t(),
+                metadata["nbytes"].cast<int64_t>(),
+                at::DataPtr(
+                    reinterpret_cast<void*>(
+                        metadata["data_ptr"].cast<size_t>()),
+                    metadata["device"].cast<c10::Device>()));
+          } else if (py::isinstance<py::int_>(storages[i])) {
+            s = outputs[storages[i].cast<int64_t>()]
+                    .cast<at::Tensor>()
+                    .storage();
+          } else {
+            s = storages[i].cast<c10::Storage>();
+          }
+
+          auto dtype_arg = metadata["dtype"].ptr();
+          auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
+
+          constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
+          at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+              std::move(s), cuda_dks, meta);
+
+          tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+              metadata["size"].cast<std::vector<int64_t>>(),
+              metadata["stride"].cast<std::vector<int64_t>>());
+          tensor.unsafeGetTensorImpl()->set_storage_offset(
+              metadata["storage_offset"].cast<int64_t>());
+          outputs.append(std::move(tensor));
+        }
+      });
 
   m.def(
       "_cuda_beginAllocateCurrentStreamToPool",
@@ -1269,6 +1363,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
     {"_cuda_exchangeDevice", THCPModule_exchangeDevice, METH_O, nullptr},
+    {"_cuda_maybeExchangeDevice",
+     THCPModule_maybeExchangeDevice,
+     METH_O,
+     nullptr},
     {"_cuda_getDevice", THCPModule_getDevice_wrap, METH_NOARGS, nullptr},
     {"_cuda_getDeviceCount",
      THCPModule_getDeviceCount_wrap,

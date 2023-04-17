@@ -35,7 +35,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'flake8==6.0.0',
     'flake8-bugbear==23.3.23',
-    'flake8-comprehensions==3.11.1',
+    'flake8-comprehensions==3.12.0',
     'flake8-executable==2.1.3',
     'flake8-logging-format==0.9.0',
     'flake8-pyi==23.3.1',
@@ -632,6 +632,37 @@ command = [
     '--error-name=raw CUDA API usage',
     """--error-description=\
         This line calls raw CUDA APIs directly; please use at::cuda wrappers instead.
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'RAWCUDADEVICE'
+include_patterns = [
+    'aten/**',
+    'c10/**',
+    'torch/csrc/**',
+]
+exclude_patterns = [
+    'aten/src/ATen/cuda/CUDAContext.cpp',
+    'aten/src/ATen/cuda/CUDAGeneratorImpl.cpp',
+    'aten/src/ATen/test/**',
+    'c10/core/impl/InlineDeviceGuard.h',
+    'c10/cuda/CUDAFunctions.cpp',
+    'c10/cuda/CUDAGuard.h',
+    'c10/cuda/impl/CUDATest.cpp',
+    'torch/csrc/cuda/nccl.cpp',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=cudaSetDevice',
+    '--pattern=cudaGetDevice',
+    '--linter-name=RAWCUDADEVICE',
+    '--error-name=raw CUDA API usage',
+    """--error-description=\
+        This line calls raw CUDA APIs directly; please use c10::cuda wrappers instead.
     """,
     '--',
     '@{{PATHSFILE}}'

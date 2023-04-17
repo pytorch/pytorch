@@ -1,4 +1,3 @@
-import logging
 import os
 import sys
 import tempfile
@@ -17,16 +16,6 @@ from . import external_utils
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
 log_file_name = None
-
-# Note (mlazos): This is deprecated and will be removed very soon
-# to configure logging for dynamo, aot, and inductor
-# use the following API in the torch._logging module
-# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
-# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
-# see this design doc for more detailed info
-# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
-log_level = logging.ERROR
-output_code = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
@@ -66,7 +55,13 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
-assume_static_by_default = False
+assume_static_by_default = True
+
+# This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
+# with assume_static_by_default=True.
+# With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
+# any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
+automatic_dynamic_shapes = True
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
@@ -111,9 +106,6 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
-
-# Print guards
-print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
 
 # Show a warning for every specialization
 print_specializations = False
@@ -201,7 +193,7 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
-skip_nnmodule_hook_guards = False
+skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True

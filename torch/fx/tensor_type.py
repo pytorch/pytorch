@@ -56,7 +56,7 @@ Dyn = _DynType()
 def is_consistent(t1, t2):
     """
     A binary relation denoted by ~ that determines if t1 is consistent with t2.
-    The relation is reflexive, semmetric but not transitive.
+    The relation is reflexive, symmetric but not transitive.
     returns True if t1 and t2 are consistent and False otherwise.
     Example:
         Dyn ~ TensorType((1,2,3))

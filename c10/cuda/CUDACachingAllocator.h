@@ -221,7 +221,28 @@ class CUDAAllocator : public Allocator {
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
-  virtual bool needsPoolSpecificPeerAccess() = 0;
+
+  virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
+
+  // memory not allocated from cudaMalloc cannot be copied
+  // across devices using cudaMemcpyAsync if peer to peer access is disabled.
+  // instead it requres cudaMemcpyAsyncPeer
+  //  with P2P Enabled, all combinations work
+  //  with P2P Disabled:
+  //                       cudaMalloc cudaMallocAsync/cuMemMap
+  // cudaMemcpyAsyncPeer   works      works
+  // cudaMemcpyAsync       works      error
+
+  // This function performs chooses to use the Peer version of
+  // memcpy if required based on where the allocated put dst/src.
+  virtual cudaError_t memcpyAsync(
+      void* dst,
+      int dstDevice,
+      const void* src,
+      int srcDevice,
+      size_t count,
+      cudaStream_t stream,
+      bool p2p_enabled) = 0;
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
       int device,
       MempoolId_t id) = 0;
@@ -345,6 +366,22 @@ inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 
 inline std::string name() {
   return get()->name();
+}
+
+inline cudaError_t memcpyAsync(
+    void* dst,
+    int dstDevice,
+    const void* src,
+    int srcDevice,
+    size_t count,
+    cudaStream_t stream,
+    bool p2p_enabled) {
+  return get()->memcpyAsync(
+      dst, dstDevice, src, srcDevice, count, stream, p2p_enabled);
+}
+
+inline void enablePeerAccess(int dev, int dev_to_access) {
+  return get()->enablePeerAccess(dev, dev_to_access);
 }
 
 } // namespace CUDACachingAllocator

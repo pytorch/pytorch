@@ -11,6 +11,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     Union,
@@ -22,7 +23,9 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils._pytree as pytree
+
 from torch import fx
+from torch._subclasses import FakeTensorMode
 from torch.distributed._spmd.distribute import (
     _convert_to_distributed,
     distribute,
@@ -114,7 +117,6 @@ class Override(ABC):
     def transform(
         self,
         gm: fx.GraphModule,
-        schema_map: Dict[str, Schema],
         flat_state: List[torch.Tensor],
     ) -> fx.GraphModule:
         r"""
@@ -125,8 +127,6 @@ class Override(ABC):
 
         Args:
             gm (:class:`fx.Graph`): a DTensor-expanded graph.
-            schema_map (Dict[str, :class:`Schema`]): a dictionary maps from node
-                name to DTensor schema.
             flat_state (List[str, :class:`Tensor`]): a reference to the list of
                 flattened state. The elements in ``flat_state`` map to the first
                 ``len(flat_state)`` placeholders in the graph. The transformation
@@ -186,11 +186,11 @@ def _override_placements(t: torch.Tensor, placements: List[Placement]):
 
 def _dtensor_expand(
     gm: fx.GraphModule,
+    params_and_buffers: Dict[str, Any],
+    named_states: Dict[str, Any],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-    named_states: Dict[str, Any],
-    params_and_buffers: Dict[str, Any],
-) -> Tuple[fx.GraphModule, Dict[str, Schema]]:
+) -> fx.GraphModule:
     flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
 
     mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
@@ -200,6 +200,11 @@ def _dtensor_expand(
 
     inps, schemas = [], []
 
+    for p in pytree.tree_flatten(params_and_buffers)[0]:
+        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
+        inps.append(p)
+        schemas.append(replicate_schema)
+
     for o in pytree.tree_flatten(named_states)[0]:
         if isinstance(o, torch.Tensor):
             inps.append(o)
@@ -207,11 +212,6 @@ def _dtensor_expand(
         else:
             inps.append(torch.empty(0))
             schemas.append(replicate_schema)
-
-    for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
-        inps.append(p)
-        schemas.append(replicate_schema)
 
     for a in flat_args:
         if isinstance(a, torch.Tensor):
@@ -231,7 +231,12 @@ def _dtensor_expand(
             inps.append(torch.empty(0))
             schemas.append(shard_schema)
 
-    return _convert_to_distributed(gm, inps, schemas, _allow_partial=False)
+    with FakeTensorMode(allow_non_fake_inputs=True):
+        fake_inps = [torch.empty_like(inp) for inp in inps]
+
+    return _convert_to_distributed(
+        gm, fake_inps, schemas, default_mesh=mesh, _allow_partial=False
+    )[0]
 
 
 @contextmanager
@@ -251,7 +256,6 @@ def _rematerialize_optimizer(
     # FIXME: support multiple parameter groups
     param_group = opt.param_groups[0]
     orig_params = param_group["params"]
-    # FIXME(@mrshenli): exclude buffers
     param_group["params"] = params.values()
 
     try:
@@ -382,6 +386,35 @@ FOREACH_DECOMP_TABLE = {
 }
 
 
+DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
+}
+
+
+def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
+    args_to_node: Dict[Tuple[Any, ...], fx.Node] = {}
+
+    for node in gm.graph.nodes:
+        # replace all args with the results from the first unique comm op
+        args, _ = pytree.tree_flatten(node.args)
+
+        if node.target in DEDUP_TARGETS:
+            args_key = (node.target, *args)
+            unique_node = args_to_node.get(args_key, None)
+            if unique_node is None:
+                # first time seeing this combination, remember it
+                args_to_node[args_key] = node
+            else:
+                # the current node is a duplicate, replace it
+                node.replace_all_uses_with(unique_node)
+                gm.graph.erase_node(node)
+
+    gm.recompile()
+
+    return gm
+
+
 @dataclass
 class _CompiledResult:
     gm: fx.GraphModule
@@ -392,7 +425,7 @@ class _CompiledResult:
 
 def _compile(
     func: Callable,
-    module_override: Optional[Dict[Type[Any], Override]],
+    module_override: Optional[Dict[Union[Type[Any], str], Override]],
     *args: Any,
     **kwargs: Any,
 ) -> _CompiledResult:
@@ -415,25 +448,27 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
-        for typ, override in module_override.items():
+        # FIXME(@mrshenli): type might overlap with fqns
+        for typ_or_fqn, override in module_override.items():
             for name, submodule in mod.named_modules():
-                if isinstance(submodule, typ):
+                if (
+                    isinstance(typ_or_fqn, str)
+                    and typ_or_fqn == name
+                    or isinstance(typ_or_fqn, type)
+                    and isinstance(submodule, typ_or_fqn)
+                ):
                     accessor.swap_submodule(name, override.replacement(submodule))
 
     # 3. Trace statelss version of the train_step
-    params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
+    params = dict(mod.named_parameters(remove_duplicate=False))
+    buffers = dict(mod.named_buffers(remove_duplicate=False))
 
     named_states = {}
     if opt is not None:
-        opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
-        for n, p in params_and_buffers.items():
+        for n, p in params.items():
             if p in opt.state:
                 # opt.state's key type is string, but optimizer uses
                 # Parameter as keys
@@ -441,15 +476,15 @@ def _compile(
 
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, named_states, params_and_buffers, args, kwargs):
+    def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
-            cast(nn.Module, mod), params_and_buffers
+            cast(nn.Module, mod), {**params, **buffers}
         ), _rematerialize_optimizer(
-            opt, named_states, params_and_buffers
+            opt, named_states, params
         ) if opt else nullcontext():
             ret = func(*args, **kwargs)
             # make sure updated parameters are returned
-            return ret, list(mod.parameters())  # type: ignore[union-attr]
+            return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
 
     # FIXME: Using symbolic tracing to work around. Otherwise it hits
     # shape mismatch error, as we use local inputs to trace local graph
@@ -465,12 +500,15 @@ def _compile(
             tracing_mode="symbolic",
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
-        )(named_states, params_and_buffers, args, kwargs)
+        )(params, buffers, named_states, args, kwargs)
+
+    params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
+        **params,
+        **buffers,
+    }
 
     # 4. Use DTensor to insert collectives
-    gm, name_to_spec = _dtensor_expand(
-        gm, args, kwargs, named_states, params_and_buffers
-    )
+    gm = _dtensor_expand(gm, params_and_buffers, named_states, args, kwargs)
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
@@ -478,13 +516,26 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
+    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
-    # 6. Replace previously inserted dummy ones with real graphs.
+    # 6. dedup comm operators.
+    # The duplication could come from DTensor args and kwargs redistribution.
+    # Suppose one operator produces a Partial gradient tensor and model
+    # parameters are replicated. In this case, every optimizer operation using
+    # that Partial gradient tensor would trigger an allreduce. This is becuase
+    # DTensor only has local information on individual tensor/operator, which is
+    # not sufficient to detect duplications in the graph. This situation can
+    # also happen when inserting FSDP allgather if a parameter is used multiple
+    # times in the forward method.
+    # TODO(@mrshenli): @yifuwang has a suggestion of conducting expansion and
+    # dedup at tracer-level to avoid multiple graph passes.
+    gm = _dedup_collectives(gm)
+
+    # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
         for _, override in module_override.items():
-            gm = override.transform(gm, name_to_spec, flat_state)
+            gm = override.transform(gm, flat_state)
 
     return _CompiledResult(gm, mod, opt, flat_state)
 
@@ -495,7 +546,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
 def compile(
-    module_override: Optional[Dict[Type[Any], Override]] = None,
+    module_override: Optional[Dict[Union[Type[Any], str], Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ):
     r"""
@@ -505,9 +556,10 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Type[Any], Override]]): a dictionary maps
-            from target :class:`nn.Module` types to :class:`Override` objects.
-            The :class:`Override` objects provide :class:`nn.Module` replacements
+        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a
+            dictionary maps from target :class:`nn.Module` types or
+            fully-qualified names to :class:`Override` objects. The
+            :class:`Override` objects provide :class:`nn.Module` replacements
             during tracing and a graph transformation function after tracing.
             (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
@@ -533,11 +585,11 @@ def compile(
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
-                output = compiled_obj.gm(*flat_inps)[0]
                 if first_iter and gm_transformation:
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
                     compiled_obj.gm = gm_transformation(compiled_obj.gm)
+                output = compiled_obj.gm(*flat_inps)[0]
                 return output
 
         return wrapper
