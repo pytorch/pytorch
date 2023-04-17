@@ -11117,7 +11117,7 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(out.dtype, dtype)
             self.assertEqual(input.grad.dtype, dtype)
-            self.assertEqual(out, out2.to(dtype=dtype), atol=prec, rtol=prec) 
+            self.assertEqual(out, out2.to(dtype=dtype), atol=prec, rtol=prec)
             self.assertEqual(input.grad.data, input2.grad.data.to(dtype=dtype), atol=prec, rtol=prec)
 
         shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
