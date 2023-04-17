@@ -5,17 +5,33 @@ import os
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, Set
+from typing import Dict, Set, Callable, List
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARN
-DEFAULT_FORMATTER = logging.Formatter(
-    "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
-)
 LOG_ENV_VAR = "TORCH_LOGS"
 
+FORMATTER_PREFIXES : List[Callable[[], str]] = []
+
+class ExtenableLogFormatter(logging.Formatter):
+    def __init__(self, fmt=None, datefmt=None):
+        super().__init__(fmt, datefmt)
+
+    def format(self, record):
+        if len(FORMATTER_PREFIXES) == 0:
+            return super().format(record)
+        else:
+            prefix = ""
+            for fn in FORMATTER_PREFIXES:
+                prefix += fn()
+        record.msg = prefix + record.msg
+        return super().format(record)
+
+DEFAULT_FORMATTER = ExtenableLogFormatter(
+    "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
+)
 
 @dataclass
 class LogRegistry:
@@ -188,6 +204,16 @@ def set_logs(
         schedule=schedule,
     )
 
+
+def register_formatter_prefix_fn(fn: Callable[[], str]):
+    """
+    Registers a function to be invoked, per log. The function contract is () -> str. 
+    We run each function, in the order they are registered, to append some piece of data to a log.
+
+    Args:
+        fn: the callable to invoke per log.
+    """
+    FORMATTER_PREFIXES.append(fn)
 
 def register_log(setting_name, log_name):
     """
@@ -388,7 +414,6 @@ def _reset_logs():
         log = logging.getLogger(artifact_log_qname)
         log.setLevel(logging.NOTSET)
         log.propagate = True
-
 
 def _get_log_state():
     return log_state
