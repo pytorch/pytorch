@@ -2,10 +2,11 @@
 
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import List, Union, Dict
+from typing import List, Dict
 
 ################################################################################
 # Following section is the defining the permissible argument types for operators
+
 
 # Copied from torchgen/model.py
 class ScalarType(Enum):
@@ -22,6 +23,7 @@ class ScalarType(Enum):
     c128 = auto()   # torch.complex128 or torch.cdouble
     b8 = auto()     # torch.bool
     bf16 = auto()   # torch.bfloat16
+
 
 # Copied from torch/_C/__init__.pyi.in
 class Layout(Enum):
@@ -51,16 +53,19 @@ class Device:
     type: str
     index: int
 
+
 @dataclass
 class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
     as_int: int = None
     as_sym: str = None
 
-# !!! To support t.item(), we need to introduce SymFloat
-# @dataclass
-# class SymFloat:  # Union, ONLY EXACTLY ONE of the following fields can be set
-#     as_flaot: float = None
-#     as_sym: str = None
+
+# This is a SymInt Arugment used in the args of an node
+# We intentionally don't store the SymInt's value here, as the same SymInt argument can be used in multiple nodes
+# This field is an reference to the SymInt
+@dataclass
+class SymIntArgument:
+    name: str   # identifier of the symint, which must exist in graph's symint_values
 
 
 # This is a Tensor Arugment used in the args of an node
@@ -70,25 +75,6 @@ class SymInt:  # Union, ONLY EXACTLY ONE of the following fields can be set
 @dataclass
 class TensorArgument:
     name: str   # identifier of the tensor, which must exist in graph's tensor_values
-
-# This is a SymInt Arugment used in the args of an node
-# We intentionally don't store the SymInt's value here, as the same SymInt argument can be used in multiple nodes
-# This field is an reference to the SymInt
-@dataclass
-class SymIntArgument:
-    name: str   # identifier of the symint, which must exist in graph's symint_values
-
-#  Permissible return types for operators
-# !!! Notice: this assumes that a node can only return Tensor(s) and Symint(s), and not other int/float/bool types...
-# !!! What about .item()? Do we need to handle this?
-@dataclass
-class ReturnArgument:  # Union, ONLY EXACTLY ONE of the following fields can be set
-    as_tensor: TensorArgument = None
-
-    # !!! ATM, no operator has return type as Tensor[], might need this latter?
-    # as_tensors: List[TensorArgument] = None
-
-    as_symint: SymIntArgument = None
 
 
 # Permissible argument types for operators
@@ -101,31 +87,33 @@ class Argument:  # Union, ONLY EXACTLY ONE of the following fields can be set
 
     as_tensor: TensorArgument = None
     as_tensors: List[TensorArgument] = None   # Tensor[], used by aten.cat, and condition ops
-
-    as_symint: SymIntArgument = None         # Symint can be an argument, there are symint in native_function.yaml
-    as_symints: List[SymIntArgument] = None   # Symint[] can be an argement, there are symint[] in native_function.yaml
-
-    as_bool: bool = None
-
-    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
-    as_bools: List[bool] = None     # for bool[]
-
+    
     as_int: int = None
     as_ints: List[int] = None      # for int[]
     as_float: float = None
     as_floats: List[float] = None    # for float[]
     as_str: str = None
-    # List[str],        # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
 
-    # Graph,            # !!! Consider how to handle condition op, which need to pass in a graph for the branch
-    # List[Graph],      # !!! What about list of graphs? Do we need this?
-    as_gm: "GraphModule" = None     # !!! ATM, torch.cond models branch as GraphModule
+    as_symint: SymIntArgument = None         # Symint can be an argument, there are symint in native_function.yaml
+    as_symints: List[SymIntArgument] = None   # Symint[] can be an argement, there are symint[] in native_function.yaml
 
     # !!! Following types doesn't have a list version in native_function.yaml
     as_scalar_type: ScalarType = None
     as_memory_format: MemoryFormat = None
     as_layout: Layout = None
     as_device: Device = None
+
+    as_bool: bool = None
+    # !!! There are use of bool[3] in canonical aten ops, consider if we can simplify this
+    as_bools: List[bool] = None     # for bool[]
+
+    # List[str],        # !!! There is no str[] in native_function.yaml. Consider if this is needed for expressiveness
+
+    # Graph,            # !!! Consider how to handle condition op, which need to pass in a graph for the branch
+    # List[Graph],      # !!! What about list of graphs? Do we need this?
+    as_gm: "GraphModule" = None     # !!! ATM, torch.cond models branch as GraphModule
+
+    as_lowered_module: "LoweredBackendModule" = None     # call_delegate ops take in the LoweredBackendModule
 
 
 ################################################################################
@@ -160,31 +148,6 @@ class TensorMeta:
     layout: Layout
 
 
-@dataclass
-class Buffer:
-    # data stored in big endian
-    buffer: bytes
-
-
-# External data needs to stored in big endian
-@dataclass
-class ExternalBuffer:
-    location: str
-    offset: str     # !!! Consider using int, but int has int_max limitation
-    length: str     # !!! Consider using int, but int has int_max limitation
-    checksum: str
-
-
-@dataclass
-class Storage:
-    class DataLocation(Enum):
-        Internal = auto()
-        External = auto()
-
-    data_location: DataLocation
-    data: Union[Buffer, ExternalBuffer]
-
-
 # This is a concrete tensor backed by storage
 @dataclass
 class Tensor:
@@ -198,25 +161,13 @@ class Tensor:
 ################################################################################
 # Following section is defining the schema of 3 level construct: GraphModule, Graph, Node
 
+
 # TensorValue has no corresponding class in fx
 # TensorValue is the "tensor results" that are passed between nodes in the graph
 # TensorValue is a named virtual tensor, with an TensorMeta that describes the properties of the tensor
 @dataclass
 class TensorValue:
-    name: str           # unique identifier of the TensorValue, referenced in Argument.as_tensor field
     meta: TensorMeta    # tensor meta
-
-
-@dataclass
-class SymIntValue:
-    name: str       # unique identifier of the SymIntValue, referenced in Argument.as_symint field
-    value: SymInt
-
-@dataclass
-class NodeMetadata:
-    stack_trace: str                      # source info of a node
-    nn_module_stack: str                  # stack of nn.Module that the node originates from
-    extra: Dict[str, str]                 # arbitrary string-string pairs for extra metadata
 
 
 # Maps to fx.Node
@@ -238,23 +189,19 @@ class Node:
     kwargs: Dict[str, Argument]
 
     # A list of Argument returned by this node
-    outputs: List[ReturnArgument]
+    outputs: List[Argument]
 
-    metadata: NodeMetadata          # metadata fields for this node
+    metadata: Dict[str, str]          # metadata fields for this node
 
 
 # Maps to fx.Graph
 @dataclass(init=False)
 class Graph:
     # Maps to fx.graph's placeholder nodes.
-    # !!! Do we allow SymInt as graph input?
-    # !!! need to think about where to store the metadata for placeholder nodes
-    inputs: List[TensorArgument]
+    inputs: List[Argument]
 
     # Maps to fx.graph's output node.
-    # !!! Do we allow SymInt as graph output?
-    # !!! need to thinking about where to store the metadata for original output node
-    outputs: List[TensorArgument]
+    outputs: List[Argument]
 
     # maps to computations nodes in fx.graph
     # Placeholder nodes and output node are not included in this list.
@@ -263,14 +210,14 @@ class Graph:
 
     # Tensor values that appear in the graph
     # They could be graph inputs, graph outputs, or intermediate tensor values produced by nodes
-    tensor_values: List[TensorValue]
+    tensor_values: Dict[str, TensorValue]
 
     # SymInt values that appear in the graph
-    symint_values: List[SymIntValue]
+    symint_values: Dict[str, SymInt]
 
 
 # Maps to fx.GraphModule
-# This the top level construct for the model
+# This the top level construct for a method in a model
 @dataclass(init=False)
 class GraphModule:
     # A readable name for the model, potentially maps to GraphModule's self.__class__.__name__
@@ -294,3 +241,37 @@ class GraphModule:
 
     # !!! Might also need to store the shape_env for symints, but it's unclear how downstream system will use it.
     # !!! Consider storing it in the GraphModule, or in the Graph.
+
+
+################################################################################
+# Following section is defining the schema constructs needed for delegation to a
+# backend: CompileSpec, LoweredBackendModule
+
+
+# Compilation specs needed for delegation
+@dataclass(init=False)
+class CompileSpec:
+    key: str
+    value: bytes
+
+
+# Module representing what is being delegated to a specific backend
+@dataclass(init=False)
+class LoweredBackendModule:
+    # Backend's name
+    _backend_id: str
+    # Delegate blobs created from backend.preprocess
+    _processed_bytes: bytes
+    # List of backend-specific objects with static metadata to configure the compilation process
+    _compile_specs: List[CompileSpec]
+    # Original graph module
+    _original_module: GraphModule
+
+
+################################################################################
+# Following section is defining the schema of the top level construct for a model
+
+@dataclass(init=False)
+class MultiMethodProgram:
+    method_to_graph_module: Dict[str, GraphModule]
+    metadata : Dict[str, str]
