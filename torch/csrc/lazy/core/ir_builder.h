@@ -261,7 +261,7 @@ static inline NodePtr MakeSizeAdd(const Value& a, const Value& b) {
   return getIrBuilder()->MakeSizeAdd(a, b);
 }
 static inline NodePtr MakeSizeMul(const Value& a, const Value& b) {
-  return getIrBuilder()->MakeSizeAdd(a, b);
+  return getIrBuilder()->MakeSizeMul(a, b);
 }
 static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
   return getIrBuilder()->MakeSizeDiv(a, b);
