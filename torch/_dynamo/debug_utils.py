@@ -935,6 +935,7 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
+
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
     Minifier uses this function to identify if the minified graph module fails

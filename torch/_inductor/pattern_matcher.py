@@ -9,10 +9,10 @@ from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
+import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
-import torch._guards
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict, immutable_list

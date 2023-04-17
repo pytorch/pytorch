@@ -8,7 +8,6 @@ import warnings
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
-import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config

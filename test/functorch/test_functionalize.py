@@ -1,7 +1,5 @@
 # Owner(s): ["module: functorch"]
 
-import functorch
-from unittest.mock import patch
 import functools
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 import test_aotdispatch
