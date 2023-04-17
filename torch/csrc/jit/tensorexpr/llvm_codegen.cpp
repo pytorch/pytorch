@@ -1120,7 +1120,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     value_ = irb_.CreateLShr(value_, toVec(shift_len, lans));
     value_ = irb_.CreateTrunc(value_, llvmTypeToVec(ShortTy_, lans));
     value_ = irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(ShortTy_, lans));
-    // If the the value is NaN, return BF16 NaN.
+    // If the value is NaN, return BF16 NaN.
     value_ = irb_.CreateSelect(mask, value_, toVec(bf16_nan, lans));
     return;
   }
