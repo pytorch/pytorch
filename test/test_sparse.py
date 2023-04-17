@@ -4467,8 +4467,9 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=False), t)
-            self.assertTrue(r)
+            for fast_mode in (True, False):
+                self.assertTrue(gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=False), t, fast_mode=fast_mode))
+                self.assertTrue(gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=True), t, masked=True, fast_mode=fast_mode))
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
