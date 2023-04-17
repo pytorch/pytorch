@@ -540,7 +540,6 @@ class TestCustomOp(TestCase):
         def bar(x):
             ...
 
-
         @bar.impl('cpu')
         def bar_cpu(x):
             return x.sin()
@@ -602,16 +601,16 @@ class TestCustomOp(TestCase):
             ...
 
         @baz.impl(['cpu', 'cuda'])
-        def baz_cuda(x):
+        def baz_impl(x):
             return x.cos()
 
         x = torch.randn(3)
         result = baz(x)
-        self.assertEqual(result, baz_cpu(x))
+        self.assertEqual(result, baz_impl(x))
 
         x_cuda = x.cuda()
         result = baz(x_cuda)
-        self.assertEqual(result, baz_cuda(x_cuda))
+        self.assertEqual(result, baz_impl(x_cuda))
         del baz
 
     def test_impl_meta(self):

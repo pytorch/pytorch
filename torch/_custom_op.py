@@ -298,9 +298,7 @@ def validate_schema(schema: FunctionSchema) -> None:
         r.annotation is not None and not r.annotation.is_write for r in rets
     )
     if is_non_mutating_view:
-        raise ValueError(
-            f"custom_op does not support view functions. Got: {schema}"
-        )
+        raise ValueError(f"custom_op does not support view functions. Got: {schema}")
 
     # Requires us to have handling for factory functions
     if not schema.arguments.has_tensor_arg():
@@ -351,18 +349,24 @@ def get_autograd_not_implemented_kernel(custom_op) -> typing.Callable:
     return autograd_not_implemented
 
 
-def validate_function_matches_schema(schema: FunctionSchema, func: typing.Callable) -> None:
+def validate_function_matches_schema(
+    schema: FunctionSchema, func: typing.Callable
+) -> None:
     arg_spec = inspect.getfullargspec(func)
 
     arg_names = tuple(arg.name for arg in schema.arguments.post_self_positional)
     if arg_names != tuple(arg_spec.args):
         raise ValueError(
             f"custom_op: Expected the schema to match the signature of `func`. "
-            f"Schema has arg names {arg_names} but function has {arg_spec.args}.")
+            f"Schema has arg names {arg_names} but function has {arg_spec.args}."
+        )
 
-    kwonlyarg_names = tuple(arg.name for arg in schema.arguments.pre_tensor_options_kwarg_only)
+    kwonlyarg_names = tuple(
+        arg.name for arg in schema.arguments.pre_tensor_options_kwarg_only
+    )
     if kwonlyarg_names != tuple(arg_spec.kwonlyargs):
         raise ValueError(
             f"custom_op: Expected the schema to match the signature of `func`. "
             f"Schema has kwonlyarg names {kwonlyarg_names} but function has "
-            f"{arg_spec.kwonlyargs}.")
+            f"{arg_spec.kwonlyargs}."
+        )
