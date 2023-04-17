@@ -665,7 +665,6 @@ def compile_fx(
         )
 
     assert not config._raise_error_for_testing
-    functorch.compile.config.use_functionalize = True
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes

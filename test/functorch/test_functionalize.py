@@ -10,8 +10,7 @@ import test_aotdispatch
 def make_functionalize_fn(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        with patch.object(functorch.compile.config, "use_functionalize", True):
-            return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
 
     return _fn
 

@@ -21,9 +21,6 @@ def aot_autograd(**kwargs):
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()
 
-        # TODO: stop monkeypatching here (without even cleaning up, UGH!)
-        functorch.compile.config.use_functionalize = True
-
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
 

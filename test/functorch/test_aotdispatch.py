@@ -2748,7 +2748,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_functionalize", True)
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
@@ -2809,7 +2808,6 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
     @modules(module_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_functionalize", True)
     @decorateForModules(unittest.expectedFailure,
                         aot_autograd_module_failures | symbolic_aot_autograd_module_failures)
     def test_aot_autograd_symbolic_module_exhaustive(self, device, dtype, training, module_info):
