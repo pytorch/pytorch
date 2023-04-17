@@ -195,6 +195,8 @@ __all__ = [
     "amax",
     "amin",
     "any",
+    "cumsum",
+    "cumprod",
     "mean",
     "std",
     "std_mean",
@@ -3325,7 +3327,7 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
@@ -3980,12 +3982,12 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     )
 
 
-@register_decomposition(aten.cumsum)
-def cumsum(
+def _cumsumprod_common(
+    func,
+    init,
     a: TensorLikeType,
     dim: int,
     *,
-    keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
@@ -3994,14 +3996,36 @@ def cumsum(
     ndim = a.ndim
     dim = utils.canonicalize_dim(ndim, dim)
     if ndim == 0:
-        return sum(a.unsqueeze(0), dim=0, keepdim=keepdim, dtype=dtype, out=out)
+        return func(a.unsqueeze(0), dim=0, dtype=dtype, out=out)
     a = a.unsqueeze(dim + 1)
     rg = torch.arange(a.shape[dim], device=a.device)
     mask = rg.unsqueeze(1) <= rg
     for _ in range(ndim - dim - 1):
         mask = mask.unsqueeze(-1)
-    masked_a = utils.mask_tensor(mask, a)
-    return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
+    masked_a = torch.where(mask, a, init)
+    return func(masked_a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumsum)
+def cumsum(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=sum, init=0, a=a, dim=dim, dtype=dtype, out=out)
+
+
+@register_decomposition(aten.cumprod)
+def cumprod(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    return _cumsumprod_common(func=prod, init=1, a=a, dim=dim, dtype=dtype, out=out)
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
@@ -5394,7 +5418,40 @@ def log_normal(self, mean=1, std=2, generator=None):
 def normal(self, mean=0, std=1, generator=None):
     assert generator is None
     utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
-    return std * torch.randn_like(self) + mean
+    normal_samples = prims.normal(
+        self.shape,
+        mean=0.0,
+        std=1.0,
+        dtype=self.dtype,
+        device=self.device,
+        requires_grad=False,
+    )
+    return std * normal_samples + mean
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def rad2deg(self: TensorLikeType):
+    utils.check(
+        not utils.is_complex_dtype(self.dtype),
+        lambda: "rad2deg is not supported for complex tensors.",
+    )
+    M_180_PI = 57.295779513082320876798154814105170332405472466564
+    return self * M_180_PI
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def deg2rad(self: TensorLikeType):
+    utils.check(
+        not utils.is_complex_dtype(self.dtype),
+        lambda: "deg2rad is not supported for complex tensors.",
+    )
+    M_PI_180 = 0.017453292519943295769236907684886127134428718885417
+    return self * M_PI_180
+
+
+@register_decomposition(aten.count_nonzero)
+def count_nonzero(self, dim: Optional[DimsType] = None):
+    return (self != 0).sum(dim)
 
 
 # inplace
@@ -5424,6 +5481,8 @@ copysign_ = _make_inplace(copysign)
 cos_ = _make_inplace(cos)
 cosh_ = _make_inplace(cosh)
 cumsum_ = _make_inplace(cumsum)
+cumprod_ = _make_inplace(cumprod)
+deg2rad_ = _make_inplace(deg2rad)
 digamma_ = _make_inplace(digamma)
 div_ = _make_inplace(div)
 eq_ = _make_inplace(eq)
@@ -5466,6 +5525,7 @@ ne_ = _make_inplace(ne)
 neg_ = _make_inplace(neg)
 nextafter_ = _make_inplace(nextafter)
 pow_ = _make_inplace(pow)
+rad2deg_ = _make_inplace(rad2deg)
 reciprocal_ = _make_inplace(reciprocal)
 remainder_ = _make_inplace(remainder)
 rsqrt_ = _make_inplace(rsqrt)

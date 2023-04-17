@@ -119,7 +119,7 @@ class ReenterWith:
 
             return [
                 *load_args,
-                create_instruction("CALL_FUNCTION", len(load_args)),
+                create_instruction("CALL_FUNCTION", arg=len(load_args)),
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
             ]
@@ -134,7 +134,7 @@ class ReenterWith:
                 create_instruction("LOAD_CONST", argval=None),
                 create_instruction("DUP_TOP"),
                 create_instruction("DUP_TOP"),
-                create_instruction("CALL_FUNCTION", 3),
+                create_instruction("CALL_FUNCTION", arg=3),
                 create_instruction("POP_TOP"),
                 create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
                 with_except_start,
@@ -152,7 +152,7 @@ class ReenterWith:
 
             return [
                 *load_args,
-                create_instruction("CALL_FUNCTION", len(load_args)),
+                create_instruction("CALL_FUNCTION", arg=len(load_args)),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
@@ -176,10 +176,10 @@ class ReenterWith:
                     "POP_JUMP_FORWARD_IF_TRUE",
                     target=pop_top_after_with_except_start,
                 ),
-                create_instruction("RERAISE", 2),
-                create_instruction("COPY", 3),
+                create_instruction("RERAISE", arg=2),
+                create_instruction("COPY", arg=3),
                 create_instruction("POP_EXCEPT"),
-                create_instruction("RERAISE", 1),
+                create_instruction("RERAISE", arg=1),
                 pop_top_after_with_except_start,
                 create_instruction("POP_EXCEPT"),
                 create_instruction("POP_TOP"),
@@ -265,6 +265,13 @@ class ContinueExecutionCache:
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
+            if sys.version_info >= (3, 11):
+                if freevars:
+                    prefix.append(
+                        create_instruction("COPY_FREE_VARS", arg=len(freevars))
+                    )
+                prefix.append(create_instruction("RESUME", arg=0))
+
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
             null_idxes_i = 0
@@ -305,7 +312,7 @@ class ContinueExecutionCache:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
             create_instruction("LOAD_CONST", argval=None),
-            create_instruction("RAISE_VARARGS", 1),
+            create_instruction("RAISE_VARARGS", arg=1),
         ]
 
     @classmethod

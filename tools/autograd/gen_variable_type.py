@@ -555,6 +555,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # Functional collectives keep an internal ref through the Work object
     "all_reduce",
     "all_gather_into_tensor",
+    "reduce_scatter_tensor",
     "wait_tensor",
 }
 

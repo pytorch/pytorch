@@ -185,6 +185,7 @@ def _has_potential_branch_input_alias(branch, inputs):
     """
     try:
         gm = make_fx(branch)(*inputs)
+
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized

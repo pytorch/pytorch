@@ -1119,6 +1119,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: bitwise_not_out
+    MPS: bitwise_not_out_mps
   tags: pointwise
 
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -2862,13 +2863,13 @@
     CUDA: _fft_r2c_cufft_out
 
 # Complex to real inverse FFT
-- func: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
+- func: _fft_c2r(Tensor self, int[] dim, int normalization, SymInt last_dim_size) -> Tensor
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
 
-- func: _fft_c2r.out(Tensor self, int[] dim, int normalization, int last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl_out
@@ -4360,47 +4361,47 @@
     CompositeExplicitAutograd: rand_like
   autogen: rand_like.out
 
-- func: randint(int high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint(SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.generator(int high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.generator(SymInt high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.low(int low, int high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low(SymInt low, SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.low_generator(int low, int high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randint.low_generator(SymInt low, SymInt high, SymInt[] size, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint
 
-- func: randint.out(int high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: randint.out(SymInt high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint.generator_out(int high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randint.generator_out(SymInt high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint.low_out(int low, int high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: randint.low_out(SymInt low, SymInt high, SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint.low_generator_out(int low, int high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randint.low_generator_out(SymInt low, SymInt high, SymInt[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randint_out
 
-- func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like(Tensor self, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -4408,7 +4409,7 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -4456,22 +4457,22 @@
     CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
 
-- func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm(SymInt n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm
 
-- func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: randperm.generator(SymInt n, *, Generator? generator, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm
 
-- func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+- func: randperm.out(SymInt n, *, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutograd: randperm_out
 
-- func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
+- func: randperm.generator_out(SymInt n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
   tags: nondeterministic_seeded
   dispatch:
     CPU: randperm_out_cpu
@@ -5742,7 +5743,7 @@
 - func: flipud(Tensor self) -> Tensor
   variants: function, method
 
-- func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
+- func: roll(Tensor self, SymInt[1] shifts, int[1] dims=[]) -> Tensor
   variants: function, method
   dispatch:
     CPU, MPS: roll
@@ -7559,6 +7560,7 @@
   dispatch:
     CPU: index_fill_
     CUDA: index_fill_
+    MPS: index_fill_mps_
   autogen: index_fill.int_Scalar_out
 
 - func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
@@ -7572,6 +7574,7 @@
   variants: method
   dispatch:
     CPU, CUDA: index_fill_
+    MPS: index_fill_mps_
   autogen: index_fill.int_Tensor_out
 
 - func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
@@ -7713,6 +7716,7 @@
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
+    MPS: bitwise_and_out_mps
   tags: pointwise
 
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -7777,6 +7781,7 @@
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
+    MPS: bitwise_or_out_mps
   tags: pointwise
 
 - func: bitwise_or.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -7839,6 +7844,7 @@
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
+    MPS: bitwise_xor_out_mps
   tags: pointwise
 
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -8123,6 +8129,7 @@
   variants: method
   dispatch:
     CPU, CUDA: random_
+    MPS: random_mps_
     Meta: random_meta_
   autogen: random, random.out
 
@@ -8659,6 +8666,15 @@
     CUDA: nonzero_cuda
     MPS: nonzero_mps
   tags: [dynamic_output_shape, core]
+
+- func: nonzero_static.out(Tensor self, *, int size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: nonzero_static_out_cpu
+
+- func: nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
+  variants: method, function
+  dispatch:
+    CPU: nonzero_static_cpu
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
@@ -12832,157 +12848,229 @@
 
 # torch.fft.fft
 # NOTE: NOT an alias for torch.fft, which has different semantics
-- func: fft_fft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+- func: fft_fft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_fft_symint
 
-- func: fft_fft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_fft.out(Tensor self, SymInt? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_fft_symint_out
 
-- func: fft_ifft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+- func: fft_ifft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ifft_symint
 
-- func: fft_ifft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_ifft.out(Tensor self, SymInt? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ifft_symint_out
 
-- func: fft_rfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+- func: fft_rfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_rfft_symint
 
-- func: fft_rfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_rfft.out(Tensor self, SymInt? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_rfft_symint_out
 
-- func: fft_irfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+- func: fft_irfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_irfft_symint
 
-- func: fft_irfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_irfft.out(Tensor self, SymInt? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_irfft_symint_out
 
-- func: fft_hfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+- func: fft_hfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_hfft_symint
 
-- func: fft_hfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_hfft.out(Tensor self, SymInt? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_hfft_symint_out
 
-- func: fft_ihfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
+- func: fft_ihfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ihfft_symint
 
-- func: fft_ihfft.out(Tensor self, int? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_ihfft.out(Tensor self, SymInt? n=None, int dim=-1, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ihfft_symint_out
 
-- func: fft_fft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+- func: fft_fft2(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_fft2_symint
 
-- func: fft_fft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_fft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_fft2_symint_out
 
-- func: fft_ifft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+- func: fft_ifft2(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ifft2_symint
 
-- func: fft_ifft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_ifft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ifft2_symint_out
 
-- func: fft_rfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+- func: fft_rfft2(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_rfft2_symint
 
-- func: fft_rfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_rfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_rfft2_symint_out
 
-- func: fft_irfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+- func: fft_irfft2(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_irfft2_symint
 
-- func: fft_irfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_irfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_irfft2_symint_out
 
-- func: fft_hfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+- func: fft_hfft2(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_hfft2_symint
 
-- func: fft_hfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_hfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_hfft2_symint_out
 
-- func: fft_ihfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+- func: fft_ihfft2(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ihfft2_symint
 
-- func: fft_ihfft2.out(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_ihfft2.out(Tensor self, SymInt[1]? s=None, int[1] dim=[-2,-1], str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ihfft2_symint_out
 
-- func: fft_fftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+- func: fft_fftn(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_fftn_symint
 
-- func: fft_fftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_fftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_fftn_symint_out
 
-- func: fft_ifftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+- func: fft_ifftn(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ifftn_symint
 
-- func: fft_ifftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_ifftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ifftn_symint_out
 
-- func: fft_rfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+- func: fft_rfftn(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_rfftn_symint
 
-- func: fft_rfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_rfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_rfftn_symint_out
 
-- func: fft_irfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+- func: fft_irfftn(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_irfftn_symint
 
-- func: fft_irfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_irfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_irfftn_symint_out
 
-- func: fft_hfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+- func: fft_hfftn(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_hfftn_symint
 
-- func: fft_hfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_hfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_hfftn_symint_out
 
-- func: fft_ihfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+- func: fft_ihfftn(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ihfftn_symint
 
-- func: fft_ihfftn.out(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: fft_ihfftn.out(Tensor self, SymInt[1]? s=None, int[1]? dim=None, str? norm=None, *, Tensor(a!) out) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   python_module: fft
   variants: function
+  dispatch:
+    CompositeImplicitAutograd: fft_ihfftn_symint_out
 
 - func: fft_fftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   python_module: fft

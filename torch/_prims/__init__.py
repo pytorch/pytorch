@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
@@ -14,6 +13,7 @@ import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
+from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     check,
     Dim,
@@ -1523,7 +1523,7 @@ def _slice_meta(
 
     new_shape = []
     for x, y, z in zip(start_indices, limit_indices, _strides):
-        new_shape.append(math.floor((y - x) / z))
+        new_shape.append(1 + (y - x - 1) // z)
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):
@@ -2964,3 +2964,4 @@ fft_c2r = _make_prim(
 )
 
 register_nvprims()
+register_rng_prims()

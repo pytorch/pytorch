@@ -76,10 +76,7 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "gat",  # only works on CPU
-    "gcn",  # only works on CPU
     "llama",  # does not support complex32
-    "sage",  # only works on CPU
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -173,11 +170,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     "OPTForCausalLM",  # OOM
-    # TIMM
-    "cait_m36_384",  # Accuracy
-    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -236,45 +228,22 @@ CI_SKIP[CI("inductor", training=True)] = [
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
-    # TIMM
-    "convit_base",  # fp64_OOM
-    "eca_halonext26ts",  # accuracy
-    "fbnetv3_b",  # accuracy
-    "levit_128",  # fp64_OOM
-    # https://github.com/pytorch/pytorch/issues/94066
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
-    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
-    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 # Skips for dynamic=True
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    # torchbench
-    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    # timm_models
-    "botnet26t_256",  # sympy RecursionError
-    "eca_botnext26ts_256",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    # torchbench
-    "functorch_dp_cifar10",  # timeout
-    "opacus_cifar10",  # timeout
-    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
-    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
-    # timm_models
-    "convit_base",  # TypeError: Cannot convert symbols to int
-    "pnasnet5large",  # CompilationError: math.ceil
-    "tf_efficientnet_b0",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -282,10 +251,8 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # timm_models
-    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
+    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
 ]
-
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
@@ -891,7 +858,7 @@ def read_batch_size_from_file(args, filename, model_name):
             if model_name == cur_name:
                 batch_size = int(b)
     if batch_size is None:
-        log.warning("Could not find batch size for {}".format(model_name))
+        log.warning("Could not find batch size for %s", model_name)
     elif batch_size == -1:
         raise RuntimeError(
             f"Batch size is unset for {model_name} in {args.batch_size_file}"
@@ -1099,6 +1066,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_cuda(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -1293,12 +1264,11 @@ class BenchmarkRunner:
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
         except Exception:
             log.warning(
-                f"fp64 golden ref were not generated for {name}. Setting accuracy check to cosine"
+                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                name,
             )
             self.args.cosine = True
             fp64_outputs = None
-            if self.args.ci and self.args.training:
-                return record_status("fp64_OOM")
 
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             self.args.training, current_device, name
@@ -1365,7 +1335,11 @@ class BenchmarkRunner:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
-                    accuracy_status = "fail_to_run"
+                    accuracy_status = (
+                        "OOM"
+                        if isinstance(e, torch.cuda.OutOfMemoryError)
+                        else "fail_to_run"
+                    )
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
@@ -1407,7 +1381,7 @@ class BenchmarkRunner:
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
             except Exception:
-                log.exception(f"Backend {mode} failed in warmup()")
+                log.exception("Backend %s failed in warmup()", mode)
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -1435,11 +1409,11 @@ class BenchmarkRunner:
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
-            # print(
-            #     f"memory: eager: {eager_peak_mem:.2f} GB, "
-            #     f"dynamo: {dynamo_peak_mem:.2f} GB, "
-            #     f"ratio: {compression_ratio:.2f}"
-            # )
+            print(
+                f"memory: eager: {eager_peak_mem:.2f} GB, "
+                f"dynamo: {dynamo_peak_mem:.2f} GB, "
+                f"ratio: {compression_ratio:.2f}"
+            )
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1520,6 +1494,9 @@ class BenchmarkRunner:
                 f"covering {stats['calls_captured']} ops with "
                 f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
+
+        if self.args.stats:
+            Stats.print_summary()
 
 
 def help(fn):
@@ -1622,6 +1599,9 @@ def parse_args(args=None):
     )
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
+        "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
+    )
+    parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
@@ -1668,11 +1648,6 @@ def parse_args(args=None):
                 return (torch.randn(2, 10),)
         ```
     """,
-    )
-    parser.add_argument(
-        "--training",
-        action="store_true",
-        help="Performs training",
     )
     parser.add_argument(
         "--ddp",
@@ -1757,23 +1732,24 @@ def parse_args(args=None):
         "--profiler_trace_name",
         help="Overwrites exported trace name",
     )
-
     parser.add_argument(
         "--diff-branch",
         default=diff_branch_default,
         help="delta current branch against given branch.",
     )
-
     parser.add_argument(
         "--tag", default=None, help="Specify a tag to be included in csv files."
     )
-
     parser.add_argument(
         "--explain",
         action="store_true",
         help="print some graph/op statistics during the run, similar to .explain()",
     )
-
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="print graph counter stats",
+    )
     parser.add_argument(
         "--cold-start-latency",
         "--cold_start_latency",
@@ -1784,6 +1760,21 @@ def parse_args(args=None):
         "--disable-cudagraphs",
         action="store_true",
         help="Disables cudagraphs for Inductor",
+    )
+    parser.add_argument(
+        "--disable-split-reductions",
+        action="store_true",
+        help="Disables split reductions for Inductor",
+    )
+    parser.add_argument(
+        "--disable-persistent-reductions",
+        action="store_true",
+        help="Disables split reductions for Inductor",
+    )
+    parser.add_argument(
+        "--disable-divisible-by-16",
+        action="store_true",
+        help="Disables divisible by 16 hint to Triton for Inductor",
     )
     parser.add_argument(
         "--inductor-compile-mode",
@@ -1924,6 +1915,17 @@ def parse_args(args=None):
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
+
+    run_mode_group = parser.add_mutually_exclusive_group(required=True)
+    run_mode_group.add_argument(
+        "--training",
+        action="store_true",
+        help="Performs training",
+    )
+    run_mode_group.add_argument(
+        "--inference", action="store_true", help="Performs inference"
+    )
+
     return parser.parse_args(args)
 
 
@@ -1972,7 +1974,6 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-        torch._dynamo.config.allow_ignore_mark_dynamic = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
     if args.specialize_int:
@@ -2092,14 +2093,6 @@ def run(runner, args, original_dir=None):
                 "hf_Longformer",
                 "timm_nfnet",
                 "timm_efficientdet",
-                # timm
-                "beit_base_patch16_224",
-                "cait_m36_384",
-                "convmixer_768_32",
-                "deit_base_distilled_patch16_224",
-                "dm_nfnet_f0",
-                "dpn107",
-                "dm_nfnet_f0",
             }
         )
         if args.training:
@@ -2119,13 +2112,13 @@ def run(runner, args, original_dir=None):
         torch.set_num_threads(args.threads)
 
     if args.verbose:
-        torch._dynamo.config.log_level = logging.DEBUG
+        torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
         torch._dynamo.config.print_graph_breaks = True
 
     if args.quiet:
-        torch._dynamo.config.log_level = logging.ERROR
+        torch._logging.set_logs(dynamo=logging.ERROR)
 
     torch._dynamo.config.suppress_errors = args.suppress_errors
 
@@ -2140,6 +2133,8 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+    elif args.devices == ["cuda"]:
+        runner.skip_models.update(runner.skip_models_for_cuda)
 
     if args.inductor or args.inductor_settings:
         runner.skip_models.update(runner.failing_torchinductor_models)
@@ -2234,6 +2229,12 @@ def run(runner, args, original_dir=None):
 
     if args.inductor or args.backend == "inductor":
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs
+        inductor_config.triton.persistent_reductions = (
+            not args.disable_persistent_reductions
+        )
+        inductor_config.split_reductions = not args.disable_split_reductions
+        inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
+        inductor_config.cpp_wrapper = args.cpp_wrapper
 
     runner.setup_amp()
 
@@ -2324,7 +2325,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warning(f"{args.only} failed to load")
+                    logging.warning("%s failed to load", args.only)
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:

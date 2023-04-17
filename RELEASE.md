@@ -21,6 +21,7 @@
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
+    - [Patch Release Process Description](#patch-release-process-description)
     - [Triage](#triage)
     - [Issue Tracker for Patch releases](#issue-tracker-for-patch-releases)
     - [Building a release schedule / cherry picking](#building-a-release-schedule--cherry-picking)
@@ -149,7 +150,7 @@ git push origin  v1.12.0-rc2
 
 Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
 
-This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/master/.github/pytorch-circleci-labels.yml)
+This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). and make sure all binary builds are successful.
 ### Release Candidate Storage
@@ -189,7 +190,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
-[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/master/release/promote.sh)
+[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/main/release/promote.sh)
 
 Users of that script should take care to update the versions necessary for the specific packages you are attempting to promote.
 
@@ -237,6 +238,21 @@ Patch releases should be considered if a regression meets the following criteria
 
 ## Patch Release Process
 
+### Patch Release Process Description
+
+> Main POC: Patch Release Managers, Triage Reviewers
+
+Patch releases should follow these high-level phases. This process starts immediately after the previous release has completed.
+Minor release process takes around 6-7 weeks to complete.
+
+1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
+2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed and following decisions are made:
+  * Should the new patch Release be created ?
+  * Timeline execution for the patch release
+3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
+4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
+5. General Availability
+
 ### Triage
 
 > Main POC: Triage Reviewers
@@ -266,6 +282,8 @@ Only following issues are accepted:
 1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
     * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
 2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
+    * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. if cherry pick is not posted the issue will not be included in the release.
+3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact.
 
 ### Building Binaries / Promotion to Stable
 
