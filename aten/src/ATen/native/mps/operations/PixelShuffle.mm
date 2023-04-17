@@ -19,7 +19,7 @@ Tensor pixel_shuffle_mps(const Tensor& self, int64_t upscale_factor) {
   }
 
   if (upscale_factor == 1) {
-    return self;
+    return self.clone();
   }
 
   check_pixel_shuffle_shapes(self, upscale_factor);
@@ -100,7 +100,7 @@ Tensor pixel_unshuffle_mps(const Tensor& self, int64_t downscale_factor) {
   }
 
   if (downscale_factor == 1) {
-    return self;
+    return self.clone();
   }
 
   check_pixel_unshuffle_shapes(self, downscale_factor);
