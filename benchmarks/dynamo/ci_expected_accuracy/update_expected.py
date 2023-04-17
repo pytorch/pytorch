@@ -91,6 +91,7 @@ def download_artifacts_and_extract_csvs(urls):
                 name = f"test/test-reports/{phase}_{subsuite}.csv"
                 try:
                     df = pd.read_csv(artifact.open(name))
+                    df['graph_breaks'] = df['graph_breaks'].fillna(0).astype(int)
                     prev_df = dataframes.get((suite, phase), None)
                     dataframes[(suite, phase)] = (
                         pd.concat([prev_df, df]) if prev_df is not None else df
