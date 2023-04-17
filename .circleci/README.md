@@ -308,7 +308,7 @@ Note that the Windows Python wheels are still built in conda environments. Some 
 
 * These should all be consolidated
 * These must run on all OS types: MacOS, Linux, and Windows
-* These all run smoke tests at the moment. They inspect the packages some, maybe run a few import statements. They DO NOT run the python tests nor the cpp tests. The idea is that python tests on mainand PR merges will catch all breakages. All these tests have to do is make sure the special binary machinery didn’t mess anything up.
+* These all run smoke tests at the moment. They inspect the packages some, maybe run a few import statements. They DO NOT run the python tests nor the cpp tests. The idea is that python tests on main and PR merges will catch all breakages. All these tests have to do is make sure the special binary machinery didn’t mess anything up.
 * There are separate run_tests.sh and smoke_test.sh because one used to be called by the smoke jobs and one used to be called by the binary test jobs (see circleci structure section above). This is still true actually, but these could be united into a single script that runs these checks, given an installed pytorch package.
 
 ### Note on libtorch
