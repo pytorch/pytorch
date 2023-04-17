@@ -42,7 +42,6 @@ from .utils import (
     developer_warning,
     sympy_dot,
     sympy_product,
-    sympy_str,
     sympy_subs,
     sympy_symbol,
 )
@@ -2082,12 +2081,13 @@ class BufferList(IRNode):
     def make_loader(self):
         def fn():
             load = self.data.make_loader()
-            result = load()
-            # write out intermediate, so that we properly support
-            # returning an intermediate but fusing the rest of
-            # the foreach computation
+            return load()
+
+        return fn
+
+    def get_store_function(self):
+        def fn(result):
             ops.store(self.list_name, None, result)
-            return result
 
         return fn
 
@@ -2111,35 +2111,49 @@ class BufferList(IRNode):
 
     @cache_on_self
     def normalized_read_writes(self):
-        class ExtractListLoads(V.MockHandler):
+        class RecordListLoadStores(V.MockHandler):
             def __init__(self):
                 super().__init__()
-                self._reads: Set[dependencies.StarDep] = set()
+                self._reads: Set[dependencies.Dep] = set()
+                self._writes: Set[dependencies.Dep] = set()
 
             def load(self, name: str, index: sympy.Expr) -> str:
                 for name in V.graph.lists[name]:
-                    self._reads.add(dependencies.StarDep(name))
-                return f"ops.load({name}, {sympy_str(index)})"
+                    buffer = V.graph.get_buffer(name)
+                    (
+                        _,
+                        index,
+                        _,
+                    ) = dependencies.index_vars_squeeze(buffer.layout.size)
+                    indexer = buffer.layout.make_indexer()
+                    self._reads.add(
+                        dependencies.MemoryDep(
+                            name, indexer(*index), tuple(buffer.layout.size)
+                        )
+                    )
 
-        list_load_extractor = ExtractListLoads()
+            def store(self, name: str, index: sympy.Expr, value: str) -> None:
+                for name in V.graph.lists[name]:
+                    buffer = V.graph.get_buffer(name)
+                    (
+                        _,
+                        index,
+                        _,
+                    ) = dependencies.index_vars_squeeze(buffer.layout.size)
+                    indexer = buffer.layout.make_indexer()
+                    self._writes.add(
+                        dependencies.MemoryDep(
+                            name, indexer(*index), tuple(buffer.layout.size)
+                        )
+                    )
+
+        list_load_extractor = RecordListLoadStores()
         with V.set_ops_handler(list_load_extractor):
-            self.data.make_loader()()
+            self.get_store_function()(self.make_loader()())
 
-        name = self.get_name()
-        deps = dependencies.ReadWrites(list_load_extractor._reads, set(), set())
-
-        layout = self.get_layout(0)
-        indexer = layout.make_indexer()
-
-        def dummy(index, rindex):
-            assert len(rindex) == 0
-            return ops.store(name, indexer(index), "fake")
-
-        deps = deps.merge(
-            dependencies.extract_read_writes(dummy, layout.size, (), normalize=True)
+        return dependencies.ReadWrites(
+            list_load_extractor._reads, list_load_extractor._writes, set()
         )
-
-        return deps
 
     def get_reads(self):
         return self.get_read_writes().reads
@@ -4087,11 +4101,11 @@ class TensorListItem:
 
 # This will have some other metadata and stuffs
 class ForeachPointwise(IRNode):
-    def __init__(self, left_arg, right_arg, op_fn):
+    def __init__(self, left, right, op_fn):
         super().__init__()
-        self.layouts = left_arg.get_layouts()
-        self.left_inputs = left_arg
-        self.right_inputs = right_arg
+        self.layouts = left.get_layouts()
+        self.left = left
+        self.right = right
         self.op_fn = op_fn
 
     @classmethod
@@ -4099,13 +4113,11 @@ class ForeachPointwise(IRNode):
         return TensorList.create(cls(*args, **kwargs))
 
     def get_inputs(self):
-        return itertools.chain(self.left_inputs, self.right_inputs)
+        return itertools.chain(self.left, self.right)
 
     def make_loader(self):
         def fn():
-            return self.op_fn(
-                self.left_inputs.make_loader()(), self.right_inputs.make_loader()()
-            )
+            return self.op_fn(self.left.make_loader()(), self.right.make_loader()())
 
         return fn
 

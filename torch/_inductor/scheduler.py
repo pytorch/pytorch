@@ -353,7 +353,22 @@ class ForeachKernelSchedulerNode(BaseSchedulerNode):
         pass
 
     def codegen(self):
-        self.node.make_loader()()
+        self.node.get_store_function()(self.node.make_loader()())
+
+    def can_free(self):
+        return isinstance(self.node, ir.ListElemBuffer)
+
+
+class FusedForeachKernelSchedulerNode(BaseSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", nodes):
+        self.nodes = nodes
+
+    def mark_run(self):
+        pass
+
+    def codegen(self):
+        for node in self.nodes:
+            node.get_store_function()(node.make_loader()())
 
     def can_free(self):
         return isinstance(self.node, ir.ListElemBuffer)
