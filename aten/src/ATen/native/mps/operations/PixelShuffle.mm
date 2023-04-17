@@ -1,5 +1,7 @@
 #include <ATen/native/PixelShuffle.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/ops/pixel_shuffle_native.h>
+#include <ATen/ops/pixel_unshuffle_native.h>
 
 using namespace at::mps;
 
@@ -8,6 +10,13 @@ namespace at::native {
 Tensor pixel_shuffle_mps(const Tensor& self, int64_t upscale_factor) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
+
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: pixel_shuffle op is supported starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performance implications.");
+
+    return at::native::pixel_shuffle_cpu(self.to("cpu")).clone().to("mps");
+  }
 
   if (upscale_factor == 1) {
     return self;
@@ -82,6 +91,13 @@ Tensor pixel_shuffle_mps(const Tensor& self, int64_t upscale_factor) {
 Tensor pixel_unshuffle_mps(const Tensor& self, int64_t downscale_factor) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
+
+  if (!is_macos_13_or_newer()) {
+    TORCH_WARN_ONCE("MPS: pixel_unshuffle op is supported starting from macOS 13.0. ",
+                    "Falling back on CPU. This may have performance implications.");
+
+    return at::native::pixel_unshuffle_cpu(self.to("cpu")).clone().to("mps");
+  }
 
   if (downscale_factor == 1) {
     return self;
