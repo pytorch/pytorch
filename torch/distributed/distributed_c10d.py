@@ -391,7 +391,7 @@ _pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
 _tags_to_pg: Dict[str, List[ProcessGroup]] = {}
 _pg_to_tag: Dict[ProcessGroup, str] = {}
-_pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
+
 
 class _World:
     """
@@ -403,6 +403,7 @@ class _World:
     """
     def __init__(self):
         self._default_pg = None
+        self._pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
 
     @property
     def default_pg(self):
@@ -486,8 +487,7 @@ class _World:
 
     @property
     def pg_coalesce_state(self) -> Dict[ProcessGroup, List[Union[_CollOp, P2POp]]]:
-        global _pg_coalesce_state
-        return _pg_coalesce_state
+        return self._pg_coalesce_state
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -1263,7 +1263,12 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        del _world.pg_coalesce_state[pg]
+        if pg in _world.pg_coalesce_state.keys():
+            warnings.warn(
+                "Some coalesced collectives haven't been launched when "
+                "ProcessGroup is destroyed. They will be cleaned."
+            )
+            del _world.pg_coalesce_state[pg]
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -1524,8 +1529,8 @@ def _coalescing_manager(
 
     .. warning::
        :func:`_coalescing_manager` currently do not support coalescing
-       all-reduces with different reduce operators, e.g.  `ReduceOp.SUM` and
-       `ReduceOp.PRODUCT`.
+       all-reduces with different reduce operators, e.g.  `ReduceOp.SUM` mixed
+       with `ReduceOp.PRODUCT`.
     """
     group = group or _get_default_group()
     op_list = _world.pg_coalesce_state.setdefault(group, [])
