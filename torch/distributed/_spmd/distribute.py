@@ -105,7 +105,7 @@ class DSymInt:
             raise NotImplementedError(f"DSymInt does not support {node.target}")
 
 
-def _is_partial_dtensor(obj: object) -> bool:
+def _is_partial_dtensor(obj: Any) -> bool:
     """check if object is 1) DTensor and  2) with any placement of _Partial"""
     if not isinstance(obj, DTensor):
         return False
@@ -121,21 +121,21 @@ def _is_partial_dtensor(obj: object) -> bool:
 
 def _dispatch_with_local_tensors(
     op: torch._ops.OpOverload,
-    local_args: Tuple[object, ...],
-    kwargs: Optional[Dict[str, object]] = None,
+    local_args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
     specs: Optional[
         Dict[
             torch.Tensor,
             Tuple[torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]],
         ]
     ] = None,
-) -> object:
+) -> Any:
     if kwargs is None:
         kwargs = {}
     if specs is None:
         specs = {}
 
-    def redistribute(arg: object) -> object:
+    def redistribute(arg: Any) -> Any:
         return (
             _redistribute_with_local_tensor(arg, *specs[arg])  # type: ignore[index]
             if isinstance(arg, torch.Tensor) and arg in specs  # type: ignore[operator]
@@ -205,13 +205,13 @@ def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> Non
     return None
 
 
-def _remap_arg(node_to_obj: Dict[fx.Node, object], arg: object) -> object:
+def _remap_arg(node_to_obj: Dict[fx.Node, Any], arg: Any) -> Any:
     if isinstance(arg, torch.fx.Node):
         obj = node_to_obj[arg]
         if _get_tracer():
             # This is a shared arg, already has a tracer from previous
             # tracing. Delete the tracer.
-            del cast(Dict[object, object], obj.__dict__)[proxy_slot]
+            del cast(Dict[Any, Any], obj.__dict__)[proxy_slot]
         return obj
     else:
         return arg
@@ -236,7 +236,7 @@ def unpack_size_and_sharded_dims(
     return local_sizes, sharded_placements
 
 
-def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[object, ...]) -> DTensor:
+def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[Any, ...]) -> DTensor:
     assert len(args) == 2, f"Expect two args but got op {node.target} with args {args}"
     assert isinstance(
         args[0], DTensor
@@ -338,7 +338,7 @@ FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
 
 def _get_dtensor_dispatch_graph(
     node: fx.Node,
-    node_to_obj: Dict[fx.Node, object],
+    node_to_obj: Dict[fx.Node, Any],
     *,
     force_make_fx: bool = False,
     default_mesh: Optional[DeviceMesh] = None,
@@ -443,8 +443,8 @@ def _get_dtensor_dispatch_graph(
 
 
 def _build_dummy_add_graph(
-    dt: DTensor, node_to_obj: Dict[fx.Node, object]
-) -> Tuple[fx.GraphModule, object]:
+    dt: DTensor, node_to_obj: Dict[fx.Node, Any]
+) -> Tuple[fx.GraphModule, Any]:
     """
     Creates a graph for a dummy add function from a partial DTensor.
     This dummy add is used for triggering all_reduce on a Partial DTensor
@@ -482,7 +482,7 @@ def _build_dummy_add_graph(
 def _convert_output(
     gm: fx.GraphModule,
     node: fx.Node,
-    node_to_obj: Dict[fx.Node, object],
+    node_to_obj: Dict[fx.Node, Any],
 ) -> fx.Node:
     new_args = []
     has_partial = False
@@ -682,7 +682,7 @@ def _convert_to_distributed(
     """
     global logger
     logger = get_logger("spmd_exp")
-    node_to_obj: Dict[fx.Node, object] = {}
+    node_to_obj: Dict[fx.Node, Any] = {}
     # map local op node in traced_f to its corresponding subgraph of
     # DTensor ops.
     node_replacements: Dict[torch.fx.Node, torch.fx.GraphModule] = {}
@@ -844,19 +844,19 @@ def distribute(
     dist_graph: DistributedGraph,
     param_schema: Schema,
     input_schemas: Sequence[Placement],
-    *args: Tuple[object],
-    **kwargs: Dict[str, object],
+    *args: Tuple[Any, ...],
+    **kwargs: Dict[str, Any],
 ) -> nn.Module:
     flat_args, _ = tree_flatten(args)
     flat_kwargs, _ = tree_flatten(kwargs)
-    input_set: Set[object] = set(flat_args + flat_kwargs)
+    input_set: Set[Any] = set(flat_args + flat_kwargs)
 
     fake_mode: FakeTensorMode = FakeTensorMode()
 
     # will update this to the original forward inputs
-    original_inputs: List[Optional[Sequence[object]]] = [None]
+    original_inputs: List[Optional[Sequence[Any]]] = [None]
 
-    def input_to_fake(input: object) -> object:
+    def input_to_fake(input: Any) -> Any:
         if not isinstance(input, torch.Tensor):
             return input
         y = fake_mode.from_tensor(input)
@@ -868,8 +868,8 @@ def distribute(
         return y
 
     def gather_inputs_for_compilation(
-        inps: Tuple[object, ...],
-    ) -> Tuple[object, ...]:
+        inps: Tuple[Any, ...],
+    ) -> Tuple[Any, ...]:
         original_inputs[0] = inps
         return tuple(input_to_fake(x) for x in inps)
 
