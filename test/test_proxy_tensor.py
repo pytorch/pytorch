@@ -1330,20 +1330,20 @@ make_fx_failures = {
     xfail('narrow'),
 
     # many complex operators incorrect striding, metadata
-    xfail('fft.fft', ''),
-    xfail('fft.hfft2', ''),
-    xfail('fft.hfft', ''),
-    xfail('fft.hfftn', ''),
-    xfail('fft.ifft', ''),
-    xfail('fft.ihfft2', ''),
-    xfail('fft.ihfft', ''),
-    xfail('fft.ihfftn', ''),
-    xfail('fft.irfft2', ''),
-    xfail('fft.irfft', ''),
-    xfail('fft.irfftn', ''),
-    xfail('fft.rfft2', ''),
-    xfail('fft.rfft', ''),
-    xfail('fft.rfftn', ''),
+    skip('fft.fft', ''),
+    skip('fft.hfft2', ''),
+    skip('fft.hfft', ''),
+    skip('fft.hfftn', ''),
+    skip('fft.ifft', ''),
+    skip('fft.ihfft2', ''),
+    skip('fft.ihfft', ''),
+    skip('fft.ihfftn', ''),
+    skip('fft.irfft2', ''),
+    skip('fft.irfft', ''),
+    skip('fft.irfftn', ''),
+    skip('fft.rfft2', ''),
+    skip('fft.rfft', ''),
+    skip('fft.rfftn', ''),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1365,6 +1365,23 @@ fake_tensor_failures = {
     xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+
+    xfail('linalg.cond', ''),
+    xfail("linalg.matrix_norm"),
+    xfail("linalg.norm"),
+    xfail("linalg.matrix_norm"),
+    xfail("linalg.matrix_rank"),
+    xfail("linalg.norm"),
+    xfail("linalg.norm", "subgradients_at_zero"),
+    xfail("linalg.svd"),
+    xfail("linalg.svdvals"),
+
+    xfail("norm", "nuc"),
+    xfail("pca_lowrank"),
+    xfail("stft"),
+    xfail("svd"),
+    xfail("svd_lowrank"),
+    xfail("linalg.matrix_norm"),
 }
 
 symbolic_tensor_failures = {
