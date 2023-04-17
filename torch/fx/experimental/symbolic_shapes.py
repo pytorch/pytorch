@@ -1419,7 +1419,7 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
 
 
 TLS = threading.local()
-ENV_COUNTER = collections.Counter()
+
 
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
