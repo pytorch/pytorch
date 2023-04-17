@@ -95,12 +95,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        try:
-            return tx.inline_user_function_return(
-                self, list(self.self_args()) + list(args), kwargs
-            )
-        except Exception:
-            raise
+        return tx.inline_user_function_return(
+            self, list(self.self_args()) + list(args), kwargs
+        )
 
     def num_parameters(self):
         return len(inspect.signature(self.get_function()).parameters)

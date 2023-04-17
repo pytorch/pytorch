@@ -7,6 +7,7 @@ from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._dynamo.exc import CondOpArgsMismatchError
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -389,7 +390,7 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            TypeError,
+            CondOpArgsMismatchError,
             "Expected to return same number of outputs but got",
         ):
             make_fx(f)(x, torch.tensor(False))
@@ -406,7 +407,7 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            TypeError,
+            CondOpArgsMismatchError,
             "Expected each tensor to have same metadata but got",
         ):
             make_fx(f)(x, torch.tensor(False))
@@ -556,7 +557,7 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            TypeError,
+            CondOpArgsMismatchError,
             "Expected to return same number of outputs but got",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
@@ -574,7 +575,7 @@ class TestControlFlowTraced(TestCase):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            TypeError,
+            CondOpArgsMismatchError,
             "Expected each tensor to have same metadata but got",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))

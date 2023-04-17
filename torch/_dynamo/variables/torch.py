@@ -16,7 +16,7 @@ from torch._guards import GuardsCheckpointState
 from .. import variables
 from ..allowed_functions import torch_get_name
 from ..config_utils import config
-from ..exc import unimplemented, Unsupported, UserError, UserErrorType
+from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -855,16 +855,13 @@ class TorchHigherOrderOperator(VariableTracker):
                 # NB: we don't bother populating graphargs, as
                 # they won't actually get used by anything
 
-            try:
-                output = f.call_function(tx, args, {})
-            except Exception:
-                raise
+            output = f.call_function(tx, args, {})
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support non single Tensor output
             if not isinstance(output, TensorVariable):
-                raise TypeError(
+                raise ArgsMismatchError(
                     "Expected branch out type to be a single tensor but got {}".format(
                         str(output.python_type())
                     ),
@@ -968,7 +965,7 @@ class TorchHigherOrderOperator(VariableTracker):
                     return speculate_subgraph(
                         args[ix], operands, graph_checkpoint, checkpoint
                     )
-                except (Unsupported, TypeError) as e:
+                except ArgsMismatchError as e:
                     raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
             (

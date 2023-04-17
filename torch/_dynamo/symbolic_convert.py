@@ -42,7 +42,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .config_utils import config
-from .exc import BackendCompilerFailed, unimplemented, Unsupported
+from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -2035,7 +2035,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
-            raise Unsupported(
+            # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
+            raise ArgsMismatchError(
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",

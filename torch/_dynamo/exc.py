@@ -78,6 +78,20 @@ class RecompileError(TorchDynamoException):
     pass
 
 
+class ArgsMismatchError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
+class CondOpArgsMismatchError(ArgsMismatchError):
+    """
+    Internal error from cond() due to arguments mismatch.
+    """
+
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()

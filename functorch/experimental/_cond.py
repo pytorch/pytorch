@@ -22,6 +22,7 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 from torch.utils._pytree import tree_flatten
+from torch._dynamo.exc import CondOpArgsMismatchError
 
 
 @dataclass
@@ -57,17 +58,17 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
     flat_false_outs, _ = pytree.tree_flatten(false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
-        raise TypeError(
+        raise CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
-            f"\n  {true_fn.__name__} returns {flat_true_outs}"
-            f"\n  {false_fn.__name__} returns {flat_false_outs}"
+            f"\n  {true_fn.__name__} returns {len(flat_true_outs)} item(s)"
+            f"\n  {false_fn.__name__} returns {len(flat_false_outs)} item(s)"
         )
 
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
         if true_out.meta['tensor_meta'] != false_out.meta['tensor_meta']:
-            raise TypeError(
+            raise CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"

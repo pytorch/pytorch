@@ -46,7 +46,7 @@ else:
 
 from . import convert_frame, skipfiles, utils
 from .config_utils import config
-from .exc import ResetRequired, UserError, UserErrorType
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -844,7 +844,8 @@ def export(
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
                 )(*example_fake_inputs)
-            except TypeError as e:
+            except CondOpArgsMismatchError as e:
+                # Wrap the internal error to the user-facing error
                 raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
