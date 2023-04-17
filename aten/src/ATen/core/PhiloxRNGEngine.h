@@ -98,7 +98,7 @@ public:
   /**
    * Gets the current offset of the Philox Generator.
    */
-  C10_HOST_DEVICE uint64_t get_offset() {
+  C10_HOST_DEVICE uint64_t get_offset() const {
     uint64_t lo = static_cast<uint64_t>(counter_[0]);
     uint64_t hi = static_cast<uint64_t>(counter_[1]) << 32;
     return lo | hi;
