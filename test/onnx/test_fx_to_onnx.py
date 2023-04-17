@@ -68,9 +68,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             func, torch.randn(1, 1, 2), export_options=self.export_options
         )
 
-    @unittest.skip(
-        "max_pool2d is not supported in ATen Lib: https://github.com/microsoft/onnx-script/issues/585"
-    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
