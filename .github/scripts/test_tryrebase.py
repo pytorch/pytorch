@@ -34,12 +34,12 @@ class TestRebase(TestCase):
                 "push",
                 "-f",
                 "https://github.com/mingxiaoh/pytorch.git",
-                "pull/31093/head:main",
+                "pull/31093/head:master",
             ),
         ]
         mocked_run_git.assert_has_calls(calls)
         self.assertTrue(
-            "Successfully rebased `main` onto `refs/remotes/origin/main`"
+            "Successfully rebased `master` onto `refs/remotes/origin/main`"
             in mocked_post_comment.call_args[0][3]
         )
 
@@ -65,12 +65,12 @@ class TestRebase(TestCase):
                 "push",
                 "-f",
                 "https://github.com/mingxiaoh/pytorch.git",
-                "pull/31093/head:main",
+                "pull/31093/head:master",
             ),
         ]
         mocked_run_git.assert_has_calls(calls)
         self.assertTrue(
-            "Successfully rebased `main` onto `refs/remotes/origin/viable/strict`"
+            "Successfully rebased `master` onto `refs/remotes/origin/viable/strict`"
             in mocked_post_comment.call_args[0][3]
         )
 
@@ -96,7 +96,7 @@ class TestRebase(TestCase):
                 "push",
                 "-f",
                 "https://github.com/mingxiaoh/pytorch.git",
-                "pull/31093/head:main",
+                "pull/31093/head:master",
             ),
         ]
         mocked_run_git.assert_has_calls(calls)
