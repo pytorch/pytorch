@@ -105,7 +105,7 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 /// `torch.device` object (e.g., "cuda:1" can be passed to everywhere a
 /// `torch.device("cuda:1")` is accepted). To support the syntax
 /// `at::empty({10}, {kCUDA, 1})` and `tensor.to(kCUDA)`, we need to make sure
-/// that `TensorOptions` is implicitly constructible with any argments that a
+/// that `TensorOptions` is implicitly constructible with any arguments that a
 /// `Device` can constructed from. So we have,
 ///
 ///    /* implicit */ TensorOptions(T&& device) : TensorOptions() {
@@ -120,7 +120,7 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 ///
 ///
 /// But this will be problematic. Consider this: `TensorOptions({kCUDA, 1})`.
-/// Compiler will compain about ambiguity between the copy constructor and the
+/// Compiler will complain about ambiguity between the copy constructor and the
 /// `Device` constructor because `{kCUDA, 1}` can be converted to both a
 /// `TensorOption` and a `Device`.
 ///

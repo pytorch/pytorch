@@ -153,8 +153,7 @@ struct UnwindCache {
               return 0;
             }
           }
-          TORCH_WARN_ONCE(
-              "Did not find a PT_GNU_EH_FRAME segment for ", info->dlpi_name);
+          self->libraries_with_no_unwind_.push_back(info->dlpi_name);
           return 0;
         },
         this);
@@ -198,35 +197,47 @@ struct UnwindCache {
     return r.first->second;
   }
 
-  const LibraryInfo& libraryFor(uint64_t addr) {
+  const LibraryInfo* findLibraryFor(uint64_t addr) {
     Version current_version = currentVersion();
     if (current_version.subs_ != last_version_.subs_) {
       refreshLibraries();
       last_version_ = current_version;
     }
-    auto& r = searchFor(addr);
-    if (addr >= r.last_addr()) {
+    auto* r = searchFor(addr);
+    if (!r) {
       if (current_version.adds_ != last_version_.adds_) {
         refreshLibraries();
         last_version_ = current_version;
       }
-      auto& r = searchFor(addr);
-      if (addr >= r.last_addr()) {
-        throw UnwindError("addr not in range of known libraries");
-      }
-      return r;
+      r = searchFor(addr);
     }
     return r;
   }
+
+  const LibraryInfo& libraryFor(uint64_t addr) {
+    auto* r = findLibraryFor(addr);
+    if (!r) {
+      for (const auto& l : libraries_with_no_unwind_) {
+        TORCH_WARN("Did not find a PT_GNU_EH_FRAME segment for ", l);
+      }
+      libraries_with_no_unwind_.clear();
+      throw UnwindError("addr not in range of known libraries");
+    }
+    return *r;
+  }
+
   torch::unwind::Stats stats() {
     return stats_;
   }
 
  private:
-  const LibraryInfo& searchFor(uint64_t addr) {
+  const LibraryInfo* searchFor(uint64_t addr) {
+    if (all_libraries_.empty()) {
+      return nullptr;
+    }
     uint64_t low = 0;
     uint64_t high = all_libraries_.size();
-    while (low + 1 != high) {
+    while (low + 1 < high) {
       auto mid = (low + high) / 2;
       if (addr < all_libraries_.at(mid).load_bias()) {
         high = mid;
@@ -234,7 +245,11 @@ struct UnwindCache {
         low = mid;
       }
     }
-    return all_libraries_.at(low);
+    LibraryInfo* r = &all_libraries_.at(low);
+    if (addr < r->load_bias() || addr >= r->last_addr()) {
+      return nullptr;
+    }
+    return r;
   }
 
   // sorted by load_bias
@@ -245,6 +260,8 @@ struct UnwindCache {
 
   // to keep track of whether we need to refresh this info
   Version last_version_;
+
+  std::vector<std::string> libraries_with_no_unwind_;
 };
 
 static UnwindCache unwind_cache;
@@ -344,10 +361,12 @@ symbolize(const std::vector<void*>& frames) {
     }
   };
   for (auto f : frames) {
-    if (f == nullptr) {
+    auto maybe_library = f ? unwind_cache.findLibraryFor((uint64_t)f) : nullptr;
+    if (!maybe_library) {
+      results_map[f] = Frame{"??", "<unwind unsupported>", 0};
       continue;
     }
-    auto& entry = get_or_create(unwind_cache.libraryFor((uint64_t)f));
+    auto& entry = get_or_create(*maybe_library);
     entry.queried.push_back(f);
     auto libaddress = ((uint64_t)f - entry.lib->load_bias() - 1);
     entry.comm->out() << (void*)libaddress << "\n";
@@ -367,10 +386,6 @@ symbolize(const std::vector<void*>& frames) {
 
   std::vector<Frame> results;
   for (auto f : frames) {
-    if (f == nullptr) {
-      results.emplace_back(Frame{"??", "<unwind unsupported>", 0});
-      continue;
-    }
     results.emplace_back(results_map.at(f));
   }
   return results;
