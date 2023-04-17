@@ -144,6 +144,16 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         {
             nn.ConvTranspose3d,
         },
+        # functional transposed conv
+        {
+            F.conv_transpose1d,
+        },
+        {
+            F.conv_transpose2d,
+        },
+        {
+            F.conv_transpose3d,
+        },
         # ELU
         {
             nn.ELU,
