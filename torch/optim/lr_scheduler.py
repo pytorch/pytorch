@@ -1547,7 +1547,7 @@ class OneCycleLR(LRScheduler):
         >>> # xdoctest: +SKIP
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, steps_per_epoch=len(data_loader), epochs=10)
+        >>> scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, total_steps=len(data_loader), epochs=10)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
         >>>         train_batch(...)
