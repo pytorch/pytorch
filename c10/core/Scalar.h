@@ -276,12 +276,12 @@ class C10_API Scalar {
   }
 
   Scalar(c10::SymInt si) {
-    if (si.is_symbolic()) {
+    if (auto m = si.maybe_as_int()) {
+      tag = Tag::HAS_i;
+      v.i = *m;
+    } else {
       tag = Tag::HAS_si;
       v.p = std::move(si).release();
-    } else {
-      tag = Tag::HAS_i;
-      v.i = si.as_int_unchecked();
     }
   }
 

@@ -305,12 +305,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/columns.size(0),
               /*     k=*/columns.size(1),
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/weight.data_ptr<scalar_t>(),
+              /*     A=*/weight.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/columns.data_ptr<scalar_t>(),
+              /*     B=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/output_n.data_ptr<scalar_t>(),
+              /*     C=*/output_n.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/nOutputPlane);
         } else {
           cpublas::gemm(
@@ -320,12 +320,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/nOutputPlane,
               /*     k=*/columns.size(0),
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/columns.data_ptr<scalar_t>(),
+              /*     A=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/weight.data_ptr<scalar_t>(),
+              /*     B=*/weight.const_data_ptr<scalar_t>(),
               /*   ldb=*/columns.size(0),
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/output_n.data_ptr<scalar_t>(),
+              /*     C=*/output_n.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         }
       } else {
@@ -371,12 +371,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/columns.size(0),
               /*     k=*/nOutputPlane,
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/weight.data_ptr<scalar_t>(),
+              /*     A=*/weight.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   ldb=*/nOutputPlane,
               /*  beta=*/static_cast<scalar_t>(0),
-              /*     C=*/columns.data_ptr<scalar_t>(),
+              /*     C=*/columns.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         } else {
           cpublas::gemm(
@@ -386,12 +386,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/columns.size(0),
               /*     k=*/nOutputPlane,
               /* alpha=*/static_cast<scalar_t>(1),
-              /*     A=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     A=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/weight.data_ptr<scalar_t>(),
+              /*     B=*/weight.const_data_ptr<scalar_t>(),
               /*   ldb=*/columns.size(0),
               /*  beta=*/static_cast<scalar_t>(0),
-              /*     C=*/columns.data_ptr<scalar_t>(),
+              /*     C=*/columns.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         }
         // Unpack columns back into input:
@@ -461,12 +461,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/nOutputPlane,
               /*     k=*/columns.size(0),
               /* alpha=*/static_cast<scalar_t>(scale),
-              /*     A=*/columns.data_ptr<scalar_t>(),
+              /*     A=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   ldb=*/nOutputPlane,
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/grad_weight.data_ptr<scalar_t>(),
+              /*     C=*/grad_weight.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(1));
         } else {
           cpublas::gemm(
@@ -476,12 +476,12 @@ void slow_conv_dilated_all_cpu_template(
               /*     n=*/nOutputPlane,
               /*     k=*/columns.size(1),
               /* alpha=*/static_cast<scalar_t>(scale),
-              /*     A=*/columns.data_ptr<scalar_t>(),
+              /*     A=*/columns.const_data_ptr<scalar_t>(),
               /*   lda=*/columns.size(1),
-              /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+              /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
               /*   ldb=*/columns.size(1),
               /*  beta=*/static_cast<scalar_t>(1),
-              /*     C=*/grad_weight.data_ptr<scalar_t>(),
+              /*     C=*/grad_weight.mutable_data_ptr<scalar_t>(),
               /*   ldc=*/columns.size(0));
         }
       }
