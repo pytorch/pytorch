@@ -1054,7 +1054,7 @@ void apply_ldl_factor_magma(
   auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
   auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
 
-  auto a_data = A.data_ptr<scalar_t>();
+  auto a_data = A.mutable_data_ptr<scalar_t>();
   Tensor pivots_cpu =
       at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
   auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
