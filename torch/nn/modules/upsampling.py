@@ -141,7 +141,7 @@ class Upsample(Module):
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
                  mode: str = 'nearest', align_corners: Optional[bool] = None,
                  recompute_scale_factor: Optional[bool] = None) -> None:
-        super(Upsample, self).__init__()
+        super().__init__()
         self.name = type(self).__name__
         self.size = size
         if isinstance(scale_factor, tuple):
@@ -207,7 +207,7 @@ class UpsamplingNearest2d(Upsample):
                   [3., 3., 4., 4.]]]])
     """
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
+        super().__init__(size, scale_factor, mode='nearest')
 
 
 class UpsamplingBilinear2d(Upsample):
@@ -254,4 +254,4 @@ class UpsamplingBilinear2d(Upsample):
                   [3.0000, 3.3333, 3.6667, 4.0000]]]])
     """
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
+        super().__init__(size, scale_factor, mode='bilinear', align_corners=True)

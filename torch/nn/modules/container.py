@@ -31,7 +31,7 @@ def _addindent(s_, numSpaces):
 class Container(Module):
 
     def __init__(self, **kwargs: Any) -> None:
-        super(Container, self).__init__()
+        super().__init__()
         # DeprecationWarning is ignored by default <sigh>
         warnings.warn("nn.Container is deprecated. All of it's functionality "
                       "is now implemented in nn.Module. Subclass that instead.")
@@ -95,7 +95,7 @@ class Sequential(Module):
         ...
 
     def __init__(self, *args):
-        super(Sequential, self).__init__()
+        super().__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
                 self.add_module(key, module)
@@ -200,7 +200,7 @@ class Sequential(Module):
 
     @_copy_to_script_wrapper
     def __dir__(self):
-        keys = super(Sequential, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -261,7 +261,7 @@ class ModuleList(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.linears = nn.ModuleList([nn.Linear(10, 10) for i in range(10)])
 
             def forward(self, x):
@@ -274,7 +274,7 @@ class ModuleList(Module):
     _modules: Dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
-        super(ModuleList, self).__init__()
+        super().__init__()
         if modules is not None:
             self += modules
 
@@ -359,7 +359,7 @@ class ModuleList(Module):
 
     @_copy_to_script_wrapper
     def __dir__(self):
-        keys = super(ModuleList, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -433,7 +433,7 @@ class ModuleDict(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.choices = nn.ModuleDict({
                         'conv': nn.Conv2d(10, 10, 3),
                         'pool': nn.MaxPool2d(3)
@@ -452,7 +452,7 @@ class ModuleDict(Module):
     _modules: Dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
-        super(ModuleDict, self).__init__()
+        super().__init__()
         if modules is not None:
             self.update(modules)
 
@@ -567,7 +567,7 @@ class ParameterList(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
 
             def forward(self, x):
@@ -578,7 +578,7 @@ class ParameterList(Module):
     """
 
     def __init__(self, values: Optional[Iterable[Any]] = None) -> None:
-        super(ParameterList, self).__init__()
+        super().__init__()
         self._size = 0
         if values is not None:
             self += values
@@ -632,7 +632,7 @@ class ParameterList(Module):
         return self.extend(parameters)
 
     def __dir__(self):
-        keys = super(ParameterList, self).__dir__()
+        keys = super().__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
@@ -707,7 +707,7 @@ class ParameterDict(Module):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.params = nn.ParameterDict({
                         'left': nn.Parameter(torch.randn(5, 10)),
                         'right': nn.Parameter(torch.randn(5, 10))
@@ -719,7 +719,7 @@ class ParameterDict(Module):
     """
 
     def __init__(self, parameters: Any = None) -> None:
-        super(ParameterDict, self).__init__()
+        super().__init__()
         self._keys: Dict[str, None] = {}
         if parameters is not None:
             self.update(parameters)

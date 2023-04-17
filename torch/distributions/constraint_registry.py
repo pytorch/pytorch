@@ -76,13 +76,13 @@ __all__ = [
 ]
 
 
-class ConstraintRegistry(object):
+class ConstraintRegistry:
     """
     Registry to link constraints to transforms.
     """
     def __init__(self):
         self._registry = {}
-        super(ConstraintRegistry, self).__init__()
+        super().__init__()
 
     def register(self, constraint, factory=None):
         """

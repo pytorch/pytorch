@@ -2,7 +2,7 @@ import sys
 import torch
 import types
 
-class _XNNPACKEnabled(object):
+class _XNNPACKEnabled:
     def __get__(self, obj, objtype):
         return torch._C._is_xnnpack_enabled()
 
@@ -11,7 +11,7 @@ class _XNNPACKEnabled(object):
 
 class XNNPACKEngine(types.ModuleType):
     def __init__(self, m, name):
-        super(XNNPACKEngine, self).__init__(name)
+        super().__init__(name)
         self.m = m
 
     def __getattr__(self, attr):

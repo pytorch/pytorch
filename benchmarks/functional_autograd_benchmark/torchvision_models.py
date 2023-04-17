@@ -29,7 +29,7 @@ class BasicBlock(nn.Module):
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
-        super(BasicBlock, self).__init__()
+        super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         if groups != 1 or base_width != 64:
@@ -74,7 +74,7 @@ class Bottleneck(nn.Module):
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
-        super(Bottleneck, self).__init__()
+        super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         width = int(planes * (base_width / 64.)) * groups
@@ -116,7 +116,7 @@ class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
                  norm_layer=None):
-        super(ResNet, self).__init__()
+        super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
@@ -281,7 +281,7 @@ class IntermediateLayerGetter(nn.ModuleDict):
             if not return_layers:
                 break
 
-        super(IntermediateLayerGetter, self).__init__(layers)
+        super().__init__(layers)
         self.return_layers = orig_return_layers
 
     def forward(self, x):
@@ -297,7 +297,7 @@ class _SimpleSegmentationModel(nn.Module):
     __constants__ = ['aux_classifier']
 
     def __init__(self, backbone, classifier, aux_classifier=None):
-        super(_SimpleSegmentationModel, self).__init__()
+        super().__init__()
         self.backbone = backbone
         self.classifier = classifier
         self.aux_classifier = aux_classifier
@@ -346,7 +346,7 @@ class FCNHead(nn.Sequential):
             nn.Conv2d(inter_channels, channels, 1)
         ]
 
-        super(FCNHead, self).__init__(*layers)
+        super().__init__(*layers)
 
 def _segm_resnet(name, backbone_name, num_classes, aux, pretrained_backbone=True):
     # backbone = resnet.__dict__[backbone_name](

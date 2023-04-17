@@ -40,7 +40,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
         import torch
         class MyModule(torch.nn.Module):
             def __init__(self, N, M):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(N, M))
                 self.linear = torch.nn.Linear(N, M)
 
@@ -62,7 +62,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
         import torch
         class MyModule2(torch.nn.Module):
             def __init__(self):
-                super(MyModule2, self).__init__()
+                super().__init__()
                 self.modified_tensor = torch.tensor(10.)
                 self.version = 1
 

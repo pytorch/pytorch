@@ -23,7 +23,7 @@ def __allow_nonbracketed_mutation():
     finally:
         __allow_nonbracketed_mutation_flag = old
 
-class ContextProp(object):
+class ContextProp:
     def __init__(self, getter, setter):
         self.getter = getter
         self.setter = setter
@@ -40,7 +40,7 @@ class ContextProp(object):
 
 class PropModule(types.ModuleType):
     def __init__(self, m, name):
-        super(PropModule, self).__init__(name)
+        super().__init__(name)
         self.m = m
 
     def __getattr__(self, attr):

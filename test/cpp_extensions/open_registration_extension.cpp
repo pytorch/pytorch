@@ -7,7 +7,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/EmptyTensor.h>
-
+#include <ATen/core/GeneratorForPrivateuseone.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -73,6 +73,11 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   return dst;
 }
 
+at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, c10::optional<at::ScalarType> dtype_opt, c10::optional<at::Layout> layout_opt, c10::optional<at::Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
+  auto dtype = c10::dtype_or_default(dtype_opt);
+  return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
+}
 
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
@@ -88,6 +93,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
+  m.impl("empty_strided", &custom_empty_strided);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -108,6 +114,25 @@ bool custom_add_called() {
   return called;
 }
 
+class PrivateGeneratorImpl : public at::CPUGeneratorImpl {
+public:
+  // Constructors
+  PrivateGeneratorImpl(c10::DeviceIndex device_index) {
+    device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
+    key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
+  }
+  ~PrivateGeneratorImpl() override = default;
+};
+
+// this is used to register generator
+at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
+  return at::make_generator<PrivateGeneratorImpl>(device_index);
+}
+
+void register_generator() {
+  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -115,4 +140,5 @@ bool custom_add_called() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
+    m.def("register_generator", &register_generator, "register generator for custom device");
 }

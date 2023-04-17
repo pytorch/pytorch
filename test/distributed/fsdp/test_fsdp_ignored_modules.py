@@ -146,7 +146,17 @@ class TestFSDPIgnoredModules(FSDPTest):
         with FSDP.summon_full_params(wrapped_model):
             flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
-            self.assertEqual(flat_param_numel, nonignored_numel)
+            if use_orig_params:
+                # Subtract the numel contributed from alignment padding
+                padding_numel = sum(
+                    numel
+                    for (numel, is_padding) in zip(
+                        flat_param._numels_with_padding, flat_param._is_padding_mask
+                    )
+                    if is_padding
+                )
+                flat_param_numel -= padding_numel
+                self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
@@ -185,6 +195,17 @@ class TestFSDPIgnoredModules(FSDPTest):
         with FSDP.summon_full_params(wrapped_model):
             flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
+            if use_orig_params:
+                # Subtract the numel contributed from alignment padding
+                padding_numel = sum(
+                    numel
+                    for (numel, is_padding) in zip(
+                        flat_param._numels_with_padding, flat_param._is_padding_mask
+                    )
+                    if is_padding
+                )
+                flat_param_numel -= padding_numel
+                self.assertEqual(flat_param_numel, nonignored_numel)
             self.assertEqual(flat_param_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
@@ -244,9 +265,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": layer1_ignored_modules}
             if ignore_modules
             else {
-                "ignored_parameters": set(
+                "ignored_parameters": {
                     p for m in layer1_ignored_modules for p in m.parameters()
-                )
+                }
             }
         )
         model.layer1 = FSDP(model.layer1, **ignore_kwargs)
@@ -260,9 +281,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": model_ignored_modules}
             if ignore_modules
             else {
-                "ignored_parameters": set(
+                "ignored_parameters": {
                     p for m in model_ignored_modules for p in m.parameters()
-                )
+                }
             }
         )
         wrapped_model = FSDP(model, **ignore_kwargs_top)
@@ -279,9 +300,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": ignored_modules}
             if ignore_modules
             else {
-                "ignored_parameters": set(
+                "ignored_parameters": {
                     p for m in ignored_modules for p in m.parameters()
-                )
+                }
             }
         )
 

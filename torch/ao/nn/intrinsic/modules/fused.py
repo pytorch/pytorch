@@ -62,7 +62,7 @@ class ConvBn2d(_FusedModule):
         assert type_before_parametrizations(conv) == Conv2d and type_before_parametrizations(bn) == BatchNorm2d, \
             'Incorrect types for input modules{}{}'.format(
                 type_before_parametrizations(conv), type_before_parametrizations(bn))
-        super(ConvBn2d, self).__init__(conv, bn)
+        super().__init__(conv, bn)
 
 class ConvBnReLU1d(_FusedModule):
     r"""This is a sequential container which calls the Conv 1d, Batch Norm 1d, and ReLU modules.

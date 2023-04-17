@@ -30,17 +30,17 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
 }
 // This is intentionally a separate function and in a .cpp file
 // because then the template is smaller and that benefits binary size
-C10_EXPORT FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return FunctionSchema(std::move(name), std::move(overload_name), createArgumentVector(arguments), createArgumentVector(returns));
 }
 
-C10_EXPORT FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
+FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns) {
   return make_function_schema("", "", arguments, returns);
 }
 }
 }
 
-C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+c10::optional<std::string> findSchemaDifferences(const FunctionSchema& lhs, const FunctionSchema& rhs) {
   if (lhs.arguments().size() != rhs.arguments().size()) {
     return "The number of arguments is different. " + guts::to_string(lhs.arguments().size()) +
              " vs " + guts::to_string(rhs.arguments().size()) + ".";

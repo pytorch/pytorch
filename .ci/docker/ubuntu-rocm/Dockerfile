@@ -31,8 +31,8 @@ ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh
-RUN rm /opt/conda/requirements-ci.txt
+COPY ./common/common_utils.sh common_utils.sh
+RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -68,6 +68,7 @@ RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
+ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
@@ -88,6 +89,16 @@ ARG NINJA_VERSION
 COPY ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
+
+ARG TRITON
+# Install triton, this needs to be done before sccache because the latter will
+# try to reach out to S3, which docker build runners don't have access
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton-rocm.txt triton-rocm.txt
+COPY triton_version.txt triton_version.txt
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh

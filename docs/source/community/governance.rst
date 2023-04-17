@@ -61,6 +61,7 @@ contributors and other interested parties understand the
 future direction of the project and can participate in discussion.
 
 Responsibilities of the maintainer includes:
+
 * Triaging high priority issues of the module
 * Triaging and reviewing and landing high priority pull requests of the module
 * Supporting public documentation related to the module

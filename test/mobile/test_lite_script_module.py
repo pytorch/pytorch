@@ -34,9 +34,6 @@ class TestLiteScriptModule(TestCase):
 
     def test_load_mobile_module(self):
         class MyTestModule(torch.nn.Module):
-            def __init__(self):
-                super(MyTestModule, self).__init__()
-
             def forward(self, x):
                 return x + 10
 
@@ -60,15 +57,12 @@ class TestLiteScriptModule(TestCase):
 
     def test_save_mobile_module_with_debug_info_with_trace(self):
         class A(torch.nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def forward(self, x, y):
                 return x * y
 
         class B(torch.nn.Module):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
                 self.A0 = A()
                 self.A1 = A()
 
@@ -103,9 +97,6 @@ class TestLiteScriptModule(TestCase):
 
     def test_load_mobile_module_with_debug_info(self):
         class MyTestModule(torch.nn.Module):
-            def __init__(self):
-                super(MyTestModule, self).__init__()
-
             def forward(self, x):
                 return x + 5
 
@@ -161,7 +152,7 @@ class TestLiteScriptModule(TestCase):
     def test_method_calls_with_optional_arg(self):
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
 
             # opt arg in script-to-script invocation
             def forward(self, x, two: int = 2):
@@ -169,7 +160,7 @@ class TestLiteScriptModule(TestCase):
 
         class B(torch.nn.Module):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
                 self.A0 = A()
 
             # opt arg in Python-to-script invocation
@@ -227,12 +218,11 @@ class TestLiteScriptModule(TestCase):
 
     def test_unsupported_return_list_with_module_class(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super(Foo, self).__init__()
+            pass
 
         class MyTestModuleForListWithModuleClass(torch.nn.Module):
             def __init__(self):
-                super(MyTestModuleForListWithModuleClass, self).__init__()
+                super().__init__()
                 self.foo = Foo()
 
             def forward(self):
@@ -250,12 +240,11 @@ class TestLiteScriptModule(TestCase):
 
     def test_unsupported_return_dict_with_module_class(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super(Foo, self).__init__()
+            pass
 
         class MyTestModuleForDictWithModuleClass(torch.nn.Module):
             def __init__(self):
-                super(MyTestModuleForDictWithModuleClass, self).__init__()
+                super().__init__()
                 self.foo = Foo()
 
             def forward(self):
@@ -274,7 +263,7 @@ class TestLiteScriptModule(TestCase):
     def test_module_export_operator_list(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.weight = torch.ones((20, 1, 5, 5))
                 self.bias = torch.ones(20)
 
@@ -391,7 +380,7 @@ class TestLiteScriptModule(TestCase):
     def test_source_range_raise_exc(self):
         class FooTest5(torch.jit.ScriptModule):
             def __init__(self, val: int):
-                super(FooTest5, self).__init__()
+                super().__init__()
                 self.val = val
 
             @torch.jit.script_method
@@ -434,9 +423,6 @@ class TestLiteScriptModule(TestCase):
                 pass
 
         class B(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x
 
@@ -496,7 +482,7 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         # From the example in Static Quantization section of https://pytorch.org/docs/stable/quantization.html
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.relu = torch.nn.ReLU()
@@ -524,9 +510,6 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
 
     def test_bundled_input_with_dynamic_type(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-
             def forward(
                 self,
                 x: Dict[int, torch.Tensor],

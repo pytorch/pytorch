@@ -8,7 +8,7 @@ from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
 
 @dataclass
-class ShardingPlan(object):
+class ShardingPlan:
     """
     Representation of a sharding plan, describes how to shard a module
     across hosts. `plan` is used to shard module parameters according to the spec provided,
@@ -29,7 +29,7 @@ class ShardingPlan(object):
             Default: `None`
         return_local_tensor (List[str], optional): a list of string, each element enables
             a module's sharded output to be returned as a Tensor from its local shards to
-            ensure further processsing in a data parallel fashion. ("" in list means the
+            ensure further processing in a data parallel fashion. ("" in list means the
             root module).
             Default: None
     Example:

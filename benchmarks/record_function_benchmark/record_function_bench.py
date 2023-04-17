@@ -92,7 +92,7 @@ if __name__ == '__main__':
     parser.add_argument('--lstmMiniBatch', default='64', type=int)
     parser.add_argument('--warmup', default='2', type=int)
     parser.add_argument('--nloops', default='50', type=int)
-    parser.add_argument('--timer_min_run_time', default=120, type=int)
+    parser.add_argument('--timer-min-run-time', '--timer_min_run_time', default=120, type=int)
 
     args = parser.parse_args()
 

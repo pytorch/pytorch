@@ -54,16 +54,22 @@ Tensor mean(
       input_arg.scalar_type(),
   };
 
+  int32_t channels = safe_downcast<int32_t>(get_dim<Dim4D::Channel>(v_input));
+  int32_t ch_aligned = api::utils::align_up(channels, 4);
+
   const struct Block final {
-    uvec3 extents;
-    int32_t range;
-    uvec3 iextents;
+    ivec3 out_extents;
+    int32_t plane_size;
+    ivec3 in_extents;
+    int32_t ch_aligned;
   } block{
-      v_output.extents(),
+      api::utils::make_ivec3(v_output.extents()),
       safe_downcast<int32_t>(
           v_input_sizes[Layout::Activation4D::width] *
           v_input_sizes[Layout::Activation4D::height]),
-      v_input.extents()};
+      api::utils::make_ivec3(v_input.extents()),
+      ch_aligned,
+  };
 
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};

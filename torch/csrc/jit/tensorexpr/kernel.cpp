@@ -434,9 +434,9 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
     if (vec.empty()) {
       return BufList(); // Return arbitrarily typed vector
-    } else if (c10::get_if<BufHandle>(vec.data())) {
+    } else if (c10::get_if<BufHandle>(&vec[0])) {
       return convertVecArgValue<BufHandle>(vec);
-    } else if (c10::get_if<int64_t>(vec.data())) {
+    } else if (c10::get_if<int64_t>(&vec[0])) {
       return convertVecArgValue<int64_t>(vec);
     }
     throw unsupported_dtype();
@@ -1089,7 +1089,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
         generated_strides++;
       }
     }
-    for (int i = 0; i < rank; i++) {
+    for (int i = 0; i < static_cast<int>(rank); i++) {
       if (stride_input[i] == torch::jit::StrideInput::S_TRAN_CONT &&
           stride_set[i - 1]) {
         inputTensorStrides[i] =
@@ -1309,7 +1309,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
   TORCH_INTERNAL_ASSERT(buf != nullptr);
   TORCH_INTERNAL_ASSERT(tt != nullptr);
@@ -1346,7 +1346,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   TORCH_INTERNAL_ASSERT(
       bufs_.count(v),
       buildErrorMessage(
-          "Ouput tensor has no corresponding bufs in the fuser."));
+          "Output tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
@@ -1460,7 +1460,6 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
     const std::vector<BufPtr>& interm_bufs) {
   std::vector<BufPtr> remaining_interm_bufs;
-  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
   for (const auto& buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;
@@ -1501,7 +1500,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
     //
     // TODO: Check if the tensors with symbolic shapes are contiguous.
     TORCH_CHECK(
-        nInputs_ > symbolic_shape_inputs_.size(),
+        nInputs_ > static_cast<int64_t>(symbolic_shape_inputs_.size()),
         "Symbolic dims not provided as inputs to the graph");
 
     // First, process the symbolic input params and create a new variable for
@@ -1511,7 +1510,9 @@ BlockPtr TensorExprKernel::bindAllInputs() {
     // create for the symbolic input params.
     symbolic_shape_args.reserve(symbolic_shape_inputs_.size());
 
-    for (size_t i = symbolic_shape_inputs_start_pos; i < nInputs_; ++i) {
+    for (size_t i = symbolic_shape_inputs_start_pos;
+         i < static_cast<size_t>(nInputs_);
+         ++i) {
       auto input = graph_->inputs()[i];
       if (input->type()->kind() != TypeKind::IntType) {
         throw std::runtime_error(
@@ -1575,7 +1576,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 
 void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // If the tensor is channels-last contiguous, the preferred memory layout
-  // propagation policy is to use channes-last. Otherwise, the preferred policy
+  // propagation policy is to use channels-last. Otherwise, the preferred policy
   // is to use contiguous.
   auto _prefer_symbolic_mem =
       [](const torch::jit::Value* val,
@@ -1649,7 +1650,7 @@ void TensorExprKernel::optimizeOwningGraph() {
   GRAPH_DUMP("TensorExprKernel graph (Before graph optimization):", graph_);
 
   // We may manipulate output pointers in graph manipulation. So we store the
-  // orignal outputs for symbolic strides information synchronization
+  // original outputs for symbolic strides information synchronization
   auto _orignal_graph_outputs = graph_->outputs().vec();
 
   // Get the graph device information first. The graph optimization
@@ -2105,7 +2106,8 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       args.emplace_back(&stride_values[idx]);
     }
 
-    TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(
+        nOutputs_ == static_cast<int64_t>(bufOutputs_.size()));
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto& out = stack_outputs[i].toTensor();
       // This has only been tested on CPUs.

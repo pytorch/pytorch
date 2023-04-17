@@ -320,7 +320,9 @@ void Logger::set_runtime_stats_and_log() {
         "Cuda time stats are not collected for multi-device modules.");
     return;
   }
-  if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
+
+  if (!reducer_->timer_ &&
+      (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu())) {
     TORCH_WARN_ONCE(
         "Time stats are currently only collected for CPU and CUDA devices. "
         "Please refer to CpuTimer or CudaTimer for how to register timer "

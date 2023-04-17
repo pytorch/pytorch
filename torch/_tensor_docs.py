@@ -701,6 +701,15 @@ See :func:`torch.as_strided`
 )
 
 add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
+""",
+)
+
+add_docstr_all(
     "atan",
     r"""
 atan() -> Tensor
@@ -3124,10 +3133,12 @@ add_docstr_all(
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into :attr:`self` tensor at positions where
-the :attr:`mask` is True.
+the :attr:`mask` is True. Elements from :attr:`source` are copied into :attr:`self`
+starting at position 0 of :attr:`source` and continuing in order one-by-one for each
+occurrence of :attr:`mask` being True.
 The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
 with the shape of the underlying tensor. The :attr:`source` should have at least
-as many elements as the number of ones in :attr:`mask`
+as many elements as the number of ones in :attr:`mask`.
 
 Args:
     mask (BoolTensor): the boolean mask
@@ -3137,6 +3148,16 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
+
+Example:
+
+    >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter_(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -3585,6 +3606,58 @@ add_docstr_all(
 nonzero() -> LongTensor
 
 See :func:`torch.nonzero`
+""",
+)
+
+add_docstr_all(
+    "nonzero_static",
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    input (Tensor): the input tensor to count non-zero elements.
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example:
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
 """,
 )
 
@@ -4274,7 +4347,10 @@ is updated as::
 Reducing with the addition operation is the same as using
 :meth:`~torch.Tensor.scatter_add_`.
 
-For more reduction options, one might prefer :meth:`~torch.Tensor.scatter_reduce_`.
+.. warning::
+    The reduce argument with Tensor ``src`` is deprecated and will be removed in
+    a future PyTorch release. Please use :meth:`~torch.Tensor.scatter_reduce_`
+    instead for more reduction options.
 
 Args:
     dim (int): the axis along which to index
@@ -5345,9 +5421,15 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense() -> Tensor
+to_dense(dtype=None, *, masked_grad=True) -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
+
+Keyword args:
+    {dtype}
+    masked_grad (bool, optional): If set to ``True`` (default) and
+      :attr:`self` has a sparse layout then the backward of
+      :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::
 
@@ -6359,6 +6441,21 @@ add_docstr_all(
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+
+.. note::
+
+    The inputs :attr:`self` and :attr:`mask`
+    :ref:`broadcast <broadcasting-semantics>`.
+
+Example:
+
+    >>> self = torch.tensor([0, 0, 0, 0, 0])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -6545,7 +6642,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
 """,
 )
 
@@ -6567,6 +6664,22 @@ add_docstr_all(
     "ndim",
     r"""
 Alias for :meth:`~Tensor.dim()`
+""",
+)
+
+add_docstr_all(
+    "itemsize",
+    r"""
+Alias for :meth:`~Tensor.element_size()`
+""",
+)
+
+add_docstr_all(
+    "nbytes",
+    r"""
+Returns the number of bytes consumed by the "view" of elements of the Tensor
+if the Tensor does not use sparse storage layout.
+Defined to be :meth:`~Tensor.numel()` * :meth:`~Tensor.element_size()`
 """,
 )
 

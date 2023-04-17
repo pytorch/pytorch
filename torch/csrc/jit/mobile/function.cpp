@@ -68,7 +68,7 @@ bool Function::initialize_operators(bool should_check_operators) {
   std::unordered_set<std::string> unsupported_op_names;
   code_.operators_.resize(code_.op_names_.size());
   bool all_ops_supported = true;
-  for (int i = 0; i < code_.op_names_.size(); i++) {
+  for (unsigned i = 0; i < code_.op_names_.size(); i++) {
     const auto& opname = code_.op_names_[i];
     int num_args = code_.operator_input_sizes_[i];
     c10::optional<int> num_specified_args =
@@ -77,7 +77,6 @@ bool Function::initialize_operators(bool should_check_operators) {
     if (!func.has_value()) {
       unsupported_op_names.insert(operator_str(opname));
       all_ops_supported = false;
-      break;
     } else {
       code_.operators_[i] = *func;
     }
@@ -213,7 +212,7 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
           stack.pop_back();
         }
         TORCH_CHECK(
-            num_specified_args.value() >= out_args.size(),
+            static_cast<size_t>(num_specified_args.value()) >= out_args.size(),
             "The number of output arguments is: ",
             out_args.size(),
             ", which is more then the number of specified arguments: ",

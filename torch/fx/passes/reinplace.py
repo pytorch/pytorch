@@ -153,7 +153,7 @@ def _maybe_get_inplace_op(op):
         for f in inplace_overloads
         if _schemas_match(op._schema, f._schema)
     ]
-    # Just becuase foo() and foo_() are both existing operators,
+    # Just because foo() and foo_() are both existing operators,
     # They aren't guaranteed to have compatible schemas.
     # For example, pow.Scalar(Scalar self, Tensor exponent) has no valid inplace variant,
     # Even though several overloads of pow_ exist.
@@ -280,7 +280,7 @@ def reinplace(gm, *sample_args):
            Because that would require resizing "a".
 
            Similarly, we can't convert torch.ge(a, b) into a.ge_(b),
-           beause that would require changing a's dtype (from e.g. float32 to bool).
+           because that would require changing a's dtype (from e.g. float32 to bool).
            Note that in this specific example, we could technically do better..
 
            If we see the pattern:
@@ -468,10 +468,10 @@ def reinplace(gm, *sample_args):
     # so we know not to re-inplace them.
     # NOTE: later, we'll need to add an optimization for fully recovering performance
     # on programs that mutate inputs.
-    input_storages = set(
+    input_storages = {
         StorageWeakRef(
             node.meta['fake_result']._typed_storage()
-        ) for node in gm.graph.nodes if node.op == 'placeholder')
+        ) for node in gm.graph.nodes if node.op == 'placeholder'}
 
 
     # We also need to know for a given node, what are all of its aliasing nodes.
@@ -627,14 +627,14 @@ def reinplace(gm, *sample_args):
                     old_flattened_res, _ = tree_flatten(old.meta['fake_result'])
                     node_flattened_res, _ = tree_flatten(node_to_update.meta['fake_result'])
 
-                    old_res_storage = set(
+                    old_res_storage = {
                         StorageWeakRef(
                             x._typed_storage()
-                        ) for x in old_flattened_res if isinstance(x, FakeTensor))
-                    node_res_storage = set(
+                        ) for x in old_flattened_res if isinstance(x, FakeTensor)}
+                    node_res_storage = {
                         StorageWeakRef(
                             x._typed_storage()
-                        ) for x in node_flattened_res if isinstance(x, FakeTensor))
+                        ) for x in node_flattened_res if isinstance(x, FakeTensor)}
 
                     # This will happen if we're updating a view op, e.g.
                     # e.g. replacing
@@ -648,10 +648,10 @@ def reinplace(gm, *sample_args):
                     # We can't just check equality because we might encounter FX nodes that return zero tensor outputs.
                     if len(old_res_storage) == 1 and len(node_res_storage) == 1 and old_res_storage == node_res_storage:
                         new_flattened_res, _ = tree_flatten(new.meta['fake_result'])
-                        new_res_storage = set(
+                        new_res_storage = {
                             StorageWeakRef(
                                 x._typed_storage()
-                            ) for x in new_flattened_res if isinstance(x, FakeTensor))
+                            ) for x in new_flattened_res if isinstance(x, FakeTensor)}
                         assert len(new_res_storage) == 1
                         (old_ref,) = old_res_storage
                         (new_ref,) = new_res_storage

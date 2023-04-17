@@ -76,10 +76,7 @@ mm_plus_mm_template = TritonTemplate(
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
-        # Splitting this into two loops causes an internal triton LLVM error
-        # https://github.com/openai/triton/issues/967
-        # for k2 in range(K2, 0, -BLOCK_K):
-        k2 = k1
+    for k2 in range(K1, 0, -BLOCK_K):
 
         # Second matmul with C @ D
         if EVEN_K:
@@ -92,9 +89,6 @@ mm_plus_mm_template = TritonTemplate(
         C += BLOCK_K * stride_ck
         D += BLOCK_K * stride_dk
 
-    # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
 
     idx_m = rm[:, None]
     idx_n = rn[None, :]
@@ -149,6 +143,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
     """
+    # Optimization is optional, because we can always just not do the fusion
     if not V.graph.sizevars.maybe_guard_list_equals(
         mat1.get_size(), mat3.get_size()
     ) or not V.graph.sizevars.maybe_guard_list_equals(mat2.get_size(), mat4.get_size()):
@@ -163,12 +158,16 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout)]
     if use_triton_template(layout):
         for config in mm_configs():
-            choices.append(
-                mm_plus_mm_template.generate(
+            # see https://github.com/openai/triton/issues/1298
+            # BLOCK_K = K causes llvm error
+            if config.kwargs["BLOCK_K"] < k:
+                mm_plus_mm_template.maybe_append_choice(
+                    choices,
                     (mat1, mat2, mat3, mat4),
                     layout,
                     **mm_options(config, k, layout),
                 )
-            )
 
-    return autotune_select_algorithm(choices, [mat1, mat2, mat3, mat4], layout)
+    return autotune_select_algorithm(
+        "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout
+    )

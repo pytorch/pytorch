@@ -415,7 +415,7 @@ This is how a ``Linear`` module can be implemented::
 
     class Linear(nn.Module):
         def __init__(self, input_features, output_features, bias=True):
-            super(Linear, self).__init__()
+            super().__init__()
             self.input_features = input_features
             self.output_features = output_features
 
@@ -566,8 +566,8 @@ of doing this is to define a decorator::
   import functools
   def implements(torch_function):
       """Register a torch function override for ScalarTensor"""
-      @functools.wraps(torch_function)
       def decorator(func):
+          functools.update_wrapper(func, torch_function)
           HANDLED_FUNCTIONS[torch_function] = func
           return func
       return decorator

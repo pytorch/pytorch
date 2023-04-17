@@ -31,7 +31,7 @@ from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch.utils.data.datapipes.iter import IterableWrapper
 from torch._utils import ExceptionWrapper
-from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
+from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
                                                   IS_MACOS)
@@ -78,11 +78,6 @@ load_tests = load_tests
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
-if TEST_CUDA:
-    dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
-    IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
-else:
-    IS_JETSON = False
 
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the
@@ -187,7 +182,7 @@ class TestDatasetRandomSplit(TestCase):
                 self.test_object = test_object
 
             def __getitem__(self, key):
-                self.test_object.assertEqual(type(key), type(0))
+                self.test_object.assertEqual(type(key), int)
                 return self.data[key]
 
             def __len__(self):
@@ -283,7 +278,7 @@ class TestDatasetRandomSplit(TestCase):
 
 class CUDACountingDataset(Dataset):
     def __init__(self, n):
-        super(CUDACountingDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __getitem__(self, i):
@@ -295,7 +290,7 @@ class CUDACountingDataset(Dataset):
 
 class CountingDataset(Dataset):
     def __init__(self, n):
-        super(CountingDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __getitem__(self, i):
@@ -307,7 +302,7 @@ class CountingDataset(Dataset):
 
 class CountingIterableDataset(IterableDataset):
     def __init__(self, n):
-        super(CountingIterableDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __iter__(self):
@@ -459,7 +454,7 @@ class ErrorTrackingProcess(mp.Process):
     # Setting disable_stderr=True may generate a lot of unrelated error outputs
     # but could be helpful for debugging.
     def __init__(self, disable_stderr=True, **kwargs):
-        super(ErrorTrackingProcess, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self._pconn, self._cconn = mp.Pipe()
         self._exception = None
         self.disable_stderr = disable_stderr
@@ -471,7 +466,7 @@ class ErrorTrackingProcess(mp.Process):
             with open(os.devnull, 'w') as devnull:
                 os.dup2(devnull.fileno(), sys.stderr.fileno())
         try:
-            super(ErrorTrackingProcess, self).run()
+            super().run()
             self._cconn.send(None)
         except Exception:
             self._cconn.send(ExceptionWrapper(sys.exc_info()))
@@ -940,7 +935,7 @@ def filter_len(row):
 class TestDataLoader(TestCase):
 
     def setUp(self):
-        super(TestDataLoader, self).setUp()
+        super().setUp()
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
@@ -1111,6 +1106,7 @@ except RuntimeError as e:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
+    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
     def test_multiple_dataloaders(self):
         for multiprocessing_context in supported_multiprocessing_contexts:
             loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
@@ -1361,7 +1357,7 @@ except RuntimeError as e:
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 4)
-            fetched = set(tuple(t.tolist()) for t in fetched)
+            fetched = {tuple(t.tolist()) for t in fetched}
             self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
             # [auto-batching] test that workers exit gracefully
@@ -1399,7 +1395,7 @@ except RuntimeError as e:
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 2)
-            fetched = set(tuple(t.tolist()) for t in fetched)
+            fetched = {tuple(t.tolist()) for t in fetched}
             self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
             # [auto-batching & drop_last] test that workers exit gracefully
@@ -1435,6 +1431,7 @@ except RuntimeError as e:
             list(iter(ChainDataset([dataset1, self.dataset])))
 
     @unittest.skipIf(IS_MACOS, "Not working on macos")
+    @unittest.skipIf(IS_MACOS or IS_JETSON, "Not working on macos or Jetson")
     @skipIfRocm  # https://github.com/pytorch/pytorch/issues/90940
     def test_multiprocessing_contexts(self):
         reference = [
@@ -1460,6 +1457,7 @@ except RuntimeError as e:
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
     @skipIfNoNumpy
+    @unittest.skipIf(IS_JETSON, "Not working on Jetson")
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
@@ -1500,7 +1498,7 @@ except RuntimeError as e:
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
-        self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+        self.assertEqual({int(batch) for batch in get_dataloader()}, {int(batch) for batch in get_dataloader()})
 
     def test_multi_epochs_reproducibility(self):
         num_workers = 2
@@ -2295,7 +2293,7 @@ class StringDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestStringDataLoader(TestCase):
     def setUp(self):
-        super(TestStringDataLoader, self).setUp()
+        super().setUp()
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -2325,7 +2323,7 @@ class DictDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDictDataLoader(TestCase):
     def setUp(self):
-        super(TestDictDataLoader, self).setUp()
+        super().setUp()
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
@@ -2400,7 +2398,7 @@ class DummyDataset(torch.utils.data.Dataset):
 class TestDataLoaderPersistentWorkers(TestDataLoader):
 
     def setUp(self):
-        super(TestDataLoaderPersistentWorkers, self).setUp()
+        super().setUp()
         self.persistent_workers = True
 
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
@@ -2513,7 +2511,7 @@ class NamedTupleDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
-        super(TestNamedTupleDataLoader, self).setUp()
+        super().setUp()
         self.dataset = NamedTupleDataset()
 
     def test_dataloader_with_namedtuple(self):
@@ -2533,7 +2531,7 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-class SimpleCustomBatch(object):
+class SimpleCustomBatch:
     def __init__(self, data):
         transposed_data = list(zip(*data))
         self.inp = torch.stack(transposed_data[0], 0)
@@ -2576,7 +2574,7 @@ def collate_into_packed_sequence_batch_first(batch):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestCustomPinFn(TestCase):
     def setUp(self):
-        super(TestCustomPinFn, self).setUp()
+        super().setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
@@ -2634,7 +2632,7 @@ class TestWorkerQueueDataset(Dataset):
     "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
-        super(TestIndividualWorkerQueue, self).setUp()
+        super().setUp()
         self.dataset = TestWorkerQueueDataset(list(range(128)))
 
     def _run_ind_worker_queue_test(self, batch_size, num_workers):

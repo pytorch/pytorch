@@ -60,6 +60,13 @@ def get_linear_configs():
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 0})
     )
+    # linear is decomposed to `t - mm` if bias is not present
+    linear_configs.append(
+        BackendPatternConfig(torch.ops.aten.mm.default)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        ._set_input_type_to_index({"weight": 1})
+    )
     return linear_configs
 
 def get_conv_configs():

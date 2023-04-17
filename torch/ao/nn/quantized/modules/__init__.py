@@ -86,7 +86,7 @@ class Quantize(torch.nn.Module):
 
     def __init__(self, scale, zero_point, dtype, factory_kwargs=None):
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(Quantize, self).__init__()
+        super().__init__()
         self.register_buffer('scale', torch.tensor([scale], **factory_kwargs))
         self.register_buffer('zero_point',
                              torch.tensor([zero_point], dtype=torch.long,
@@ -122,9 +122,6 @@ class DeQuantize(torch.nn.Module):
         tensor([[ 1., -1.],
                 [ 1., -1.]], dtype=torch.float32)
     """
-
-    def __init__(self):
-        super(DeQuantize, self).__init__()
 
     def forward(self, Xq):
         return Xq.dequantize()

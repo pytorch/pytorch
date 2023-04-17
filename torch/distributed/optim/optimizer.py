@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # TODO (wanchaol): remove this once we added TorchScript
 # class reference semantics
 @jit.interface
-class _ScriptLocalOptimizerInterface(object):
+class _ScriptLocalOptimizerInterface:
     def step(self, autograd_ctx_id: int) -> None:
         pass
 
@@ -59,7 +59,7 @@ class _ScriptLocalOptimizer(nn.Module):
 
 # TODO (wanchaol): remove/merge this with ScriptLocalOptimizer once
 # we have converted all to functional optimizer in distributed.optim
-class _LocalOptimizer(object):
+class _LocalOptimizer:
     # Ideally we would only need to share a lock for instances of
     # _LocalOptimizer that deal with the same parameters. We are
     # making a simplifying assumption here that if there is more
@@ -198,12 +198,13 @@ class DistributedOptimizer:
         if self.is_functional_optim:
             optimizer_new_func = _new_script_local_optimizer
         else:
-            logger.warn(
-                f"Creating the optimizer {optimizer_class} without TorchScript support, "
+            logger.warning(
+                "Creating the optimizer %s without TorchScript support, "
                 "this might result in slow computation time in multithreading environment"
                 "(i.e. Distributed Model Parallel training on CPU) due to the Python's "
                 "Global Interpreter Lock (GIL). Please file an issue if you need this "
-                "optimizer in TorchScript. "
+                "optimizer in TorchScript. ",
+                optimizer_class
             )
             optimizer_new_func = _new_local_optimizer
 

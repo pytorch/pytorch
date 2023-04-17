@@ -8,13 +8,13 @@ from caffe2.python import core
 import numpy as np
 
 
-class ParameterTags(object):
+class ParameterTags:
     BIAS = 'BIAS'
     WEIGHT = 'WEIGHT'
     COMPUTED_PARAM = 'COMPUTED_PARAM'
 
 
-class ParameterInfo(object):
+class ParameterInfo:
 
     def __init__(
             self, param_id, param, key=None, shape=None, length=None,

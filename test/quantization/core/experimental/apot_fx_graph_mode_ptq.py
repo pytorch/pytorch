@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.quantization
+import torch.ao.quantization
 from torchvision.models.quantization.resnet import resnet18
 from torch.ao.quantization.experimental.quantization_helper import (
     evaluate,
@@ -25,8 +25,8 @@ model_to_quantize.eval()
 Prepare models
 """
 
-# Note that this is temporary, we'll expose these functions to torch.quantization after official releasee
-from torch.quantization.quantize_fx import prepare_qat_fx
+# Note that this is temporary, we'll expose these functions to torch.ao.quantization after official releasee
+from torch.ao.quantization.quantize_fx import prepare_qat_fx
 
 def calibrate(model, data_loader):
     model.eval()

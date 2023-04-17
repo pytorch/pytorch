@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
 from .expanded_weights_utils import \
-    forward_helper, set_grad_sample_if_exists, unpack_expanded_weight_or_tensor
+    forward_helper, set_grad_sample_if_exists, unpack_expanded_weight_or_tensor, is_batch_first
 from typing import List, Optional
 
 @implements_per_sample_grads(F.linear)
@@ -14,6 +14,7 @@ class LinearPerSampleGrad(torch.autograd.Function):
                                f"of at least rank 2, got of rank {len(expanded_args_and_kwargs[0].shape)}")
         expanded_kwargs = {'bias': expanded_args_and_kwargs[2] if len(expanded_args_and_kwargs) == 3 else None}
         expanded_args = expanded_args_and_kwargs[:2]
+        ctx.batch_first = is_batch_first(expanded_args_and_kwargs)
         output = forward_helper(F.linear, expanded_args, expanded_kwargs)
         ctx.args = expanded_args
         ctx.kwargs = expanded_kwargs
@@ -32,6 +33,10 @@ class LinearPerSampleGrad(torch.autograd.Function):
         else:
             results.append(None)
         results.extend([None] * 2)  # weight and bias don't compute batched gradients
+
+        if not ctx.batch_first:
+            grad_output = grad_output.transpose(0, 1)
+            input = input.transpose(0, 1)
 
         # weight and bias get their grad_sample fields set directly if they exist
         set_grad_sample_if_exists(weight, lambda _: torch.einsum("n...i,n...j->nij", grad_output, input))

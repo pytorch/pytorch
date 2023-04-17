@@ -75,7 +75,7 @@ def _annotation_has_type(*, typ, annotation):
     return typ is annotation
 
 
-class elementwise_type_promotion_wrapper(object):
+class elementwise_type_promotion_wrapper:
     """
     Adds elementwise type promotion to a Python reference implementation.
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import FrozenSet, List, Optional, Sequence, Tuple, Type, TypeVar
+import pprint
+from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
@@ -14,7 +15,13 @@ class Level(enum.Enum):
 
     This class is used to represent the level of a diagnostic. The levels are defined
     by the SARIF specification, and are not modifiable. For alternative categories,
-    please use infra.Tag instead.
+    please use infra.Tag instead. When selecting a level, please consider the following
+    guidelines:
+
+    - NONE: Informational result that does not indicate the presence of a problem.
+    - NOTE: An opportunity for improvement was found.
+    - WARNING: A potential problem was found.
+    - ERROR: A serious problem was found.
     """
 
     NONE = enum.auto()
@@ -28,8 +35,6 @@ levels = Level
 
 class Tag(enum.Enum):
     """The tag of a diagnostic. This class can be inherited to define custom tags."""
-
-    pass
 
 
 class PatchedPropertyBag(sarif.PropertyBag):
@@ -98,6 +103,16 @@ class Rule:
             help_uri=self.help_uri,
         )
 
+    def format(self, level: Level, *args, **kwargs) -> Tuple[Rule, Level, str]:
+        """Returns a tuple of (rule, level, message) for a diagnostic.
+
+        This method is used to format the message of a diagnostic. The message is
+        formatted using the default template of this rule, and the arguments passed in
+        as `*args` and `**kwargs`. The level is used to override the default level of
+        this rule.
+        """
+        return (self, level, self.format_message(*args, **kwargs))
+
     def format_message(self, *args, **kwargs) -> str:
         """Returns the formatted default message of this Rule.
 
@@ -119,6 +134,7 @@ class Location:
     start_column: Optional[int] = None
     end_column: Optional[int] = None
     snippet: Optional[str] = None
+    function: Optional[str] = None
 
     def sarif(self) -> sarif.Location:
         """Returns the SARIF representation of this location."""
@@ -138,23 +154,14 @@ class Location:
         )
 
     def pretty_print(self):
-        """Prints the location in a human-readable format."""
-        location_strs = ["frame:"]
-        if self.snippet is not None:
-            location_strs.append(self.snippet)
-        if self.uri is not None:
-            line_strs = [self.uri]
-            line_strs.append(str(self.line)) if self.line is not None else "-1"
-            line_strs.append(
-                str(self.start_column)
-            ) if self.start_column is not None else "-1"
-            line_strs.append(
-                str(self.end_column)
-            ) if self.end_column is not None else "-1"
-            location_strs.append(":".join(line_strs))
-        if self.message is not None:
-            location_strs.append(f"({self.message})")
-        print(" ".join(location_strs))
+        """Prints the location in a traceback style format."""
+        unknown = "<unknown>"
+        snippet = self.snippet or unknown
+        uri = self.uri or unknown
+        function = self.function or unknown
+        lineno = self.line if self.line is not None else unknown
+        message = f"  # {self.message}" if self.message is not None else ""
+        print(f'  File "{uri}", line {lineno}, in {function}\n    {snippet}{message}')
 
 
 @dataclasses.dataclass
@@ -172,6 +179,8 @@ class StackFrame:
 
 @dataclasses.dataclass
 class Stack:
+    """Records a stack trace. The frames are in order from newest to oldest stack frame."""
+
     frames: List[StackFrame] = dataclasses.field(default_factory=list)
     message: Optional[str] = None
 
@@ -187,12 +196,35 @@ class Stack:
     def pretty_print(self):
         """Prints the stack in a human-readable format."""
         formatter.pretty_print_title(f"Stack: {self.message}", fill_char="-")
-        for frame in self.frames:
+        for frame in reversed(self.frames):
             frame.pretty_print()
 
 
-# This is a workaround for mypy not supporting Self from typing_extensions.
-_Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
+@dataclasses.dataclass
+class ThreadFlowLocation:
+    """Records code location and the initial state."""
+
+    location: Location
+    state: Mapping[str, str]
+    index: int
+    stack: Optional[Stack] = None
+
+    def sarif(self) -> sarif.ThreadFlowLocation:
+        """Returns the SARIF representation of this thread flow location."""
+        return sarif.ThreadFlowLocation(
+            location=self.location.sarif(),
+            state=self.state,
+            stack=self.stack.sarif() if self.stack is not None else None,
+        )
+
+    def pretty_print(self, verbose: bool = False):
+        """Prints the thread flow location in a human-readable format."""
+        formatter.pretty_print_title(f"Step {self.index}", fill_char="-")
+        self.location.pretty_print()
+        if verbose:
+            print(f"State: {pprint.pformat(self.state)}")
+            if self.stack is not None:
+                self.stack.pretty_print()
 
 
 @dataclasses.dataclass
@@ -203,97 +235,32 @@ class Graph:
     The `nodes` and `edges` fields are unused in the current implementation.
     """
 
-    graph_str: str
+    graph: str
     name: str
     description: Optional[str] = None
 
     def sarif(self) -> sarif.Graph:
         """Returns the SARIF representation of this graph."""
         return sarif.Graph(
-            description=sarif.Message(text=self.graph_str),
+            description=sarif.Message(text=self.graph),
             properties=PatchedPropertyBag(name=self.name, description=self.description),
         )
 
-    def pretty_print(self):
-        pass
-
-
-@dataclasses.dataclass
-class Diagnostic:
-    rule: Rule
-    level: Level
-    message: Optional[str] = None
-    locations: List[Location] = dataclasses.field(default_factory=list)
-    stacks: List[Stack] = dataclasses.field(default_factory=list)
-    graphs: List[Graph] = dataclasses.field(default_factory=list)
-    additional_message: Optional[str] = None
-    tags: List[Tag] = dataclasses.field(default_factory=list)
-
-    def sarif(self) -> sarif.Result:
-        """Returns the SARIF Result representation of this diagnostic."""
-        message = self.message or self.rule.message_default_template
-        if self.additional_message is not None:
-            message = f"{message}\n{self.additional_message}"
-        sarif_result = sarif.Result(
-            message=sarif.Message(text=message),
-            level=self.level.name.lower(),  # type: ignore[arg-type]
-            rule_id=self.rule.id,
-        )
-        sarif_result.locations = [location.sarif() for location in self.locations]
-        sarif_result.stacks = [stack.sarif() for stack in self.stacks]
-        sarif_result.graphs = [graph.sarif() for graph in self.graphs]
-        sarif_result.properties = sarif.PropertyBag(
-            tags=[tag.value for tag in self.tags]
-        )
-        return sarif_result
-
-    def with_location(self: _Diagnostic, location: Location) -> _Diagnostic:
-        """Adds a location to the diagnostic."""
-        self.locations.append(location)
-        return self
-
-    def with_stack(self: _Diagnostic, stack: Stack) -> _Diagnostic:
-        """Adds a stack to the diagnostic."""
-        self.stacks.append(stack)
-        return self
-
-    def with_graph(self: _Diagnostic, graph: Graph) -> _Diagnostic:
-        """Adds a graph to the diagnostic."""
-        self.graphs.append(graph)
-        return self
-
-    def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
-        """Adds an additional message to the diagnostic."""
-        if self.additional_message is None:
-            self.additional_message = message
-        else:
-            self.additional_message = f"{self.additional_message}\n{message}"
-        return self
-
-    def pretty_print(self, verbose: bool = False, log_level: Level = Level.ERROR):
+    def pretty_print(
+        self,
+        verbose: bool = False,
+    ):
         """Prints the diagnostics in a human-readable format.
 
         Args:
-            verbose: If True, prints all information. E.g. stack frames, graphs, etc.
-                Otherwise, only prints compact information. E.g., rule name and display message.
+            verbose: If True, prints all information. Otherwise, only prints compact
+                information. E.g., graph name and description.
             log_level: The minimum level of diagnostics to print.
         """
-        if self.level.value < log_level.value:
-            return
-        formatter.pretty_print_item_title(f"{self.level.name}: {self.rule.name}")
-        print(self.message)
-
-        if not verbose:
-            print("<Set verbose=True to see more details>\n")
-            return
-
-        for location in self.locations:
-            location.pretty_print()
-        for stack in self.stacks:
-            stack.pretty_print()
-        for graph in self.graphs:
-            graph.pretty_print()
-        print()
+        formatter.pretty_print_title(f"Graph: {self.name}", fill_char="-")
+        print(self.description)
+        if verbose:
+            print(self.graph)
 
 
 @dataclasses.dataclass
@@ -334,6 +301,7 @@ class RuleCollection:
 
 class Invocation:
     # TODO: Implement this.
+    # Tracks top level call arguments and diagnostic options.
     def __init__(self) -> None:
         raise NotImplementedError()
 
@@ -346,105 +314,3 @@ class DiagnosticOptions:
 
     log_verbose: bool = dataclasses.field(default=False)
     log_level: Level = dataclasses.field(default=Level.ERROR)
-
-
-@dataclasses.dataclass
-class DiagnosticContext:
-    name: str
-    version: str
-    options: DiagnosticOptions = dataclasses.field(default_factory=DiagnosticOptions)
-    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
-    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
-    _invocation: Invocation = dataclasses.field(init=False)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        return True
-
-    def sarif(self) -> sarif.Run:
-        """Returns the SARIF Run object."""
-        return sarif.Run(
-            tool=sarif.Tool(
-                driver=sarif.ToolComponent(
-                    name=self.name,
-                    version=self.version,
-                    rules=[diagnostic.rule.sarif() for diagnostic in self.diagnostics],
-                )
-            ),
-            results=[diagnostic.sarif() for diagnostic in self.diagnostics],
-        )
-
-    def add_diagnostic(self, diagnostic: Diagnostic) -> None:
-        """Adds a diagnostic to the context.
-
-        Use this method to add diagnostics that are not created by the context.
-        Args:
-            diagnostic: The diagnostic to add.
-        """
-        if not isinstance(diagnostic, self.diagnostic_type):
-            raise TypeError(
-                f"Expected diagnostic of type {self.diagnostic_type}, got {type(diagnostic)}"
-            )
-        self.diagnostics.append(diagnostic)
-
-    def diagnose(
-        self,
-        rule: Rule,
-        level: Level,
-        message: Optional[str] = None,
-        **kwargs,
-    ) -> Diagnostic:
-        """Creates a diagnostic for the given arguments.
-
-        Args:
-            rule: The rule that triggered the diagnostic.
-            level: The level of the diagnostic.
-            message: The message of the diagnostic.
-            **kwargs: Additional arguments to pass to the Diagnostic constructor.
-
-        Returns:
-            The created diagnostic.
-
-        Raises:
-            ValueError: If the rule is not supported by the tool.
-        """
-        diagnostic = self.diagnostic_type(rule, level, message, **kwargs)
-        self.add_diagnostic(diagnostic)
-        return diagnostic
-
-    def pretty_print(
-        self, verbose: bool = False, log_level: Level = Level.ERROR
-    ) -> None:
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
-            log_level: The minimum level of diagnostics to print.
-        """
-        formatter.pretty_print_title(
-            f"Diagnostic Run {self.name} version {self.version}"
-        )
-        print(f"verbose: {verbose}, log level: {log_level}")
-        diagnostic_stats = {level: 0 for level in Level}
-        for diagnostic in self.diagnostics:
-            diagnostic_stats[diagnostic.level] += 1
-        formatter.pretty_print_title(
-            " ".join(f"{diagnostic_stats[level]} {level.name}" for level in Level)
-        )
-
-        for diagnostic in self.diagnostics:
-            diagnostic.pretty_print(verbose, log_level)
-
-        unprinted_diagnostic_stats = [
-            (level, count)
-            for level, count in diagnostic_stats.items()
-            if count > 0 and level.value < log_level.value
-        ]
-        if unprinted_diagnostic_stats:
-            print(
-                f"{' '.join(f'{count} {level.name}' for level, count in unprinted_diagnostic_stats)} "
-                "were not printed due to the log level."
-            )
-        print()

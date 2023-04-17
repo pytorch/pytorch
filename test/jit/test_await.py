@@ -59,7 +59,7 @@ class TestAwait(JitTestCase):
         self.assertTrue(torch.allclose(script_out, out))
 
     def test_nowait_class(self):
-        class C(object):
+        class C:
             def __init__(self, a: Tensor, b: Tensor):
                 self._a = a
                 self._b = b
@@ -85,7 +85,7 @@ class TestAwait(JitTestCase):
 
     def test_await_class_arg(self):
 
-        class C(object):
+        class C:
             def __init__(self, a: Tensor, b: Tensor):
                 self.__a = a
                 self.__b = b
@@ -113,7 +113,7 @@ class TestAwait(JitTestCase):
         self.assertTrue(torch.allclose(script_out, out))
 
     def test_awaitable_to_await(self):
-        class C(object):
+        class C:
             __slots__ = ["_a", "_b"]
 
             def __init__(self, a: Tensor, b: Tensor):
@@ -144,7 +144,7 @@ class TestAwait(JitTestCase):
 
     def test_await_class_return(self):
 
-        class C(object):
+        class C:
             __slots__ = ["a", "b"]
 
             def __init__(self, a: Tensor, b: Tensor):
@@ -178,7 +178,7 @@ class TestAwait(JitTestCase):
         self.assertGraphContainsExactly(sm.graph, kind='prim::awaitable_wait', num_kind_nodes=1)
 
     def test_await_getattr_implicit_convertion(self):
-        class C(object):
+        class C:
             def __init__(self, a: Tensor, b: Tensor):
                 self._a = a
                 self._b = b
@@ -216,7 +216,7 @@ class TestAwait(JitTestCase):
 
     def test_await_nested(self):
 
-        class C(object):
+        class C:
             def __init__(self, a: Tensor, b: Tensor):
                 self.__a = a
                 self.__b = b
@@ -246,7 +246,7 @@ class TestAwait(JitTestCase):
 
     def test_eager_await_non_scriptable(self):
         # Tree type can not be compiled (Recursive type)
-        class Tree(object):
+        class Tree:
             def __init__(self, v):
                 self.parent = torch.jit.annotate(Optional[Tree], None)
                 self.v = v

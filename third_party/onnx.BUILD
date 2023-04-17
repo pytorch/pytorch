@@ -76,6 +76,8 @@ cc_library(
         "onnx/version_converter/*.h",
         "onnx/common/*.h",
         "onnx/defs/*.h",
+        "onnx/defs/math/*.h",
+        "onnx/defs/reduction/*.h",
         "onnx/defs/tensor/*.h",
         "onnx/shape_inference/*.h",
         "onnx/version_converter/adapters/*.h",

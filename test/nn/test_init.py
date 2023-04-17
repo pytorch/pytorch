@@ -16,7 +16,7 @@ if TEST_SCIPY:
 
 class TestNNInit(TestCase):
     def setUp(self):
-        super(TestNNInit, self).setUp()
+        super().setUp()
         random.seed(123)
 
     def _is_normal(self, tensor, mean, std):

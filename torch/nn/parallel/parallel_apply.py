@@ -9,7 +9,7 @@ def get_a_var(obj):
     if isinstance(obj, torch.Tensor):
         return obj
 
-    if isinstance(obj, list) or isinstance(obj, tuple):
+    if isinstance(obj, (list, tuple)):
         for result in map(get_a_var, obj):
             if isinstance(result, torch.Tensor):
                 return result
@@ -35,7 +35,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     element of :attr:`inputs` can either be a single object as the only argument
     to a module, or a collection of positional arguments.
     """
-    assert len(modules) == len(inputs)
+    assert len(modules) == len(inputs), f'The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}'
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
     else:

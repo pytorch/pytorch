@@ -21,9 +21,7 @@ class SamplingTrain(ModelLayer):
         name='sampling_train',
         **kwargs
     ):
-        super(SamplingTrain, self).__init__(
-            model, name, input_record, **kwargs
-        )
+        super().__init__(model, name, input_record, **kwargs)
 
         layer_class = get_layer_class(prediction_layer)
         assert issubclass(layer_class, SamplingTrainableMixin)

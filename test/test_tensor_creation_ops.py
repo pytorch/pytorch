@@ -14,16 +14,16 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS, parametrize, skipIfTorchDynamo)
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes
+    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
+    float_to_corresponding_complex_type_map
 )
-from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
@@ -953,8 +953,9 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
-    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
+    @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetson, \
+        see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
@@ -1155,7 +1156,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_tensor_from_sequence(self, device):
-        class MockSequence(object):
+        class MockSequence:
             def __init__(self, lst):
                 self.lst = lst
 
@@ -1444,14 +1445,14 @@ class TestTensorCreation(TestCase):
     def test_ctor_with_numpy_array(self, device):
         correct_dtypes = [
             np.double,
-            np.float,
+            float,
             np.float16,
             np.int64,
             np.int32,
             np.int16,
             np.int8,
             np.uint8,
-            np.bool,
+            bool,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
@@ -2503,6 +2504,8 @@ class TestTensorCreation(TestCase):
             torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
             torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Stride calculation overflowed'):
+            torch.empty([0, 4, 2305843009213693952], dtype=torch.float32)
 
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -3663,10 +3666,10 @@ class TestBufferProtocol(TestCase):
             torch.frombuffer(byte_arr, dtype=dtype)
 
     def test_byte_to_int(self):
-        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte)
+        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte) if sys.byteorder == 'little' \
+            else np.array([0, 0, 0, -1, 0, 0, 0, -1], dtype=np.byte)
         tensor = torch.frombuffer(byte_array, dtype=torch.int32)
         self.assertEqual(tensor.numel(), 2)
-        # Assuming little endian machine
         self.assertSequenceEqual(tensor, [255, 255])
 
 # Tests for the `asarray` function:
@@ -3947,6 +3950,13 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dim(), 0)
         self.assertEqual(tensor.item(), scalar.item())
         self.assertEqual(tensor.dtype, torch.float64)
+        # Regression test for https://github.com/pytorch/pytorch/issues/97021
+        zerodim_arr = np.array(1.)
+        tensor = torch.asarray(zerodim_arr, dtype=torch.int32)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), zerodim_arr.item())
+        self.assertEqual(tensor.dtype, torch.int32)
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

@@ -330,7 +330,7 @@ class TestQuantizedOps(TestCase):
             {
                 'quantized_fn': [
                     torch.ao.nn.quantized.functional.hardsigmoid,
-                    torch.nn.quantized.functional.hardsigmoid,
+                    torch.ao.nn.quantized.functional.hardsigmoid,
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
@@ -339,7 +339,7 @@ class TestQuantizedOps(TestCase):
             {
                 'quantized_fn': [
                     torch.ao.nn.quantized.functional.hardsigmoid,
-                    torch.nn.quantized.functional.hardsigmoid,
+                    torch.ao.nn.quantized.functional.hardsigmoid,
                 ],
                 'reference_fn': torch.nn.functional.hardsigmoid,
                 'output_range': (0.0, 1.0),
@@ -661,7 +661,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             'native': torch.threshold,
             'nn.functional': torch.nn.functional.threshold,
-            'nn.quantized.functional': torch.nn.quantized.functional.threshold,
+            'nn.quantized.functional': torch.ao.nn.quantized.functional.threshold,
             'ao.nn.quantized.functional': torch.ao.nn.quantized.functional.threshold,
         }
 
@@ -734,7 +734,7 @@ class TestQuantizedOps(TestCase):
 
             ops_under_test = {
                 'nn.quantized.functional.hardtanh':
-                    torch.nn.quantized.functional.hardtanh,
+                    torch.ao.nn.quantized.functional.hardtanh,
                 'ao.nn.quantized.functional.hardtanh':
                     torch.ao.nn.quantized.functional.hardtanh,
             }
@@ -745,7 +745,7 @@ class TestQuantizedOps(TestCase):
 
             ops_under_test_inplace = {
                 'inplace nn.quantized.functional.hardtanh':
-                    torch.nn.quantized.functional.hardtanh,
+                    torch.ao.nn.quantized.functional.hardtanh,
                 'inplace ao.nn.quantized.functional.hardtanh':
                     torch.ao.nn.quantized.functional.hardtanh,
             }
@@ -1346,7 +1346,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool1d,
             "nn.functional": torch.nn.functional.max_pool1d,
-            "nn.quantized.functional": torch.nn.quantized.functional.max_pool1d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool1d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool1d,
         }
 
@@ -1443,7 +1443,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
         }
 
@@ -1502,7 +1502,7 @@ class TestQuantizedOps(TestCase):
         ops_under_test = {
             "torch": torch.max_pool2d,
             "nn.functional": torch.nn.functional.max_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.max_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.max_pool2d,
         }
 
@@ -1552,7 +1552,7 @@ class TestQuantizedOps(TestCase):
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1614,7 +1614,7 @@ class TestQuantizedOps(TestCase):
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool2d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1669,7 +1669,7 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1732,7 +1732,7 @@ class TestQuantizedOps(TestCase):
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool3d,
-            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool3d,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.avg_pool3d,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -1802,7 +1802,7 @@ class TestQuantizedOps(TestCase):
             ops_under_test = {
                 "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
                 "nn.quantized.functional":
-                    torch.nn.quantized.functional.adaptive_avg_pool2d,
+                    torch.ao.nn.quantized.functional.adaptive_avg_pool2d,
                 "ao.nn.quantized.functional":
                     torch.ao.nn.quantized.functional.adaptive_avg_pool2d,
             }
@@ -1873,7 +1873,7 @@ class TestQuantizedOps(TestCase):
                     "nn.functional":
                         getattr(torch.nn.functional, 'adaptive_avg_pool{}d'.format(dim)),
                     "nn.quantized.functional":
-                        getattr(torch.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim)),
+                        getattr(torch.ao.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim)),
                     "ao.nn.quantized.functional":
                         getattr(torch.ao.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim))
                 }
@@ -1952,7 +1952,7 @@ class TestQuantizedOps(TestCase):
             ops_under_test = {
                 "nn.functional": torch.nn.functional.adaptive_avg_pool3d,
                 "nn.quantized.functional":
-                    torch.nn.quantized.functional.adaptive_avg_pool3d,
+                    torch.ao.nn.quantized.functional.adaptive_avg_pool3d,
                 "ao.nn.quantized.functional":
                     torch.ao.nn.quantized.functional.adaptive_avg_pool3d,
             }
@@ -2100,7 +2100,7 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.interpolate,
-            "nn.quantized.functional": torch.nn.quantized.functional.interpolate,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
@@ -2154,7 +2154,7 @@ class TestQuantizedOps(TestCase):
 
         ops_under_test = {
             "nn.functional": torch.nn.functional.interpolate,
-            "nn.quantized.functional": torch.nn.quantized.functional.interpolate,
+            "nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
             "ao.nn.quantized.functional": torch.ao.nn.quantized.functional.interpolate,
         }
 
@@ -2337,6 +2337,13 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
+    """Tests quantized equal op with input of non-quantized tensor."""
+    def test_quantized_equal(self,):
+        x = torch.rand(1)
+        y = torch.quantize_per_tensor(x, scale=0.5, zero_point=0, dtype=torch.qint8)
+        self.assertTrue(not torch.equal(x, y))
+        self.assertTrue(not torch.equal(y, x))
+
     @skipIfNoFBGEMM
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
@@ -2443,7 +2450,7 @@ class TestQuantizedOps(TestCase):
         affine_list = (True, False)
         combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases_product = itertools.product(*combined)
-        test_cases = list(test_case for test_case in test_cases_product)
+        test_cases = list(test_cases_product)
         # add just one test case to test overflow
         test_cases.append([
             [1, 4, 224, 224, 160],  # shape,
@@ -2831,7 +2838,7 @@ class TestQuantizedOps(TestCase):
                 lstm_prepared = torch.ao.quantization.prepare(lstm)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
-                assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
+                assert type(lstm_prepared[0]) == torch.ao.nn.quantizable.LSTM
 
                 # Calibrate
                 y = lstm_prepared(x)
@@ -2839,7 +2846,7 @@ class TestQuantizedOps(TestCase):
 
                 # Quantize
                 lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
-                assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
+                assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -2861,7 +2868,7 @@ class TestQuantizedOps(TestCase):
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):
             def __init__(self, *args, **kwargs):
-                super(MultiheadAttentionModel, self).__init__()
+                super().__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
             def forward(
@@ -3007,7 +3014,7 @@ class TestDynamicQuantizedOps(TestCase):
         # W_scale = 1.0
         # W_zp = 0
         W_scales = np.ones(output_channels)
-        W_zps = np.zeros(output_channels).astype(np.int)
+        W_zps = np.zeros(output_channels).astype(int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -3571,9 +3578,9 @@ class TestQuantizedLinear(TestCase):
             # xnnpack forces W_zp to 0 when using symmetric quantization
             # ONEDNN only supports symmetric quantization of weight
             if dtype == torch.qint8 or qengine_is_onednn():
-                W_zps = np.zeros(output_channels).astype(np.int)
+                W_zps = np.zeros(output_channels).astype(int)
             else:
-                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
+                W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(int)
             # when using symmetric quantization
             # special restriction for xnnpack fully connected op weight
             # [-127, 127] instead of [-128, 127]

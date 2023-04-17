@@ -117,7 +117,7 @@ def _gen_torch_functional_registered_ops():
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
     ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
-    return set(getattr(torch.functional, name) for name in ops)
+    return {getattr(torch.functional, name) for name in ops}
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
 

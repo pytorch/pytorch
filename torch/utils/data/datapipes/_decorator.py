@@ -8,7 +8,7 @@ from torch.utils.data.datapipes._typing import _DataPipeMeta
 ######################################################
 # Functional API
 ######################################################
-class functional_datapipe(object):
+class functional_datapipe:
     name: str
 
     def __init__(self, name: str, enable_df_api_tracing=False) -> None:
@@ -44,7 +44,7 @@ class functional_datapipe(object):
 _determinism: bool = False
 
 
-class guaranteed_datapipes_determinism(object):
+class guaranteed_datapipes_determinism:
     prev: bool
 
     def __init__(self) -> None:
@@ -60,7 +60,7 @@ class guaranteed_datapipes_determinism(object):
         _determinism = self.prev
 
 
-class non_deterministic(object):
+class non_deterministic:
     cls: Optional[Type[IterDataPipe]] = None
     # TODO: Lambda for picking
     deterministic_fn: Callable[[], bool]
@@ -145,7 +145,7 @@ def argument_validation(f):
 _runtime_validation_enabled: bool = True
 
 
-class runtime_validation_disabled(object):
+class runtime_validation_disabled:
     prev: bool
 
     def __init__(self) -> None:

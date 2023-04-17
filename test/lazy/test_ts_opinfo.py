@@ -34,8 +34,8 @@ def init_lists():
         yaml_ts = yaml.load(f, yaml.Loader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
     HAS_SYMINT_SUFFIX = yaml_ts["symint"]
-    FALLBACK_LIST = set(["clamp"])
-    SKIP_RUNTIME_ERROR_LIST = set([
+    FALLBACK_LIST = {"clamp"}
+    SKIP_RUNTIME_ERROR_LIST = {
         'index_select',  # Empty output_sizes is not supported
         'clone',  # is clone decomposed?
 
@@ -46,19 +46,19 @@ def init_lists():
         'all',  # ASAN failure
         'any',  # ASAN failure
         'logdet',  # ASAN failure
-    ])
-    SKIP_INCORRECT_RESULTS_LIST = set([
+    }
+    SKIP_INCORRECT_RESULTS_LIST = {
         'squeeze',  # Value out of range
         't',  # Value out of range
         'transpose',  # Value out of range
         'bernoulli',  # incorrect results
         'pow',  # incorrect results
         'addcdiv',  # incorrect results (on CI not locally?)
-    ])
+    }
     # The following ops all show up directly in ts_native_functions.yaml,
     # but run functionalized versions of the composite kernels in core.
     # This means that we don't expect the ops to show directly in the LTC metrics.
-    FUNCTIONAL_DECOMPOSE_LIST = set([
+    FUNCTIONAL_DECOMPOSE_LIST = {
         'diag_embed',
         'block_diag',
         'new_empty_strided',
@@ -70,13 +70,13 @@ def init_lists():
         'linalg_inv_ex',
         'linalg_pinv.atol_rtol_tensor',
         'logsumexp',
-    ])
+    }
     # For some ops, we don't support all variants. Here we use formatted_name
     # to uniquely identify the variant.
-    SKIP_VARIANT_LIST = set([
+    SKIP_VARIANT_LIST = {
         'norm_nuc',
         'min_reduction_with_dim'
-    ])
+    }
 
     return (LAZY_OPS_LIST,
             FALLBACK_LIST,

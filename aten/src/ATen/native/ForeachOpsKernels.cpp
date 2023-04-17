@@ -1,3 +1,4 @@
+#include <vector>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
@@ -49,10 +50,12 @@
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
+#include <ATen/ops/_foreach_pow_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/zeros_like_ops.h>
+#include <ATen/ops/pow.h>
 #endif
 
 namespace at { namespace native {
@@ -234,6 +237,7 @@ FOREACH_BINARY_OP_SCALAR(mul);
 FOREACH_BINARY_OP_SCALAR(div);
 FOREACH_BINARY_OP_SCALAR(clamp_min);
 FOREACH_BINARY_OP_SCALAR(clamp_max);
+FOREACH_BINARY_OP_SCALAR(pow);
 
 FOREACH_BINARY_OP_SCALARLIST(add);
 FOREACH_BINARY_OP_SCALARLIST(sub);
@@ -241,11 +245,13 @@ FOREACH_BINARY_OP_SCALARLIST(mul);
 FOREACH_BINARY_OP_SCALARLIST(div);
 FOREACH_BINARY_OP_SCALARLIST(clamp_min);
 FOREACH_BINARY_OP_SCALARLIST(clamp_max);
+FOREACH_BINARY_OP_SCALARLIST(pow);
 
 FOREACH_BINARY_OP_LIST(mul);
 FOREACH_BINARY_OP_LIST(div);
 FOREACH_BINARY_OP_LIST(clamp_min);
 FOREACH_BINARY_OP_LIST(clamp_max);
+FOREACH_BINARY_OP_LIST(pow);
 
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
@@ -317,6 +323,16 @@ std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& o
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
     result.emplace_back(at::linalg_vector_norm(t, ord));
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(const Scalar& self, TensorList exponent) {
+  check_foreach_api_restrictions(exponent);
+  std::vector<Tensor> result;
+  result.reserve(exponent.size());
+  for (const auto & t : exponent) {
+    result.emplace_back(at::pow(self, t));
   }
   return result;
 }

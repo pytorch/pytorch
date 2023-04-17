@@ -783,6 +783,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
+      if (torch::is_symfloat(py::handle(obj))) {
+        // This will induce a guard
+        return true;
+      }
       return false;
     }
     case ParameterType::INT64: {
@@ -793,6 +797,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) &&
             !var.requires_grad() && var.dim() == 0;
+      }
+      if (torch::is_symint(py::handle(obj))) {
+        // This will induce a guard
+        return true;
       }
       return false;
     }
@@ -1577,6 +1585,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   } else if (torch::is_symfloat(py::handle(obj))) {
     save_symint = true;
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
+  } else if (torch::is_symbool(py::handle(obj))) {
+    save_symint = true;
+    scalar = at::Scalar(true);
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
@@ -1637,6 +1648,13 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
 
   if (torch::is_symfloat(arg)) {
     return at::Scalar(py::cast<c10::SymFloat>(arg));
+  }
+
+  if (torch::is_symbool(arg)) {
+    // Windows build fails with C2440: '<function-style-cast>'
+    // when at:Scalar(py::cast<c10::SymBool>(arg))
+    auto sym_bool = py::handle(arg).cast<c10::SymBool>();
+    return at::Scalar(sym_bool);
   }
 
   return at::Scalar(THPUtils_unpackDouble(arg));

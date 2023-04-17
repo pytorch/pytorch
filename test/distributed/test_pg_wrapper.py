@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def setUp(self):
-        super(AbstractProcessGroupWrapperTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def _validate_error(self, exception, op_type, rank, tensor):
@@ -59,6 +59,9 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 self.assertTrue("Long" in err, "Expected Long type")
             else:
                 self.fail(f"Unexpected dtype {str(tensor.dtype)} for error {err}")
+
+            # Ensure sequence number is logged in error
+            self.assertTrue("SequenceNumber" in err)
 
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
@@ -335,9 +338,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
 @requires_gloo()
 class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
-    def setUp(self):
-        super(ProcessGroupGlooWrapperTest, self).setUp()
-
     def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = timeout

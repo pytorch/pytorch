@@ -68,9 +68,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--format", default='csr', type=str)
     parser.add_argument("--m", default='1000', type=int)
-    parser.add_argument("--nnz_ratio", default='0.1', type=float)
+    parser.add_argument("--nnz-ratio", "--nnz_ratio", default='0.1', type=float)
     parser.add_argument("--outfile", default='stdout', type=str)
-    parser.add_argument("--test_count", default='10', type=int)
+    parser.add_argument("--test-count", "--test_count", default='10', type=int)
 
     args = parser.parse_args()
 

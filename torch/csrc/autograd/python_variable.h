@@ -23,11 +23,11 @@ struct THPVariable {
   PyObject* backward_hooks = nullptr;
 };
 
-TORCH_API void registerPythonTensorClass(
+TORCH_PYTHON_API void registerPythonTensorClass(
     const std::string& device,
     PyObject* python_tensor_class);
 
-TORCH_API void activateCUDATrace();
+TORCH_PYTHON_API void activateCUDATrace();
 
 TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
@@ -52,6 +52,11 @@ static inline bool THPVariable_CheckExact(PyObject* obj) {
 inline bool THPVariable_Check(PyObject* obj) {
   if (!THPVariableClass)
     return false;
+
+  // Fast path
+  if (THPVariable_CheckExact(obj)) {
+    return true;
+  }
 
   const auto result = PyObject_IsInstance(obj, THPVariableClass);
   if (result == -1)

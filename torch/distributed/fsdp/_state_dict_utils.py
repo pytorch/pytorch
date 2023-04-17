@@ -1,12 +1,11 @@
 import functools
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
+from typing import Any, Callable, cast, Dict, Iterator, List, no_type_check, Tuple
 
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
-import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,7 +27,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
-    _get_buffer_dtypes,
+    _get_orig_buffer_dtypes,
     _lazy_init,
 )
 from torch.distributed.fsdp.api import FullStateDictConfig, StateDictType
@@ -58,23 +57,25 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
     return module_name
 
 
-def _param_fqns(
+def _param_name_infos(
     module: nn.Module, fsdp_state: _FSDPState
 ) -> Iterator[Tuple[str, str, str]]:
     if not _has_fsdp_params(fsdp_state, module):
         return
     for param_name, module_name in _module_handles(fsdp_state, module)[
         0
-    ].parameter_module_names():
+    ].param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
 
 
-def _shared_param_fqns(module: nn.Module, fsdp_state) -> Iterator[Tuple[str, str, str]]:
+def _shared_param_name_infos(
+    module: nn.Module, fsdp_state
+) -> Iterator[Tuple[str, str, str]]:
     for param_name, module_name in _module_handles(fsdp_state, module)[
         0
-    ].shared_parameter_module_names():
+    ].shared_param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -127,7 +128,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+        _clear_grads_if_needed(fsdp_state._all_handles)
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -196,7 +197,7 @@ def _common_unshard_post_state_dict_hook(
 
     # Loop only the parameters saved in this instance's wrapped module to
     # avoid processing buffers.
-    for fqn, param_name, module_name in _param_fqns(module, fsdp_state):
+    for fqn, param_name, module_name in _param_name_infos(module, fsdp_state):
         fqn = f"{prefix}{fqn}"
         if no_fsdp_return:
             state_dict.pop(fqn)
@@ -240,7 +241,7 @@ def _common_unshard_post_state_dict_hook(
             else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
         if mixed_precision_enabled_for_buffers:
-            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            buffer_dtypes = _get_orig_buffer_dtypes(fsdp_state, buffer_clean_fqns)
             _cast_buffers_to_dtype_and_device(
                 buffers, buffer_dtypes, fsdp_state.compute_device
             )
@@ -386,15 +387,23 @@ def _local_post_state_dict_hook(
     # to get flat_param to get the metadata.
     assert _module_handles(fsdp_state, module), "Should have returned early"
     flat_param = _module_handles(fsdp_state, module)[0].flat_param
-    # Construct a ShardedTensor from the flat_param.
+    # Constructs a ShardedTensor from the flat_param "without" padding.
+    # Removing the padding allows users to change the number of ranks
+    # when loading the local_state_dict.
     full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
     shard_offset = flat_param.numel() * fsdp_state.rank
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
-    if valid_data_size > 0 and flat_param._shard_numel_padded > 0:
-        flat_param = flat_param.narrow(0, 0, valid_data_size)
-    local_shards = [
-        Shard.from_tensor_and_offsets(flat_param, [shard_offset], fsdp_state.rank)
-    ]
+    if valid_data_size > 0:
+        # If FlatParameter is returned, FlatParameter._local_shard cause a
+        # pickling issue (can be torch.save but not torch.load). Since there
+        # is no benefit for state_dict to return the actual FlatParameter class,
+        # a view (which is a tensor) of the FlatParameter will be returned.
+        flat_param = flat_param[:valid_data_size].view(valid_data_size)
+        local_shards = [
+            Shard.from_tensor_and_offsets(flat_param, [shard_offset], fsdp_state.rank)
+        ]
+    else:
+        local_shards = []
     sharded_tensor = init_from_local_shards(
         local_shards, full_numel, process_group=fsdp_state.process_group
     )  # type: ignore[assignment]
@@ -436,20 +445,24 @@ def _local_pre_load_state_dict_hook(
     ), "Tensors in local_state_dict should be ShardedTensor."
 
     # Convert the ShardedTensor to a Tensor.
-    shards = load_tensor.local_shards()
-    assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
-    load_tensor = shards[0].tensor
-
-    # Get the metadata of the flat_param to decide whether to pad the loaded
-    # tensor.
     flat_param = _module_handles(fsdp_state, module)[0].flat_param
     assert flat_param is not None
-    if flat_param._shard_numel_padded not in (0, flat_param.numel()):
-        assert load_tensor.numel() < flat_param.numel(), (
-            f"Local shard size = {flat_param.numel()} and the tensor in "
-            f"the state_dict is {load_tensor.numel()}."
-        )
-        load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
+    valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
+    shards = load_tensor.local_shards()
+    if valid_data_size > 0:
+        assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
+        load_tensor = shards[0].tensor
+
+        # Get the metadata of the flat_param to decide whether to pad the loaded
+        # tensor.
+        if flat_param._shard_numel_padded > 0:
+            assert load_tensor.numel() < flat_param.numel(), (
+                f"Local shard size = {flat_param.numel()} and the tensor in "
+                f"the state_dict is {load_tensor.numel()}."
+            )
+            load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
+    else:
+        load_tensor = flat_param
     state_dict[fqn] = load_tensor
 
 
@@ -536,19 +549,25 @@ def _sharded_pre_load_state_dict_hook(
     if not _has_fsdp_params(fsdp_state, module):
         return
 
-    if not _module_handles(fsdp_state, module)[0].uses_sharded_strategy:
+    handle = _module_handles(fsdp_state, module)[0]
+    if not handle.uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
-            "are flatten and sharded."
+            "are flattened and sharded."
         )
 
-    nonsharded_tensors = []
-    shared_fqns = [fqn for fqn, _, _ in _shared_param_fqns(module, fsdp_state)]
-    loaded_shapes = []
-    for fqn, _, _ in _param_fqns(module, fsdp_state):
-        full_fqn = f"{prefix}{FSDP_PREFIX}{fqn}"
-        param = state_dict.pop(full_fqn)
-        if fqn in shared_fqns:
+    tensors_to_flatten: List[torch.Tensor] = []
+    shared_param_fqns = [
+        fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
+    ]
+    loaded_shapes: List[torch.Size] = []
+    device = fsdp_state.compute_device
+    for fqn, _, _ in _param_name_infos(module, fsdp_state):
+        fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
+        param = state_dict.pop(fqn_from_global_root)
+        if fqn in shared_param_fqns:
+            # This shared parameter does not own the storage, so there is no
+            # need to flatten it into the `FlatParameter`
             continue
         # All-gather the param (ShardedTensor)
         param, shards = _ext_pre_load_state_dict_transform(param)
@@ -570,20 +589,19 @@ def _sharded_pre_load_state_dict_hook(
             if num_padding > 0:
                 local_tensor = F.pad(local_tensor, [0, num_padding])
         else:
-            local_tensor = torch.zeros(chunk_size, dtype=param.dtype).cuda()
+            local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
         tensor = torch.empty(
-            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype
-        ).cuda()
+            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
+        )
         dist.all_gather_into_tensor(
             tensor, local_tensor, group=fsdp_state.process_group
         )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
-        nonsharded_tensors.append(tensor)
+        tensors_to_flatten.append(tensor)
 
     # Create a new flat_param from the loaded, non-sharded tensors.
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
-    loaded_flat_param = FlatParamHandle.flatten_params(
-        nonsharded_tensors, requires_grad=False
+    loaded_flat_param = handle.flatten_tensors_into_flat_param(
+        tensors_to_flatten, handle._aligned_numel, requires_grad=False
     )
 
     # Get the chunk from the loaded flat_param for the local rank.
@@ -592,9 +610,11 @@ def _sharded_pre_load_state_dict_hook(
         fsdp_state.rank,
         fsdp_state.world_size,
     )
+    flat_param = handle.flat_param
     loaded_flat_tensor.to(flat_param.device)
-    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, flat_param._shapes)), (
-        f"The original shapes in FSDP are {flat_param._shapes}. "
+    expected_shapes = [shape for shape in flat_param._shapes if shape is not None]
+    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, expected_shapes)), (
+        f"The original shapes in FSDP are {expected_shapes}. "
         f"The loaded shapes are {loaded_shapes}. "
         f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
     )

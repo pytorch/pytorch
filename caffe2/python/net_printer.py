@@ -15,7 +15,7 @@ from copy import copy
 from itertools import chain
 
 
-class Visitor(object):
+class Visitor:
     @classmethod
     def register(cls, Type):
         if not(hasattr(cls, 'visitors')):
@@ -65,8 +65,10 @@ class Analyzer(Visitor):
         if do_copy:
             ws = copy(ws)
         self.workspace_ctx.append(ws)
-        yield ws
-        del self.workspace_ctx[-1]
+        try:
+            yield ws
+        finally:
+            del self.workspace_ctx[-1]
 
     def define_blob(self, blob):
         self.workspace[blob] += 1
@@ -154,7 +156,7 @@ def analyze(obj):
     Analyzer()(obj)
 
 
-class Text(object):
+class Text:
     def __init__(self):
         self._indent = 0
         self._lines_in_context = [0]
@@ -166,12 +168,14 @@ class Text(object):
             self.add('with %s:' % text)
             self._indent += 4
             self._lines_in_context.append(0)
-        yield
-        if text is not None:
-            if self._lines_in_context[-1] == 0:
-                self.add('pass')
-            self._indent -= 4
-            del self._lines_in_context[-1]
+        try:
+            yield
+        finally:
+            if text is not None:
+                if self._lines_in_context[-1] == 0:
+                    self.add('pass')
+                self._indent -= 4
+                del self._lines_in_context[-1]
 
     def add(self, text):
         self._lines_in_context[-1] += 1

@@ -11,7 +11,7 @@ except ImportError:
     import test_global_declaration
 
 
-class Pair(object):  # noqa: B903
+class Pair:  # noqa: B903
     def __init__(self, x, y):
         self.x = x
         self.y = y

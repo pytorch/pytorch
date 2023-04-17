@@ -18,7 +18,7 @@ import numpy as np
 class BatchHuberLoss(ModelLayer):
 
     def __init__(self, model, input_record, name='batch_huber_loss', delta=1.0, **kwargs):
-        super(BatchHuberLoss, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         assert delta > 0
 

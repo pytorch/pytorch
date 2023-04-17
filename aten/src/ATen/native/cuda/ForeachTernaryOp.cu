@@ -66,6 +66,7 @@ void foreach_tensor_lerp_ternary_cuda_(TensorList tensors1, TensorList tensors2,
                 LerpFunctor<opmath_t>());
         }
   );
+  increment_version(tensors1);
 }
 
 std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(TensorList tensors1, TensorList tensors2, const Scalar& weight) {

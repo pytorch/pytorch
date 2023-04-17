@@ -54,7 +54,7 @@ class TestOptimizer(TestCase):
 
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
                 self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape))
                 self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)))
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
@@ -86,7 +86,7 @@ class TestOptimizer(TestCase):
 
         class BNTestModule(torch.nn.Module):
             def __init__(self):
-                super(BNTestModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
                 self.bn.eps = 0.0023
@@ -167,7 +167,7 @@ class TestOptimizer(TestCase):
 
         class MyMobileOptimizedTagTest(torch.nn.Module):
             def __init__(self):
-                super(MyMobileOptimizedTagTest, self).__init__()
+                super().__init__()
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
                 self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
@@ -184,7 +184,7 @@ class TestOptimizer(TestCase):
 
         class MyPreserveMethodsTest(torch.nn.Module):
             def __init__(self):
-                super(MyPreserveMethodsTest, self).__init__()
+                super().__init__()
                 self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape))
                 self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)))
 
@@ -208,7 +208,7 @@ class TestOptimizer(TestCase):
 
         class OptimizeNoForwardTest(torch.nn.Module):
             def __init__(self):
-                super(OptimizeNoForwardTest, self).__init__()
+                super().__init__()
                 self.l = nn.Linear(10, 100)
                 self.l2 = nn.Linear(100, 1)
                 self.d = nn.Dropout(p=0.2)
@@ -234,7 +234,7 @@ class TestOptimizer(TestCase):
 
         class BNTestNoForwardModule(torch.nn.Module):
             def __init__(self):
-                super(BNTestNoForwardModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
                 self.bn.eps = 0.0023
@@ -273,7 +273,7 @@ class TestOptimizer(TestCase):
 
         class Child(nn.Module):
             def __init__(self):
-                super(Child, self).__init__()
+                super().__init__()
                 self.conv2 = nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
@@ -282,7 +282,7 @@ class TestOptimizer(TestCase):
 
         class Parent(nn.Module):
             def __init__(self):
-                super(Parent, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
@@ -308,7 +308,7 @@ class TestOptimizer(TestCase):
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(4, 4)
                 self.dropout = torch.nn.Dropout(p=0.5)
 
@@ -319,7 +319,7 @@ class TestOptimizer(TestCase):
 
         class MyBNModule(torch.nn.Module):
             def __init__(self):
-                super(MyBNModule, self).__init__()
+                super().__init__()
                 self.bn = torch.nn.BatchNorm2d(4, affine=True)
 
             def forward(self, inputs):
@@ -327,9 +327,6 @@ class TestOptimizer(TestCase):
                 return bn
 
         class MyBundledInputModule(torch.nn.Module):
-            def __init__(self):
-                super(MyBundledInputModule, self).__init__()
-
             def forward(self, inputs):
                 return inputs
 
@@ -359,16 +356,10 @@ class TestOptimizer(TestCase):
     @skipIfNoXNNPACK
     def test_preserve_bundled_inputs_methods(self):
         class MyBundledInputModule(torch.nn.Module):
-            def __init__(self):
-                super(MyBundledInputModule, self).__init__()
-
             def forward(self, inputs):
                 return inputs
 
         class MyIncompleteBundledInputModule(torch.nn.Module):
-            def __init__(self):
-                super(MyIncompleteBundledInputModule, self).__init__()
-
             def forward(self, inputs):
                 return inputs
 
@@ -419,7 +410,7 @@ class TestOptimizer(TestCase):
 
         class Standalone(nn.Module):
             def __init__(self):
-                super(Standalone, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
@@ -440,7 +431,7 @@ class TestOptimizer(TestCase):
 
         class Child(nn.Module):
             def __init__(self):
-                super(Child, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
@@ -449,7 +440,7 @@ class TestOptimizer(TestCase):
 
         class Parent(nn.Module):
             def __init__(self):
-                super(Parent, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.child = Child()
@@ -521,7 +512,7 @@ class TestOptimizer(TestCase):
     def test_clone_module_with_class(self):
         class MyInnerTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyInnerTestModule, self).__init__()
+                super().__init__()
                 self.pqr = torch.Tensor([10., 20., 30.])
 
             def forward(self, inputs):
@@ -533,7 +524,7 @@ class TestOptimizer(TestCase):
 
         class MyTestModule(torch.nn.Module):
             def __init__(self):
-                super(MyTestModule, self).__init__()
+                super().__init__()
                 self.abc = 23
                 self.pqr = torch.Tensor([1., 2., 3.])
                 self.inner = MyInnerTestModule()

@@ -4668,7 +4668,8 @@ gradient(input, *, spacing=1, dim=None, edge_order=1) -> List of Tensors
 
 Estimates the gradient of a function :math:`g : \mathbb{R}^n \rightarrow \mathbb{R}` in
 one or more dimensions using the `second-order accurate central differences method
-<https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_.
+<https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_ and
+either first or second order estimates at the boundaries.
 
 The gradient of :math:`g` is estimated using samples. By default, when :attr:`spacing` is not
 specified, the samples are entirely described by :attr:`input`, and the mapping of input coordinates
@@ -4683,16 +4684,16 @@ The gradient is estimated by estimating each partial derivative of :math:`g` ind
 accurate if :math:`g` is in :math:`C^3` (it has at least 3 continuous derivatives), and the estimation can be
 improved by providing closer samples. Mathematically, the value at each interior point of a partial derivative
 is estimated using `Taylor’s theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
-Letting :math:`x` be an interior point and  :math:`x+h_r` be point neighboring it, the partial gradient at
-:math:`f(x+h_r)` is estimated using:
+Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring
+it to the left and right respectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
 
 .. math::
     \begin{aligned}
-        f(x+h_r) = f(x) + h_r f'(x) + {h_r}^2  \frac{f''(x)}{2} + {h_r}^3 \frac{f'''(x_r)}{6} \\
+        f(x+h_r) = f(x) + h_r f'(x) + {h_r}^2  \frac{f''(x)}{2} + {h_r}^3 \frac{f'''(\xi_1)}{6}, \xi_1 \in (x, x+h_r) \\
+        f(x-h_l) = f(x) - h_l f'(x) + {h_l}^2  \frac{f''(x)}{2} - {h_l}^3 \frac{f'''(\xi_2)}{6}, \xi_2 \in (x, x-h_l) \\
     \end{aligned}
 
-where :math:`x_r` is a number in the interval :math:`[x, x+ h_r]`  and using the fact that :math:`f \in C^3`
-we derive :
+Using the fact that :math:`f \in C^3` and solving the linear system, we derive:
 
 .. math::
     f'(x) \approx \frac{ {h_l}^2 f(x+h_r) - {h_r}^2 f(x-h_l)
@@ -12051,7 +12052,7 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1]``
 can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
 applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
@@ -12348,6 +12349,51 @@ Example::
     (1, 2)
     >>> a.size()
     torch.Size([2, 3])
+""".format(
+        **factory_common_args
+    ),
+)
+
+add_docstr(
+    torch.empty_permuted,
+    r"""
+empty_permuted(size, physical_layout, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+
+Creates an uninitialized, non-overlapping and dense tensor with the
+specified :attr:`size`, with :attr:`physical_layout` specifying how the
+dimensions are physically laid out in memory (each logical dimension is listed
+from outermost to innermost).  :attr:`physical_layout` is a generalization
+of NCHW/NHWC notation: if each dimension is assigned a number according to
+what order they occur in size (N=0, C=1, H=2, W=3), then NCHW is ``(0, 1, 2, 3)``
+while NHWC is ``(0, 2, 3, 1)``.  Equivalently, the strides of the output
+tensor ``t`` are such that ``t.stride(physical_layout[i]) == contiguous_strides[i]``
+(notably, this function is *not* equivalent to ``torch.empty(size).permute(physical_layout)``).
+
+Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
+tensor with no overlaps.  If possible, prefer using this function over
+:func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
+
+Args:
+    size (tuple of int): the shape of the output tensor
+    physical_layout (tuple of int): the ordering of dimensions physically in memory
+
+Keyword args:
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
+
+Examples:
+
+    >>> torch.empty((2, 3, 5, 7)).stride()
+    (105, 35, 7, 1)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 1, 2, 3)).stride()
+    (105, 35, 7, 1)
+    >>> torch.empty((2, 3, 5, 7), memory_format=torch.channels_last).stride()
+    (105, 1, 21, 3)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).stride()
+    (105, 1, 21, 3)
 """.format(
         **factory_common_args
     ),

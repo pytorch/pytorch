@@ -1127,7 +1127,7 @@ user-defined types if they implement the ``__contains__`` method.
 Identity Comparisons
 """"""""""""""""""""
 For all types except ``int``, ``double``, ``bool``, and ``torch.device``, operators ``is`` and ``is not`` test for the object’s identity;
-``x is y`` is ``True`` if and and only if ``x`` and ``y`` are the same object. For all other types, ``is`` is equivalent to
+``x is y`` is ``True`` if and only if ``x`` and ``y`` are the same object. For all other types, ``is`` is equivalent to
 comparing them using ``==``. ``x is not y`` yields the inverse of ``x is y``.
 
 Boolean Operations
@@ -1437,16 +1437,15 @@ For loops on lists: for loops over a ``nn.ModuleList`` will unroll the body of t
 
     class SubModule(torch.nn.Module):
         def __init__(self):
-            super(SubModule, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(2))
 
         def forward(self, input):
             return self.weight + input
 
     class MyModule(torch.nn.Module):
-
         def __init__(self):
-            super(MyModule, self).init()
+            super().__init__()
             self.mods = torch.nn.ModuleList([SubModule() for i in range(10)])
 
         def forward(self, v):

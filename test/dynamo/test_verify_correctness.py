@@ -28,7 +28,7 @@ class Seq(torch.nn.Module):
 
 class Conv_Bn_Relu(torch.nn.Module):
     def __init__(self, in_channels, out_channels, **kwargs):
-        super(Conv_Bn_Relu, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
         self.relu = torch.nn.ReLU()
