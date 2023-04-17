@@ -23,7 +23,6 @@ def aot_autograd(**kwargs):
 
         # TODO: stop monkeypatching here (without even cleaning up, UGH!)
         functorch.compile.config.use_functionalize = True
-        functorch.compile.config.use_fake_tensor = True
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
