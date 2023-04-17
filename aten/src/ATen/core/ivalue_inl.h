@@ -264,6 +264,23 @@ inline c10::SymFloat IValue::toSymFloat() const& {
     return c10::SymFloat(payload.u.as_double);
   }
 }
+inline c10::SymBool IValue::toSymBool() && {
+  AT_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
+  if (isSymBool()) {
+    return c10::SymBool(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymBool(payload.u.as_bool);
+  }
+}
+
+inline c10::SymBool IValue::toSymBool() const& {
+  AT_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
+  if (isSymBool()) {
+    return c10::SymBool(toIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymBool(payload.u.as_bool);
+  }
+}
 
 namespace ivalue {
 
@@ -1714,6 +1731,7 @@ DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
 DEFINE_TO(c10::SymFloat, toSymFloat)
+DEFINE_TO(c10::SymBool, toSymBool)
 
 template <class T>
 struct _fake_type {};

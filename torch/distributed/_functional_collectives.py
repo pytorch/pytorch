@@ -16,6 +16,17 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 """
+The old check `sys.executable == 'torch_deploy'` for torch::deploy was replaced here:
+https://github.com/pytorch/multipy/pull/138/files#diff-dae4e20139ff6af007a16cc6888d0e3c1d40d297cb7aef89d8e6cc201caacb9eR124
+
+The new check is a bit more hackish, but that's all we have for now.
+
+"""
+def _is_running_under_torch_deploy():
+    return torch._meta_registrations is object
+
+
+"""
 New traceable, functional collectives.
 RFC: https://github.com/pytorch/pytorch/issues/93173
 
@@ -464,7 +475,22 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     return res
 
 def all_gather_into_tensor_coalesced(self: List[torch.Tensor], group: RANK_TYPES, tag: str = "") -> List[List[torch.Tensor]]:
+    """
+    Gather a list of tensors across from all machines.
 
+    Note that it currently only supports gather_dim = 0.
+
+    The input tensor is left unmodified.
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
     tag, rankset, group_size = _expand_group(group, tag)
     tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(self, tag, rankset, group_size)  # type: ignore[attr-defined]
 
@@ -480,10 +506,6 @@ def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
         return out_tensor
 
     return [mk_out_tensor(t) for t in self]
-
-
-c10_lib = torch.library.Library("c10d_functional", "DEF")
-c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
 
 # We now register meta kernels to deal with tracing
 def _all_reduce_meta(self, *args):
@@ -525,7 +547,12 @@ def _register_ops():
         c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
 
-if sys.executable != 'torch_deploy':
+if not _is_running_under_torch_deploy():
+    # Library MUST be defined at module scope or it doesn't work
+    # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
+    #   guarded against running inside it
+    c10_lib = torch.library.Library("c10d_functional", "DEF")
+    c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")

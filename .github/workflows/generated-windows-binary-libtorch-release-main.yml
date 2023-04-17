@@ -7,7 +7,7 @@ name: windows-binary-libtorch-release
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - 'ciflow/trunk/*'
   workflow_dispatch:
