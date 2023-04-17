@@ -113,7 +113,7 @@ def find_node(
     """
     nodes = cast(Iterable[fx.Node], graph.nodes)
     if reverse_order:
-        nodes = cast(Iterable[fx.Node], iter(reversed(nodes)))
+        nodes = cast(Iterable[fx.Node], iter(reversed(nodes)))  # type: ignore[call-overload]
     return [node for node in nodes if predicate(node)]
 
 
