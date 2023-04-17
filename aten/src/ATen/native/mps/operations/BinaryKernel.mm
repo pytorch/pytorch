@@ -1,5 +1,15 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/maximum.h>
+#include <ATen/ops/minimum.h>
+#endif
 
 namespace at::native {
 namespace mps {
