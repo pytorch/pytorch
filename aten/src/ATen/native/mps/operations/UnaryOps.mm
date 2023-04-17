@@ -1,7 +1,48 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/acos_native.h>
+#include <ATen/ops/acosh_native.h>
+#include <ATen/ops/asin_native.h>
+#include <ATen/ops/asinh_native.h>
+#include <ATen/ops/atan_native.h>
+#include <ATen/ops/atanh_native.h>
+#include <ATen/ops/ceil_native.h>
+#include <ATen/ops/cos_native.h>
+#include <ATen/ops/cosh_native.h>
+#include <ATen/ops/cumsum_native.h>
+#include <ATen/ops/erf_native.h>
+#include <ATen/ops/exp2_native.h>
+#include <ATen/ops/exp_native.h>
+#include <ATen/ops/expm1_native.h>
+#include <ATen/ops/floor_native.h>
+#include <ATen/ops/frac_native.h>
+#include <ATen/ops/log10_native.h>
+#include <ATen/ops/log1p_native.h>
+#include <ATen/ops/log2_native.h>
+#include <ATen/ops/log_native.h>
+#include <ATen/ops/logit_backward_native.h>
+#include <ATen/ops/neg_native.h>
+#include <ATen/ops/reciprocal_native.h>
+#include <ATen/ops/round_native.h>
+#include <ATen/ops/rsqrt_native.h>
+#include <ATen/ops/sigmoid_native.h>
+#include <ATen/ops/sign_native.h>
+#include <ATen/ops/signbit_native.h>
+#include <ATen/ops/sin_native.h>
+#include <ATen/ops/sinh_native.h>
+#include <ATen/ops/sqrt_native.h>
+#include <ATen/ops/tan_native.h>
+#include <ATen/ops/tanh_native.h>
+#include <ATen/ops/trunc_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -262,8 +303,7 @@ Tensor& logit_out_mps(const Tensor& self, c10::optional<double> eps, Tensor& res
 }
 
 Tensor logit_mps(const Tensor& self, c10::optional<double> eps) {
-  Tensor result =
-      at::native::empty_mps(self.sizes(), ScalarType::Float, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor result = at::empty(self.sizes(), ScalarType::Float, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   logit_mps_impl(self, eps, result, "logit_mps");
   return result;
 }
