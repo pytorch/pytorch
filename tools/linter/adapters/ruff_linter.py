@@ -14,7 +14,6 @@ import time
 from typing import Any, BinaryIO
 
 LINTER_CODE = "RUFF"
-
 IS_WINDOWS: bool = os.name == "nt"
 
 

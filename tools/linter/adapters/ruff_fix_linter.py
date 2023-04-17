@@ -15,6 +15,7 @@ import time
 from typing import Any, BinaryIO
 
 LINTER_CODE = "RUFF-FIX"
+IS_WINDOWS: bool = os.name == "nt"
 
 
 def eprint(*args: Any, **kwargs: Any) -> None:
