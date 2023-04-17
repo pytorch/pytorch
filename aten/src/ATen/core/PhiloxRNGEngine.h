@@ -92,7 +92,6 @@ public:
   C10_HOST_DEVICE inline void set_offset(uint64_t offset) {
     counter_[0] = static_cast<uint32_t>(offset);
     counter_[1] = static_cast<uint32_t>(offset >> 32);
-    STATE = 0;
   }
 
   /**
