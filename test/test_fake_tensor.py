@@ -826,6 +826,19 @@ class FakeTensorOperatorInvariants(TestCase):
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
 
+    def test_cross_entropy_loss(self):
+        inp = torch.randn(3, 5)
+        target = torch.randint(5, (3,), dtype=torch.long)
+        fn = torch.nn.functional.cross_entropy
+        ref = fn(inp, target)
+        with FakeTensorMode() as m:
+            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in (inp, target)]
+
+            meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
+
+        self.assertEqual(ref.size(), meta_out.size())
+
+
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
