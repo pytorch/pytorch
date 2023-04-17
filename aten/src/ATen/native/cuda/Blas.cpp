@@ -149,7 +149,7 @@ static bool getDisableAddmmCudaLt() {
 uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
+  uintptr_t address = reinterpret_cast<uintptr_t>(t.const_data_ptr());
   for (; alignment < 4; alignment *= 2) {
     if (address % (alignment * 2)) {
       return alignment;
@@ -305,7 +305,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               mat1_ld,
               mat2_->data_ptr<scalar_t>(),
               mat2_ld,
-              self.data_ptr<scalar_t>(),
+              self.const_data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
 #if 0
@@ -333,9 +333,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           using opmath_t = at::opmath_type<scalar_t>;
           opmath_t alpha_val = alpha.to<opmath_t>();
           opmath_t beta_val = beta.to<opmath_t>();
-          scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-          scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-          scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+          const scalar_t* mat1_ptr = mat1_->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = mat2_->const_data_ptr<scalar_t>();
+          scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
               transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
@@ -428,9 +428,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     using opmath_t = at::opmath_type<scalar_t>;
     opmath_t alpha_val = alpha.to<opmath_t>();
     opmath_t beta_val = beta.to<opmath_t>();
-    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+    const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+    const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
     at::cuda::blas::bgemm<scalar_t>(
       transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
       transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
@@ -560,11 +560,11 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::cuda::blas::dot<scalar_t>(
             handle,
             n,
-            self.data_ptr<scalar_t>(),
+            self.const_data_ptr<scalar_t>(),
             incx,
-            other.data_ptr<scalar_t>(),
+            other.const_data_ptr<scalar_t>(),
             incy,
-            result.data_ptr<scalar_t>());
+            result.mutable_data_ptr<scalar_t>());
 
         return result;
       });
@@ -609,11 +609,11 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     at::cuda::blas::vdot<scalar_t>(
         handle,
         n,
-        self.data_ptr<scalar_t>(),
+        self.const_data_ptr<scalar_t>(),
         incx,
-        other.data_ptr<scalar_t>(),
+        other.const_data_ptr<scalar_t>(),
         incy,
-        result.data_ptr<scalar_t>());
+        result.mutable_data_ptr<scalar_t>());
 
     return result;
   });
@@ -653,19 +653,19 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
         auto alpha = alpha_.to<scalar_t>();
         if (mat.stride(0) == 1 && mat.stride(1) >= std::max<int64_t>(1, mat.size(0))) {
           at::cuda::blas::gemv<scalar_t>('n',
-            mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.data_ptr<scalar_t>(),
-            vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+            mat.size(0), mat.size(1), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.const_data_ptr<scalar_t>(),
+            vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else if (mat.stride(1) == 1 && mat.stride(0) >= std::max<int64_t>(1, mat.size(1))) {
           at::cuda::blas::gemv<scalar_t>('t',
-            mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
-            vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+            mat.size(1), mat.size(0), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(0),
+            vec_contiguous.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else {
           Tensor cmat = mat.contiguous();
           at::cuda::blas::gemv<scalar_t>('t',
-              mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
-              vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+              mat.size(1), mat.size(0), alpha, cmat.const_data_ptr<scalar_t>(), cmat.stride(0),
+              vec_contiguous.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
       });
     }
