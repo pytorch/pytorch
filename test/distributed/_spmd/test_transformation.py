@@ -244,7 +244,7 @@ class TransformationTest(DTensorTestBase):
             comm_fusion_with_concat(gm, 100)
             schedule_comm_wait(gm)
             remove_copy_from_optimizer(gm)
-            iter_move_grads_and_optimizers(gm, "all_reduce_default_3", "relu_2")
+            iter_move_grads_and_optimizers(gm, "all_reduce_default_1", "relu")
             gm.freeze_cross_iter_movement()
             return gm
 
