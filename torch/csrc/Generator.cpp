@@ -87,7 +87,7 @@ static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
   auto& gen = ((THPGenerator*)_self)->cdata;
 
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen.mutex());
+  std::scoped_lock<std::mutex> lock(gen.mutex());
   auto state_tensor = gen.get_state();
 
   return THPVariable_Wrap(std::move(state_tensor));
@@ -108,7 +108,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);
 
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen.mutex());
+  std::scoped_lock<std::mutex> lock(gen.mutex());
   gen.set_state(new_state_tensor);
 
   Py_INCREF(self);
@@ -148,7 +148,7 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
       THPUtils_typename(seed));
   uint64_t unsigned_seed = unpack_uint64(seed);
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(generator.mutex());
+  std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_current_seed(unsigned_seed);
   Py_INCREF(self);
   return (PyObject*)self;
@@ -166,7 +166,7 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
       THPUtils_typename(offset));
   uint64_t unsigned_offset = unpack_uint64(offset);
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(generator.mutex());
+  std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_offset(unsigned_offset);
   Py_INCREF(self);
   return (PyObject*)self;
@@ -177,7 +177,7 @@ static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
   auto self = (THPGenerator*)_self;
-  std::lock_guard<std::mutex> lock(self->cdata.mutex());
+  std::scoped_lock<std::mutex> lock(self->cdata.mutex());
   uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
