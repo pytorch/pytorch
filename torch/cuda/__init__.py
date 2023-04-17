@@ -1156,8 +1156,6 @@ __all__ = [
     'IntStorage', 'IntTensor',
     'LongStorage', 'LongTensor',
     'ShortStorage', 'ShortTensor',
-    # offset function
-    '_get_rng_state_offset', '_set_rng_state_offset',
     'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError', 'Stream',
     'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
     'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream',

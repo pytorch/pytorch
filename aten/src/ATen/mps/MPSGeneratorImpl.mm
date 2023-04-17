@@ -29,23 +29,20 @@ MPSGeneratorImpl::MPSGeneratorImpl(uint64_t seed_in)
 
 void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   data_.seed = seed;
-  data_.offset = 0;
   data_.state.fill(1);
   // the two last state values are the Philox keys
   // TODO: make "key" in PhiloxRNGEngine.h public so we don't duplicate code here
   data_.state[5] = static_cast<uint32_t>(seed);
   data_.state[6] = static_cast<uint32_t>(seed >> 32);
   engine_.reset_state(seed);
-  engine_.set_offset(0);
 }
 
 void MPSGeneratorImpl::set_offset(uint64_t offset) {
-  data_.offset = offset;
   engine_.set_offset(offset);
 }
 
 uint64_t MPSGeneratorImpl::get_offset() const {
-  return data_.offset;
+  return engine_.get_offset();
 }
 
 uint64_t MPSGeneratorImpl::current_seed() const {
@@ -77,7 +74,7 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
       {(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
-  auto current_offset = this->data_.offset;
+  auto current_offset = this->get_offset();
   memcpy(rng_state, this->data_.state.data(), states_size);
   memcpy(rng_state + states_size, &current_seed, seed_size);
   memcpy(rng_state + states_size + offset_size, &current_offset, offset_size);
