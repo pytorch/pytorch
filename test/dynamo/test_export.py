@@ -1703,14 +1703,25 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(pred, true_fn, false_fn, [x, y])
 
-        for Module in [ModuleAccidentallyPassingError, ModuleNoAccidentError, ModuleClosureReproError]:
+        for Module in [
+            ModuleAccidentallyPassingError,
+            ModuleNoAccidentError,
+            ModuleClosureReproError,
+        ]:
             mod = Module()
             x = torch.randn([3, 3])
             pred = torch.tensor(x[0][0].item() < 0)
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Cannot inline.*closes over"):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                "Cannot inline nested function.*because it closes over variables"
+            ):
                 torch._dynamo.export(mod.forward, pred, x)
 
-        for Module in [ModuleAccidentallyPassingFixed, ModuleNoAccidentFixed, ModuleClosureReproFixed]:
+        for Module in [
+            ModuleAccidentallyPassingFixed,
+            ModuleNoAccidentFixed,
+            ModuleClosureReproFixed,
+        ]:
             mod = Module()
             x = torch.randn([3, 3])
             pred = torch.tensor(x[0][0].item() < 0)

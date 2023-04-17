@@ -42,7 +42,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented, Unsupported
+from .exc import BackendCompilerFailed, unimplemented, Unsupported, UserError, UserErrorType
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -2031,15 +2031,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
         if isinstance(func, NestedUserFunctionVariable) and func.closure is not None:
-            cvs = [cv.name for cv in func.closure.items if isinstance(cv, ClosureVariable) and cv.name != "self"]
-            if cvs:
+            # closure vars other than 'self' are not in scope of generated code, so error early
+            # TODO(avik): these should be supported eventually
+            closure_vars = [
+                var.name
+                for var in func.closure.items
+                if isinstance(var, ClosureVariable) and var.name != "self"]
+            if closure_vars:
                 code = func.get_code()
-                unimplemented(
+                UserError(
+                    UserErrorType.ANTI_PATTERN,
                     f"Cannot inline nested function '{code.co_name}' at {code.co_filename}:{code.co_firstlineno} "
-                    f"because it closes over variables {cvs}. "
-                    f"Please rewrite '{code.co_name}' to take {cvs} as additional arguments."
+                    f"because it closes over variables {closure_vars}. "
+                    f"Please rewrite '{code.co_name}' to take {closure_vars} as additional arguments."
                 )
-
 
     @staticmethod
     def inline_call_(
