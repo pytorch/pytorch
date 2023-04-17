@@ -321,7 +321,7 @@ def write_record_to_file(filename, exec_record):
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error(f"Unable to write execution record {filename}", exc_info=1)
+        log.error("Unable to write execution record %s", filename, exc_info=1)
 
 
 def count_calls(g: fx.Graph):
@@ -1170,7 +1170,13 @@ def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
     """
-    from .exc import TorchRuntimeError, unimplemented, Unsupported
+    from .exc import (
+        TorchRuntimeError,
+        unimplemented,
+        Unsupported,
+        UserError,
+        UserErrorType,
+    )
 
     op = node.op
 
@@ -1187,6 +1193,10 @@ def get_fake_value(node, tx):
     kwargs = tree_map(fake_wrapper, kwargs)
 
     nnmodule = None
+    if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
+        # If the first argument is nn.Module, should copy to fake mode.
+        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
@@ -1231,6 +1241,8 @@ def get_fake_value(node, tx):
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
             unimplemented("guard on data-dependent symbolic int/float")
+        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError() from e
 
 
@@ -1382,6 +1394,7 @@ class TensorStaticReason(enum.Enum):
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
+    NN_MODULE_PROPERTY = 5
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
@@ -1391,11 +1404,13 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
         return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
+    if reason == TensorStaticReason.NN_MODULE_PROPERTY:
+        return "tensor is static because it is nn module associated."
     raise AssertionError(f"Illegal reason {reason}")
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool, guard_source: "GuardSource"
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -1414,12 +1429,34 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
+    if guard_source.is_nn_module():
+        return True, TensorStaticReason.NN_MODULE_PROPERTY
     return False, None
 
 
-def format_graph_code(name, gm):
-    return _format_graph_code(
-        name, gm.forward.__code__.co_filename, gm.print_readable(print_output=False)
+class LazyString:
+    def __init__(self, func, *args, **kwargs):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return self.func(*self.args, **self.kwargs)
+
+
+def lazy_format_graph_code(name, gm, maybe_id=None):
+    def format_name():
+        if maybe_id is not None:
+            return f"{name} {maybe_id}"
+        else:
+            return name
+
+    return LazyString(
+        lambda: _format_graph_code(
+            f"===== {format_name()} =====\n",
+            gm.forward.__code__.co_filename,
+            gm.print_readable(print_output=False),
+        )
     )
 
 
@@ -1427,20 +1464,25 @@ def _format_graph_code(name, filename, graph_str):
     return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
 
 
-def format_graph_tabular(fn_name, gm):
-    try:
-        from tabulate import tabulate  # TODO: Check that this is installed
-    except ImportError:
-        return (
-            "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-            + format_graph_code(fn_name, gm)
-        )
+def lazy_format_graph_tabular(fn_name, gm):
+    def inner():
+        try:
+            from tabulate import tabulate  # TODO: Check that this is installed
+        except ImportError:
+            return (
+                "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+                + format_graph_code(fn_name, gm)
+            )
 
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes]
-    graph_str = tabulate(
-        node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
-    )
-    return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+        node_specs = [
+            [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
+        ]
+        graph_str = tabulate(
+            node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+        )
+        return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+    return LazyString(inner)
 
 
 def format_bytecode(prefix, name, filename, line_no, code):

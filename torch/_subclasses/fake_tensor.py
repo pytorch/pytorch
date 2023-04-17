@@ -15,6 +15,7 @@ from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
 )
@@ -428,6 +429,8 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symint()
+    elif is_boolean_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
 
@@ -950,10 +953,8 @@ class FakeTensor(torch.Tensor):
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
-                if fake_mode is None:
-                    fake_mode = arg.fake_mode
-                else:
-                    assert fake_mode is arg.fake_mode, "Mixing modes NYI"
+                fake_mode = arg.fake_mode
+                break
 
         assert fake_mode is not None
         with fake_mode:  # type: ignore[attr-defined]
@@ -1157,9 +1158,13 @@ class FakeTensorMode(TorchDispatchMode):
 
             return converter(self, args[0])
 
-        args, kwargs = self.validate_and_convert_non_fake_tensors(
-            func, converter, args, kwargs
-        )
+        # Recompute flat_arg_fake_tensors here again in case some of the inputs
+        # were real tensors and fakified in validate_and_convert_non_fake_tensors
+        (
+            args,
+            kwargs,
+            flat_arg_fake_tensors,
+        ) = self.validate_and_convert_non_fake_tensors(func, converter, args, kwargs)
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -1294,9 +1299,12 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
+        Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
+        flat_arg_fake_tensors = []
 
         def validate(x):
+            nonlocal flat_arg_fake_tensors
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
@@ -1308,14 +1316,19 @@ class FakeTensorMode(TorchDispatchMode):
                         f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
                     )
 
-                return converter(self, x)
+                x = converter(self, x)
+            else:
+                assert x.fake_mode is self, "Mixing fake modes NYI"
+
+            flat_arg_fake_tensors.append(x)
             return x
 
-        return tree_map_only(
+        args, kwargs = tree_map_only(
             torch.Tensor,
             validate,
             (args, kwargs),
         )
+        return args, kwargs, flat_arg_fake_tensors
 
     def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
         wrap = self.gen_wrap_fn(func, args, kwargs)

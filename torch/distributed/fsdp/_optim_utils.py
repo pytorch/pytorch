@@ -482,6 +482,10 @@ def _flatten_optim_state(
             for unflat_param_state in unflat_param_states
         ]
         non_none_state_values = [v for v in state_values if v is not None]
+        # If all ranks have None, this is a None value
+        if not non_none_state_values:
+            flat_state[state_name] = None
+            continue
         are_pos_dim_tensors = are_zero_dim_tensors = are_non_tensors = True
         for v in non_none_state_values:
             are_pos_dim_tensors &= torch.is_tensor(v) and v.dim() > 0
@@ -1603,7 +1607,7 @@ def _all_gather_optim_state(
                     value.shape, value.dtype
                 )
         else:
-            processed_state.non_tensors = value
+            processed_state.non_tensors[state_name] = value
     object_list: List[StateInfo] = [
         processed_state for _ in range(fsdp_state.world_size)
     ]
