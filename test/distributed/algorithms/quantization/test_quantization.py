@@ -309,7 +309,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
     old_classname = DistQuantizationTests.__name__
     classname_with_backend = f"{old_classname}{BACKEND.upper()}"
     DistQuantizationTests.__name__ = classname_with_backend
-    globals()[classname_with_backend] = globals()[DistQuantizationTests.__name__]
+    globals()[classname_with_backend] = globals()[old_classname]
     del globals()[old_classname]
 
 

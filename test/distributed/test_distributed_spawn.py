@@ -38,7 +38,7 @@ if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
     old_classname = TestDistBackendWithSpawn.__name__
     classname_with_backend = f"{old_classname}{BACKEND.upper()}"
     TestDistBackendWithSpawn.__name__ = classname_with_backend
-    globals()[classname_with_backend] = globals()[TestDistBackendWithSpawn.__name__]
+    globals()[classname_with_backend] = globals()[old_classname]
     del globals()[old_classname]
 
 if __name__ == "__main__":
