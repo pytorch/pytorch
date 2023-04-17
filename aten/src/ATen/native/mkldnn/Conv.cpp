@@ -559,7 +559,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
       !alpha.has_value() || alpha.value().to<float>() == 1.0,
       "mkldnn_convolution_pointwise_binary: the alpha value for the binary op should be none(meaning 1.0) or 1.0");
   TORCH_CHECK(
-      !unary_attr.has_value() || unary_attr.value() == "relu",
+      !unary_attr.has_value() || unary_attr.value() == "none" || unary_attr.value() == "relu",
       "mkldnn_convolution_pointwise_binary: only support none or relu unary op fusion after binary op");
 
   c10::MaybeOwned<Tensor> bias_maybe_owned =
@@ -587,7 +587,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   if (can_be_fused) {
     ideep::tensor y = itensor_from_tensor(other_t);
     ideep::attr_t op_attr;
-    if (unary_attr.has_value()) {
+    if (unary_attr.has_value() && unary_attr.value() != "none") {
       op_attr = ideep::attr_t::residual();
     } else {
       op_attr = ideep::attr_t::fuse_sum();
