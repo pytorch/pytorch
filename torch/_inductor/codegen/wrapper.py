@@ -751,7 +751,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 '''
                 void assert_size_stride(at::Tensor tensor, std::vector<int64_t> size, std::vector<int64_t> stride) {
                     int64_t ndim = tensor.ndimension();
-                    if (size.size() != ndim || stride.size() != ndim) {
+                    if (static_cast<int64_t>(size.size()) != ndim || static_cast<int64_t>(stride.size()) != ndim) {
                         TORCH_CHECK(false, "wrong number of dimensions");
                     }
                     for (auto i : c10::irange(ndim)) {
