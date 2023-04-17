@@ -1130,7 +1130,6 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
     // `self_` having an incompatible stride without copying.
     // If value has a batch dim, we do for-loop as well because
     // index_fill_ supports 1-element tensor only.
-    value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
     for (const auto i : c10::irange(0, batch_size)) {
       const auto& self_slice = self_.select(0, i);
       const auto& index_slice = index_.select(0, i);
