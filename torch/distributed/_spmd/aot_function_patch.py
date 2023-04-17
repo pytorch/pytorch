@@ -4,11 +4,11 @@ from typing import Callable, Dict, Optional, Tuple
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import (
     AOT_COUNTER,
-    KNOWN_TYPES,
     AOTConfig,
-    PytreeThunk,
     create_aot_dispatcher_function,
     default_partition,
+    KNOWN_TYPES,
+    PytreeThunk,
 )
 
 
@@ -162,9 +162,7 @@ def patched_aot_function(
                 return flat_out
 
             compile_flat_args = (
-                pre_compile_fn(flat_args)
-                if pre_compile_fn is not None
-                else flat_args
+                pre_compile_fn(flat_args) if pre_compile_fn is not None else flat_args
             )
 
             compiled_fn = create_aot_dispatcher_function(

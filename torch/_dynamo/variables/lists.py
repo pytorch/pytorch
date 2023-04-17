@@ -53,7 +53,13 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
+
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -67,7 +73,7 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
@@ -208,7 +214,7 @@ class ListVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", len(self.items))]
+        return [create_instruction("BUILD_LIST", arg=len(self.items))]
 
     def call_method(
         self,
@@ -299,7 +305,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", len(self.items))]
+        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
 
     def call_method(
         self,
@@ -374,7 +380,7 @@ class SizeVariable(TupleVariable):
         codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
         return build_torch_size
 
@@ -432,7 +438,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
         return [
-            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
@@ -479,7 +485,7 @@ class SliceVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", len(self.items))]
+        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -523,6 +529,10 @@ class ListIteratorVariable(VariableTracker):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         return [
-            create_instruction("BUILD_TUPLE", len(remaining_items)),
+            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
             create_instruction("GET_ITER"),
         ]
+
+
+class TupleIteratorVariable(ListIteratorVariable):
+    pass

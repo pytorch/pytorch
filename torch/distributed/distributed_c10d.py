@@ -204,7 +204,7 @@ class Backend:
 
     def __new__(cls, name: str):
         if not isinstance(name, str):
-            raise ValueError("Backend name must be a string, but got: {}".format(name))
+            raise ValueError(f"Backend name must be a string, but got: {name}")
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
         if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
@@ -342,7 +342,7 @@ class _World:
     Container class for c10d process group state.
     This is used during registration and lookup of PG state.
 
-    .. warning:: This is an experimental API inteded to expose the inner workings
+    .. warning:: This is an experimental API intended to expose the inner workings
        of c10d and is subject to change..
     """
     def __init__(self):
@@ -468,50 +468,50 @@ def _get_pg_device(group: ProcessGroup):
     return torch.device("cpu")
 
 
-def _store_based_barrier(rank, store, timeout):
+def _store_based_barrier(rank, store, timeout, logging_interval=timedelta(seconds=10)):
     """
     Barrier based on store which is used for synchronizing processes after
     ``init_process_group`` or ``new_group``. Intended to be used only with
     those two methods and is not a generic alternative to ``barrier()``.
     """
-    store_key = "{}:{}".format(STORE_BASED_BARRIER_PREFIX, _world.group_count)
+    store_key = f"{STORE_BASED_BARRIER_PREFIX}:{_world.group_count}"
     store.add(store_key, 1)
-    logger.info("Added key: {} to store for rank: {}".format(store_key, rank))
+    logger.info("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
     world_size = get_world_size()
-    # Use 'add' instead of 'get' since for some store implementations 'add'
-    # doesn't work well with 'get'. Ideally the store implementations should
-    # be fixed, but for backward compatibility reasons it is risky to change
-    # the store implementations. Once, we completely migrate away from these
-    # legacy stores, we can use 'get' here instead.
     worker_count = store.add(store_key, 0)
-    start = time.time()
-    log_time = time.time()
-    while worker_count != world_size:
-        time.sleep(0.01)
-        worker_count = store.add(store_key, 0)
 
-        # Print status periodically to keep track.
-        if timedelta(seconds=(time.time() - log_time)) > timedelta(seconds=10):
+    last_worker_key = f"{store_key}:last_worker"
+    if worker_count == world_size:
+        store.set(last_worker_key, "1")
+
+    start = time.time()
+    while True:
+        try:
+            # This will throw an exception after the logging_interval in which we print out
+            # the status of the group or time out officially, throwing runtime error
+            store.wait([last_worker_key], logging_interval)
+            break
+        except RuntimeError as e:
+            worker_count = store.add(store_key, 0)
+            # Print status periodically to keep track.
             logger.info(
                 "Waiting in store based barrier to initialize process group for "
-                "rank: {}, key: {} (world_size={}, worker_count={}, timeout={})".format(
-                    rank, store_key, world_size, worker_count, timeout
-                )
+                "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s)",
+                rank, store_key, world_size, worker_count, timeout
             )
-            log_time = time.time()
 
-        if timedelta(seconds=(time.time() - start)) > timeout:
-            raise RuntimeError(
-                "Timed out initializing process group in store based barrier on "
-                "rank: {}, for key: {} (world_size={}, worker_count={}, timeout={})".format(
-                    rank, store_key, world_size, worker_count, timeout
+            if timedelta(seconds=(time.time() - start)) > timeout:
+                raise RuntimeError(
+                    "Timed out initializing process group in store based barrier on "
+                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
+                        rank, store_key, world_size, worker_count, timeout
+                    )
                 )
-            )
 
     logger.info(
-        f"Rank {rank}: Completed store-based barrier for key:{store_key} with {world_size} nodes."
+        "Rank %s: Completed store-based barrier for key:%s with %s nodes.", rank, store_key, world_size
     )
 
 
@@ -1043,6 +1043,9 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
+            # create new process group with accurate rank and size
+            if pg.rank() == -1 and pg.size() == -1:
+                pg = ProcessGroup(backend_prefix_store, backend_class.rank(), backend_class.size(), base_pg_options)
         elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
@@ -1097,7 +1100,7 @@ def _new_process_group_helper(
         # Set sequence numbers for gloo and nccl backends.
         if backend_str in [Backend.GLOO, Backend.NCCL]:
             backend_class._set_sequence_number_for_group()
-        # If the type is a sublcass of ProcessGroup then return this process group immediately
+        # If the type is a subclass of ProcessGroup then return this process group immediately
         # TODO: This defaults to the old behavior for PythonProcessGroups which overwrites the
         # ProcessGroup instance
         if issubclass(type(backend_class), ProcessGroup):
@@ -2062,6 +2065,11 @@ def all_gather_object(object_list, obj, group=None):
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`all_gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`all_gather` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2149,6 +2157,11 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`gather_object` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`gather` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -2257,6 +2270,11 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
 
+    .. warning::
+        Calling :func:`broadcast_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`broadcast` instead.
+
     Example::
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
@@ -2352,6 +2370,11 @@ def scatter_object_list(
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    .. warning::
+        Calling :func:`scatter_object_list` with GPU tensors is not well supported
+        and inefficient as it incurs GPU -> CPU transfer since tensors would be
+        pickled. Please consider using :func:`scatter` instead.
 
     Example::
         >>> # xdoctest: +SKIP("need process group init")
@@ -3353,8 +3376,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     if device_ids is not None:
         if get_backend(group) != Backend.NCCL:
             raise RuntimeError(
-                "Function argument device_ids not supported "
-                "for the selected backend {}".format(get_backend(group))
+                f"Function argument device_ids not supported for the selected backend {get_backend(group)}"
             )
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
@@ -3716,7 +3738,8 @@ def new_subgroups(
         if rank in ranks_in_subgroup:
             cur_subgroup = subgroup
             logger.info(
-                "Rank {} is assigned to subgroup {}".format(rank, ranks_in_subgroup)
+                "Rank %s is assigned to subgroup %s",
+                rank, ranks_in_subgroup
             )
 
     return cur_subgroup, subgroups
@@ -3821,14 +3844,12 @@ def new_subgroups_by_enumeration(
         for rank in ranks:
             if rank in rank_to_ranks_dict:
                 raise ValueError(
-                    "Rank {} has appeared in both subgroup {} and {}".format(
-                        rank, rank_to_ranks_dict[rank], ranks
-                    )
+                    f"Rank {rank} has appeared in both subgroup {rank_to_ranks_dict[rank]} and {ranks}"
                 )
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank %s is assigned to subgroup %s", rank, ranks)
 
     return cur_subgroup, subgroups
 

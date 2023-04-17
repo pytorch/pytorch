@@ -7,7 +7,6 @@ import platform
 import stat
 import subprocess
 import sys
-import textwrap
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -69,7 +68,7 @@ def check(binary_path: Path, reference_hash: str) -> bool:
     If there is hash difference, delete the actual binary.
     """
     if not binary_path.exists():
-        logging.info(f"{binary_path} does not exist.")
+        logging.info("%s does not exist.", binary_path)
         return False
 
     existing_binary_hash = compute_file_sha256(str(binary_path))
@@ -77,16 +76,17 @@ def check(binary_path: Path, reference_hash: str) -> bool:
         return True
 
     logging.warning(
-        textwrap.dedent(
-            f"""\
-            Found binary hash does not match reference!
+        """\
+Found binary hash does not match reference!
 
-            Found hash: {existing_binary_hash}
-            Reference hash: {reference_hash}
+Found hash: %s
+Reference hash: %s
 
-            Deleting {binary_path} just to be safe.
-            """
-        )
+Deleting %s just to be safe.
+""",
+        existing_binary_hash,
+        reference_hash,
+        binary_path,
     )
     if DRY_RUN:
         logging.critical(
@@ -97,7 +97,7 @@ def check(binary_path: Path, reference_hash: str) -> bool:
     try:
         binary_path.unlink()
     except OSError as e:
-        logging.critical(f"Failed to delete binary: {e}")
+        logging.critical("Failed to delete binary: %s", e)
         logging.critical(
             "Delete this binary as soon as possible and do not execute it!"
         )
@@ -118,14 +118,14 @@ def download(
     # First check if we need to do anything
     binary_path = Path(output_dir, name)
     if check(binary_path, reference_bin_hash):
-        logging.info(f"Correct binary already exists at {binary_path}. Exiting.")
+        logging.info("Correct binary already exists at %s. Exiting.", binary_path)
         return True
 
     # Create the output folder
     binary_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Download the binary
-    logging.info(f"Downloading {url} to {binary_path}")
+    logging.info("Downloading %s to %s", url, binary_path)
 
     if DRY_RUN:
         logging.info("Exiting as there is nothing left to do in dry run mode")
@@ -137,19 +137,19 @@ def download(
         reporthook=report_download_progress if sys.stdout.isatty() else None,
     )
 
-    logging.info(f"Downloaded {name} successfully.")
+    logging.info("Downloaded %s successfully.", name)
 
     # Check the downloaded binary
     if not check(binary_path, reference_bin_hash):
-        logging.critical(f"Downloaded binary {name} failed its hash check")
+        logging.critical("Downloaded binary %s failed its hash check", name)
         return False
 
-    # Ensure that exeuctable bits are set
+    # Ensure that executable bits are set
     mode = os.stat(binary_path).st_mode
     mode |= stat.S_IXUSR
     os.chmod(binary_path, mode)
 
-    logging.info(f"Using {name} located at {binary_path}")
+    logging.info("Using %s located at %s", name, binary_path)
     return True
 
 
@@ -204,7 +204,7 @@ if __name__ == "__main__":
     host_platform = HOST_PLATFORM if HOST_PLATFORM in config else HOST_PLATFORM_ARCH
     # If the host platform is not in platform_to_hash, it is unsupported.
     if host_platform not in config:
-        logging.error(f"Unsupported platform: {HOST_PLATFORM}/{HOST_PLATFORM_ARCH}")
+        logging.error("Unsupported platform: %s/%s", HOST_PLATFORM, HOST_PLATFORM_ARCH)
         exit(1)
 
     url = config[host_platform]["download_url"]
@@ -212,5 +212,5 @@ if __name__ == "__main__":
 
     ok = download(args.output_name, args.output_dir, url, hash)
     if not ok:
-        logging.critical(f"Unable to initialize {args.linter}")
+        logging.critical("Unable to initialize %s", args.linter)
         sys.exit(1)
