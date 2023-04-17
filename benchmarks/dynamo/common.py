@@ -152,7 +152,23 @@ CI_SKIP[CI("aot_eager", training=True)] = [
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
-    *CI_SKIP[CI("aot_eager", training=False)],
+    # TorchBench
+    "DALLE2_pytorch",  # AttributeError: text_encodings
+    "llama",  # does not support complex32
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
+    "demucs",  # OOM
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
     # TorchBench
     "detectron2",
     "hf_T5",  # accuracy
@@ -166,10 +182,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
-    # Huggingface
-    "AllenaiLongformerBase",
-    "DebertaV2ForQuestionAnswering",  # OOM
-    "OPTForCausalLM",  # OOM
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -221,13 +233,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
-    # Huggingface
-    "BlenderbotForCausalLM",  # OOM
-    "GoogleFnet",  # Eager model failed to run
-    "MBartForConditionalGeneration",  # OOM
-    "M2M100ForConditionalGeneration",  # OOM
-    "XGLMForCausalLM",  # OOM
-    "MT5ForConditionalGeneration",  # fails accuracy
 ]
 
 # Skips for dynamic=True
