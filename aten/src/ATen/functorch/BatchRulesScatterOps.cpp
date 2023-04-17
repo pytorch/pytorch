@@ -1133,11 +1133,10 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
     for (const auto i : c10::irange(0, batch_size)) {
       const auto& self_slice = self_.select(0, i);
       const auto& index_slice = index_.select(0, i);
-      const auto& value_slice = value_.select(0, i);
       self_slice.index_fill_(
         dim,
         index_slice,
-        value_slice
+        value_bdim.has_value() ? value_.select(0, i) : value_
       );
     }
     return std::make_tuple(self_, 0);
