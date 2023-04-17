@@ -531,6 +531,14 @@ class CppVecOverrides(OpOverrides):
         return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
+    def int_minimum(a, b):
+        return f"at::vec::minimum({a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
     def square(a):
         return f"{a} * {a}"
 
@@ -795,6 +803,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def maximum(a, b):
         return f"({b} != {b}) ? {b} : std::max({a}, {b})"
+
+    @staticmethod
+    def int_minimum(a, b):
+        return f"std::min({a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
