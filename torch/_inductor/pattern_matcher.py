@@ -3,7 +3,6 @@ import functools
 import inspect
 import itertools
 import logging
-import operator
 import os
 import re
 from collections import defaultdict
@@ -537,14 +536,10 @@ def register_replacement(
     pattern.register(pass_dict)
 
 
-def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1, pass_dict=None
-):
+def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
     """
     Register an aten to inductor IR replacement pattern
     """
-    if pass_dict is None:
-        pass_dict = pass_patterns[pass_number]
 
     def decorator(handler):
         assert callable(handler)
@@ -591,22 +586,6 @@ class PatternMatcherPass:
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
-
-
-def reorder_for_locality(graph: torch.fx.Graph):
-    def visit(other_node):
-        if (
-            other_node.op == "call_function"
-            and other_node.target != operator.getitem
-            and all((n in seen_nodes) for n in other_node.users)
-        ):
-            # move node's producers right before it
-            node.prepend(other_node)
-
-    seen_nodes = set()
-    for node in reversed(graph.nodes):
-        seen_nodes.add(node)
-        torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
 def _not_implemented(*args, **kwargs):
@@ -689,6 +668,7 @@ def training_graph(fn, args):
         lambda g, i: make_boxed_func(g),
         partition_fn=record_joint_graph,
         decompositions=select_decomp_table(),
+        enable_log=False,
     )(*args)
 
     # remove in/out specs
@@ -710,12 +690,6 @@ def clone_graph(input_graph):
 
 
 _seen_patterns = set()
-# First pass_patterns[0] are applied, then [1], then [2]
-pass_patterns = [
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-]
 
 
 def get_arg_value(node, arg_number, kwarg_name=None):
