@@ -9,9 +9,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
-#if !defined(USE_ROCM) && !defined(FBCODE_CAFFE2) && !defined(OVRSOURCE) && \
-    !defined(_WIN32)
-#define EXPANDABLE_SEGMENTS_SUPPORTED
+#if !defined(USE_ROCM) && defined(PYTORCH_EXPANDABLE_SEGMENTS_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
 
@@ -260,7 +258,7 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#ifdef EXPANDABLE_SEGMENTS_SUPPORTED
+#if !defined(USE_ROCM) && defined(PYTORCH_EXPANDABLE_SEGMENTS_SUPPORTED)
 
 /*
 Note [Expandable Segments]
@@ -402,9 +400,9 @@ struct ExpandableSegment {
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(begin, i)) {
-          auto handle = handles_.at(j).value();
+          auto h = handles_.at(j).value();
           handles_.at(j) = c10::nullopt;
-          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(handle));
+          C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h));
         }
         trimHandles();
         return rangeFromHandles(begin, begin);
