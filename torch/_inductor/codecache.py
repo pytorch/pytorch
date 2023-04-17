@@ -769,13 +769,16 @@ class CppWrapperCodeCache:
                 if not os.path.exists(cpp_wrapper_dir):
                     os.mkdir(cpp_wrapper_dir)
                 log.debug("Cpp wrapper building %s", filepath)
+                cpp_flags_ = cpp_flags()
+                optimization_flags_ = optimization_flags(cuda=cuda)
                 shared = get_shared()
-                warning_all_flag = get_warning_all_flag()
-                ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+                warning_all_flag_ = get_warning_all_flag()
+                ipaths, lpaths, libs, macros_ = get_include_and_linking_paths(
                     vec_isa=pick_vec_isa(),
                     cuda=cuda,
                 )
-                extra_cflags = f"{cpp_flags()} {optimization_flags(cuda=cuda)} {warning_all_flag} {macros} {use_custom_generated_macros()}"
+                use_custom_generated_macros_ = use_custom_generated_macros()
+                extra_cflags = f"{cpp_flags_} {optimization_flags_} {warning_all_flag_} {macros_} {use_custom_generated_macros_}"
                 extra_ldflags = f"{shared} {lpaths} {libs}"
                 extra_include_paths = f"{ipaths}"
 
