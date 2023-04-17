@@ -51,7 +51,7 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
 
 # todo(mkozuki): Figure out the root cause
 if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
-    # malfet: One shoudl not assume that PyTorch re-exports CUDA dependencies
+    # malfet: One should not assume that PyTorch re-exports CUDA dependencies
     cublas_extension = CUDAExtension(
         name='torch_test_cpp_extension.cublas_extension',
         sources=['cublas_extension.cpp'],

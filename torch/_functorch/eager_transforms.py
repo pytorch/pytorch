@@ -544,7 +544,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # Iterate and concat the jacobians of different
             # inputs.
             for idx in range(len(flat_primals)):
-                r = tuple(map(lambda r_: r_[idx], chunked_results))
+                r = tuple((r_[idx] for r_ in chunked_results))
                 flat_results.append(torch.cat(r, 0))
 
             return flat_results
@@ -567,7 +567,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                     for t in flat_basis_chunk:
                         assert t.size(0) == 1
 
-                    flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
+                    flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
 
