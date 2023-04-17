@@ -177,6 +177,14 @@ class TensorProperty(enum.Enum):
     STRIDE = 1
     STORAGE_OFFSET = 2
 
+    def method_name(self):
+        if self is TensorProperty.SIZE:
+            return "size"
+        elif self is TensorProperty.STRIDE:
+            return "stride"
+        elif self is TensorProperty.STORAGE_OFFSET:
+            return "storage_offset"
+
 
 @dataclasses.dataclass(frozen=True)
 class TensorPropertySource(Source):
@@ -192,7 +200,16 @@ class TensorPropertySource(Source):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        instructions = [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_attr(self.prop.method_name()),
+        ]
+        if self.idx is not None:
+            instructions.append(codegen.create_load_const(self.idx))
+        instructions.extend(
+            create_call_function(1 if self.idx is not None else 0, True)
+        )
+        return instructions
 
     def guard_source(self):
         return self.base.guard_source()
