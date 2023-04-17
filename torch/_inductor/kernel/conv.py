@@ -177,10 +177,18 @@ conv2d_template = TritonTemplate(
 """,
 )
 
-# TODO: remove ordered_kwargs_for_cpp_kernel for aten_addmm as well
 aten_convolution = ExternKernelChoice(
     torch.convolution,
     "at::convolution",
+    (
+        "bias",
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ),
     has_out_variant=False,
 )
 
@@ -332,20 +340,16 @@ def convolution(
     x = ir.ExternKernel.require_stride_order(x, req_stride_order)
     weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
-    constant_args = [stride, padding, dilation, transposed, output_padding, groups]
-
     if bias is None:
         args = (x, weight)
         kwargs["bias"] = None
-        constant_args.insert(0, bias)
     else:
         args = (x, weight, bias)
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_static_shapes(bias.get_size())
 
-    # TODO: replaced kwargs with constant_args here. Check the functionality and whether above kwargs could be removed
-    choices = [aten_convolution.bind(args, layout, constant_args)]
+    choices = [aten_convolution.bind(args, layout, **kwargs)]
     if (
         use_triton_template(layout)
         # templates only support these:
