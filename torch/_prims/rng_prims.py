@@ -26,7 +26,7 @@ def throw_on_non_cuda(device):
 
 def register_philox_rand():
     name = "philox_rand"
-    schema = "philox_rand(int[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> Tensor"  # noqa: B950
+    schema = "philox_rand(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> Tensor"  # noqa: B950
 
     rngprim.define(schema)
 
