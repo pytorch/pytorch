@@ -134,7 +134,10 @@ from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
 from torch.testing._internal.opinfo.definitions.sparse import (
+    error_inputs_mul_sparse,
     sample_inputs_mul_sparse,
+    error_inputs_reduction_sparse_sum,
+    sample_inputs_reduction_sparse_sum
 )
 
 
@@ -3164,77 +3167,7 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
                      error_regex="Trying to create tensor with negative dimension")
 
 
-def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
-    op_supports_layout = getattr(op_info, 'supports_' + layout_name)
-    if not op_supports_layout:
-        return
 
-    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        if sample_input.input.ndim == 0:
-            # scalar sparse tensors are not supported
-            continue
-        if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-            if sample_input.input.ndim < 2:
-                # conversion to sparse compressed tensors requires at
-                # least 2 dimensional tensors
-                continue
-        if layout in {torch.sparse_bsr, torch.sparse_bsc} and blocksize is None:
-            blocksize = (1, 1)
-
-        yield SampleInput(
-            sample_input.input.detach().to_sparse(layout=layout,
-                                                  blocksize=blocksize).requires_grad_(requires_grad),
-            args=sample_input.args,
-            kwargs=sample_input.kwargs)
-
-        if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
-            # uncoalesced samples
-            inp = sample_input.input.detach().to_sparse(layout=layout)
-            inp = torch.sparse_coo_tensor(inp.indices().repeat(1, 2),
-                                          inp.values().repeat(2),
-                                          inp.shape,
-                                          dtype=inp.dtype,
-                                          device=inp.device)
-            assert not inp.is_coalesced()
-            yield SampleInput(inp.requires_grad_(requires_grad),
-                              args=sample_input.args,
-                              kwargs=sample_input.kwargs)
-
-        if sample_input.input.ndim > 2:
-            # hybrid samples
-            yield SampleInput(
-                sample_input.input.detach().to_sparse(layout=layout,
-                                                      blocksize=blocksize,
-                                                      dense_dim=sample_input.input.ndim - 2).requires_grad_(requires_grad),
-                args=sample_input.args,
-                kwargs=sample_input.kwargs)
-
-
-def sample_inputs_reduction_sparse_sum(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    for sample in sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=blocksize, **kwargs):
-        t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
-        if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
-            if ((isinstance(t_kwargs.get('dim'), int) and (t_inp.dim() != 2 or t_kwargs.get('keepdim')))
-                or (isinstance(t_kwargs.get('dim'), (list, tuple)) and (
-                    ((t_inp.dim() != 2 and len(t_kwargs.get('dim')) != t_inp.dim()) or t_kwargs.get('keepdim'))))):
-                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                    yield ErrorInput(sample,
-                                     error_regex=("empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
-                                                  " layout but got Sparse(Bsr|Bsc)"))
-                else:
-                    yield ErrorInput(
-                        sample,
-                        error_regex="Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend")
-                continue
-            elif t_kwargs and not t_kwargs.get('keepdim'):
-                # reductions on sparse compressed tensors require
-                # keepdim==True when reduction is over sparse dimensions
-                yield ErrorInput(sample,
-                                 # FIXME: raise a better exception message
-                                 error_regex="torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported")
-                continue
-        yield sample
 
 
 class _TestParamsMaxPoolBase:
@@ -9307,6 +9240,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
+                    error_inputs_func=error_inputs_mul_sparse,
                     # Specifying sample input function for sparse layout implies the sparse layout support:
                     sample_inputs_sparse_coo_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_coo),
                     sample_inputs_sparse_csr_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_csr),
@@ -12569,6 +12503,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
@@ -13175,6 +13110,7 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_gradgrad=True,
         # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
         decorators=[
@@ -17718,6 +17654,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
+        error_inputs_func=error_inputs_reduction_sparse_sum,
         sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_coo),
         sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_csr),
         sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_csc),

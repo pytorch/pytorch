@@ -26,7 +26,6 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
-from torch.testing._internal.opinfo.core import ErrorInput
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -4691,12 +4690,6 @@ class TestSparseAny(TestCase):
             self.skipTest('Requires fix to gh-98495. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-            if isinstance(sample, ErrorInput):
-                t_inp, t_args, t_kwargs = sample.sample_input.input, sample.sample_input.args, sample.sample_input.kwargs
-                with self.assertRaisesRegex(sample.error_type, sample.error_regex):
-                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE sample_inputs_reduction_sparse_*
-                continue
-
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
 
             result = op.op(t_inp, *t_args, **t_kwargs)
@@ -4717,9 +4710,6 @@ class TestSparseAny(TestCase):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
         count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
-            if isinstance(sample, ErrorInput):
-                # skip error inputs that are tested in test_reductions
-                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
 
             r = op.op(t_inp, *t_args, **t_kwargs)
@@ -4826,7 +4816,6 @@ class TestSparseAny(TestCase):
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
 
-
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
@@ -4836,13 +4825,6 @@ class TestSparseAny(TestCase):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-
-            if isinstance(sample, ErrorInput):
-                with self.assertRaisesRegex(sample.error_type, sample.error_regex):
-                    t_inp, t_args, t_kwargs = sample.sample_input.input, sample.sample_input.args, sample.sample_input.kwargs
-                    op.op(t_inp, *t_args, **t_kwargs)  # ######### WHEN SUCCEEDS, UPDATE opinfo/definitions/sparse.py
-                continue
-
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
             result = op.op(t_inp, *t_args, **t_kwargs)
