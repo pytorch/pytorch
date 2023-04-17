@@ -1173,7 +1173,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.compile_subgraph(
             self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
         )
-        self.output.add_output_instructions([inst])
+        self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(self.next_instruction)
