@@ -31,6 +31,11 @@ TORCH_API void set_autocast_privateuseone_dtype(at::ScalarType dtype);
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
+TORCH_API size_t adjusted_use_count(const at::Tensor& t);
+TORCH_API void add_cudagraph_cached_tensor(const at::Tensor& t);
+TORCH_API void remove_cudagraph_cached_tensor(const at::Tensor& t);
+TORCH_API void set_cudagraph_cached_tensors_enabled(bool enable);
+
 namespace {
 bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
   switch (device_type) {
