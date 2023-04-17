@@ -3436,7 +3436,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
         cpp_kernel="mkldnn::_convolution_pointwise_",
-        cpp_constant_args=(),
     ):
         # TODO: fix me
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
@@ -3462,20 +3461,12 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 c10::optional<c10::string_view> unary_attr,
                 torch::List<c10::optional<at::Scalar>> unary_scalars,
                 c10::optional<c10::string_view> unary_algorithm)"""
-        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
-
-        if isinstance(wrapper, CppWrapperCodeGen):
-            args = self.cpp_wrapper_codegen_args()
-        else:
-            args = self.codegen_args()
         wrapper.generate_fusion_ops_code(
             self.get_name(),
             self.kernel,
-            self.cpp_kernel,
-            args,
+            self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
             self.cpp_kernel_overlad_name,
@@ -3516,24 +3507,17 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs.insert(1, other)
         constant_args = constant_args + [
             binary_attr,
-            binary_alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
+            binary_alpha if binary_alpha else 1.0,
+            unary_attr if unary_attr else "none",
+            unary_scalars if unary_scalars else [1],
+            unary_algorithm if unary_algorithm else "",
         ]
-        cpp_constant_args = cpp_constant_args + [
-            f'"{binary_attr}"',
-            str(binary_alpha) if binary_alpha else str(1.0),  # TODO: optional(float)
-            f'"{unary_attr}"' if unary_attr else '""',
-            _string(unary_scalars) if unary_scalars else "{-1}",  # TODO: optional(list)
-            unary_algorithm if unary_algorithm else '""',
-        ]
+
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
             inputs=inputs,
             constant_args=constant_args,
             kernel=kernel,
-            cpp_constant_args=cpp_constant_args,
         )
 
 
