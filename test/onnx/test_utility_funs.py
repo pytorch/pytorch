@@ -3,6 +3,7 @@
 import copy
 import functools
 import io
+import re
 import warnings
 from typing import Callable
 
@@ -41,42 +42,18 @@ def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
         >>> )
         "M"
         >>> _remove_test_environment_prefix_from_scope_name(
+        >>>     "test_utility_funs.test_abc.<locals>.M"
+        >>> )
+        "M"
+        >>> _remove_test_environment_prefix_from_scope_name(
         >>>     "__main__.M"
         >>> )
         "M"
     """
-    prefixes_to_remove = ["test_utility_funs.", "__main__."]
+    prefixes_to_remove = ["test_utility_funs", "__main__"]
     for prefix in prefixes_to_remove:
-        scope_name = scope_name.replace(prefix, "")
+        scope_name = re.sub(f"{prefix}\\.(.*?<locals>\\.)?", "", scope_name)
     return scope_name
-
-
-class _N(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.relu = torch.nn.ReLU()
-
-    def forward(self, x):
-        return self.relu(x)
-
-
-class _M(torch.nn.Module):
-    def __init__(self, num_layers):
-        super().__init__()
-        self.num_layers = num_layers
-        self.lns = torch.nn.ModuleList(
-            [torch.nn.LayerNorm(3, eps=float(i)) for i in range(num_layers)]
-        )
-        self.gelu1 = torch.nn.GELU()
-        self.gelu2 = torch.nn.GELU()
-        self.relu = _N()
-
-    def forward(self, x, y, z):
-        res1 = self.gelu1(x)
-        res2 = self.gelu2(y)
-        for ln in self.lns:
-            z = ln(z)
-        return res1 + res2, self.relu(z)
 
 
 class _BaseTestCase(pytorch_test_common.ExportTestCase):
@@ -1115,19 +1092,45 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
     def test_node_scope(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        class M(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList(
+                    [torch.nn.LayerNorm(3, eps=float(i)) for i in range(num_layers)]
+                )
+                self.gelu1 = torch.nn.GELU()
+                self.gelu2 = torch.nn.GELU()
+                self.relu = N()
+
+            def forward(self, x, y, z):
+                res1 = self.gelu1(x)
+                res2 = self.gelu2(y)
+                for ln in self.lns:
+                    z = ln(z)
+                return res1 + res2, self.relu(z)
+
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
 
-        model = _M(3)
+        model = M(3)
         expected_scope_names = {
-            "_M::/torch.nn.modules.activation.GELU::gelu1",
-            "_M::/torch.nn.modules.activation.GELU::gelu2",
-            "_M::/torch.nn.modules.normalization.LayerNorm::lns.0",
-            "_M::/torch.nn.modules.normalization.LayerNorm::lns.1",
-            "_M::/torch.nn.modules.normalization.LayerNorm::lns.2",
-            "_M::/_N::relu/torch.nn.modules.activation.ReLU::relu",
-            "_M::",
+            "M::/torch.nn.modules.activation.GELU::gelu1",
+            "M::/torch.nn.modules.activation.GELU::gelu2",
+            "M::/torch.nn.modules.normalization.LayerNorm::lns.0",
+            "M::/torch.nn.modules.normalization.LayerNorm::lns.1",
+            "M::/torch.nn.modules.normalization.LayerNorm::lns.2",
+            "M::/N::relu/torch.nn.modules.activation.ReLU::relu",
+            "M::",
         }
 
         graph, _, _ = self._model_to_graph(
@@ -1181,9 +1184,8 @@ class TestUtilityFuns(_BaseTestCase):
         #       so we expect 3 constants with different scopes. The 3 constants are for the 3 layers.
         #       If CSE in exporter is improved later, this test needs to be updated.
         #       It should expect 1 constant, with same scope as root.
-        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
-        expected_root_scope_name = f"{scope_prefix}.N::"
-        expected_layer_scope_name = f"{scope_prefix}._M::layers"
+        expected_root_scope_name = "N::"
+        expected_layer_scope_name = "M::layers"
         expected_constant_scope_name = [
             f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
             for i in range(layer_num)
@@ -1192,7 +1194,9 @@ class TestUtilityFuns(_BaseTestCase):
         constant_scope_names = []
         for node in graph.nodes():
             if node.kind() == "onnx::Constant":
-                constant_scope_names.append(node.scopeName())
+                constant_scope_names.append(
+                    _remove_test_environment_prefix_from_scope_name(node.scopeName())
+                )
         self.assertEqual(constant_scope_names, expected_constant_scope_name)
 
     def test_scope_of_nodes_when_combined_by_cse_pass(self):
@@ -1231,9 +1235,8 @@ class TestUtilityFuns(_BaseTestCase):
         graph, _, _ = self._model_to_graph(
             N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
         )
-        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
-        expected_root_scope_name = f"{scope_prefix}.N::"
-        expected_layer_scope_name = f"{scope_prefix}._M::layers"
+        expected_root_scope_name = "N::"
+        expected_layer_scope_name = "M::layers"
         expected_add_scope_names = [
             f"{expected_root_scope_name}/{expected_layer_scope_name}.0"
         ]
@@ -1246,9 +1249,13 @@ class TestUtilityFuns(_BaseTestCase):
         mul_scope_names = []
         for node in graph.nodes():
             if node.kind() == "onnx::Add":
-                add_scope_names.append(node.scopeName())
+                add_scope_names.append(
+                    _remove_test_environment_prefix_from_scope_name(node.scopeName())
+                )
             elif node.kind() == "onnx::Mul":
-                mul_scope_names.append(node.scopeName())
+                mul_scope_names.append(
+                    _remove_test_environment_prefix_from_scope_name(node.scopeName())
+                )
         self.assertEqual(add_scope_names, expected_add_scope_names)
         self.assertEqual(mul_scope_names, expected_mul_scope_names)
 
