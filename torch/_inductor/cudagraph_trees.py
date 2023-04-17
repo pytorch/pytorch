@@ -808,25 +808,22 @@ class CUDAGraphNode:
         outputs_new = []
 
         # # We recreate the below logic in cpp to reduce overhead, since this is on the hot path
-        """
         for storage_info, metadata in zip(storages_info, self.outputs_metadata):
             if metadata is None:
                 outputs_new.append(None)
                 continue
 
-            if isinstance(storage_info, UntypedStorage):
-                s = storage_info
             if storage_info is None:
                 s = self.create_storage(metadata)
+            elif isinstance(storage_info, UntypedStorage):
+                s = storage_info
             else:
                 assert isinstance(storage_info, int)
                 s = outputs_new[storage_info].untyped_storage()
-            outputs_new.append(self._reconstruct_from_tensor_metadata(metadata, storage=s))
-        """
 
-        torch._C._construct_Tensors_From_Storage_and_Metadata(
-            storages_info, self.outputs_metadata, outputs_new
-        )
+            outputs_new.append(
+                self._reconstruct_from_tensor_metadata(metadata, storage=s)
+            )
 
         return outputs_new
 
@@ -991,27 +988,13 @@ class CUDAGraphNode:
 
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
-        output_weak_ref_cdatas = []
-        output_data_ptrs = []
 
-        # For output, gets the storage weakref and data_ptr if it is not a static persistent storage alias
-        torch._C._map_Storage_Refs(
-            outputs,
-            self.output_persistent_storage,
-            output_weak_ref_cdatas,
-            output_data_ptrs,
-        )
-        assert len(output_weak_ref_cdatas) == len(output_data_ptrs)
-
-        for ref, data_ptr in zip(output_weak_ref_cdatas, output_data_ptrs):
-            if ref is None:
-                assert data_ptr is None
+        for out, persistent_storage in zip(outputs, self.output_persistent_storage):
+            if out is None or persistent_storage is not None:
                 self.outputs_weakrefs.append(None)
                 continue
 
-            self.outputs_weakrefs.append(
-                StorageWeakRefWrapper.from_weakref_and_data_ptr(ref, data_ptr)
-            )
+            self.outputs_weakrefs.append(StorageWeakRefWrapper(out))
 
     @property
     def parent(self):
@@ -1206,14 +1189,7 @@ class CUDAGraphNode:
         self, metadata: Dict[str, Any], storage=None
     ) -> Tensor:
         s = self.create_storage(metadata) if storage is None else storage
-        t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
-        t.set_(
-            source=s,
-            storage_offset=metadata["storage_offset"],
-            size=metadata["size"],
-            stride=metadata["stride"],
-        )
-        return t
+        return torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(metadata, s)
 
     def create_storage(self, metadata):
         return torch._C._construct_storage_from_data_pointer(
