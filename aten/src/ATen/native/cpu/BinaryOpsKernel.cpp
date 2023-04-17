@@ -5,6 +5,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
@@ -21,9 +22,10 @@ namespace {
 
 using namespace vec;
 
-template <typename scalar_t, typename Op, typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline Vectorized<scalar_t> binary_op_scalar(const Vectorized<scalar_t>& a, float b, const Op& op) {
-  Vectorized<float> a0, a1, vec_b(b);
+template <typename scalar_t, typename Op, typename opmath_t = at::opmath_type<scalar_t>,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline Vectorized<scalar_t> binary_op_scalar(const Vectorized<scalar_t>& a, opmath_t b, const Op& op) {
+  Vectorized<opmath_t> a0, a1, vec_b(b);
   std::tie(a0, a1) = convert_to_float<scalar_t>(a);
   return convert_from_float<scalar_t>(op(a0, vec_b), op(a1, vec_b));
 }
@@ -74,12 +76,13 @@ void mul_kernel(TensorIteratorBase& iter) {
         });
   } else if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "mul_cpu_reduced_float", [&]() {
-      float b = iter.original_scalar_value<float>(2);
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t b = iter.original_scalar_value<opmath_t>(2);
       iter.remove_operand(2);
       cpu_kernel_vec(iter,
-        [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t { return static_cast<float>(a) * b; },
+        [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t { return static_cast<opmath_t>(a) * b; },
         [=](Vectorized<scalar_t> a) __ubsan_ignore_undefined__ {
-          return binary_op_scalar(a, b, [](const Vectorized<float>& x, const Vectorized<float>& y) { return x * y; });
+          return binary_op_scalar(a, b, [](const Vectorized<opmath_t>& x, const Vectorized<opmath_t>& y) { return x * y; });
         });
     });
   } else {
@@ -97,14 +100,15 @@ void div_true_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_cpu_reduced_float", [&]() {
-      float b = iter.original_scalar_value<float>(2);
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t b = iter.original_scalar_value<opmath_t>(2);
       iter.remove_operand(2);
       cpu_kernel_vec(iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return static_cast<float>(a) / b;
+          return static_cast<opmath_t>(a) / b;
         },
         [=](Vectorized<scalar_t> a) {
-          return binary_op_scalar(a, b, [](const Vectorized<float>& x, const Vectorized<float>& y) { return x / y; });
+          return binary_op_scalar(a, b, [](const Vectorized<opmath_t>& x, const Vectorized<opmath_t>& y) { return x / y; });
         });
     });
   } else {
@@ -133,14 +137,15 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
     });
   } else if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_trunc_cpu_reduced_float", [&]() {
-      float b = iter.original_scalar_value<float>(2);
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t b = iter.original_scalar_value<opmath_t>(2);
       iter.remove_operand(2);
       cpu_kernel_vec(iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return std::trunc(static_cast<float>(a) / b);
+          return std::trunc(static_cast<opmath_t>(a) / b);
         },
         [=](Vectorized<scalar_t> a) {
-          return binary_op_scalar(a, b, [](const Vectorized<float>& x, const Vectorized<float>& y) { return (x / y).trunc(); });
+          return binary_op_scalar(a, b, [](const Vectorized<opmath_t>& x, const Vectorized<opmath_t>& y) { return (x / y).trunc(); });
         });
     });
   } else {
@@ -237,12 +242,13 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     // See NOTE: [Floor Division in Python]
     if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_floor_cpu_reduced_float", [&]() {
-        float b = iter.original_scalar_value<float>(2);
+        using opmath_t = at::opmath_type<scalar_t>;
+        opmath_t b = iter.original_scalar_value<opmath_t>(2);
         iter.remove_operand(2);
-        using vec_t = Vectorized<float>;
+        using vec_t = Vectorized<opmath_t>;
         cpu_kernel_vec(iter,
           [=](scalar_t a) -> scalar_t {
-            return div_floor_internal(static_cast<float>(a), b);
+            return div_floor_internal(static_cast<opmath_t>(a), b);
           },
           [=](Vectorized<scalar_t> a) {
             return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_internal(x, y); });
