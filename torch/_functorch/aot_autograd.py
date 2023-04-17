@@ -2377,31 +2377,23 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
 
-    if config.use_functionalize:
-        fx_g = create_functionalized_graph(
-            joint_fn_to_trace,
-            joint_inputs,
-            meta=fw_metadata,
-            aot_config=aot_config,
-            trace_joint=True,
-        )
+    fx_g = create_functionalized_graph(
+        joint_fn_to_trace,
+        joint_inputs,
+        meta=fw_metadata,
+        aot_config=aot_config,
+        trace_joint=True,
+    )
 
-        # There should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fx_g.graph)
+    # There should be *NO* mutating ops in the graph at this point.
+    assert_functional_graph(fx_g.graph)
 
-        # Redudant with the check above, but worth having in case tracing introduced
-        # a fake tensor. Unlikely.
-        # See Note: [Fake Modules and AOTAutograd]
-        torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
-    else:
-        # joint_forward_backward() now always runs with functionalization, and factoring it out
-        # to make that toggleable is a bit painful.
-        # aot autograd without functionalization is wrong anyway, so we error.
-        raise AssertionError(
-            "Graph partitioning without functionalization is not sound, we may introduce errors"
-        )
+    # Redudant with the check above, but worth having in case tracing introduced
+    # a fake tensor. Unlikely.
+    # See Note: [Fake Modules and AOTAutograd]
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
+    fx_g.graph.eliminate_dead_code()
+    fx_g.recompile()
 
     if aot_config.enable_log:
         aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
