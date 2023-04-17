@@ -116,7 +116,7 @@ static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
     }
 
     // Replace the old data_ptr and allocator with the new ones
-    storage.set_data_ptr(std::move(new_storage.data_ptr()));
+    storage.set_data_ptr(std::move(new_storage.mutable_data_ptr()));
     storage.unsafeGetStorageImpl()->set_allocator(new_storage.allocator());
 
     ctx = THManagedMapAllocator::fromDataPtr(storage.data_ptr());
@@ -206,7 +206,7 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
     }
 
     // Replace the old data_ptr and allocator with the new ones
-    storage.set_data_ptr(std::move(new_storage.data_ptr()));
+    storage.set_data_ptr(std::move(new_storage.mutable_data_ptr()));
     storage.unsafeGetStorageImpl()->set_allocator(new_storage.allocator());
 
     ctx = at::MapAllocator::fromDataPtr(storage.data_ptr());
@@ -291,12 +291,12 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   Py_INCREF(Py_None);
   THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
-  if (storage.data<uint8_t>()) {
+  if (storage.data()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t base_size;
     void* base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(
-        storage.data<uint8_t>(), &base_size);
-    ptrdiff_t offset_bytes = (char*)storage.data<uint8_t>() - (char*)base_ptr;
+        storage.mutable_data(), &base_size);
+    ptrdiff_t offset_bytes = (char*)storage.data() - (char*)base_ptr;
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcMemHandle_t handle;
@@ -307,8 +307,8 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
 
     // Put Storage Data behind new ref counting context
     // See Note [CUDA IPC Refcounting implementation explained]
-    at::DataPtr sent_data_ptr =
-        torch::GetNewRefCountedSentData(storage.data(), storage.device());
+    at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(
+        storage.mutable_data(), storage.device());
     auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
     auto sent_data =
         static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());

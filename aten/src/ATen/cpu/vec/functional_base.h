@@ -83,7 +83,8 @@ inline scalar_t vec_reduce_all(const Op& vec_fun, const Vectorized<scalar_t>& ac
   return VecReduceAllSIMD<scalar_t, Op>::apply(vec_fun, acc_vec);
 }
 
-template <typename scalar_t, typename Op>
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
   if (size < Vec::size())
@@ -102,7 +103,8 @@ inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size
 }
 
 // similar to reduce_all, but reduces into two outputs
-template <typename scalar_t, typename Op1, typename Op2>
+template <typename scalar_t, typename Op1, typename Op2,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
     const scalar_t* data, int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
@@ -130,7 +132,8 @@ inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2&
     vec_reduce_all(vec_fun2, acc_vec2));
 }
 
-template <typename scalar_t, typename MapOp, typename ReduceOp>
+template <typename scalar_t, typename MapOp, typename ReduceOp,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -154,7 +157,8 @@ inline scalar_t map_reduce_all(
   return vec_reduce_all(red_fun, acc_vec);
 }
 
-template <typename scalar_t, typename MapOp, typename ReduceOp>
+template <typename scalar_t, typename MapOp, typename ReduceOp,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map2_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -185,7 +189,8 @@ inline scalar_t map2_reduce_all(
   return vec_reduce_all(red_fun, acc_vec);
 }
 
-template <typename scalar_t, typename MapOp, typename ReduceOp>
+template <typename scalar_t, typename MapOp, typename ReduceOp,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline scalar_t map3_reduce_all(
     const MapOp& map_fun,
     const ReduceOp& red_fun,
@@ -221,7 +226,8 @@ inline scalar_t map3_reduce_all(
   return vec_reduce_all(red_fun, acc_vec);
 }
 
-template <typename scalar_t, typename Op>
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -239,7 +245,8 @@ inline void map(
   }
 }
 
-template <typename scalar_t, typename Op>
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -262,7 +269,8 @@ inline void map2(
   }
 }
 
-template <typename scalar_t, typename Op>
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map3(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -288,7 +296,8 @@ inline void map3(
   }
 }
 
-template <typename scalar_t, typename Op>
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map4(
     const Op& vec_fun,
     scalar_t* output_data,

@@ -274,14 +274,11 @@ class TestLinalg(TestCase):
                     return np.linalg.lstsq(a, b, rcond=rcond)
                 check_correctness_ref(a, b, res, numpy_ref)
 
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_available = (version >= (10, 2))
-
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (cusolver_available or device == 'cpu')
+        include_m_l_n_case = (has_cusolver() or device == 'cpu')
         matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
@@ -6793,7 +6790,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for fn in [torch.det, torch.logdet, torch.slogdet, torch.linalg.slogdet]:
                 expected_value = []
                 actual_value = fn(full_tensor)
-                for full_idx in itertools.product(*map(lambda x: list(range(x)), batchdims)):
+                for full_idx in itertools.product(*(list(range(x)) for x in batchdims)):
                     expected_value.append(fn(full_tensor[full_idx]))
 
                 if fn == torch.slogdet or fn == torch.linalg.slogdet:
