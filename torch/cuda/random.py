@@ -1,6 +1,6 @@
 import torch
 from typing import Iterable, List, Union
-from . import _lazy_init, _lazy_call, device_count, current_device
+from . import _lazy_init, _lazy_call, device_count, current_device, get_device, get_generator
 from .. import Tensor
 
 __all__ = ['get_rng_state', 'get_rng_state_all', 'get_rng_state_offset',
@@ -8,21 +8,6 @@ __all__ = ['get_rng_state', 'get_rng_state_all', 'get_rng_state_offset',
            'manual_seed', 'manual_seed_all',
            'seed', 'seed_all', 'initial_seed']
 
-
-
-def get_device(device: Union[int, str, torch.device] = 'cuda') -> torch.device:
-    if isinstance(device, str):
-        device = torch.device(device)
-    elif isinstance(device, int):
-        device = torch.device('cuda', device)
-    return device
-
-
-def get_generator(device: torch.device) -> torch._C.Generator:
-    idx = device.index
-    if idx is None:
-        idx = current_device()
-    return torch.cuda.default_generators[idx]
 
 
 def get_rng_state(device: Union[int, str, torch.device] = 'cuda') -> Tensor:
