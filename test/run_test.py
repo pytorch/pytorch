@@ -150,6 +150,7 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "onnx/test_pytorch_onnx_onnxruntime_cuda.py",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
