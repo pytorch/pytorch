@@ -573,7 +573,7 @@ Tensor cross_entropy_loss_label_smoothing(
     }
 
     auto ignore_mask = target == std::move(ignore_index);
-    smooth_loss.index_put_({ignore_mask}, 0.0);
+    smooth_loss.masked_fill_(ignore_mask, 0.0);
 
     Tensor ret;
     switch (reduction) {
@@ -583,7 +583,8 @@ Tensor cross_entropy_loss_label_smoothing(
           // loss is normalized by the weights to be consistent with nll_loss_nd
           ret = smooth_loss.sum() / weight.gather(0, target.masked_select(~ignore_mask).flatten()).sum();
         } else {
-          ret = smooth_loss.masked_select(~ignore_mask).mean();
+          auto true_mask = ~ignore_mask;
+          ret = smooth_loss.sum()/ true_mask.sum();
         }
         break;
       case Reduction::Sum:

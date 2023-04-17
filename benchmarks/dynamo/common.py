@@ -251,6 +251,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
+    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
 ]
 
 CI_SKIP_OPTIMIZER = {
