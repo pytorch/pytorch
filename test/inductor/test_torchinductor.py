@@ -55,7 +55,6 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from functorch.compile import config as functorch_config
 from torch._inductor import config, test_operators
 
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
@@ -3793,7 +3792,6 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     @config.patch({"triton.cudagraphs": True})
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -3816,7 +3814,6 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -3835,7 +3832,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -3870,7 +3866,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -3883,7 +3878,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
