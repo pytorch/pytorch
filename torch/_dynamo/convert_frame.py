@@ -206,6 +206,9 @@ def exception_handler(e, code, frame=None):
         log.error(format_error_msg(e, code, record_filename, frame))
 
 
+FRAME_COUNTER = 0
+
+
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
@@ -215,8 +218,15 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
 
-    def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame_assert(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         increment_frame()
+        global FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
+            FRAME_COUNTER += 1
+
         code = frame.f_code
 
         if code in input_codes and (
@@ -324,6 +334,7 @@ def convert_frame_assert(
             export_constraints,
             hooks,
             frame,
+            frame_state=frame_state,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -342,6 +353,7 @@ def _compile(
     export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
+    frame_state=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
@@ -363,6 +375,7 @@ def _compile(
             export,
             export_constraints,
             mutated_closure_cell_contents,
+            frame_state=frame_state,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()
@@ -467,10 +480,12 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(frame: types.FrameType, cache_size: int, hooks: Hooks):
+    def _convert_frame(
+        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks)
+            result = inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
