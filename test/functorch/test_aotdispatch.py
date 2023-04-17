@@ -2511,7 +2511,6 @@ symbolic_aot_autograd_failures = {
     xfail('cholesky_solve', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
-    xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2632,8 +2631,6 @@ symbolic_aot_autograd_failures = {
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
