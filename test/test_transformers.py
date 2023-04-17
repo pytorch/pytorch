@@ -1628,7 +1628,7 @@ class TestSDPA(NNTestCase):
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 128])
+    @parametrize("head_dim", [8, 16, 32, 64, 96, 128])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
