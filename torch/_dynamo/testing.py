@@ -148,7 +148,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
