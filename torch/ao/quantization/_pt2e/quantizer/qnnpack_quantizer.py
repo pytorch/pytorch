@@ -48,6 +48,9 @@ def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternT
             [torch.nn.AdaptiveAvgPool2d],
             [F.adaptive_avg_pool2d],
         ],
+        "flatten": [
+            [torch.flatten],
+        ],
     }
     return copy.deepcopy(supported_operators)
 
@@ -255,13 +258,15 @@ class QNNPackQuantizer(Quantizer):
             # supported op type.
             self._annotate_conv2d_relu(node, global_config)
             self._annotate_conv2d(node, global_config)
-            self._annotate_linear(node, global_config)
+            self._annotate_linear3d(node, global_config)
+            self._annotate_linear2d(node, global_config)
             self._annotate_maxpool2d(node, global_config)
             self._annotate_add_relu(node, global_config)
             self._annotate_add(node, global_config)
             self._annotate_hardtanh(node, global_config)
             self._annotate_mean(node, global_config)
             self._annotate_adaptive_avg_pool2d(node, global_config)
+            self._annotate_flatten(node, global_config)
 
         return model
 
@@ -325,7 +330,64 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
 
-    def _annotate_linear(
+    def _annotate_linear3d(
+        self, node: Node, quantization_config: Optional[QuantizationConfig]
+    ) -> None:
+        output_view_node = node
+        if (
+            output_view_node.op != "call_function" or
+            output_view_node.target != torch.ops.aten.view.default
+        ):
+            return
+        addmm_node = output_view_node.args[0]
+        assert isinstance(addmm_node, Node)
+        if (
+            addmm_node.op != "call_function"
+            or addmm_node.target != torch.ops.aten.addmm.default
+        ):
+            return
+        input_view_node = addmm_node.args[1]
+        assert isinstance(input_view_node, Node)
+        if (
+            input_view_node.op != "call_function"
+            or input_view_node.target != torch.ops.aten.view.default
+        ):
+            return
+        t_node = addmm_node.args[2]
+        assert isinstance(t_node, Node)
+        if t_node.op != "call_function" or t_node.target != torch.ops.aten.t.default:
+            return
+        if _is_annotated([output_view_node, addmm_node, input_view_node, t_node]):
+            return
+
+        # bias and output act
+        addmm_node.meta["target_dtype_info"] = {
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "bias_index": 0,
+            "_annotated": True,
+        }
+        # input act
+        input_view_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "_annotated": True,
+        }
+        # weight
+        t_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "_annotated": True,
+        }
+        # output act
+        output_view_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "_annotated": True,
+        }
+
+    def _annotate_linear2d(
         self, node: Node, quantization_config: Optional[QuantizationConfig]
     ) -> None:
         addmm_node = node
@@ -334,32 +396,22 @@ class QNNPackQuantizer(Quantizer):
             or addmm_node.target != torch.ops.aten.addmm.default
         ):
             return
-        view_node = addmm_node.args[1]
-        assert isinstance(view_node, Node)
-        if (
-            view_node.op != "call_function"
-            or view_node.target != torch.ops.aten.view.default
-        ):
-            return
         t_node = addmm_node.args[2]
         assert isinstance(t_node, Node)
         if t_node.op != "call_function" or t_node.target != torch.ops.aten.t.default:
             return
-        if _is_annotated([addmm_node, view_node, t_node]):
+        if _is_annotated([addmm_node, t_node]):
             return
 
-        # bias and output act
+        # bias, input and output act
+        # weight annotated in t_node
         addmm_node.meta["target_dtype_info"] = {
             "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "bias_index": 0,
-            "_annotated": True,
-        }
-        # input act
-        view_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "weight_index": 2,
             "_annotated": True,
         }
         # weight
@@ -446,6 +498,14 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_input_out_obs_sharing_op(
             torch.ops.aten.adaptive_avg_pool2d.default, node, quantization_config
         )
+
+    def _annotate_flatten(
+        self, node: Node, quantization_config: Optional[QuantizationConfig]
+    ) -> None:
+        for flatten_aten_op in [torch.ops.aten.view_copy.default, torch.ops.aten.view.default]:
+            self._annotate_input_out_obs_sharing_op(
+                flatten_aten_op, node, quantization_config
+            )
 
     def _annotate_add_relu(
         self, node: Node, quantization_config: Optional[QuantizationConfig]
