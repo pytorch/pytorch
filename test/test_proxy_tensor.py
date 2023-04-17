@@ -1235,6 +1235,17 @@ def forward(self, a_1):
         inp = (torch.randn(8)[3:], torch.randn(5))
         self.assertEqual(fx_g(*inp), f(*inp))
 
+    def test_sym_contains(self):
+        def f(x, y):
+            return x.size(0) in y
+
+        # This shouldn't raise but we need SymBool from
+        # https://github.com/pytorch/pytorch/pull/98453
+        # then modify this.  It should NOT raise a RuntimeError
+        # though!
+        with self.assertRaisesRegex(NotImplementedError, "item NYI for torch.bool"):
+            make_fx(f, tracing_mode="symbolic")(torch.randn(2), torch.randn(3))
+
     def _assert_no_guards(self, fx_g, free_symbols):
         assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
@@ -1356,35 +1367,11 @@ symbolic_tensor_failures = {
     xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
-    xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
-    xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
     xfail('combinations', ''),
-    xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
-    xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('fft.fft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.fft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.fftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.fftshift', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.hfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.hfft', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.hfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifftshift', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ihfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ihfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ihfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.irfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.irfft', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.irfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.rfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.rfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1398,7 +1385,6 @@ symbolic_tensor_failures = {
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
-    xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigvalsh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.householder_product', ''),  # aten.linalg_householder_product.default - couldn't find symbolic meta funct...
