@@ -4,7 +4,6 @@ from copy import deepcopy
 
 import torch
 
-import torch.library
 import torch.nn as nn
 
 from torch.distributed._spmd.api import compile
@@ -13,6 +12,7 @@ from torch.distributed._spmd.parallel_mode import DataParallel
 from torch.distributed._tensor import Replicate
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -106,6 +106,7 @@ class TestDataParallel(DTensorTestBase):
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "replicate"
         )
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_replicate_sgd_momentum(self):
         mod = SimpleMLP().cuda(self.rank)
@@ -123,6 +124,7 @@ class TestDataParallel(DTensorTestBase):
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "replicate"
         )
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_fully_shard_sgd(self):
         mod = SimpleMLP().cuda(self.rank)
@@ -139,6 +141,7 @@ class TestDataParallel(DTensorTestBase):
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
         )
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_fully_shard_sgd_momentum(self):
         mod = SimpleMLP().cuda(self.rank)
@@ -154,3 +157,7 @@ class TestDataParallel(DTensorTestBase):
         self._test_data_parallel(
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
         )
+
+
+if __name__ == "__main__":
+    run_tests()

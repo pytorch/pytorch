@@ -210,7 +210,7 @@ class BatchDimAnalyzer(object):
             mesh=mesh, placements=[Shard(node_batch_dim)]
         )
         if reduction_over_batch or input_full_reduction:
-            batch_dim_shard_spec.from_local = True
+            batch_dim_shard_spec.from_local = True  # type: ignore[attr-defined]
 
         return batch_dim_shard_spec, reduction_over_batch
 
@@ -254,7 +254,7 @@ def build_data_parallel_strategies(
     num_states: int,
     mesh: DeviceMesh,
     batch_dim: int = 0,
-) -> Dict[fx.Node, StrategyList]:
+) -> Dict[fx.Node, DataParallelStrategy]:
     """
     This function loop through the train step graph and build the
     data parallel strategy for each fx Node
@@ -297,52 +297,54 @@ def build_data_parallel_strategies(
                 break
 
     train_step_graph.recompile()
-    train_step_graph.print_readable()
 
     # next we forward propagate to mark all the sharding
     for node in train_step_graph.graph.nodes:
         if node.op == "placeholder":
-            if placeholder_idx < num_params:
-                shard_sig = _gen_shard_strategy(mesh, 0)
-                replica_sig = _gen_replicate_strategy(mesh)
+            if "val" not in node.meta:
+                # NOTE: There're certain cases where the placeholder nodes does
+                # not have real tensor values:
+                # 1. optimizer states can be None sometimes, i.e. SGD with
+                #    no momentum, optimizer states populate `momentum` state
+                #    as None, the full graph we get from `compile` would have
+                #    None as the placeholder value
+                # 2. function args might not only contain params or activations,
+                #    but also contain other non-tensor inputs, i.e. the model
+                #    and optimizer instances baked in as a placeholder, there might
+                #    also be some scalar argument which is not a tensor
+                #
+                # For the above cases, we create a NON_TENSOR stratgy so that we
+                # know it's not a tensor and we don't need to shard it
+                dp_strategy_map[node] = DataParallelStrategy(NodeType.NON_TENSOR, [])
+
+            elif placeholder_idx < num_params:
+                # during compilation there's a assumption that the first num_params
+                # placeholders should be parameters
+                shard_strategy = _gen_shard_strategy(mesh, 0)
+                replica_strategy = _gen_replicate_strategy(mesh)
                 dp_strategy_map[node] = DataParallelStrategy(
-                    NodeType.PARAM, [replica_sig, shard_sig]
+                    NodeType.PARAM, [replica_strategy, shard_strategy]
                 )
 
             elif placeholder_idx < activation_idx:
                 # optimizer states follow the same strategy as
                 # the corresponding parameters
-                # NOTE: optimizer states can be None sometimes,
-                # creating a NON_TENSOR stratgy for those cases.
-                if "val" not in node.meta:
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.NON_TENSOR, []
-                    )
-                else:
-                    shard_sig = _gen_shard_strategy(mesh, 0)
-                    replica_sig = _gen_replicate_strategy(mesh)
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.STATE, [replica_sig, shard_sig]
-                    )
+                shard_strategy = _gen_shard_strategy(mesh, 0)
+                replica_strategy = _gen_replicate_strategy(mesh)
+                dp_strategy_map[node] = DataParallelStrategy(
+                    NodeType.STATE, [replica_strategy, shard_strategy]
+                )
             else:
-                # NOTE: args might not only contain activation but also
-                # contain other non-tensor inputs, creating a NON_TENSOR
-                # strategy for those cases.
-                if "val" not in node.meta:
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.NON_TENSOR, []
-                    )
-                else:
-                    activation_batch_dim_size = node.meta["val"].shape[batch_dim]
-                    # find the first activation node and use its batch dim size
-                    if batch_dim_analzer.batch_dim_size == -1:
-                        batch_dim_analzer.init_batch_dim_size(activation_batch_dim_size)
+                activation_batch_dim_size = node.meta["val"].shape[batch_dim]
+                # find the first activation node and use its batch dim size
+                if batch_dim_analzer.batch_dim_size == -1:
+                    batch_dim_analzer.init_batch_dim_size(activation_batch_dim_size)
 
-                    batch_dim_analzer.set_batch_dim(node, batch_dim)
-                    shard_sig = _gen_shard_strategy(mesh, batch_dim)
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [shard_sig]
-                    )
+                batch_dim_analzer.set_batch_dim(node, batch_dim)
+                shard_strategy = _gen_shard_strategy(mesh, batch_dim)
+                dp_strategy_map[node] = DataParallelStrategy(
+                    NodeType.ACT, [shard_strategy]
+                )
             placeholder_idx += 1
         elif node.op == "call_function":
             # Annotate node types for the computation graph
@@ -356,19 +358,19 @@ def build_data_parallel_strategies(
             # param + state -> out: param
 
             if node.target in non_compute_ops:
-                input_full_reduction = False
                 input_nodes = node.all_input_nodes
                 assert (
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
                 arg_node_type = dp_strategy_map[input_nodes[0]].node_type
-                if dp_strategy_map[input_nodes[0]].reduction_over_batch:
-                    input_full_reduction = True
+                input_full_reduction = dp_strategy_map[
+                    input_nodes[0]
+                ].reduction_over_batch
 
                 if arg_node_type == NodeType.PARAM:
-                    replica_sig = _gen_replicate_strategy(mesh)
+                    replica_strategy = _gen_replicate_strategy(mesh)
                     dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.PARAM, [replica_sig]
+                        NodeType.PARAM, [replica_strategy]
                     )
                 elif arg_node_type == NodeType.GRAD:
                     partial_sig = _gen_partial_strategy(mesh)
@@ -384,11 +386,11 @@ def build_data_parallel_strategies(
                         node, mesh, input_full_reduction
                     )
 
-                    shard_sig = PlacementStrategy(
+                    shard_strategy = PlacementStrategy(
                         output_spec=output_spec, input_specs=[arg_node_spec]
                     )
                     dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [shard_sig]
+                        NodeType.ACT, [shard_strategy]
                     )
                 else:
                     raise RuntimeError(
@@ -400,9 +402,7 @@ def build_data_parallel_strategies(
 
             # for computatation nodes, we need to check all the inputs
             input_args = node.all_input_nodes
-            input_node_types = pytree.tree_map(
-                lambda x: dp_strategy_map[x].node_type, input_args
-            )
+            input_node_types = [dp_strategy_map[arg].node_type for arg in input_args]
             input_specs = []
             if node in dp_strategy_map:
                 # found a param_grad node that already have output pre-filled spec
@@ -470,14 +470,18 @@ def build_data_parallel_strategies(
                     replica_strategy = _gen_replicate_strategy(mesh)
                     shard_strategy = _gen_shard_strategy(mesh, batch_dim)
                     output_node_type = NodeType.PARAM
-                    for arg_node_type in input_node_types:
-                        if arg_node_type != NodeType.GRAD:
-                            output_node_type = arg_node_type
-                            break
-                    assert (
-                        output_node_type == NodeType.STATE
-                        or output_node_type == NodeType.PARAM
-                    ), "Expecting output node type to be either state or param! "
+
+                    non_grad_types = [t for t in input_node_types if t != NodeType.GRAD]
+
+                    output_node_type = non_grad_types[0]
+                    for non_grad_type in non_grad_types:
+                        assert (
+                            non_grad_type == output_node_type
+                        ), f"Found more than one non grad types! Expect {output_node_type} but found {non_grad_type}!"
+                    assert output_node_type in [
+                        NodeType.PARAM,
+                        NodeType.STATE,
+                    ], f"Expecting output node type to be either state or param, but found {output_node_type}!"
 
                     dp_strategy_map[node] = DataParallelStrategy(
                         output_node_type, [replica_strategy, shard_strategy]
@@ -589,10 +593,12 @@ def _to_local_shard(
         if placement.is_shard():
             placement = cast(Shard, placement)
             num_chunks = spec.mesh.size(dim=idx)
-            my_coord = spec.mesh.get_coordinate()[idx]
+            my_coord = spec.mesh.get_coordinate()
+            assert my_coord is not None, "current rank not in mesh!"
+            my_coord_on_mesh_dim = my_coord[idx]
             local_shard = placement._split_tensor(
                 local_shard, num_chunks, contiguous=False
-            )[0][my_coord]
+            )[0][my_coord_on_mesh_dim]
     return local_shard
 
 
@@ -615,7 +621,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
             continue
 
         if node.op == "placeholder":
-            # print(f">>>> processing placeholder: {node}")
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
                 local_val = _to_local_shard(node.meta["val"], out_spec)
@@ -683,7 +688,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
 
     graph.graph.lint()
     graph.recompile()
-    graph.print_readable()
     return graph
 
 
