@@ -442,7 +442,7 @@ class Source:
         return self.guard_source().is_nn_module()
 
 
-def detect_fake_mode(inputs: Any = None, ignore_tracing_context=False):
+def detect_fake_mode(inputs: Any = None):
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
@@ -457,7 +457,7 @@ def detect_fake_mode(inputs: Any = None, ignore_tracing_context=False):
     from torch.utils._pytree import tree_flatten
 
     context = TracingContext.get()
-    if context is not None and not ignore_tracing_context:
+    if context is not None:
         fake_mode = context.fake_mode
         if fake_mode is not None:
             return fake_mode
