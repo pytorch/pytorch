@@ -1,11 +1,32 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/elu_backward_native.h>
+#include <ATen/ops/elu_native.h>
+#include <ATen/ops/gelu_backward_native.h>
+#include <ATen/ops/gelu_native.h>
+#include <ATen/ops/glu_native.h>
+#include <ATen/ops/hardsigmoid_backward_native.h>
+#include <ATen/ops/hardsigmoid_native.h>
+#include <ATen/ops/hardtanh_backward_native.h>
+#include <ATen/ops/leaky_relu_backward_native.h>
+#include <ATen/ops/leaky_relu_native.h>
+#include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/silu_backward_native.h>
+#include <ATen/ops/silu_native.h>
+#include <ATen/ops/softplus_backward_native.h>
+#include <ATen/ops/softplus_native.h>
+#include <ATen/ops/tanh_backward_native.h>
+#include <ATen/ops/threshold_backward_native.h>
+#include <ATen/ops/threshold_native.h>
+#endif
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -1424,8 +1445,7 @@ Tensor& glu_backward_mps_out(const Tensor& grad_output, const Tensor& self, cons
 }
 
 Tensor glu_backward_mps(const Tensor& grad_output, const Tensor& self, const int64_t dim) {
-  Tensor grad_input =
-      at::native::empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor grad_input = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   grad_input = glu_backward_mps_out(grad_output, self, dim, grad_input);
   return grad_input;
 }
@@ -2057,8 +2077,8 @@ TORCH_IMPL_FUNC(hardsigmoid_backward_out_mps)
 // Hardtanh backward
 
 Tensor hardtanh_backward_mps(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max) {
-  Tensor grad_input = at::native::empty_mps(
-      grad_output.sizes(), grad_output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor grad_input =
+      at::empty(grad_output.sizes(), grad_output.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
   grad_input = hardtanh_backward_out_mps(grad_output, self, min, max, grad_input);
   return grad_input;
 }

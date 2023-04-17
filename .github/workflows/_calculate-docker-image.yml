@@ -22,7 +22,7 @@ jobs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
 
