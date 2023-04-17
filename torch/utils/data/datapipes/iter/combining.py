@@ -50,7 +50,8 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     def __iter__(self) -> Iterator:
         for dp in self.datapipes:
-            yield from dp
+            for data in dp:
+                yield data
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
@@ -560,7 +561,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
                 except StopIteration:
                     self.buffer.clear()
                     return
-            yield from self.buffer
+            for value in self.buffer:
+                yield value
             self.buffer.clear()
 
     def __len__(self):

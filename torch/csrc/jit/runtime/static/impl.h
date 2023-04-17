@@ -260,7 +260,8 @@ using SROperator = std::function<void(ProcessedNode*)>;
 //   planner.
 class BlockInfo {
  public:
-  BlockInfo(uint32_t input_idx, Block& block);
+  BlockInfo(uint32_t input_idx, Block& block)
+      : input_idx_(input_idx), block_(block) {}
 
   void set_nodes(
       std::vector<StaticNodeInfo> nodes,
@@ -270,7 +271,9 @@ class BlockInfo {
     return nodes_;
   }
 
-  size_t num_nodes() const;
+  size_t num_nodes() const {
+    return nodes_.size();
+  }
 
   size_t num_inputs() const {
     return block_.inputs().size();
@@ -835,10 +838,6 @@ class TORCH_API StaticNodeInfo {
   uint16_t outputs_offset_;
 };
 
-inline size_t BlockInfo::num_nodes() const {
-  return nodes_.size();
-}
-
 /*
   ProcessedNodeMetadata class wraps the possible metadata
   for ProcessedNode. Depending upon the nature of op, processedNode
@@ -856,7 +855,7 @@ class TORCH_API ProcessedNodeMetadata {
 
   ProcessedNodeMetadata() : launcher_(nullptr) {}
 
-  // deleted copy ctor/assignment as standard containers (vector) always
+  // deleted copy ctor/assigment as standard containers (vector) always
   // have copy constructors, but their instantiation is not well-formed
   // if the contained type (BlockRunner) is not copyable
   ProcessedNodeMetadata(const ProcessedNodeMetadata&) = delete;

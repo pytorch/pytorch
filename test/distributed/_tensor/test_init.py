@@ -26,11 +26,19 @@ class DTensorInitOpsTest(DTensorTestBase):
 
     @with_comms
     def test_init_ops(self):
-        # NOTE: random init tests are moved to test_random_ops.py
+        self._run_init_op(
+            torch.nn.init.kaiming_uniform_,
+            a=0,
+            mode="fan_in",
+            nonlinearity="leaky_relu",
+        )
+        self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
+        self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
         self._run_init_op(torch.nn.init.constant_, 2.4)
 
 
 class DTensorConstructorTest(DTensorTestBase):
+
     @property
     def world_size(self):
         return 4

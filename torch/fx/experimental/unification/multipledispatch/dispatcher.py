@@ -282,7 +282,7 @@ class Dispatcher:
     __repr__ = __str__
 
     def dispatch(self, *types):
-        """Determine appropriate implementation for this type signature
+        """Deterimine appropriate implementation for this type signature
         This method is internal.  Users should call this object as a function.
         Implementation resolution occurs within the ``__call__`` method.
         >>> # xdoctest: +SKIP
@@ -320,7 +320,7 @@ class Dispatcher:
                     yield result
 
     def resolve(self, types):
-        """ Determine appropriate implementation for this type signature
+        """ Deterimine appropriate implementation for this type signature
         .. deprecated:: 0.4.4
             Use ``dispatch(*types)`` instead
         """

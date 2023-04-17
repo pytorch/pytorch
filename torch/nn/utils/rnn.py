@@ -440,7 +440,7 @@ def unpad_sequence(
         padded_sequences.transpose_(0, 1)
 
     max_length = padded_sequences.shape[1]
-    idx = torch.arange(max_length, device=lengths.device)
+    idx = torch.arange(max_length)
 
     for seq, length in zip(padded_sequences, lengths):
         mask = idx < length

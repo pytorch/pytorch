@@ -26,10 +26,10 @@ class TestRebase(TestCase):
         "Tests rebase successfully"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        rebase_onto(pr, repo, "main")
+        rebase_onto(pr, repo, "master")
         calls = [
             mock.call("fetch", "origin", "pull/31093/head:pull/31093/head"),
-            mock.call("rebase", "refs/remotes/origin/main", "pull/31093/head"),
+            mock.call("rebase", "refs/remotes/origin/master", "pull/31093/head"),
             mock.call(
                 "push",
                 "-f",
@@ -39,7 +39,7 @@ class TestRebase(TestCase):
         ]
         mocked_run_git.assert_has_calls(calls)
         self.assertTrue(
-            "Successfully rebased `master` onto `refs/remotes/origin/main`"
+            "Successfully rebased `master` onto `refs/remotes/origin/master`"
             in mocked_post_comment.call_args[0][3]
         )
 
@@ -88,10 +88,10 @@ class TestRebase(TestCase):
         "Tests branch already up to date"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        rebase_onto(pr, repo, "main")
+        rebase_onto(pr, repo, "master")
         calls = [
             mock.call("fetch", "origin", "pull/31093/head:pull/31093/head"),
-            mock.call("rebase", "refs/remotes/origin/main", "pull/31093/head"),
+            mock.call("rebase", "refs/remotes/origin/master", "pull/31093/head"),
             mock.call(
                 "push",
                 "-f",
@@ -120,9 +120,9 @@ class TestRebase(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         with self.assertRaisesRegex(Exception, "same sha as the target branch"):
-            rebase_onto(pr, repo, "main")
+            rebase_onto(pr, repo, "master")
         with self.assertRaisesRegex(Exception, "same sha as the target branch"):
-            rebase_ghstack_onto(pr, repo, "main")
+            rebase_ghstack_onto(pr, repo, "master")
 
 
 if __name__ == "__main__":

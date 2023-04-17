@@ -3,7 +3,6 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <c10/util/TypeSafeSignMath.h>
 
 #include <algorithm>
 #include <iterator>
@@ -52,7 +51,7 @@ struct integer_iterator {
       // end`. To handle `c10::irange(n)` where n < 0 (which should be
       // empty), we just make `begin != end` fail whenever `end` is
       // negative.
-      return is_negative(other.value) || value == other.value;
+      return other.value < 0 || value == other.value;
     } else {
       return value == other.value;
     }

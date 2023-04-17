@@ -498,7 +498,7 @@ class TestBinaryUfuncs(TestCase):
         )
 
         def _supported(dtypes):
-            return all((x in supported_dtypes for x in dtypes))
+            return all(map(lambda x: x in supported_dtypes, dtypes))
 
         # int x int type promotion
         if _supported((torch.int16, torch.int32, torch.int64)):
@@ -2616,6 +2616,7 @@ class TestBinaryUfuncs(TestCase):
             rtol=0,
         )
 
+    @onlyCUDA
     @dtypes(torch.half)
     def test_divmul_scalar(self, device, dtype):
         x = torch.tensor(100.0, device=device, dtype=dtype)

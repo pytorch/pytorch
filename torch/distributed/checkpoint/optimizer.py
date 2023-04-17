@@ -20,7 +20,7 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     TensorStorageMetadata,
-    ChunkStorageMetadata,
+    ChunkStorageMetadata
 )
 from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
@@ -170,12 +170,8 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             original_shard = obj.local_shards()[0]
             local_chunks = [
                 ChunkStorageMetadata(
-                    offsets=torch.Size(
-                        _element_wise_add(
-                            original_shard.metadata.shard_offsets, offset
-                        )
-                    ),
-                    sizes=torch.Size(original_shard.metadata.shard_sizes),
+                    offsets=torch.Size(_element_wise_add(original_shard.metadata.shard_offsets, offset)),
+                    sizes=torch.Size(original_shard.metadata.shard_sizes)
                 )
             ]
 
@@ -260,8 +256,7 @@ def load_sharded_optimizer_state_dict(
         sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{i}/cuda:{i % torch.cuda.device_count()}"
-                for i in range(dist.get_world_size())
+                f"rank:{i}/cuda:{i}" for i in range(dist.get_world_size())
             ],
         )
     else:

@@ -87,8 +87,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
   }
 #endif
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
-      torch::is_symint(py::handle(obj)) ||
-      torch::is_symfloat(py::handle(obj)) || torch::is_symbool(py::handle(obj));
+      torch::is_symint(py::handle(obj)) || torch::is_symfloat(py::handle(obj));
 }
 
 namespace torch {
@@ -134,7 +133,7 @@ struct ParsedArgs {
   PyObject* args[N];
 };
 
-struct PYBIND11_EXPORT PythonArgParser {
+struct PythonArgParser {
   explicit PythonArgParser(
       std::vector<std::string> fmts,
       bool traceable = false);
@@ -279,7 +278,6 @@ struct PythonArgs {
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
-  inline c10::SymBool toSymBool(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
@@ -494,12 +492,12 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 }
 
 inline PyObject* toPyObject(c10::SymInt symint) {
-  if (auto m = symint.maybe_as_int()) {
-    return THPUtils_packInt64(*m);
-  } else {
+  if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
+  } else {
+    return THPUtils_packInt64(symint.as_int_unchecked());
   }
 }
 
@@ -561,14 +559,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     } else {
       // convert tensor to scalar outside of try / catch,
       // so that Tensor subclass exceptions will not be caught.
-      if (THPUtils_checkLongExact(obj)) {
-        // Fast path for plain numbers
-        try {
-          res.emplace_back(THPUtils_unpackIndex(obj));
-        } catch (std::exception& e) {
-          throw_intlist_exception(this, i, obj, idx);
-        }
-      } else if (THPVariable_Check(obj)) {
+      if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
@@ -628,14 +619,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
     } else {
       // convert tensor to scalar outside of try / catch,
       // so that Tensor subclass exceptions will not be caught.
-      if (THPUtils_checkLongExact(obj)) {
-        // Fast path for plain numbers
-        try {
-          res[idx] = THPUtils_unpackIndex(obj);
-        } catch (std::exception& e) {
-          throw_intlist_exception(this, i, obj, idx);
-        }
-      } else if (THPVariable_Check(obj)) {
+      if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
@@ -716,7 +700,14 @@ inline at::ScalarType PythonArgs::scalartypeWithDefault(
   return scalartype(i);
 }
 
-inline at::ScalarType toScalarType(PyObject* obj) {
+inline at::ScalarType PythonArgs::scalartype(int i) {
+  if (!args[i]) {
+    auto scalartype = signature.params[i].default_scalartype;
+    return (scalartype == at::ScalarType::Undefined)
+        ? torch::tensors::get_default_scalar_type()
+        : scalartype;
+  }
+  PyObject* obj = args[i];
   if (obj == (PyObject*)&PyFloat_Type) {
     return at::ScalarType::Double;
   }
@@ -727,17 +718,6 @@ inline at::ScalarType toScalarType(PyObject* obj) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
-}
-
-inline at::ScalarType PythonArgs::scalartype(int i) {
-  if (!args[i]) {
-    auto scalartype = signature.params[i].default_scalartype;
-    return (scalartype == at::ScalarType::Undefined)
-        ? torch::tensors::get_default_scalar_type()
-        : scalartype;
-  }
-  PyObject* obj = args[i];
-  return toScalarType(obj);
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
@@ -934,19 +914,6 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
   return py::cast<c10::SymInt>(py::handle(args[i]));
 }
 
-inline c10::SymBool PythonArgs::toSymBool(int i) {
-  if (!args[i]) {
-    return c10::SymBool(signature.params[i].default_bool);
-  }
-  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, c10::BoolType::get());
-  }
-
-  return py::cast<c10::SymBool>(py::handle(args[i]));
-}
-
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i])
     return default_int;
@@ -989,16 +956,6 @@ inline double PythonArgs::toDouble(int i) {
   return THPUtils_unpackDouble(args[i]);
 }
 
-inline bool PythonArgs::toBool(int i) {
-  if (!args[i])
-    return signature.params[i].default_bool;
-  if (torch::is_symbool(py::handle(args[i]))) {
-    return py::cast<c10::SymBool>(py::handle(args[i]))
-        .guard_bool(__FILE__, __LINE__);
-  }
-  return args[i] == Py_True;
-}
-
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i])
     return default_double;
@@ -1021,6 +978,12 @@ inline c10::complex<double> PythonArgs::toComplexWithDefault(
   if (!args[i])
     return default_value;
   return toComplex(i);
+}
+
+inline bool PythonArgs::toBool(int i) {
+  if (!args[i])
+    return signature.params[i].default_bool;
+  return args[i] == Py_True;
 }
 
 inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {

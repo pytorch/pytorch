@@ -286,7 +286,9 @@ class GradScaler:
 
     def _maybe_opt_step(self, optimizer, optimizer_state, *args, **kwargs):
         retval = None
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+        # NOTE(crcrpar): Gradients could be inf/nan after `GradScaler.unscale_(optimizer)`
+        # especially when gradient clipping is applied.
+        if not sum(v.item() for v in self._check_inf_per_device(optimizer).values()):
             retval = optimizer.step(*args, **kwargs)
         return retval
 

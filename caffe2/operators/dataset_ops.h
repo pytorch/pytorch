@@ -92,7 +92,7 @@ class TreeCursor {
 
 /**
  * Simple wrapper class allowing an easy traversal of the tensors representing
- * the hierarchical structure.
+ * the hirerarchical structure.
  */
 class TreeWalker {
  public:

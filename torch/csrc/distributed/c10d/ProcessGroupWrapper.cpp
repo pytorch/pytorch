@@ -31,15 +31,11 @@ struct CollectiveFingerPrint {
   std::vector<int8_t> tensor_device_types_;
   // input tensor sizes
   std::vector<std::vector<int64_t>> tensor_sizes_;
-  int sequence_number_;
 
   explicit CollectiveFingerPrint(
       OpType op_type,
-      const std::vector<at::Tensor>& input_tensors,
-      int sequence_number)
-      : op_type_(op_type),
-        num_tensors_(input_tensors.size()),
-        sequence_number_(sequence_number) {
+      const std::vector<at::Tensor>& input_tensors)
+      : op_type_(op_type), num_tensors_(input_tensors.size()) {
     tensor_dtypes_.reserve(num_tensors_);
     tensor_device_types_.reserve(num_tensors_);
     tensor_sizes_.reserve(num_tensors_);
@@ -55,13 +51,11 @@ struct CollectiveFingerPrint {
       OpType op_type,
       std::vector<int8_t> tensor_dtypes,
       std::vector<int8_t> tensor_device_types,
-      std::vector<std::vector<int64_t>> tensor_sizes,
-      int sequence_number)
+      std::vector<std::vector<int64_t>> tensor_sizes)
       : op_type_(op_type),
         tensor_dtypes_(std::move(tensor_dtypes)),
         tensor_device_types_(std::move(tensor_device_types)),
-        tensor_sizes_(std::move(tensor_sizes)),
-        sequence_number_(sequence_number) {}
+        tensor_sizes_(std::move(tensor_sizes)) {}
 
   // Logs collective information in case of a failure.
   friend std::ostream& operator<<(
@@ -93,14 +87,11 @@ struct CollectiveFingerPrint {
     auto device_types = std::vector<int8_t>();
     auto sizes = std::vector<std::vector<int64_t>>();
     int index = 0;
-    int seq = 0;
     // 1. OpType
     optype = OpType(serialized_tensor[index].item<int>());
     index++;
 
     if (index < serialized_tensor.size(0)) {
-      seq = serialized_tensor[index].item<int64_t>();
-      index++;
       // 2. Num tensors
       int num_tensors = serialized_tensor[index].item<int>();
       index++;
@@ -133,7 +124,7 @@ struct CollectiveFingerPrint {
         sizes.push_back(shapeVec);
       }
     }
-    return CollectiveFingerPrint(optype, dtypes, device_types, sizes, seq);
+    return CollectiveFingerPrint(optype, dtypes, device_types, sizes);
   }
 
  private:
@@ -186,8 +177,6 @@ struct CollectiveFingerPrint {
     // std::vector<int64_t> data;
     // 1. OpType
     data->push_back(static_cast<int64_t>(op_type_));
-    // sequence number
-    data->push_back(sequence_number_);
     // 2. Num tensors
     data->push_back(static_cast<int64_t>(num_tensors_));
     // 3. Tensor dtypes
@@ -227,7 +216,6 @@ std::ostream& operator<<(
     std::ostream& output,
     const CollectiveFingerPrint& collective_fingerprint) {
   std::string collectiveInfo;
-  auto op_type_str = opTypeToString(collective_fingerprint.op_type_);
   if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
     std::vector<std::string> dtype_strs;
@@ -254,10 +242,8 @@ std::ostream& operator<<(
 
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",
-        "SequenceNumber=",
-        collective_fingerprint.sequence_number_,
-        ", OpType=",
-        op_type_str,
+        "OpType=",
+        opTypeToString(collective_fingerprint.op_type_),
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
@@ -268,10 +254,8 @@ std::ostream& operator<<(
   } else {
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",
-        "SequenceNumber=",
-        collective_fingerprint.sequence_number_,
         "OpType=",
-        op_type_str,
+        opTypeToString(collective_fingerprint.op_type_),
         ")");
   }
   return output << collectiveInfo;
@@ -458,15 +442,12 @@ c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {
 
 void ProcessGroupWrapper::runCollectiveChecks(
     OpType op_type,
-    const std::vector<at::Tensor>& tensors) {
+    const std::vector<at::Tensor>& tensors) const {
   // first perform a monitored barrier to ensure all ranks can synchronize.
   c10d::BarrierOptions options;
   // TODO: we should use wrapped backend_'s timeout here, but C++ ProcessGroup
   // API does not expose timeout.
-  auto seq = getSequenceNumberForGroup();
-  auto finger_print = CollectiveFingerPrint(op_type, tensors, seq);
-  LOG(INFO) << "[Rank " << getRank() << "] "
-            << "Running collective: " << finger_print;
+  auto finger_print = CollectiveFingerPrint(op_type, tensors);
   try {
     glooBackend_->monitoredBarrier(options, /* waitAllRanks */ true);
   } catch (const std::runtime_error& e) {

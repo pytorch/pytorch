@@ -65,7 +65,6 @@ nn/qat/ @jerryzh168
 
 # Docker
 /.ci/docker/ @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @ngimel
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change

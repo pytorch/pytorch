@@ -13,7 +13,6 @@ if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
-    TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
@@ -112,8 +111,6 @@ def livevars_analysis(instructions, instruction):
                         state.reads.add(inst.argval)
                 elif "STORE" in inst.opname:
                     state.writes.add(inst.argval)
-                elif inst.opname == "MAKE_CELL":
-                    pass
                 else:
                     raise NotImplementedError(f"unhandled {inst.opname}")
             if inst.opcode in JUMP_OPCODES:

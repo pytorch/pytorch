@@ -15,6 +15,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-tsan* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-tsan.sh" "$@"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi

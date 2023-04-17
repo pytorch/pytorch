@@ -37,7 +37,7 @@ def create_c10d_store(
         )
 
     if server_port != -1:
-        log.info("sever_port: %s, specified, ignoring retries", server_port)
+        log.info(f"sever_port: {server_port}, specified, ignoring retries")
 
     # only retry when server_port is NOT static
     attempt = retries if server_port == -1 else 1
@@ -48,11 +48,10 @@ def create_c10d_store(
             port = get_free_port()
 
         log.info(
-            "Creating c10d store on %s:%s\n"
-            "  world_size  : %s\n"
-            "  is_server   : %s\n"
-            "  timeout(sec): %s\n",
-            server_addr, port, world_size, is_server, timeout
+            f"Creating c10d store on {server_addr}:{port}\n"
+            f"  world_size  : {world_size}\n"
+            f"  is_server   : {is_server}\n"
+            f"  timeout(sec): {timeout}\n"
         )
 
         try:
@@ -78,7 +77,7 @@ def create_c10d_store(
             if str(e) == _ADDRESS_IN_USE:  # this will only happen on the server
                 if attempt < retries:
                     log.warning(
-                        "port: %s already in use, attempt: [%s/%s]", port, attempt, retries
+                        f"port: {port} already in use, attempt: [{attempt}/{retries}]"
                     )
                     attempt += 1
                 else:

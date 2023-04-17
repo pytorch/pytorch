@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorShape.h>
@@ -7,17 +7,7 @@
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/cat_native.h>
-#include <ATen/ops/topk.h>
-#include <ATen/ops/topk_native.h>
-#endif
-
 namespace at::native {
-namespace mps {
 
 // Produces a shape with the `dim` dimension set to 0.
 std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
@@ -34,31 +24,6 @@ std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
   }
   return numbers;
 }
-
-void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
-  int first_dims = first.dim();
-  int second_dims = second.dim();
-  TORCH_CHECK(
-      first_dims == second_dims, "Tensors must have same number of dimensions: got ", first_dims, " and ", second_dims);
-  for (int dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = first.size(dim);
-    int64_t second_dim_size = second.size(dim);
-    TORCH_CHECK(first_dim_size == second_dim_size,
-                "Sizes of tensors must match except in dimension ",
-                dim,
-                ". Got ",
-                static_cast<long long>(first_dim_size),
-                " and ",
-                static_cast<long long>(second_dim_size),
-                " (The offending index is ",
-                index,
-                ")");
-  }
-}
-} // namespace mps
 
 // topk
 TORCH_IMPL_FUNC(topk_out_mps)
@@ -224,6 +189,30 @@ TORCH_IMPL_FUNC(topk_out_mps)
   }
 }
 
+void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
+  int first_dims = first.dim();
+  int second_dims = second.dim();
+  TORCH_CHECK(
+      first_dims == second_dims, "Tensors must have same number of dimensions: got ", first_dims, " and ", second_dims);
+  for (int dim = 0; dim < first_dims; dim++) {
+    if (dim == dimension) {
+      continue;
+    }
+    int64_t first_dim_size = at::native::size(first, dim);
+    int64_t second_dim_size = at::native::size(second, dim);
+    TORCH_CHECK(first_dim_size == second_dim_size,
+                "Sizes of tensors must match except in dimension ",
+                dim,
+                ". Got ",
+                static_cast<long long>(first_dim_size),
+                " and ",
+                static_cast<long long>(second_dim_size),
+                " (The offending index is ",
+                index,
+                ")");
+  }
+}
+
 TORCH_IMPL_FUNC(cat_out_mps)
 (const ITensorListRef& inputs,
  int64_t dimension,
@@ -266,7 +255,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   // this behavior for backwards compatibility, but only for this specific size
   // (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
-  auto should_skip = [](const Tensor& t) { return t.dim() == 1 && t.size(0) == 0; };
+  auto should_skip = [](const Tensor& t) { return t.dim() == 1 && at::native::size(t, 0) == 0; };
   at::assert_no_internal_overlap(out);
 
   Tensor notSkippedTensor;
@@ -319,7 +308,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
     if (!should_skip(tensor)) {
       // TODO: Factor out `check_shape_except_dim`
       check_shape_except_dim(notSkippedTensor, tensor, dimension, idx);
-      cat_dim_size += tensor.size(dimension);
+      cat_dim_size += at::native::size(tensor, dimension);
       idx++;
     }
   }

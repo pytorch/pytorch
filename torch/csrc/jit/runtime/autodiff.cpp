@@ -132,7 +132,7 @@ bool isDifferentiable(Graph& g) {
 //
 // The output of compiled forward graph is [real_outputs, ctx]
 // The input of compiled backward graph is [ctx, grad_values]
-// We run LowerSimpleTuples afterwards to eliminate all tuples generated in
+// We run LowerSimpleTuples afterwards to elmininate all tuples generated in
 // this process. The original node and TupleConstruct nodes in forward graph
 // will be cleaned up later using EliminateDeadCode(block). TupleUnPack node in
 // backward graph will be removed in eliminateDeadcode(ReverseDetails) defined
@@ -304,7 +304,7 @@ class GradientHelper {
 // If we have a function y = f(x) with jacobian J, the backwards of f is dx =
 // J^t dy. Note that because the backwards always implements this matrix
 // multiply, we know that it maps an input vector of zeros to an output vector
-// of zero regardless of what operations it chooses to do inside to actually
+// of zero regardless of what operations it choses to do inside to actually
 // implement the matrix multiply (most use some optimized form and never
 // generate J^t). More generally, we know that all of the backward computations
 // are linear and can use this property to do more aggressive optimizations
@@ -752,7 +752,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
       // an output
     } else {
       // we need to create a new temporary output for this capture because it
-      // wasn't available.
+      // wasn't availiable.
 
       auto out_index = graph.registerOutput(capture_val);
       GRAPH_DEBUG(

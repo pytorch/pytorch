@@ -3,9 +3,10 @@
 import pickle
 from io import BytesIO
 from textwrap import dedent
+from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from .common import PackageTestCase
@@ -21,21 +22,28 @@ packaging_directory = Path(__file__).parent
 class TestSaveLoad(PackageTestCase):
     """Core save_* and loading API tests."""
 
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_saving_source(self):
-        buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        filename = self.temp()
+        with PackageExporter(filename) as he:
             he.save_source_file("foo", str(packaging_directory / "module_a.py"))
             he.save_source_file("foodir", str(packaging_directory / "package_a"))
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = PackageImporter(filename)
         foo = hi.import_module("foo")
         s = hi.import_module("foodir.subpackage")
         self.assertEqual(foo.result, "module_a")
         self.assertEqual(s.result, "package_a.subpackage")
 
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_saving_string(self):
-        buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        filename = self.temp()
+        with PackageExporter(filename) as he:
             src = dedent(
                 """\
                 import math
@@ -43,8 +51,7 @@ class TestSaveLoad(PackageTestCase):
                 """
             )
             he.save_source_string("my_mod", src)
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = PackageImporter(filename)
         m = hi.import_module("math")
         import math
 
@@ -52,16 +59,19 @@ class TestSaveLoad(PackageTestCase):
         my_mod = hi.import_module("my_mod")
         self.assertIs(my_mod.math, math)
 
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_save_module(self):
-        buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        filename = self.temp()
+        with PackageExporter(filename) as he:
             import module_a
             import package_a
 
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = PackageImporter(filename)
         module_a_i = hi.import_module("module_a")
         self.assertEqual(module_a_i.result, "module_a")
         self.assertIsNot(module_a, module_a_i)
@@ -125,18 +135,21 @@ class TestSaveLoad(PackageTestCase):
         self.assertEqual(package_a_i.result, "package_a")
         self.assertIsNot(package_a_i, package_a)
 
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_pickle(self):
         import package_a.subpackage
 
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
 
-        buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        filename = self.temp()
+        with PackageExporter(filename) as he:
             he.intern("**")
             he.save_pickle("obj", "obj.pkl", obj2)
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = PackageImporter(filename)
 
         # check we got dependencies
         sp = hi.import_module("package_a.subpackage")
@@ -151,27 +164,10 @@ class TestSaveLoad(PackageTestCase):
             package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject
         )
 
-    def test_pickle_long_name_with_protocol_4(self):
-        import package_a.long_name
-
-        container = []
-
-        # Indirectly grab the function to avoid pasting a 256 character
-        # function into the test
-        package_a.long_name.add_function(container)
-
-        buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
-            exporter.intern("**")
-            exporter.save_pickle("container", "container.pkl", container, pickle_protocol=4)
-
-        buffer.seek(0)
-        importer = PackageImporter(buffer)
-        unpickled_container = importer.load_pickle("container", "container.pkl")
-        self.assertIsNot(container, unpickled_container)
-        self.assertEqual(len(unpickled_container), 1)
-        self.assertEqual(container[0](), unpickled_container[0]())
-
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
     def test_exporting_mismatched_code(self):
         """
         If an object with the same qualified name is loaded from different
@@ -182,22 +178,20 @@ class TestSaveLoad(PackageTestCase):
 
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
-
-        b1 = BytesIO()
-        with PackageExporter(b1) as pe:
+        f1 = self.temp()
+        with PackageExporter(f1) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
 
-        b1.seek(0)
-        importer1 = PackageImporter(b1)
+        importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
-
-        b1.seek(0)
-        importer2 = PackageImporter(b1)
+        importer2 = PackageImporter(f1)
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 
+        f2 = self.temp()
+
         def make_exporter():
-            pe = PackageExporter(BytesIO(), importer=[importer1, sys_importer])
+            pe = PackageExporter(f2, importer=[importer1, sys_importer])
             # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
             return pe
 

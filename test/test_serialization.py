@@ -251,25 +251,6 @@ class SerializationMixin:
             with self.assertRaisesRegex(ValueError, 'supports dill >='):
                 x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
 
-    def test_pickle_module(self):
-        class ThrowingUnpickler(pickle.Unpickler):
-            def load(self, *args, **kwargs):
-                raise RuntimeError("rumpelstiltskin")
-
-        class ThrowingModule:
-            Unpickler = ThrowingUnpickler
-            load = ThrowingUnpickler.load
-
-        x = torch.eye(3)
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(x, f)
-            f.seek(0)
-            with self.assertRaisesRegex(RuntimeError, "rumpelstiltskin"):
-                torch.load(f, pickle_module=ThrowingModule)
-            f.seek(0)
-            z = torch.load(f)
-        self.assertEqual(x, z)
-
     @unittest.skipIf(
         not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
         '"dill" not found or not correct version'

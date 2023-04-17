@@ -115,15 +115,7 @@ struct CUDAPluggableAllocator
       int device,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
       override;
-  virtual void enablePeerAccess(int dev, int dev_to_access) override;
-  virtual cudaError_t memcpyAsync(
-      void* dst,
-      int dstDevice,
-      const void* src,
-      int srcDevice,
-      size_t count,
-      cudaStream_t stream,
-      bool p2p_enabled) override;
+  virtual bool needsPoolSpecificPeerAccess() override;
   virtual std::string name() override;
 
  protected:

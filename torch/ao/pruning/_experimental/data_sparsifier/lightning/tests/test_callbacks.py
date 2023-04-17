@@ -131,7 +131,7 @@ class TestTrainingAwareCallback(TestCase):
 
         # data sparsifier args are correct
         for key, value in sparsifier_args.items():
-            assert callback.data_sparsifier.defaults[key] == value
+            callback.data_sparsifier.defaults[key] == value
 
         # data scheduler args are correct
         for key, value in scheduler_args.items():

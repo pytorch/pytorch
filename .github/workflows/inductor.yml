@@ -3,6 +3,7 @@ name: inductor
 on:
   push:
     branches:
+      - master
       - main
     tags:
       - ciflow/inductor/*

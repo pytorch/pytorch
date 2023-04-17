@@ -101,21 +101,15 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   // Windows always little endian
   #define __BYTE_ORDER __LITTLE_ENDIAN
 
+  #if !defined(_M_ARM64)
   // intrinsics / prefetching
-  #if defined(_M_ARM64)
-    #include <intrin.h>
-  #else
-    #include <xmmintrin.h>
+  #include <xmmintrin.h>
   #endif
 
   #ifdef __MINGW32__
     #define PREFETCH(location) __builtin_prefetch(location)
   #else
-    #if defined(_M_ARM64)
-      #define PREFETCH(location) __prefetch(location)
-    #else
-      #define PREFETCH(location) _mm_prefetch(location, _MM_HINT_T0)
-    #endif
+    #define PREFETCH(location) _mm_prefetch(location, _MM_HINT_T0)
   #endif
 #elif defined(__APPLE__)
   #include <TargetConditionals.h>

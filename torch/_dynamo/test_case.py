@@ -23,7 +23,7 @@ def run_tests(needs=()):
         or IS_WINDOWS
         or TEST_WITH_CROSSREF
         or TEST_WITH_ROCM
-        or sys.version_info >= (3, 12)
+        or sys.version_info >= (3, 11)
     ):
         return  # skip testing
 

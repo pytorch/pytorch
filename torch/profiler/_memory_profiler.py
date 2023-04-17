@@ -361,7 +361,7 @@ class SizeMap:
                     # the core PyTorch codebase.
                     if prior_size != new_size:
                         delta = f"{prior_size} vs. {new_size}"
-                        log.warning("Mismatch between allocation and free: %s", delta)
+                        log.warning(f"Mismatch between allocation and free: {delta}")
 
         self._values.update(allocations)
 
@@ -381,7 +381,8 @@ class SizeMap:
             if isinstance(i, _TensorMetadata):
                 yield i
             elif isinstance(i, list):
-                yield from i
+                for t in i:
+                    yield t
 
     def __getitem__(self, key: TensorKey):
         return self._values[key]

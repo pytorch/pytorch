@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import operator
 
-from typing import Callable, Dict, Mapping, Union
+from typing import Callable, Dict, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import opset18  # type: ignore[import]
@@ -132,7 +132,6 @@ _ATENLIB_FUNCTIONS = {
     "aten::softmax": ops.special.aten_special_softmax,
     "aten::split": ops.core.aten_split,
     "aten::sqrt": ops.core.aten_sqrt,
-    "aten::stack": ops.core.aten_stack,
     "aten::sub": ops.core.aten_sub,
     "aten::sum": ops.core.aten_sum_dim_IntList,
     "aten::sym_size": ops.core.aten_sym_size,
@@ -154,7 +153,7 @@ _ATENLIB_FUNCTIONS = {
 
 
 def _create_op_overload_to_exporter_key_table() -> (
-    Mapping[Union[torch._ops.OpOverload, Callable], str]
+    Dict[Union[torch._ops.OpOverload, Callable], str]
 ):
     # TODO(justinchuby): Improve how the table is constructed.
     table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
@@ -199,7 +198,7 @@ _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE = {
 
 @_beartype.beartype
 def _create_onnx_friendly_decomposition_table() -> (
-    Mapping[torch._ops.OpOverload, Callable]
+    Dict[torch._ops.OpOverload, Callable]
 ):
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
     for op_overload, decomp_fn in torch._decomp.decomposition_table.items():

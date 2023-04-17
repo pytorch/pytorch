@@ -233,7 +233,7 @@ def timer(logger: logging.Logger, prefix: str) -> Iterator[None]:
     """Timed context manager"""
     start_time = time.time()
     yield
-    logger.info("%s took %.3f [s]", prefix, time.time() - start_time)
+    logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -607,8 +607,7 @@ def install(
     pytdir.cleanup()
     logger.info(
         "-------\nPyTorch Development Environment set up!\nPlease activate to "
-        "enable this environment:\n  $ conda activate %s",
-        env_opts[1],
+        f"enable this environment:\n  $ conda activate {env_opts[1]}"
     )
 
 

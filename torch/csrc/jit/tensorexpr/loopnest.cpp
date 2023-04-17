@@ -813,7 +813,7 @@ class FunctionInliner : public IRMutator {
     }
   }
 
-  // Any Random Intrinsics that were turned into vars must be inserted here.
+  // Any Random Instrinsics that were turned into vars must be inserted here.
   StmtPtr mutate(BlockPtr v) override {
     if (!success()) {
       return v;
@@ -2930,7 +2930,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     tmp_params.push_back(alloc<Add>(new_loop_vars[i], info.start[i]));
   }
 
-  // Replace accesses to the producer in the consumer with the cache.
+  // Replace acceses to the producer in the consumer with the cache.
   CacheReplacer replacer(producer, tmp_buf, info.start);
   consumer->accept_mutator(&replacer);
 

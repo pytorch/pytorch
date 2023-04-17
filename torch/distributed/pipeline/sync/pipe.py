@@ -418,7 +418,7 @@ class Pipe(Module):
 
         It's worth to cache CUDA streams although PyTorch already manages a
         pool of pre-allocated CUDA streams, because it may reduce GPU memory
-        fragmentation when the number of micro-batches is small.
+        fragementation when the number of micro-batches is small.
 
         """
         if not self._copy_streams:

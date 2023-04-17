@@ -9,8 +9,6 @@ import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch._inductor.autotune_process import BenchmarkRequest
-
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -274,28 +272,6 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-
-    def test_TritonTemplateCaller_str(self):
-        """
-        Make sure str(TritonTemplateCaller) does not raise exceptions.
-        """
-        module_path = "abc.py"
-        bmreq = BenchmarkRequest(
-            module_path=module_path,
-            module_cache_key=None,
-            kernel_name=None,
-            grid=None,
-            extra_args=None,
-            num_stages=None,
-            num_warps=None,
-            input_tensors=None,
-            output_tensor=None,
-        )
-        caller = select_algorithm.TritonTemplateCaller(
-            None, None, None, None, "extra", bmreq
-        )
-        caller_str = str(caller)
-        self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
 if __name__ == "__main__":

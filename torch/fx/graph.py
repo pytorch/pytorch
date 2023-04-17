@@ -219,7 +219,7 @@ class PythonCode:
     """
     # Python source code for the forward function definition.
     src: str
-    # Values in global scope during execution of `src_def`.
+    # Values in global scope during exection of `src_def`.
     globals: Dict[str, Any]
 
 

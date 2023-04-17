@@ -43,15 +43,9 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    from .compile_fx import compile_fx_aot
+    from .compile_fx import compile_fx
 
-    compiled = compile_fx_aot(
-        gm,
-        example_inputs,
-        config_patches=options,
-    )
-    lib_path = compiled()
-    return lib_path
+    return compile_fx(gm, example_inputs, config_patches=options, aot_mode=True)()
 
 
 def list_mode_options(mode: str = None) -> Dict[str, Any]:
@@ -68,16 +62,11 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
 
     mode_options = {
         "default": {},
-        # enable cudagraphs
         "reduce-overhead": {
             "triton.cudagraphs": True,
         },
-        # enable max-autotune
-        "max-autotune-no-cudagraphs": {
-            "max_autotune": True,
-        },
-        # enable both cuda-graphs and max-autotune
         "max-autotune": {
+            "epilogue_fusion": True,
             "max_autotune": True,
             "triton.cudagraphs": True,
         },

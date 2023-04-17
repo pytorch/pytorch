@@ -8,7 +8,8 @@ from itertools import product
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA, NoTest
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_device_type import (
-    skipCUDAIfVersionLessThan, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
+    skipCUDAIfRocm, skipCUDAIf, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
@@ -39,10 +40,10 @@ class TestPythonJiterator(TestCase):
 
         self.assertEqual(expected, result)
 
+    @skipCUDAIfRocm
     # See https://github.com/pytorch/pytorch/pull/76394#issuecomment-1118018287 for details
-    # On cuda 11.3, nvrtcCompileProgram is taking too long to
-    # compile jiterator generated kernels for non-contiguous input that requires dynamic-casting.
-    @skipCUDAIfVersionLessThan((11, 6))
+    @skipCUDAIf(_get_torch_cuda_version() < (11, 6), "On cuda 11.3, nvrtcCompileProgram is taking too long to "
+                "compile jiterator generated kernels for non-contiguous input that requires dynamic-casting.")
     @parametrize("shape_strides", [
         (([3, 3], [1, 3]), ([3, 1], [1, 3])),  # non-contiguous
     ])

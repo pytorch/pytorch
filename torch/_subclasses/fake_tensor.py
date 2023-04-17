@@ -19,7 +19,6 @@ from torch._prims_common import (
     is_integer_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -29,8 +28,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
-
-DimList = List
 
 log = logging.getLogger(__name__)
 
@@ -250,8 +247,6 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -285,8 +280,6 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -322,8 +315,6 @@ class FakeTensorConverter:
         shape_env=None,
         ignore_subclass=False,
         source=None,
-        dynamic_dims=None,
-        constraint_dims=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -332,8 +323,6 @@ class FakeTensorConverter:
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
         )
 
 
@@ -950,8 +939,10 @@ class FakeTensor(torch.Tensor):
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
-                fake_mode = arg.fake_mode
-                break
+                if fake_mode is None:
+                    fake_mode = arg.fake_mode
+                else:
+                    assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
         assert fake_mode is not None
         with fake_mode:  # type: ignore[attr-defined]
@@ -1040,7 +1031,6 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
-        log.info("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1086,7 +1076,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
-                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
+                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
             )
             incr = IncrementRecursionCount()
 
@@ -1155,13 +1145,9 @@ class FakeTensorMode(TorchDispatchMode):
 
             return converter(self, args[0])
 
-        # Recompute flat_arg_fake_tensors here again in case some of the inputs
-        # were real tensors and fakified in validate_and_convert_non_fake_tensors
-        (
-            args,
-            kwargs,
-            flat_arg_fake_tensors,
-        ) = self.validate_and_convert_non_fake_tensors(func, converter, args, kwargs)
+        args, kwargs = self.validate_and_convert_non_fake_tensors(
+            func, converter, args, kwargs
+        )
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -1296,12 +1282,9 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
-        Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
-        flat_arg_fake_tensors = []
 
         def validate(x):
-            nonlocal flat_arg_fake_tensors
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
@@ -1313,19 +1296,14 @@ class FakeTensorMode(TorchDispatchMode):
                         f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
                     )
 
-                x = converter(self, x)
-            else:
-                assert x.fake_mode is self, "Mixing fake modes NYI"
-
-            flat_arg_fake_tensors.append(x)
+                return converter(self, x)
             return x
 
-        args, kwargs = tree_map_only(
+        return tree_map_only(
             torch.Tensor,
             validate,
             (args, kwargs),
         )
-        return args, kwargs, flat_arg_fake_tensors
 
     def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
         wrap = self.gen_wrap_fn(func, args, kwargs)
@@ -1421,27 +1399,20 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(
         self,
         tensor,
-        *,
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
-        shape_env = self.shape_env
         if static_shapes:
-            assert (
-                dynamic_dims is None
-            ), "cannot set both static_shapes and dynamic_dims"
-            shape_env = None
+            return self.fake_tensor_converter(
+                self, tensor, ignore_subclass=ignore_subclass, source=source
+            )
         return self.fake_tensor_converter(
             self,
             tensor,
-            shape_env=shape_env,
+            shape_env=self.shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
-            dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims,
         )
 
 

@@ -16,6 +16,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
+    skip_if_rocm,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -29,9 +30,10 @@ if not dist.is_available():
     sys.exit(0)
 
 # bfloat16 is only supported by CUDA 11+
-BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
-    or torch.version.hip is not None
+BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and torch.version.cuda is not None
+    and int(torch.version.cuda.split(".")[0]) >= 11
 )
 
 
@@ -433,6 +435,7 @@ class TestCommunicationHooks(FSDPTest):
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     @parametrize("has_wrapping", [True, False])
     @parametrize(
         "sharding_strategy",

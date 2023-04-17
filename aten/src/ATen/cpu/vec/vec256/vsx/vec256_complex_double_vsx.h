@@ -515,14 +515,12 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> eq(const Vectorized<ComplexDbl>& other) const {
-    auto eq = (*this == other);  // compares real and imag individually
-    // If both real numbers and imag numbers are equal, then the complex numbers are equal
-    return (eq.real() & eq.imag()) & vd_one;
+    auto ret = (*this == other);
+    return ret & vd_one;
   }
   Vectorized<ComplexDbl> ne(const Vectorized<ComplexDbl>& other) const {
-    auto ne = (*this != other);  // compares real and imag individually
-    // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
-    return (ne.real() | ne.imag()) & vd_one;
+    auto ret = (*this != other);
+    return ret & vd_one;
   }
 
   Vectorized<ComplexDbl> lt(const Vectorized<ComplexDbl>& other) const {

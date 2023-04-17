@@ -57,7 +57,7 @@ class TORCH_API Context {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  static bool isPinnedPtr(const void* data) {
+  static bool isPinnedPtr(void* data) {
     return detail::getCUDAHooks().isPinnedPtr(data);
   }
   static bool hasOpenMP();

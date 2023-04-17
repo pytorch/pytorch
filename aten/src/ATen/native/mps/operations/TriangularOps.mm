@@ -1,15 +1,13 @@
 //  Copyright © 2022 Apple Inc.
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
+#include <ATen/ATen.h>
+#include <ATen/Tensor.h>
+#include <ATen/Utils.h>
+
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/tril_native.h>
-#include <ATen/ops/triu_native.h>
-#endif
+#include <torch/library.h>
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
