@@ -3461,12 +3461,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
-        (
-            inputs,
-            constant_args,
-            _,
-            _,
-        ) = _prepare_convolution_fusion_create(
+        (inputs, constant_args, _, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.realize_input(other)
