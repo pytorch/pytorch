@@ -1,3 +1,0 @@
-- func: custom::add_3.out(Tensor a, Tensor b, Tensor c, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: custom::add_3_out
