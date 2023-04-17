@@ -165,20 +165,23 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_6, contains=False)
 
-    def test_pattern_fails_with_scale_tensor_factor(self):
+    def test_pattern_fails_with_tensor_factor(self):
         # https://github.com/pytorch/pytorch/issues/99124
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, is_inv_factor):
                 super(Model, self).__init__()
-                self.scale_factor = torch.nn.Parameter(torch.ones(4, 1, 1))
+                self.scale_factor = torch.nn.Parameter(
+                    torch.ones(4, 1, 1, device="cuda")
+                )
+                self.is_inv_factor = is_inv_factor
 
             def forward(self, query, key, value) -> torch.Tensor:
-                return (
-                    torch.matmul(query, key.transpose(-2, -1))
-                    .mul(self.scale_factor)
-                    .softmax(dim=-1)
-                    .matmul(value)
-                )
+                y = torch.matmul(query, key.transpose(-2, -1))
+                if self.is_inv_factor:
+                    y = y.div(self.scale_factor)
+                else:
+                    y = y.mul(self.scale_factor)
+                return y.softmax(dim=-1).matmul(value)
 
         tensor_shape = (2, 4, 4, 4)
         args = [
@@ -186,16 +189,17 @@ class TestSDPAPatternRewriter(TestCase):
             torch.randn(tensor_shape, device="cuda"),
             torch.randn(tensor_shape, device="cuda"),
         ]
-        model = Model().cuda().eval()
         with torch.no_grad():
-            result, (source_code,) = run_and_get_code(
-                torch.compile(model, fullgraph=True), *args
-            )
-            ref = model(*args)
-            self.assertEqual(result, ref)
-            self.assertNotIn(
-                "aten._scaled_dot_product_efficient_attention", source_code
-            )
+            for is_inv_factor in [True, False]:
+                model = Model(is_inv_factor).eval()
+                result, (source_code,) = run_and_get_code(
+                    torch.compile(model, fullgraph=True), *args
+                )
+                ref = model(*args)
+                self.assertEqual(result, ref)
+                self.assertNotIn(
+                    "aten._scaled_dot_product_efficient_attention", source_code
+                )
 
 
 if __name__ == "__main__":

@@ -161,14 +161,22 @@ def _sfdp_scale_factor_check(scale_factor_op):
             or list(matmuls[0].users.keys())[0].target != aten.view.default
         ):
             return False
-        view = list(matmuls[0].users.keys())[0]
-        if len(view.users) != 1 or list(view.users.keys())[0].target != scale_factor_op:
-            return False
-        scale_factor_node = list(view.users.keys())[0]
-        # make sure the scalar mul is a float/int. SymInt?
-        if len(scale_factor_node.args) != 2 or not isinstance(
-            scale_factor_node.args[1], (float, int)
+        view_node = list(matmuls[0].users.keys())[0]
+        if (
+            len(view_node.users) != 1
+            or list(view_node.users.keys())[0].target != scale_factor_op
         ):
+            return False
+        scale_factor_node = list(view_node.users.keys())[0]
+        if len(scale_factor_node.args) != 2:
+            return False
+        # make sure the scalar mul is a float/int. SymInt?
+        scale_factor = (
+            scale_factor_node.args[1]
+            if view_node == scale_factor_node.args[0]
+            else scale_factor_node.args[0]
+        )
+        if not isinstance(scale_factor, (float, int)):
             return False
         return True
 
