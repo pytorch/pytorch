@@ -195,6 +195,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
+    def int_minimum(a, b):
+        return f"tl.where({a} < {b}, {a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"tl.where({a} > {b}, {a}, {b})"
+
+    @staticmethod
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
 
