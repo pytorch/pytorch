@@ -13,7 +13,7 @@ architectures:
 from typing import Dict, List, Optional, Tuple
 
 
-CUDA_ARCHES = ["11.7", "11.8"]
+CUDA_ARCHES = ["11.7", "11.8", "12.1"]
 
 
 ROCM_ARCHES = ["5.3", "5.4.2"]
@@ -99,6 +99,9 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     python_versions = FULL_PYTHON_VERSIONS
     if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
+        # skip CUDA 12.1 builds on Windows
+        if os == "windows" and "12.1" in arches:
+            arches.remove("12.1")
     for python_version in python_versions:
         # We don't currently build conda packages for rocm
         for arch_version in arches:
@@ -135,6 +138,9 @@ def generate_libtorch_matrix(
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+            # skip CUDA 12.1 builds on Windows
+            if "12.1" in arches:
+                arches.remove("12.1")
 
     if libtorch_variants is None:
         libtorch_variants = [
@@ -199,6 +205,9 @@ def generate_wheels_matrix(
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+            # skip CUDA 12.1 builds on Windows
+            if "12.1" in arches:
+                arches.remove("12.1")
 
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
@@ -209,9 +218,6 @@ def generate_wheels_matrix(
                 if arch_version == "cpu" or arch_version == "cpu-cxx11-abi"
                 else arch_version
             )
-            # Skip rocm 3.11 binaries for now as the docker image are not correct
-            if python_version == "3.11" and gpu_arch_type == "rocm":
-                continue
 
             # special 11.7 wheels package without dependencies
             # dependency downloaded via pip install

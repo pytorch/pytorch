@@ -37,6 +37,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             "group_size": self.world_size,
         }
 
+    @property
+    def world_size(self) -> int:
+        # hack: no matter whether we have 2 or 3 or 4 gpus, just run on 2
+        # works around issue with skipif<2 and workers with unpredictable #s gpu
+        return 2
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
@@ -306,7 +312,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         FileCheck() \
             .check("buf0 = empty_strided(") \
             .check("buf2 = empty_strided") \
-            .check("triton__0.run(arg0_1, buf0, buf2") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf2") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf1_work = dist.all_reduce(buf1") \

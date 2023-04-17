@@ -39,8 +39,17 @@ from gitutils import (
     GitRepo,
     patterns_to_regex,
 )
-from label_utils import gh_add_labels, has_required_labels, LABEL_ERR_MSG
+from label_utils import (
+    gh_add_labels,
+    gh_remove_label,
+    has_required_labels,
+    LABEL_ERR_MSG,
+)
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
+# labels
+MERGE_IN_PROGRESS_LABEL = "merging"
+MERGE_COMPLETE_LABEL = "merged"
 
 
 class JobCheckState(NamedTuple):
@@ -427,7 +436,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
-REMOTE_MAIN_BRANCH = "origin/master"
+REMOTE_MAIN_BRANCH = "origin/main"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -627,7 +636,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
         if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
-                + f"branch {orig_ref} that would be merged into master.  "
+                + f"branch {orig_ref} that would be merged into main.  "
                 + "This usually happens because there is a non ghstack change in the PR.  "
                 + f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
@@ -1031,12 +1040,18 @@ class GitHubPR:
         return msg
 
     def add_numbered_label(self, label_base: str) -> None:
-        labels = self.get_labels()
-        label = label_base
-        for i in range(len(labels) if labels is not None else 0):
-            if label in labels:
-                label = f"{label_base}X{i+2}"
-        gh_add_labels(self.org, self.project, self.pr_num, [label])
+        labels = self.get_labels() if self.labels is not None else []
+        full_label = label_base
+        count = 0
+        for label in labels:
+            if label_base in label:
+                count += 1
+                full_label = f"{label_base}X{count}"
+        gh_add_labels(self.org, self.project, self.pr_num, [full_label])
+
+    def remove_label(self, label: str) -> None:
+        if self.get_labels() is not None and label in self.get_labels():
+            gh_remove_label(self.org, self.project, self.pr_num, label)
 
     def merge_into(
         self,
@@ -1061,9 +1076,9 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
-            self.add_numbered_label("merged")
+            self.add_numbered_label(MERGE_COMPLETE_LABEL)
             for pr in additional_merged_prs:
-                pr.add_numbered_label("merged")
+                pr.add_numbered_label(MERGE_COMPLETE_LABEL)
 
         if comment_id and self.pr_num:
             # When the merge process reaches this part, we can assume that the commit
@@ -1751,6 +1766,9 @@ def merge(
     initial_commit_sha = pr.last_commit()["oid"]
     print(f"Attempting merge of {initial_commit_sha}")
 
+    if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
+        gh_add_labels(org, project, pr_num, [MERGE_IN_PROGRESS_LABEL])
+
     explainer = TryMergeExplainer(
         skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project, ignore_current
     )
@@ -1983,7 +2001,6 @@ def main() -> None:
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
-
     try:
         merge(
             args.pr_num,
@@ -2020,6 +2037,8 @@ def main() -> None:
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
+    finally:
+        pr.remove_label(MERGE_IN_PROGRESS_LABEL)
 
 
 if __name__ == "__main__":

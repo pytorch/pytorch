@@ -45,7 +45,7 @@
 namespace {
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
-  int64_t* sorted_indices, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
+  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
 //numel is total number of flattened indices, not expanded to dimensions that are not indexed.
 //stride is the cumulative size of the not-indexed last dimensions
@@ -123,7 +123,7 @@ __global__ void indexing_backward_kernel(
 
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel_quantized(
-  int64_t* sorted_indices, int64_t* indices, float* grad_output, scalar_t* grad_weight,
+  const int64_t* sorted_indices, const int64_t* indices, const float* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim,
   float inv_scale, int zero_point, int64_t qmin, int64_t qmax) {
 
@@ -386,8 +386,8 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
       cuda::cub::radix_sort_pairs(
-        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
-        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
+        range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
 
@@ -406,10 +406,10 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
       expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          orig_indices.data_ptr<int64_t>(),
-          expandedValue.data_ptr<scalar_t>(),
-          src_.data_ptr<scalar_t>(),
+          sorted_indices.const_data_ptr<int64_t>(),
+          orig_indices.const_data_ptr<int64_t>(),
+          expandedValue.const_data_ptr<scalar_t>(),
+          src_.mutable_data_ptr<scalar_t>(),
           num_indices,
           sliceSize,
           strideBefore,
@@ -479,8 +479,8 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<
       // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
       cuda::cub::radix_sort_pairs(
-        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
-        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        linearIndex.const_data_ptr<int64_t>(), sorted_indices.mutable_data_ptr<int64_t>(),
+        range.const_data_ptr<int64_t>(), orig_indices.mutable_data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
 
@@ -503,10 +503,10 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<
         float inv_scale = 1.0f / static_cast<float>(scale);
 
         indexing_backward_kernel_quantized<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          orig_indices.data_ptr<int64_t>(),
-          expandedValue.data_ptr<float>(),
-          src_.data_ptr<scalar_t>(),
+          sorted_indices.const_data_ptr<int64_t>(),
+          orig_indices.const_data_ptr<int64_t>(),
+          expandedValue.const_data_ptr<float>(),
+          src_.mutable_data_ptr<scalar_t>(),
           num_indices,
           sliceSize,
           strideBefore,
@@ -1568,19 +1568,19 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
         .build();
 
       AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
-          index_t* ptr_intrsc_counts_nneg_index = intrsc_counts_nneg_index.data_ptr<index_t>();
-          index_t* ptr_sorted_dim_indices = sorted_dim_indices.data_ptr<index_t>();
+          index_t* ptr_intrsc_counts_nneg_index = intrsc_counts_nneg_index.mutable_data_ptr<index_t>();
+          const index_t* ptr_sorted_dim_indices = sorted_dim_indices.const_data_ptr<index_t>();
           gpu_kernel(
               iter,
               [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
-                auto* lb = find_bound<index_t*, index_t, true>(
+                auto* lb = find_bound<const index_t*, index_t, true>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
                 );
-                auto* ub = find_bound<index_t*, index_t, false>(
+                auto* ub = find_bound<const index_t*, index_t, false>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
@@ -1625,16 +1625,16 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
         .build();
 
       AT_DISPATCH_INDEX_TYPES(nneg_index.scalar_type(), "index_select_sparse_cuda", [&]() {
-          index_t* ptr_res_dim_indices = res_dim_indices.data_ptr<index_t>();
-          index_t* ptr_selected_dim_indices = selected_dim_indices.data_ptr<index_t>();
-          index_t* ptr_argsort_dim_indices = argsort_dim_indices.data_ptr<index_t>();
+          index_t* ptr_res_dim_indices = res_dim_indices.mutable_data_ptr<index_t>();
+          index_t* ptr_selected_dim_indices = selected_dim_indices.mutable_data_ptr<index_t>();
+          const index_t* ptr_argsort_dim_indices = argsort_dim_indices.const_data_ptr<index_t>();
           gpu_kernel(
               iter,
               [ptr_res_dim_indices, ptr_selected_dim_indices, ptr_argsort_dim_indices] GPU_LAMBDA (
                 index_t idx_idx, index_t count, index_t offset, index_t first_match
               ) -> index_t {
                 index_t* __restrict__ ptr_res_dim_indices_out = ptr_res_dim_indices + offset;
-                index_t* __restrict__ ptr_argsort_dim_indices_in = ptr_argsort_dim_indices + first_match;
+                const index_t* __restrict__ ptr_argsort_dim_indices_in = ptr_argsort_dim_indices + first_match;
                 index_t* __restrict__ ptr_selected_dim_indices_out = ptr_selected_dim_indices + offset;
                 for (index_t i = 0; i < count; ++i) {
                   *ptr_res_dim_indices_out++ = idx_idx;
