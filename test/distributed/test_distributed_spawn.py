@@ -35,10 +35,11 @@ if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
-    classname_with_backend = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}"
-    globals()[classname_with_backend] = globals()[TestDistBackendWithSpawn.__name__]
-    del globals()[TestDistBackendWithSpawn.__name__]
+    old_classname = TestDistBackendWithSpawn.__name__
+    classname_with_backend = f"{old_classname}{BACKEND.upper()}"
     TestDistBackendWithSpawn.__name__ = classname_with_backend
+    globals()[classname_with_backend] = globals()[TestDistBackendWithSpawn.__name__]
+    del globals()[old_classname]
 
 if __name__ == "__main__":
     run_tests()

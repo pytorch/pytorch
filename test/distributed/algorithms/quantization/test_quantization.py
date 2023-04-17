@@ -306,10 +306,11 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     )
                     self.assertEqual(out_tensor, expected_tensor)
 
-    classname_with_backend = f"{DistQuantizationTests.__name__}{BACKEND.upper()}"
-    globals()[classname_with_backend] = globals()[DistQuantizationTests.__name__]
-    del globals()[DistQuantizationTests.__name__]
+    old_classname = DistQuantizationTests.__name__
+    classname_with_backend = f"{old_classname}{BACKEND.upper()}"
     DistQuantizationTests.__name__ = classname_with_backend
+    globals()[classname_with_backend] = globals()[DistQuantizationTests.__name__]
+    del globals()[old_classname]
 
 
 if __name__ == "__main__":
