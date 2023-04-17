@@ -2697,7 +2697,6 @@ class ExternKernel(InputsKernel):
         kwargs = []
         if self.kwargs:
             if V.graph.cpp_wrapper:
-                # TODO: fix it for addmm_out and remove ordered_kwargs_for_cpp_kernel
                 # TODO: use native_functions.yaml as the ground truth
                 assert (
                     self.ordered_kwargs_for_cpp_kernel
