@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from functools import wraps
-from typing import Any, List
+from typing import Any, List, Type
 
 import numpy as np
 import torch
@@ -553,7 +553,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.c10d_functional.all_reduce.default
+                            if n.target == torch.ops.aten.all_reduce.default
                         ]
                     ),
                     1,
@@ -862,6 +862,78 @@ class CoverageTest(DTensorTestBase):
         tgt = torch.empty(B, dtype=torch.long).random_(0, D).to(self.rank)
 
         self._test_train_step(train_step, mod, ids, tgt)
+
+    def _test_factory_ops(self, Model: Type[nn.Module]):
+        torch.manual_seed(0)
+        mod = Model().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        inp = torch.randn(2, 10).cuda(self.rank)
+        self._test_train_step(train_step, mod, inp)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_full(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.full(x.shape, 7, device=x.device)
+                return y + self.fc(x)
+
+        self._test_factory_ops(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_arange(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.arange(x.numel(), device=x.device).view(x.shape)
+                z = torch.arange(0, x.numel(), device=x.device).view(x.shape)
+                return self.fc(x) + y + z
+
+        self._test_factory_ops(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_numel(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.numel()
+                return self.fc(x) + y
+
+        self._test_factory_ops(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_scalar(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                # FIXME: torch.tensor(x.numel()) is captured as a tensor constant
+                y = torch.ops.aten.scalar_tensor.default(
+                    7, dtype=x.dtype, device=x.device
+                )
+                return self.fc(x) + y
+
+        self._test_factory_ops(Model)
 
 
 if __name__ == "__main__":
