@@ -187,7 +187,7 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = detect_fake_mode(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs, ignore_tracing_context=True)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
