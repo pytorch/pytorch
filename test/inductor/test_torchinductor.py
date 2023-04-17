@@ -4694,8 +4694,6 @@ class CommonTemplate:
         # different calls, different values
         self.assertFalse(torch.allclose(a, b))
 
-        self.assertFalse(True)
-
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
