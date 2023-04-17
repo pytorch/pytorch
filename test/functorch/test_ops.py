@@ -1066,7 +1066,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('nn.functional.huber_loss'),
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
@@ -1166,7 +1165,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.ctc_loss'),

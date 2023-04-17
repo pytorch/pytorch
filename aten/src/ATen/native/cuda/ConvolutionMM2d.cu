@@ -205,9 +205,9 @@ void slow_conv2d_forward(
           n, m, k,
           scalar_t(1),
           gemm_in_ptr, n,
-          weight.data_ptr<scalar_t>(), k,
+          weight.const_data_ptr<scalar_t>(), k,
           scalar_t(1),
-          output_n.data_ptr<scalar_t>(), n
+          output_n.mutable_data_ptr<scalar_t>(), n
       );
     }
   });
@@ -361,9 +361,9 @@ void slow_conv2d_grad_weight(
           n, m, k,
           scalar_t(1),
           gemm_in_ptr, k,
-          grad_output_n.data_ptr<scalar_t>(), k,
+          grad_output_n.const_data_ptr<scalar_t>(), k,
           scalar_t(1),
-          grad_weight.data_ptr<scalar_t>(), n
+          grad_weight.mutable_data_ptr<scalar_t>(), n
       );
     }
   });
