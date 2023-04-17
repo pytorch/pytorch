@@ -146,7 +146,7 @@ class TORCH_API LoopNest {
 
   // Splits the given loop into 2 nested loops with the given factor as the
   // inner loop bound. If the factor does not evenly divide the loop bound,
-  // then the remainining iterations are extracted into a tail loop that is
+  // then the remaining iterations are extracted into a tail loop that is
   // added after the given loop.
   //
   // For example, consider the following code:
