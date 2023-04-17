@@ -1798,15 +1798,6 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
-                    # TODO: move inside torch.sparse.sum
-                    if res.layout != torch.strided:
-                        # Makes sure that all incoming grads get projected onto SEs of res.
-                        # Equivalently, makes sure that res is parametrized by it's SEs.
-                        # sparse.sum backward does not do it by default, so it needs an
-                        # extra help. Also, and this is important, because of that it
-                        # might not handle arbitrary grads, i.e. the grads with the sparsity
-                        # pattern differn from that of the result.
-                        res = res.sparse_mask(res)
                     return res.to_dense(masked_grad=False)
                 gradcheck(fn, (S.clone().requires_grad_(True),))
 

@@ -232,14 +232,20 @@ def sum(input: Tensor, dim: DimOrDims = None,
     """
     if dtype is None:
         if dim is not None:
-            return torch._sparse_sum(input, dim)
+            res = torch._sparse_sum(input, dim)
         else:
-            return torch._sparse_sum(input)
+            res = torch._sparse_sum(input)
     else:
         if dim is not None:
-            return torch._sparse_sum(input, dim, dtype=dtype)
+            res = torch._sparse_sum(input, dim, dtype=dtype)
         else:
-            return torch._sparse_sum(input, dtype=dtype)
+            res = torch._sparse_sum(input, dtype=dtype)
+
+    if res.layout != torch.strided:
+        # backward for _sparse_sum does not project gradients properly
+        return res.sparse_mask(res)
+    else:
+        return res
 
 
 softmax = _add_docstr(_sparse._sparse_softmax, r"""
