@@ -306,6 +306,30 @@ class GetItemSource(Source):
 
         return instrs
 
+    def __hash__(self):
+        if isinstance(self.index, slice):
+            # GetItemSource (and all sources) needs to be hashable,
+            # since we are using set membership on sources for AOT dedupe.
+            return hash((self.base.__hash__(), self.index.__reduce__()))
+        return super().__hash__()
+
+    def __eq__(self, other):
+        if (
+            isinstance(self.index, slice)
+            or type(self) is type(other)
+            and isinstance(other.index, slice)
+        ):
+            return (
+                self.base == other.base
+                and type(self) is type(other)
+                and type(self.index) is type(other.index)
+                # technically slice implements __eq__() so i was tempted to just use that,
+                # but why not be precise about __eq__ behavior matching __hash__ impl here.
+                and self.index.__reduce__() == other.index.__reduce__()
+            )
+
+        return super().__eq__(self, other)
+
     def guard_source(self):
         return self.base.guard_source()
 
