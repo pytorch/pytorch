@@ -117,16 +117,16 @@ class TwoThreeOps(nn.Module):
 
 class TestFxModelReportDetector(QuantizationTestCase):
 
-    """Prepares and callibrate the model"""
+    """Prepares and calibrate the model"""
 
     def _prepare_model_and_run_input(self, model, q_config_mapping, input):
         model_prep = torch.ao.quantization.quantize_fx.prepare_fx(model, q_config_mapping, input)  # prep model
-        model_prep(input).sum()  # callibrate the model
+        model_prep(input).sum()  # calibrate the model
         return model_prep
 
     """Case includes:
         one conv or linear
-        post training quantiztion
+        post training quantization
         composed as module
         qconfig uses per_channel weight observer
         Only 1 qconfig in qconfig dict
@@ -155,7 +155,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
 
-            # there shoud only be one conv there in this model
+            # there should only be one conv there in this model
             self.assertEqual(per_channel_info["conv"]["backend"], torch.backends.quantized.engine)
             self.assertEqual(len(per_channel_info), 1)
             self.assertEqual(list(per_channel_info)[0], "conv")
@@ -1346,7 +1346,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # assert that each of the desired modules have the observers inserted
                 for fqn, module in prepared_for_callibrate_model.named_modules():
                     # check if module is a supported module
-                    is_in_include_list = sum(list(map(lambda x: isinstance(module, x), mods_to_check))) > 0
+                    is_in_include_list = sum([isinstance(module, x) for x in mods_to_check]) > 0
 
                     if is_in_include_list:
                         # make sure it has the observer attribute

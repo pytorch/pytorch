@@ -92,7 +92,7 @@ if(APPLE)
 
   # Get clang version on macOS
   execute_process( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
-  string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
+  string(REGEX REPLACE "Apple (.*) version ([0-9]+\\.[0-9]+).*" "\\2" CLANG_VERSION_STRING ${clang_full_version_string})
   message( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
 
 
@@ -862,15 +862,19 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
-    append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
+    # Why compiler checks are necessary even when `try_compile` is used
+    # Because of the bug in ccache that can incorrectly identify `-fcolor-diagnostics`
+    # As supported by GCC, see https://github.com/ccache/ccache/issues/740 (for older ccache)
+    # and https://github.com/ccache/ccache/issues/1275 (for newer ones)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+      append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
+    else()
+      append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
+    endif()
   endif()
 
-  if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR(CMAKE_COMPILER_IS_GNUCXX
-    AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
-    string(APPEND CMAKE_CXX_FLAGS " -faligned-new")
-  endif()
+  append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
+
   if(WERROR)
     append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
     if(NOT COMPILER_SUPPORT_WERROR)

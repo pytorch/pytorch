@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -129,7 +129,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    void* host_dst = dst.storage().data();
+    const void* host_dst = dst.storage().data();
     void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)dst_tensor_nbytes, &alignedLength);
     NSUInteger destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
     // 4 bytes alignment required on macos for blits.
@@ -148,7 +148,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
         needsBlit = false;
         tmpBuffer = destBuffer;
       } else if (src.element_size() < dst.element_size()) {
-        tmp = at::native::empty_mps(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS);
+        tmp = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
         tmpBuffer = getMTLBufferStorage(tmp);
       }
     }
@@ -184,7 +184,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   auto src_byte_offset = src.storage_offset() * src.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst);
   const size_t size_to_copy = src.nbytes();
-  const void* host_src = static_cast<char*>(src.storage().data()) + src_byte_offset;
+  const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
   TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 
@@ -284,7 +284,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset);
   } else {
     if (dst_byte_offset) {
-      auto tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
+      auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
       auto tmpBuffer = getMTLBufferStorage(tmp);
       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
       stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset);

@@ -5,6 +5,7 @@ import sys
 
 import torch
 from torch.fx import symbolic_trace
+from torch.fx.experimental.proxy_tensor import make_fx
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -72,3 +73,23 @@ class TestMatcher(JitTestCase):
         subgraph_matcher = SubgraphMatcher(pattern_graph)
         match_result = subgraph_matcher.match(original_graph)
         self.assertEqual(len(match_result), 0)
+
+    def test_subgraph_matcher_ignore_literals(self):
+        def original(x):
+            return x + 1
+
+        original_graph = make_fx(original)(torch.ones(3, 3)).graph
+        original_graph.eliminate_dead_code()
+
+        def pattern(x):
+            return x + 2
+        pattern_graph = make_fx(pattern)(torch.ones(4, 4)).graph
+        pattern_graph.eliminate_dead_code()
+
+        subgraph_matcher = SubgraphMatcher(pattern_graph)
+        match_result = subgraph_matcher.match(original_graph)
+        self.assertEqual(len(match_result), 0)
+
+        subgraph_matcher = SubgraphMatcher(pattern_graph, ignore_literals=True)
+        match_result = subgraph_matcher.match(original_graph)
+        self.assertEqual(len(match_result), 1)
