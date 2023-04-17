@@ -15,7 +15,7 @@ LOG_ENV_VAR = "TORCH_LOGS"
 
 FORMATTER_PREFIXES : List[Callable[[], str]] = []
 
-class ExtenableLogFormatter(logging.Formatter):
+class ExtendableLogFormatter(logging.Formatter):
     def __init__(self, fmt=None, datefmt=None):
         super().__init__(fmt, datefmt)
 
@@ -29,7 +29,7 @@ class ExtenableLogFormatter(logging.Formatter):
         record.msg = prefix + record.msg
         return super().format(record)
 
-DEFAULT_FORMATTER = ExtenableLogFormatter(
+DEFAULT_FORMATTER = ExtendableLogFormatter(
     "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
 )
 
