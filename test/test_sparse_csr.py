@@ -20,7 +20,6 @@ from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and
 )
-from torch.testing._internal.opinfo.core import SampleInput
 
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -491,7 +490,7 @@ class TestSparseCompressed(TestCase):
                 self.skipTest('Requires fix to gh-98495. Skipping!')
             all_samples_are_valid = True
             samples = [type(sample)(sample.input.to_dense(), sample.args, sample.kwargs)
-                       for sample in op.sample_inputs_sparse(layout, device, dtype) if isinstance(sample, SampleInput)]
+                       for sample in op.sample_inputs_sparse(layout, device, dtype)]
         else:
             samples = list(op.sample_inputs(device, dtype))
 

@@ -3,8 +3,47 @@ from torch.testing import make_tensor  # noqa: F401
 from torch.testing._internal.opinfo.core import (  # noqa: F401
     ErrorInput,
     generate_elementwise_binary_tensors,
+    sample_inputs_reduction,
     SampleInput,
 )
+
+
+def _filter_sample_inputs(
+    sample_and_error_inputs_func,
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    layout,
+    **kwargs,
+):
+    for sample in sample_and_error_inputs_func(
+        op_info, device, dtype, requires_grad, layout, **kwargs
+    ):
+        if isinstance(sample, SampleInput):
+            yield sample
+
+
+def _filter_error_inputs(sample_and_error_inputs_func, op_info, device, **kwargs):
+    for layout in (
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+        torch.sparse_coo,
+    ):
+        for dtype in op_info.supported_dtypes(device):
+            for requires_grad in (
+                [False, True]
+                if op_info.supports_autograd
+                and (dtype.is_complex or dtype.is_floating_point)
+                else [False]
+            ):
+                for sample in sample_and_error_inputs_func(
+                    op_info, device, dtype, requires_grad, layout, **kwargs
+                ):
+                    if isinstance(sample, ErrorInput):
+                        yield sample
 
 
 def sample_inputs_elementwise_binary_operation_sparse(
@@ -78,14 +117,12 @@ def sample_inputs_elementwise_binary_operation_sparse(
                 )
 
 
-def sample_inputs_mul_sparse(op_info, device, dtype, requires_grad, layout, **kwargs):
-    """Sample inputs for mul operation on sparse tensors."""
+def _sample_and_error_inputs_mul_sparse(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
     for sample in sample_inputs_elementwise_binary_operation_sparse(
         op_info, device, dtype, requires_grad, layout, **kwargs
     ):
-        if isinstance(sample, ErrorInput):
-            yield sample
-            continue
         t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
         batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
         if layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
@@ -136,3 +173,168 @@ def sample_inputs_mul_sparse(op_info, device, dtype, requires_grad, layout, **kw
             )
         else:
             yield sample
+
+
+def sample_inputs_mul_sparse(op_info, device, dtype, requires_grad, layout, **kwargs):
+    """Sample inputs for mul operation on sparse tensors."""
+    yield from _filter_sample_inputs(
+        _sample_and_error_inputs_mul_sparse,
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        layout,
+        **kwargs,
+    )
+
+
+def error_inputs_mul_sparse(op_info, device, **kwargs):
+    """Error inputs for mul operation on sparse tensors."""
+    yield from _filter_error_inputs(
+        _sample_and_error_inputs_mul_sparse, op_info, device, **kwargs
+    )
+
+
+def sample_inputs_reduction_sparse(
+    op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs
+):
+    layout_name = str(layout).split(".", 1)[-1].rsplit("_coo", 1)[0]
+    op_supports_layout = getattr(op_info, "supports_" + layout_name)
+    if not op_supports_layout:
+        return
+
+    for sample_input in sample_inputs_reduction(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        if sample_input.input.ndim == 0:
+            # scalar sparse tensors are not supported
+            continue
+        if layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if sample_input.input.ndim < 2:
+                # conversion to sparse compressed tensors requires at
+                # least 2 dimensional tensors
+                continue
+            if sample_input.input.ndim > 2 and (sample_input.input == 0).any():
+                # Skip batched sparse compressed samples that contain
+                # explicit values because to_sparse(layout=..) will
+                # fail, see gh-98495.
+                # TODO: remove this if-block after gh-98495 is fixed.
+                continue
+
+        if layout in {torch.sparse_bsr, torch.sparse_bsc} and blocksize is None:
+            blocksize = (1, 1)
+
+        yield SampleInput(
+            sample_input.input.detach()
+            .to_sparse(layout=layout, blocksize=blocksize)
+            .requires_grad_(requires_grad),
+            args=sample_input.args,
+            kwargs=sample_input.kwargs,
+        )
+
+        if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
+            # uncoalesced samples
+            inp = sample_input.input.detach().to_sparse(layout=layout)
+            inp = torch.sparse_coo_tensor(
+                inp.indices().repeat(1, 2),
+                inp.values().repeat(2),
+                inp.shape,
+                dtype=inp.dtype,
+                device=inp.device,
+            )
+            assert not inp.is_coalesced()
+            yield SampleInput(
+                inp.requires_grad_(requires_grad),
+                args=sample_input.args,
+                kwargs=sample_input.kwargs,
+            )
+
+        if sample_input.input.ndim > 2:
+            # hybrid samples
+            yield SampleInput(
+                sample_input.input.detach()
+                .to_sparse(
+                    layout=layout,
+                    blocksize=blocksize,
+                    dense_dim=sample_input.input.ndim - 2,
+                )
+                .requires_grad_(requires_grad),
+                args=sample_input.args,
+                kwargs=sample_input.kwargs,
+            )
+
+
+def _sample_and_error_inputs_reduction_sparse_sum(
+    op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs
+):
+    for sample in sample_inputs_reduction_sparse(
+        op_info, device, dtype, requires_grad, layout, blocksize=blocksize, **kwargs
+    ):
+        t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+        if layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if (
+                isinstance(t_kwargs.get("dim"), int)
+                and (t_inp.dim() != 2 or t_kwargs.get("keepdim"))
+            ) or (
+                isinstance(t_kwargs.get("dim"), (list, tuple))
+                and (
+                    (
+                        (t_inp.dim() != 2 and len(t_kwargs.get("dim")) != t_inp.dim())
+                        or t_kwargs.get("keepdim")
+                    )
+                )
+            ):
+                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    yield ErrorInput(
+                        sample,
+                        error_regex=(
+                            "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
+                            " layout but got Sparse(Bsr|Bsc)"
+                        ),
+                    )
+                else:
+                    yield ErrorInput(
+                        sample,
+                        error_regex="Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend",
+                    )
+                continue
+            elif t_kwargs and not t_kwargs.get("keepdim"):
+                # reductions on sparse compressed tensors require
+                # keepdim==True when reduction is over sparse dimensions
+                yield ErrorInput(
+                    sample,
+                    # FIXME: raise a better exception message
+                    error_regex="torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported",
+                )
+                continue
+        yield sample
+
+
+def sample_inputs_reduction_sparse_sum(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    yield from _filter_sample_inputs(
+        _sample_and_error_inputs_reduction_sparse_sum,
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        layout,
+        **kwargs,
+    )
+
+
+def error_inputs_reduction_sparse_sum(op_info, device, **kwargs):
+    yield from _filter_error_inputs(
+        _sample_and_error_inputs_reduction_sparse_sum, op_info, device, **kwargs
+    )
