@@ -912,7 +912,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable(value=val))
 
     def jump(self, inst):
-        self.instruction_pointer = self.indexof[id(inst.target)]
+        self.instruction_pointer = self.indexof[inst.target]
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -1177,6 +1177,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(self.next_instruction)
+        )
+
+    def DELETE_ATTR(self, inst):
+        obj = self.pop()
+        self.output.guards.update(
+            BuiltinVariable(delattr)
+            .call_function(self, [obj, ConstantVariable(inst.argval)], {})
+            .guards
         )
 
     def create_call_resume_at(self, offset):
@@ -1790,7 +1798,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
-        self.indexof: Dict[int, int] = get_indexof(self.instructions)
+        self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
         self.f_locals: Dict[
             str, Any
         ] = f_locals  # needed for recording accessed locals for replay

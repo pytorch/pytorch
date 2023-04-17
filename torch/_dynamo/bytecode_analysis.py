@@ -32,10 +32,8 @@ def get_indexof(insts):
     """
     indexof = {}
     for i, inst in enumerate(insts):
-        if id(inst) in indexof:
-            breakpoint()
-        assert id(inst) not in indexof
-        indexof[id(inst)] = i
+        assert inst not in indexof
+        indexof[inst] = i
     return indexof
 
 
@@ -51,9 +49,9 @@ def remove_dead_code(instructions):
             live_code.add(i)
             inst = instructions[i]
             if inst.exn_tab_entry:
-                find_live_code(indexof[id(inst.exn_tab_entry.target)])
+                find_live_code(indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
-                find_live_code(indexof[id(inst.target)])
+                find_live_code(indexof[inst.target])
             if inst.opcode in TERMINAL_OPCODES:
                 return
 
@@ -69,13 +67,12 @@ def remove_dead_code(instructions):
             if i in live_code and inst.exn_tab_entry:
                 # find leftmost live instruction >= start
                 start_idx = bisect.bisect_left(
-                    live_idx, indexof[id(inst.exn_tab_entry.start)]
+                    live_idx, indexof[inst.exn_tab_entry.start]
                 )
                 assert start_idx < len(live_idx)
                 # find rightmost live instruction <= end
                 end_idx = (
-                    bisect.bisect_right(live_idx, indexof[id(inst.exn_tab_entry.end)])
-                    - 1
+                    bisect.bisect_right(live_idx, indexof[inst.exn_tab_entry.end]) - 1
                 )
                 assert end_idx >= 0
                 assert live_idx[start_idx] <= i <= live_idx[end_idx]
@@ -158,12 +155,12 @@ def livevars_analysis(instructions, instruction):
                 else:
                     raise NotImplementedError(f"unhandled {inst.opname}")
             if inst.opcode in JUMP_OPCODES:
-                walk(may, indexof[id(inst.target)])
+                walk(may, indexof[inst.target])
                 state = may
             if inst.opcode in TERMINAL_OPCODES:
                 return
 
-    walk(must, indexof[id(instruction)])
+    walk(must, indexof[instruction])
     return must.reads | may.reads
 
 
