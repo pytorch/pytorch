@@ -2,11 +2,11 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
 import operator
-import inspect
 import os
 import shutil
 import sys
@@ -42,12 +42,16 @@ try:
     #
     # Add a wrapper to maintain the same behavior for inductor.
     # Maybe we should have own implementation of this function?
-    quantile_field_name = "quantiles" if inspect.signature(triton_do_bench).parameters.get("quantiles") is not None else "percentiles"
+    quantile_field_name = (
+        "quantiles"
+        if inspect.signature(triton_do_bench).parameters.get("quantiles") is not None
+        else "percentiles"
+    )
 
     def do_bench(*args, **kwargs):
         if quantile_field_name not in kwargs:
             kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-        return triton_do_bench(*args, **kwargs)
+        return triton_do_bench(*args, **kwargs)[0]
 
 except ImportError:
 

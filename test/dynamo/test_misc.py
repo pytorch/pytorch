@@ -4051,7 +4051,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
-            frame_state=None,
+            frame_state={"_id": 0},
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
