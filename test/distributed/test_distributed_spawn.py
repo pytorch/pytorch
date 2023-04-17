@@ -28,18 +28,16 @@ if NO_MULTIPROCESSING_SPAWN:
 BACKEND = os.environ["BACKEND"]
 
 if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
-    def gen_TestDistBackendWithSpawn_test():
 
-        class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
-            def setUp(self):
-                super().setUp()
-                self._spawn_processes()
-                torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+    class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
+        def setUp(self):
+            super().setUp()
+            self._spawn_processes()
+            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
-        classname_with_backend = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}"
-        globals()[classname_with_backend] = TestDistBackendWithSpawn
-
-    gen_TestDistBackendWithSpawn_test()
+    classname_with_backend = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}"
+    globals()[classname_with_backend] = TestDistBackendWithSpawn
+    del globals()[TestDistBackendWithSpawn.__name__]
 
 if __name__ == "__main__":
     run_tests()
