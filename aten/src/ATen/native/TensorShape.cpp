@@ -2807,7 +2807,7 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     // reshape 0D or 1D tensor t into (t.numel(), 1)
     if (input.dim() <= 1) {
-      return input.reshape({input.numel(), 1});
+      return input.reshape_symint({input.sym_numel(), 1});
     }
     return input;
   };
