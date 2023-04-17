@@ -3,7 +3,6 @@ name: unstable
 on:
   push:
     branches:
-      - master
       - main
     tags:
       - ciflow/unstable/*
