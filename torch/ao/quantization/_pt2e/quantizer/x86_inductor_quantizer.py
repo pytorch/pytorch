@@ -1,16 +1,18 @@
 import torch
 import copy
-from .quantizer import Quantizer
+from .quantizer import (
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
+    QuantizationSpec,
+    Quantizer,
+)
 from .qnnpack_quantizer import (
     _TORCH_DTYPE_TO_QDTYPE,
     _is_annotated,
     _get_default_obs_or_fq_ctr,
-    SpecAndOperators,
-    OperatorSpecConfig,
-    TensorSpec,
-    OperatorSpec,
 )
-from typing import List, Optional
+from typing import List, Dict, Optional
 from torch.fx import Node
 from torch.ao.quantization.observer import (
     HistogramObserver,
@@ -20,65 +22,69 @@ from torch.ao.quantization.observer import (
 
 __all__ = [
     "X86InductorQuantizer",
-    "get_default_x86_inductor_operator_spec",
+    "get_default_x86_inductor_quantization_config",
 ]
 
-def supported_quantized_operators() -> List[str]:
-    supported_operators = ["conv2d", ]
+def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
+    supported_operators: Dict[str, List[OperatorPatternType]] = {
+        "conv2d": [
+            [torch.ops.aten.convolution.default],
+        ],
+    }
     return copy.deepcopy(supported_operators)
 
-def _get_act_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
-    if operator_spec is None:
+def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
         return None
-    assert operator_spec is not None
-    tensor_spec: TensorSpec = operator_spec.activation
-    qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
-    assert tensor_spec.qscheme in [torch.per_tensor_affine]
-    if not tensor_spec.is_dynamic:
+    assert quantization_config is not None
+    quantization_spec: QuantizationSpec = quantization_config.activation
+    qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
+    assert quantization_spec.qscheme in [torch.per_tensor_affine]
+    if not quantization_spec.is_dynamic:
         return HistogramObserver.with_args(
             dtype=qdtype,
-            quant_min=tensor_spec.quant_min,
-            quant_max=tensor_spec.quant_max,
+            quant_min=quantization_spec.quant_min,
+            quant_max=quantization_spec.quant_max,
             reduce_range=False,
         )
     else:
         # TODO: extend this helper function to support dynamic quantization
-        raise Exception("Unsupported tensor_spec for activation: {}".format(tensor_spec))
+        raise Exception("Unsupported quantization_spec for activation: {}".format(quantization_spec))
 
-def _get_weight_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
-    if operator_spec is None:
+def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
         return None
-    assert operator_spec is not None
-    tensor_spec: TensorSpec = operator_spec.weight
-    qdtype = _TORCH_DTYPE_TO_QDTYPE[tensor_spec.dtype]
-    if tensor_spec.qscheme == torch.per_channel_symmetric:
+    assert quantization_config is not None
+    quantization_spec: QuantizationSpec = quantization_config.weight
+    qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
+    if quantization_spec.qscheme == torch.per_channel_symmetric:
         return PerChannelMinMaxObserver.with_args(
-            qscheme=tensor_spec.qscheme,
+            qscheme=quantization_spec.qscheme,
             dtype=qdtype,
-            quant_min=tensor_spec.quant_min,
-            quant_max=tensor_spec.quant_max,
+            quant_min=quantization_spec.quant_min,
+            quant_max=quantization_spec.quant_max,
         )
     else:
-        raise Exception("Unsupported tensor_spec for weight: {}".format(tensor_spec))
+        raise Exception("Unsupported quantization_spec for weight: {}".format(quantization_spec))
 
-def _get_bias_obs_or_fq_ctr(operator_spec: Optional[OperatorSpec]):
-    if operator_spec is None:
+def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
+    if quantization_config is None:
         return None
-    assert operator_spec is not None
-    tensor_spec: TensorSpec = operator_spec.bias
-    assert tensor_spec.dtype == torch.float, "Only float dtype for bias is supported for bias right now"
-    return PlaceholderObserver.with_args(dtype=tensor_spec.dtype)
+    assert quantization_config is not None
+    quantization_spec: QuantizationSpec = quantization_config.bias
+    assert quantization_spec.dtype == torch.float, "Only float dtype for bias is supported for bias right now"
+    return PlaceholderObserver.with_args(dtype=quantization_spec.dtype)
 
-def get_default_x86_inductor_operator_spec():
+def get_default_x86_inductor_quantization_config():
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
-    act_tensor_spec = TensorSpec(
+    act_quantization_spec = QuantizationSpec(
         dtype=torch.uint8,
         quant_min=0,
         quant_max=255,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
         is_dynamic=False,
     )
-    weight_tensor_spec = TensorSpec(
+    weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
@@ -86,76 +92,69 @@ def get_default_x86_inductor_operator_spec():
         ch_axis=0,  # 0 corresponding to weight shape = (oc, ic, kh, kw) of conv
         is_dynamic=False,
     )
-    bias_tensor_spec = TensorSpec(dtype=torch.float)
-    operator_spec = OperatorSpec(act_tensor_spec, weight_tensor_spec, bias_tensor_spec)
-    return operator_spec
+    bias_quantization_spec = QuantizationSpec(dtype=torch.float)
+    quantization_config = QuantizationConfig(
+        act_quantization_spec, weight_quantization_spec, bias_quantization_spec
+    )
+    return quantization_config
 
-def get_supported_x86_inductor_quantized_spec_and_operators() -> List[SpecAndOperators]:
-    supported_spec_and_operators: List[SpecAndOperators] = []
-    for operator_spec in [get_default_x86_inductor_operator_spec(), ]:
+def get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
+    supported_config_and_operators: List[OperatorConfig] = []
+    for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
         ops = supported_quantized_operators()
-        supported_spec_and_operators.append(SpecAndOperators(operator_spec, ops))
-    return copy.deepcopy(supported_spec_and_operators)
+        for op_string, pattern_list in ops.items():
+            supported_config_and_operators.append(
+                OperatorConfig(quantization_config, pattern_list)
+            )
+    return copy.deepcopy(supported_config_and_operators)
 
-def get_supported_spec_and_operators() -> List[SpecAndOperators]:
-    return get_supported_x86_inductor_quantized_spec_and_operators()
+def get_supported_config_and_operators() -> List[OperatorConfig]:
+    return get_supported_x86_inductor_config_and_operators()
 
 class X86InductorQuantizer(Quantizer):
-    supported_spec_and_operators = get_supported_spec_and_operators()
+    supported_config_and_operators = get_supported_config_and_operators()
 
     def __init__(self):
         super().__init__()
-        self.operator_spec_config = OperatorSpecConfig()
+        self.global_config: Optional[QuantizationConfig] = None
+        self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
-    def get_supported_operator_for_operator_spec(cls, operator_spec: Optional[OperatorSpec]) -> List[str]:
-        if operator_spec is None:
+    def get_supported_operator_for_quantization_config(
+        cls, quantization_config: Optional[QuantizationConfig]
+    ) -> List[OperatorPatternType]:
+        if quantization_config is None:
             all_ops = []
-            for _, ops in cls.supported_spec_and_operators:
+            for _, ops in cls.supported_config_and_operators:
                 all_ops.extend(ops)
             return all_ops
 
-        for spec, ops in cls.supported_spec_and_operators:
-            # note: this assumes each entry in cls.supported_spec_and_operators
-            # corresponds to one spec, e.g. we don't have
-            # [(spec1, op_list1), (spec1, op_list2), (spec2, op_list3)]
-            # where the first and second entry have the same spec but did not
-            # merge the op list
-            if spec == operator_spec:
+        for config, ops in cls.supported_config_and_operators:
+            if config == quantization_config:
                 return ops
         return []
 
-    def set_global(self, operator_spec: Optional[OperatorSpec]):
-        self.operator_spec_config.set_global(operator_spec)
+    def set_global(self, quantization_config: Optional[QuantizationConfig]):
+        self.global_config = quantization_config
         return self
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """ just handling global spec for now
         """
-        # initialize default target_dtype_info
-        _DEFAULT_TARGET_DTYPE_INFO = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-        }
-        for node in model.graph.nodes:
-            node.meta["target_dtype_info"] = copy.deepcopy(_DEFAULT_TARGET_DTYPE_INFO)
-
-        global_spec = self.operator_spec_config.global_spec
-        ops = self.get_supported_operator_for_operator_spec(global_spec)
+        global_config = self.global_config
+        ops = self.get_supported_operator_for_quantization_config(global_config)
         # annotate the nodes from last to first since the matching is in the reversed order
         # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
         for node in reversed(model.graph.nodes):
-            for op in ops:
-                if op == "conv2d":
-                    self._annotate_conv2d_binary_unary(node, global_spec)
-                    self._annotate_conv2d_binary(node, global_spec)
-                    self._annotate_conv2d_unary(node, global_spec)
-                    self._annotate_conv2d(node, global_spec)
+            self._annotate_conv2d_binary_unary(node, global_config)
+            self._annotate_conv2d_binary(node, global_config)
+            self._annotate_conv2d_unary(node, global_config)
+            self._annotate_conv2d(node, global_config)
         return model
 
-    def _annotate_conv2d_binary_unary(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+    def _annotate_conv2d_binary_unary(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
         # Conv2d + add + unary op
         supported_unary_node = [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]
         if node.op != "call_function" or node.target not in supported_unary_node:
@@ -167,7 +166,6 @@ class X86InductorQuantizer(Quantizer):
         supported_binary_node = [torch.ops.aten.add_.Tensor, torch.ops.aten.add.Tensor]
         if binary_node.op != "call_function" or binary_node.target not in supported_binary_node:
             return
-        print("binary_node.args[0].target is: {}".format(binary_node.args[0].target), flush=True)
         conv_node_idx = None
         extra_input_node_idx = None
         if (binary_node.args[0].op == "call_function") and (
@@ -192,9 +190,9 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
             "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
@@ -204,20 +202,19 @@ class X86InductorQuantizer(Quantizer):
         }
         # TODO(Leslie) Need to insert observer for the extra input node
         # Maybe use "args_act_index"
-        print("extra_input_node_idx is: {}".format(extra_input_node_idx), flush=True)
         binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
             "args_act_index": [extra_input_node_idx],
         }
         unary_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
-    def _annotate_conv2d_binary(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+    def _annotate_conv2d_binary(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
         # Conv2d + add
         supported_binary_node = [torch.ops.aten.add_.Tensor, torch.ops.aten.add.Tensor]
         if node.op != "call_function" or node.target not in supported_binary_node:
@@ -225,7 +222,6 @@ class X86InductorQuantizer(Quantizer):
         binary_node = node
         assert isinstance(binary_node, Node)
 
-        print("binary_node.args[0].target is: {}".format(binary_node.args[0].target), flush=True)
         conv_node_idx = None
         extra_input_node_idx = None
         if (binary_node.args[0].op == "call_function") and (
@@ -250,9 +246,9 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
             "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
@@ -262,15 +258,14 @@ class X86InductorQuantizer(Quantizer):
         }
         # TODO(Leslie) Need to insert observer for the extra input node
         # Maybe use "args_act_index"
-        print("extra_input_node_idx is: {}".format(extra_input_node_idx), flush=True)
         binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
             "args_act_index": [extra_input_node_idx],
         }
 
-    def _annotate_conv2d_unary(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+    def _annotate_conv2d_unary(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
         supported_unary_node = [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]
         if node.op != "call_function" or node.target not in supported_unary_node:
             return
@@ -283,9 +278,9 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
             "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
@@ -295,11 +290,11 @@ class X86InductorQuantizer(Quantizer):
         }
         unary_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
-    def _annotate_conv2d(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+    def _annotate_conv2d(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
         conv_node = node
         if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             return
@@ -307,10 +302,10 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([conv_node]):
             return
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -320,3 +315,7 @@ class X86InductorQuantizer(Quantizer):
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
+
+    @classmethod
+    def get_supported_operators(cls) -> List[OperatorConfig]:
+        return cls.supported_config_and_operators
