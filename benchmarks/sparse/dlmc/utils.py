@@ -23,7 +23,7 @@ def sparse_grad_output(a, b):
 def read_matrix_params(path):
     with open(path, 'r') as file:
         line = file.readline()
-        nrows, ncols, nnz = map(lambda el: int(el), line.split(', '))
+        nrows, ncols, nnz = (int(el) for el in line.split(', '))
         return (nrows, ncols), nnz
 
 
@@ -39,9 +39,9 @@ def csr_to_coo(indices, indptr, shape):
 
 def load_sparse_matrix(path, device):
     with open(path, 'r') as file:
-        nrows, ncols, nnz = map(lambda el: int(el), file.readline().split(', '))
-        index_pointers = map(lambda el: int(el), file.readline().split())
-        indices = map(lambda el: int(el), file.readline().split())
+        nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
+        index_pointers = (int(el) for el in file.readline().split())
+        indices = (int(el) for el in file.readline().split())
 
     index_pointers = list(index_pointers)
     indices = list(indices)
@@ -52,17 +52,17 @@ def load_sparse_matrix(path, device):
 
 def gen_vector(path, device):
     with open(path, 'r') as file:
-        nrows, ncols, nnz = map(lambda el: int(el), file.readline().split(', '))
-        index_pointers = map(lambda el: int(el), file.readline().split())
-        indices = map(lambda el: int(el), file.readline().split())
+        nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
+        index_pointers = (int(el) for el in file.readline().split())
+        indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, dtype=torch.double, device=device)
 
 
 def gen_matrix(path, device):
     with open(path, 'r') as file:
-        nrows, ncols, nnz = map(lambda el: int(el), file.readline().split(', '))
-        index_pointers = map(lambda el: int(el), file.readline().split())
-        indices = map(lambda el: int(el), file.readline().split())
+        nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
+        index_pointers = (int(el) for el in file.readline().split())
+        indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, ncols, dtype=torch.double, device=device)
 
 
