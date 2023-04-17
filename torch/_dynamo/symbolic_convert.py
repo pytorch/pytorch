@@ -23,6 +23,7 @@ from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
+    config,
     exc,
     logging as torchdynamo_logging,
     side_effects,
@@ -41,7 +42,6 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .config_utils import config
 from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
@@ -565,10 +565,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(
+            TracingContext.set_current_loc(
                 self.f_code.co_filename, self.lineno, self.f_code.co_name
-            ):
-                getattr(self, inst.opname)(inst)
+            )
+            getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -1134,6 +1134,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(self.next_instruction)
+        )
+
+    def DELETE_ATTR(self, inst):
+        obj = self.pop()
+        self.output.guards.update(
+            BuiltinVariable(delattr)
+            .call_function(self, [obj, ConstantVariable(inst.argval)], {})
+            .guards
         )
 
     def create_call_resume_at(self, offset):
@@ -1806,10 +1814,18 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
+        frame_state,
     ):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
         super().__init__(
             output=OutputGraph(
-                f_globals, code_options, compiler_fn, self, export, export_constraints
+                f_globals,
+                code_options,
+                compiler_fn,
+                self,
+                export,
+                export_constraints,
+                frame_state,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -1888,7 +1904,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
     def match_nested_cell(self, name, cell):
@@ -2020,7 +2035,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_function(), "_torchdynamo_disable", False
         ):
             unimplemented(
-                f"call torch._dynamo.skip() wrapped function {func.get_function()}"
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
 
     @staticmethod

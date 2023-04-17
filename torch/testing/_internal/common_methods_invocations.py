@@ -14757,6 +14757,10 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -17020,7 +17024,11 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatches in Python to matrix_norm. Not sure how to make this test happy
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.complex64, torch.float32,)),)
+                            dtypes=(torch.complex64, torch.float32,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                            device_type='cuda', dtypes=[torch.float32], active_if=TEST_WITH_ROCM),)
            ),
     OpInfo('norm',
            variant_test_name='fro',
@@ -19618,6 +19626,10 @@ python_ref_db = [
         torch_opinfo_name="contiguous",
         supports_nvfuser=False,
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.deg2rad",
+        torch_opinfo_name="deg2rad",
+    ),
     PythonRefInfo(
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
@@ -19731,6 +19743,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.rad2deg",
+        torch_opinfo_name="rad2deg",
     ),
     PythonRefInfo(
         "_refs.ravel",
@@ -19878,6 +19894,10 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
+    ),
+    ReductionPythonRefInfo(
+        "_refs.count_nonzero",
+        torch_opinfo_name="count_nonzero",
     ),
     ReductionPythonRefInfo(
         "_refs.mean",

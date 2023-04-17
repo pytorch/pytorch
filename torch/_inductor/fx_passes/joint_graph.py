@@ -2,6 +2,7 @@ import functools
 import logging
 
 import torch
+from ..._subclasses import FakeTensorMode
 from .. import config
 from ..pattern_matcher import PatternMatcherPass
 
@@ -13,7 +14,8 @@ patterns = PatternMatcherPass()
 def lazy_init():
     from .fuse_attention import _sfdp_init
 
-    _sfdp_init()
+    with FakeTensorMode():
+        _sfdp_init()
 
 
 def joint_graph_passes(graph: torch.fx.GraphModule):
