@@ -460,7 +460,13 @@ def _return_true(match):
 
 
 def register_replacement(
-    search_fn, replace_fn, example_inputs, trace_fn, pass_dict, *, scalar_workaround=()
+    search_fn,
+    replace_fn,
+    example_inputs,
+    trace_fn,
+    pass_dict,
+    extra_check=_return_true,
+    scalar_workaround=(),
 ):
     """
     Create a replacement rule based on example functions that get traced
@@ -473,6 +479,7 @@ def register_replacement(
         example_inputs: example inputs for initial trace
         trace_fn: inference_graph or training_graph
         pass_dict: dict of passes to register to
+        extra_check: additional check to run on match(using real shapes)
     """
 
     def check_fn(match: Match):
@@ -487,7 +494,6 @@ def register_replacement(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
-
         for i, grad in enumerate(requires_grad):
             if isinstance(args[i], torch.Tensor):
                 args[i] = torch.empty_strided(
@@ -497,10 +503,10 @@ def register_replacement(
                     device=args[i].device,
                     requires_grad=grad,
                 )
-
         specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(specific_graph, argnames=argnames)
-        if specific_pattern.match(match.output_nodes()[0]):
+        specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
+        if specific_pattern_match and extra_check(specific_pattern_match):
             # trace the pattern using the shapes form the user program
             match.replacement_graph = trace_fn(replace_fn, args)
             return True
