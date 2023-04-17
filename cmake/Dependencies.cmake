@@ -1805,6 +1805,8 @@ if(NOT INTERN_BUILD_MOBILE)
   else(NOT C_HAS_THREAD)
     add_compile_options(-DTH_HAVE_THREAD)
   endif(NOT C_HAS_THREAD)
+
+  find_package(ZVECTOR) # s390x simd support
 endif()
 
 #
