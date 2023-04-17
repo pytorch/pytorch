@@ -499,6 +499,34 @@ class FakeTensorTest(TestCase):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
 
+    def test_mixed_real_and_fake_inputs(self):
+        class _TestPattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(1)
+
+            def forward(self, input):
+                running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+                scale_factor = self.bn.weight / running_std
+                weight_shape = [1] * len(self.conv.weight.shape)
+                weight_shape[0] = -1
+                bias_shape = [1] * len(self.conv.weight.shape)
+                bias_shape[1] = -1
+                scaled_weight = self.conv.weight * scale_factor.reshape(weight_shape)
+                zero_bias = torch.zeros_like(self.conv.bias, dtype=input.dtype)
+                conv = self.conv._conv_forward(input, scaled_weight, zero_bias)
+                conv_orig = conv / scale_factor.reshape(bias_shape)
+                conv_orig = conv_orig + self.conv.bias.reshape(bias_shape)
+                conv = self.bn(conv_orig)
+                return conv
+
+        example_inputs = (torch.randn(1, 1, 3, 3),)
+        mod = _TestPattern()
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            out = mod(torch.randn(1, 1, 3, 3))
+        self.checkType(out, "cpu", (1, 1, 3, 3))
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -673,6 +701,17 @@ class FakeTensorConverterTest(TestCase):
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.device.type, "cpu")
 
+    def test_multiple_modes(self):
+        t = torch.rand(([4]))
+        t2 = torch.rand([4])
+        with FakeTensorMode() as m:
+            with FakeTensorMode() as m2:
+                t_fake = m.from_tensor(t)
+                t2_fake = m2.from_tensor(t2)
+
+                with self.assertRaisesRegex(Exception, "Mixing fake modes"):
+                    t_fake + t2_fake
+
     def test_separate_mode_error(self):
         with FakeTensorMode():
             x = torch.empty(2, 2, device="cpu")
@@ -786,6 +825,19 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(len(ref_out), len(meta_out))
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
+
+    def test_cross_entropy_loss(self):
+        inp = torch.randn(3, 5)
+        target = torch.randint(5, (3,), dtype=torch.long)
+        fn = torch.nn.functional.cross_entropy
+        ref = fn(inp, target)
+        with FakeTensorMode() as m:
+            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in (inp, target)]
+
+            meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
+
+        self.assertEqual(ref.size(), meta_out.size())
+
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
