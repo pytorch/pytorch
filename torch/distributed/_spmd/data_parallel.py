@@ -628,6 +628,8 @@ def partitioner(graph: GraphModule) -> GraphModule:
         if node_sharding is None:
             continue
 
+        print(f">>>> processing node: {node}")
+
         if node.op == "placeholder":
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
@@ -638,6 +640,9 @@ def partitioner(graph: GraphModule) -> GraphModule:
                 # node.meta["tensor_meta"] = local_tensor_meta
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
+            if "val" not in node.meta:
+                print(f">>>> node: {node} has no val, meta: {node.meta}")
+
             output_val = node.meta["val"]
 
             # check if there's misaligned sharding, insert reshard if there is
