@@ -1,4 +1,4 @@
-# Owner(s): ["module: functorch"]
+# Owner(s): ["oncall: pt2"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -1435,8 +1435,8 @@ def forward(self, primals_1, primals_2):
         # (Otherwise, autograd will plumb a None as the value of the grad_output,
         # which causes inductor to complain).
         self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
-def forward(self, arg0_1):
-    return (arg0_1,)""")
+def forward(self, tangents_1):
+    return [tangents_1]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_no_grad_input_output(self):
@@ -2509,34 +2509,12 @@ symbolic_aot_autograd_failures = {
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
-    xfail('column_stack', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.fftshift', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.hfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.hfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.hfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ifftshift', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ihfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ihfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.ihfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.irfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.irfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.irfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.rfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2547,7 +2525,6 @@ symbolic_aot_autograd_failures = {
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.cholesky_ex', ''),  # could not find kernel for aten.linalg_solve_triangular.default
     xfail('linalg.cond', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/deco...
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
@@ -2686,13 +2663,18 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
     try:
         reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
-
-        reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+
+        reset_grads()
+        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
+        if all([x is None for x in orig_grad]):
+            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
+                call_forwards_backwards(compiled_f)
+        else:
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
 
         def create_new_arg(x):
             if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
@@ -2702,13 +2684,18 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
         args = pytree.tree_map(create_new_arg, args)
 
         reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
-
-        reset_grads()
         call_forwards_backwards(f)
         orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+
+        reset_grads()
+        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
+        if all([x is None for x in orig_grad]):
+            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
+                call_forwards_backwards(compiled_f)
+        else:
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
     except DynamicOutputShapeException:
         self.skipTest("Dynamic output shape operation in trace")
 
