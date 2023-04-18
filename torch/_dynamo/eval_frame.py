@@ -53,7 +53,6 @@ from .utils import compile_times
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -368,7 +367,9 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size):
+    def catch_errors(frame, cache_size, frame_state):
+        assert frame_state is not None
+
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -394,10 +395,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks)
+                    return hijacked_callback(frame, cache_size, hooks, frame_state)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks)
+            return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
@@ -442,7 +443,7 @@ def check_if_dynamo_supported():
     elif sys.version_info >= (3, 11):
         warnings.warn(
             "torch.compile support of Python 3.11 is experimental. "
-            "Program may generate incorrect results or segfault."
+            "Program may segfault."
         )
 
 
@@ -612,7 +613,8 @@ class Constraint:
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
-            self.constraint_range.vr & ValueRanges(lower=lower, upper=upper)
+            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
+            warn_only=False,
         )
         return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
 
@@ -694,7 +696,6 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
-    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -731,8 +732,11 @@ def export(
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
 
+    fake_mode = None
+    example_inputs = []
+
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs
+        gm: torch.fx.GraphModule, inner_example_inputs
     ):
         nonlocal graph
         assert (
@@ -740,8 +744,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal example_fake_inputs
-        example_fake_inputs = example_inputs
+        nonlocal fake_mode, example_inputs
+        fake_mode = _guards.detect_fake_mode(inner_example_inputs)
+        example_inputs = inner_example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -778,6 +783,7 @@ def export(
         graph is not None
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
+    assert fake_mode is not None
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -823,19 +829,16 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
+
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        fake_tensor_mode = null_context()
-        for val in example_fake_inputs:
-            if isinstance(val, FakeTensor):
-                fake_tensor_mode = val.fake_mode
-                break
-
-        with enable_python_dispatcher(), fake_tensor_mode:
+        with enable_python_dispatcher(), fake_mode:
             graph = make_fx(
                 graph_with_interpreter,
                 decomposition_table=decomposition_table,

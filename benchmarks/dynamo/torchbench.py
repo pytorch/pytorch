@@ -73,6 +73,10 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
+    # https://github.com/pytorch/pytorch/issues/99201
+    "opacus_cifar10",
+    # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
+    "tacotron2",
 }
 
 SKIP_FOR_CUDA = {

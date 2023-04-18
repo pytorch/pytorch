@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import traceback
 import types
 import unittest
 from copy import deepcopy
+from functools import partial
 from typing import Tuple
 from unittest.mock import patch
 
@@ -548,7 +550,7 @@ class LazyModuleWithListInput(torch.nn.Module):
         self.layer = LazyLayerWithListInput()
 
     def forward(self, input):
-        return self.layer(input)
+        return self.layer(input[:-1])
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
@@ -677,6 +679,24 @@ class CallForwardDirectly(torch.nn.Module):
         return x
 
 
+class ConvCallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+
+    def forward(self, x):
+        return self.layer.forward(x)
+
+
+class ConvTransposeCallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.ConvTranspose2d(4, 4, 4)
+
+    def forward(self, x):
+        return self.layer.forward(x)
+
+
 class ModuleNameString(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -796,6 +816,45 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
         return x
 
 
+class SequentialWithDuplicatedModule(torch.nn.Module):
+    # Sequential module(self.layer) contains three duplicated ReLU module.
+    def __init__(self):
+        super(SequentialWithDuplicatedModule, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(10, 20),
+            self.relu,
+            torch.nn.Linear(20, 20),
+            self.relu,
+            torch.nn.Linear(20, 10),
+            self.relu,
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class SequentialWithDuplicatedModule2(torch.nn.Module):
+    def __init__(self):
+        super(SequentialWithDuplicatedModule2, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            collections.OrderedDict(
+                [
+                    ("linear1", torch.nn.Linear(10, 20)),
+                    ("relu1", self.relu),
+                    ("linear2", torch.nn.Linear(20, 20)),
+                    ("relu2", self.relu),
+                    ("linear3", torch.nn.Linear(20, 10)),
+                    ("relu3", self.relu),
+                ]
+            )
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -864,6 +923,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
     test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
+    test_sequential_with_duplicated_module = make_test(SequentialWithDuplicatedModule())
+    test_sequential_with_duplicated_module2 = make_test(
+        SequentialWithDuplicatedModule2()
+    )
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -1166,7 +1229,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
-        x = [torch.rand([5, 5])] * 3
+        x = [torch.rand([5, 5])] * 3 + [None]
         opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
         res = opt_m(x)
         ref = m(x)
@@ -1191,6 +1254,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
         graph, _ = torch._dynamo.export(mod, rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
+    def test_conv_call_forward_directly(self):
+        m = ConvCallForwardDirectly()
+        x = torch.rand([4, 3, 9, 9])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_transpose_call_forward_directly(self):
+        m = ConvTransposeCallForwardDirectly()
+        x = torch.rand([4, 4, 4, 4])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
 
 class MockModule(torch.nn.Module):
@@ -1502,6 +1581,111 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertNotEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
         self.assertEqual(cc.frame_count, 1)
+
+    def test_hooks_allowed_modules(self):
+        # this test shouldn't care whether hook guards are enabled or not
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
+                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        forward_handles = {}
+        activations = dict()
+
+        def save_activations(name, mod, inp, out):
+            activations[name] = inp
+
+        for name, module in model.named_modules():
+            forward_handles[name] = module.register_forward_hook(
+                partial(save_activations, name)
+            )
+
+        model = torch.compile(model, backend="aot_eager")
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            activations.clear()
+            x = torch.randn((20, 10))
+            pred = model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        print(f"Recorded Layers: {activations.keys()}\n\n")
+        print(f"Expected Layers: {forward_handles.keys()}")
+        self.assertTrue(activations.keys() == forward_handles.keys())
+
+    def test_backward_hooks(self):
+        # this test shouldn't care whether hook guards are enabled or not
+
+        class CustomLinear(torch.nn.Module):
+            # not an 'allowed module', so should not graph-break
+            def __init__(self, a, b):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(a, b))
+
+            def forward(self, x):
+                return torch.mm(x, self.weight)
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[CustomLinear(10, 10)]
+                    + [CustomLinear(10, 10000)]
+                    + [CustomLinear(10000, 5)]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        backward_hook_handles = {}
+        pre_backward_hook_handles = {}
+
+        grad_sizes = {}
+
+        def backward_hook(name, mod, grad_inp, grad_out):
+            grad_sizes[name] = (
+                (gi.shape for gi in grad_inp),
+                (go.shape for go in grad_out),
+            )
+            return None
+
+        pre_grad_sizes = {}
+
+        def backward_pre_hook(name, mod, grad_out):
+            pre_grad_sizes[name] = (go.shape for go in grad_out)
+            return None
+
+        for name, module in model.named_modules():
+            backward_hook_handles[name] = module.register_full_backward_hook(
+                partial(backward_hook, name)
+            )
+
+            pre_backward_hook_handles[name] = module.register_full_backward_pre_hook(
+                partial(backward_pre_hook, name)
+            )
+
+        model = torch.compile(model, backend="aot_eager")
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            x = torch.randn((20, 10))
+            pred = model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
+        self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
 
 
 if __name__ == "__main__":
