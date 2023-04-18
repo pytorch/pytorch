@@ -2293,7 +2293,7 @@ class ShapeEnv:
 
         if torch._dynamo.config.dynamic_shapes and torch._dynamo.config.summarize_dim_constraints:
             dim_constraints.solve()
-            log.warning(f"Summary of dimension constraints:{dim_constraints.prettify_results()}")
+            log.warning("Summary of dimension constraints:%s", dim_constraints.prettify_results())
 
         if constraint_violations:
             warn_msgs = []
