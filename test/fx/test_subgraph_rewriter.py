@@ -924,3 +924,16 @@ def forward(self, x):
         traced = symbolic_trace(M())
         matches = subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
         self.assertEqual(len(matches), 1)
+
+    def test_matching_variable_arguments(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.max_pool2d_with_indices.default(x, 2)
+
+        def pattern(x, kernel_size, stride, padding, dilation):
+            return torch.ops.aten.max_pool2d_with_indices.default(x, kernel_size, stride, padding, dilation)
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, pattern)
+
+        self.assertEqual(len(matches), 1)
