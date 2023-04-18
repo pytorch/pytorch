@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 project(test)
 
-set(Torch_DIR "../../../../torch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 add_library(aot_inductor_output SHARED IMPORTED)

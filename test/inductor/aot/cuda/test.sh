@@ -4,6 +4,7 @@ set -euxo pipefail
 rm -rf build
 mkdir -p build
 cd build
-cmake ..
+TORCH_PATH=$PWD/../../../../../torch
+cmake .. -DCMAKE_PREFIX_PATH=$TORCH_PATH
 make
-LD_LIBRARY_PATH=../../../../../torch/lib/ ./test
+LD_LIBRARY_PATH=$TORCH_PATH/lib ./test
