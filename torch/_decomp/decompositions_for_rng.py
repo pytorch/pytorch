@@ -1,5 +1,4 @@
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Callable, Dict
 
 import torch
@@ -120,27 +119,15 @@ class PhiloxState:
         self.relative_offset = 0
 
 
-@dataclass
-class PhiloxTotalOffsets:
-    """
-    PhiloxStateTracker computes the total fwd and bwd offsets for an AOT
-    Autograd traced graph. However, PhiloxStateTracker is a singleton class, but
-    the total offsets are specific to each traced graph. These offsets are
-    stored as part of AOT graph. This class just encapsulates the fwd and bwd
-    offsets to be used at runtime.
-    """
-
-    total_fwd_offset: int
-    total_bwd_offset: int
-
-
 class PhiloxStateTracker:
     """
     Singleton class to track the philox rng state during AOT Autograd tracing.
     For each aot tracing instance, AOT Autograd resets this tracker and keeps
     track of both forward and backward offsets. At runtime, we only care about
-    the total consumed forward and backward offsets. There are stored as part of
-    aot_config (PhiloxTotalOffsets), which is a config object per aot-tracing.
+    the total consumed forward and backward offsets. For dynamic shapes, these
+    offsets are a function of input shapes. Therefore, the AOT generated graphs
+    have additiional outputs that compute total consumed forward and backward
+    offsets.
     """
 
     running_state: PhiloxState
@@ -216,7 +203,9 @@ class PhiloxStateTracker:
         return cls.running_state.relative_offset
 
     @classmethod
-    def get_accumulated_offsets(cls):
-        fwd_offset = cls.fwd_state.relative_offset
-        bwd_offset = cls.bwd_state.relative_offset
-        return PhiloxTotalOffsets(fwd_offset, bwd_offset)
+    def get_updated_fwd_offset(cls):
+        return cls.fwd_state.base_offset + cls.fwd_state.relative_offset
+
+    @classmethod
+    def get_updated_bwd_offset(cls):
+        return cls.bwd_state.base_offset + cls.bwd_state.relative_offset
