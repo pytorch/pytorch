@@ -1,6 +1,5 @@
 import operator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from enum import Enum
 
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -15,7 +14,11 @@ import torch.utils._pytree as pytree
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import PlacementStrategy, StrategyList
+from torch.distributed._tensor.op_schema import (
+    OpStrategy,
+    PlacementStrategy,
+    StrategyType,
+)
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
 from torch.fx import GraphModule
@@ -71,15 +74,11 @@ class NodeType(Enum):
     NON_TENSOR = 4  # NON_TENSOR is to tag non tensor node (i.e. graph output)
 
 
-@dataclass
-class DataParallelStrategy(StrategyList):
+class DataParallelStrategy(OpStrategy):
     """
-    DataParallelStrategy is a special case of StrategyList that only records
+    DataParallelStrategy is a special case of OpStrategy that only records
     the "data parallel style" placement strategy for each fx Node.
     """
-
-    node_type: NodeType
-    reduction_over_batch: bool
 
     def __init__(
         self,
@@ -255,7 +254,7 @@ def build_data_parallel_strategies(
     num_states: int,
     mesh: DeviceMesh,
     batch_dim: int = 0,
-) -> Dict[fx.Node, StrategyList]:
+) -> Dict[fx.Node, StrategyType]:
     """
     This function loop through the train step graph and build the
     data parallel strategy for each fx Node
