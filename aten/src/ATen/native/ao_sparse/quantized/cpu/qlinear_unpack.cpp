@@ -93,7 +93,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
     std::transform(
         w_zero_points_.begin(),
         w_zero_points_.begin() + output_channels_,
-        zero_points.data_ptr<int>(),
+        zero_points.mutable_data_ptr<int>(),
         [](uint8_t v) { return static_cast<int>(v) - 128; });
 
     weight_origin = at::_empty_per_channel_affine_quantized(

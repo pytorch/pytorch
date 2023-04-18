@@ -13,6 +13,7 @@ import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
+from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     check,
     Dim,
@@ -1814,14 +1815,17 @@ def _as_strided_scatter_meta(
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
-    required_size = utils.compute_required_storage_length(size, stride, storage_offset)
+    input_size = input.untyped_storage().size()  # type: ignore[attr-defined]
+    required_view_size = input.element_size() * utils.compute_required_storage_length(
+        size, stride, storage_offset
+    )
     utils.check(
-        input.numel() >= required_size,
+        input_size >= required_view_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
             f" and itemsize {input.element_size()} requiring a storage size of "
-            f"{required_size * input.element_size()} are out of bounds "
-            f"for storage of size {input.numel() * input.element_size()}"
+            f"{required_view_size} are out of bounds "
+            f"for storage of size {input_size}"
         ),
     )
     utils.check(
@@ -2963,3 +2967,4 @@ fft_c2r = _make_prim(
 )
 
 register_nvprims()
+register_rng_prims()

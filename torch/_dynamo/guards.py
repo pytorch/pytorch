@@ -546,7 +546,9 @@ class GuardBuilder(GuardBuilderBase):
             # compiled with that same
             # tensor + more onerous user directives.
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
+            static, reason = tensor_always_has_static_shape(
+                value, is_tensor=True, guard_source=guard.source
+            )
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
