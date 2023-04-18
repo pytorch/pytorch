@@ -259,6 +259,7 @@ CI_SERIAL_LIST = [
     "test_cpp_api_parity",
     "test_reductions",
     "test_cuda",
+    "test_cuda_expandable_segments",
     "test_jit_cuda_fuser",  # OOM on test_issue_1785, also profiling?
     "test_indexing",
     "test_fx_backends",
