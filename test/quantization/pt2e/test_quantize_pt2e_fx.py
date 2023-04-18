@@ -7,7 +7,12 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 from torch._inductor.compile_fx import compile_fx
 from torch.ao.ns.fx.utils import compute_sqnr
-from torch.ao.quantization import get_default_qconfig, observer, QConfigMapping
+from torch.ao.quantization import (
+    get_default_qconfig,
+    observer,
+    QConfigMapping,
+    default_per_channel_symmetric_qnnpack_qconfig,
+)
 from torch.ao.quantization._quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
