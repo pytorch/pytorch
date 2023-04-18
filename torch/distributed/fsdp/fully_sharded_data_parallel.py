@@ -1916,7 +1916,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to ``:meth:optim_state_dict_to_load``
+        The functionality is identical to :meth:`optim_state_dict_to_load`
         except for the different arguments.
 
         Args:
