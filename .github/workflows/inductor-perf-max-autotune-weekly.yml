@@ -1,4 +1,4 @@
-name: inductor-A100-perf-nightly
+name: inductor-A100-max-autotune-weekly
 
 on:
   schedule:
