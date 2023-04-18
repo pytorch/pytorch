@@ -1978,7 +1978,7 @@ fake_tensor_stride_failing_ops = {
     "linalg.svd",
 }
 
-fake_backward_xfails = {
+fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1991,10 +1991,8 @@ fake_backward_xfails = {
     "cholesky",
 }
 
-fake_backward_xfails = {xfail(s) for s in fake_backward_xfails} | {
+fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
-    xfail("norm", "nuc"),
-    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
 } | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
 
