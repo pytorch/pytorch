@@ -203,7 +203,7 @@ class TestAutocastGPU(TestCase):
 
             # we should not have cached the conversion of the weight
             self.assertEqual(mode.dtype_cast_counter, 2)
-        
+
         finally:
             torch._C._set_cudagraph_cached_tensors_enabled(False)
 
