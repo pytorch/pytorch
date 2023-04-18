@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Dict, List, Union
 
 import sympy
+import sys
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -225,27 +226,31 @@ class SizeVarAllocator:
         return left
 
     def should_optimize_equals(self, left: Expr, right: Expr) -> bool:
-        """if left==right, guard on that fact and return true"""
-        if is_expr_static(left) and not is_expr_static(right):
-            return self.size_hint(left) - self.size_hint(right) == 0
+        if left == right:
+            return True
+        if is_expr_static(left) and is_expr_static(right):
+            return int(left) - int(right) == 0
         return False
 
     def should_optimize_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         if len(left) != len(right):
             return False
-        for l, r in zip(left, right):
-            if self.should_optimize_equals(l, r) == False:
-                return False
-        return True
+        if all(self.should_optimize_equals(l, r) for l, r in zip(left, right)):
+            return True
+        return False
 
     def should_optimize_leq(self, left: Expr, right: Expr) -> bool:
         if is_expr_static(left) and is_expr_static(right):
-            return self.size_hint(left) <= self.size_hint(right)
+            return int(left) <= int(right)
+        if is_expr_static(right) and right == sys.maxsize:
+            return True
         return False
 
     def should_optimize_lt(self, left: Expr, right: Expr) -> bool:
         if is_expr_static(left) and is_expr_static(right):
-            return self.size_hint(left) < self.size_hint(right)
+            return int(left) < int(right)
+        if is_expr_static(right) and right == sys.maxsize:
+            return True
         return False
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
@@ -276,12 +281,11 @@ class SizeVarAllocator:
         return -self.guard_min(-left, -right)
 
     def should_optimize_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
-        """if denominator divides numerator, return True and guard on that fact"""
+        if sympy.gcd(numerator, denominator) == denominator:
+            # can prove it symbolically
+            return True
         if is_expr_static(numerator) and is_expr_static(denominator):
-            if sympy.gcd(numerator, denominator) == denominator:
-                # can prove it symbolically
-                return True
-            if self.size_hint(numerator) % self.size_hint(denominator) == 0:
+            if int(numerator) % int(denominator) == 0:
                 return True
         return False
 
