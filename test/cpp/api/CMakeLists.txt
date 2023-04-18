@@ -80,6 +80,11 @@ if(NOT MSVC)
   target_compile_options_if_supported(test_api "-Wno-maybe-uninitialized")
   # gcc gives nonsensical warnings about variadic.h
   target_compile_options_if_supported(test_api "-Wno-unused-but-set-parameter")
+  # the nonnull check might trigger for some build configurations,
+  # probably happening due to different code optimization
+  # (see e.g. https://rkoucha.fr/tech_corner/nonnull_gcc_attribute.html)
+  # this happened for a riscv build: https://github.com/pytorch/pytorch/issues/99278
+  target_compile_options_if_supported(test_api "-Wno-error=nonnull")
 endif()
 
 if(INSTALL_TEST)
