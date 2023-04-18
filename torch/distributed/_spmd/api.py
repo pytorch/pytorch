@@ -21,9 +21,6 @@ from functorch import make_fx
 
 import torch
 import torch.distributed as dist
-
-# We need to import _functional_collectives to trigger op registration
-import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
@@ -237,7 +234,9 @@ def _dtensor_expand(
     with FakeTensorMode(allow_non_fake_inputs=True):
         fake_inps = [torch.empty_like(inp) for inp in inps]
 
-    return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
+    return _convert_to_distributed(
+        gm, fake_inps, schemas, default_mesh=mesh, _allow_partial=False
+    )[0]
 
 
 @contextmanager
@@ -388,8 +387,8 @@ FOREACH_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    torch.ops.c10d_functional.all_reduce.default,
-    torch.ops.c10d_functional.wait_tensor.default,
+    aten.all_reduce.default,
+    aten.wait_tensor.default,
 }
 
 
