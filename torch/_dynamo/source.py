@@ -291,9 +291,14 @@ class DefaultsSource(Source):
 class GetItemSource(Source):
     base: Source
     index: Any
+    index_is_slice: bool = False
 
     def __post_init__(self):
         assert self.base is not None
+        if isinstance(self.index, slice):
+            # store the hashable version of the slice so the whole GetItemSource is hashable
+            super().__setattr__("index", self.index.__reduce__())
+            super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -301,43 +306,29 @@ class GetItemSource(Source):
         if isinstance(self.index, Source):
             instrs.extend(self.index.reconstruct(codegen))
         else:
-            instrs.append(codegen.create_load_const(self.index))
+            if self.index_is_slice:
+                instrs.append(codegen.create_load_const(self.unpack_slice()))
+            else:
+                instrs.append(codegen.create_load_const(self.index))
         instrs.append(create_instruction("BINARY_SUBSCR"))
 
         return instrs
 
-    def __hash__(self):
-        if isinstance(self.index, slice):
-            # GetItemSource (and all sources) needs to be hashable,
-            # since we are using set membership on sources for AOT dedupe.
-            return hash((self.base.__hash__(), self.index.__reduce__()))
-        return super().__hash__()
-
-    def __eq__(self, other):
-        if (
-            isinstance(self.index, slice)
-            or type(self) is type(other)
-            and isinstance(other.index, slice)
-        ):
-            return (
-                self.base == other.base
-                and type(self) is type(other)
-                and type(self.index) is type(other.index)
-                # technically slice implements __eq__() so i was tempted to just use that,
-                # but why not be precise about __eq__ behavior matching __hash__ impl here.
-                and self.index.__reduce__() == other.index.__reduce__()
-            )
-
-        return super().__eq__(other)
-
     def guard_source(self):
         return self.base.guard_source()
+
+    def unpack_slice(self):
+        assert self.index_is_slice
+        slice_class, slice_args = self.index
+        return slice_class(*slice_args)
 
     def name(self):
         if isinstance(self.index, Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
-            if isinstance(self.index, enum.Enum):
+            if self.index_is_slice:
+                return f"{self.base.name()}[{self.unpack_slice()!r}]"
+            elif isinstance(self.index, enum.Enum):
                 return f"{self.base.name()}[{enum_repr(self.index)}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
