@@ -197,7 +197,6 @@ def clone_preserve_strides(x, device=None):
     else:
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-
     return out
 
 
