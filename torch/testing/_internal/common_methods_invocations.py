@@ -299,6 +299,24 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
         input_src = make_arg(output_shape)
         yield SampleInput(input_t, input_src, output_shape, stride, storage_offset=storage_offset)
 
+def reference_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # input shape, output shape, output stride, output storage offset, input is view
+    test_cases = [
+        # input is tensor
+        ((4, 1), (1,), (1,), 0, False),
+        # input is view
+        ((4, 1), (1,), (1,), 1, True),
+        ((4, 1), (1,), (1,), 2, True),
+    ]
+
+    for input_shape, output_shape, stride, storage_offset, input_is_view in test_cases:
+        input_t = make_arg(input_shape)
+        if input_is_view:
+            input_t = input_t[1]
+        input_src = make_arg(output_shape)
+        yield SampleInput(input_t, input_src, output_shape, stride, storage_offset=storage_offset)
 
 def error_inputs_as_strided_scatter(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -11648,6 +11666,7 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided_scatter,
            error_inputs_func=error_inputs_as_strided_scatter,
+           reference_inputs_func=reference_inputs_as_strided_scatter,
            skips=(
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
@@ -12526,6 +12545,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
@@ -13132,6 +13152,7 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         assert_autodiffed=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_gradgrad=True,
         # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
         decorators=[

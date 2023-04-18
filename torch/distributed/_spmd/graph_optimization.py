@@ -824,7 +824,7 @@ def _split_fused_adam(
                 )
                 orig_step_outputs.append(orig_optim_block.step.outputs[idx])
             step = gm.graph.call_function(
-                torch.ops.aten._foreach_add.Scalar,
+                aten._foreach_add.Scalar,
                 (step_args, 1),
             )
         step_block = ForeachAddBlock(step, generate_output=True)
@@ -844,7 +844,7 @@ def _split_fused_adam(
         # topo sort order is the last.
         with gm.graph.inserting_after(step_block.outputs[0]):
             optim = gm.graph.call_function(
-                torch.ops.aten._fused_adam.default,
+                aten._fused_adam.default,
                 optim_args[group_idx],
                 orig_optim_block.optim.optim_node.kwargs,
             )
