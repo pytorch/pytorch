@@ -125,7 +125,7 @@ def _redistribute_with_local_tensor(
                 )
             elif current.is_replicate():
                 # split the tensor and return the corresponding cloned local shard
-                shards, _, _ = target_placement._split_tensor(
+                shards, _ = target_placement._split_tensor(
                     local_tensor,
                     num_chunks,
                     with_padding=False,

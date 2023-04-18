@@ -202,7 +202,8 @@ class Shard(Placement):
             my_coordinate is not None
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
         pad_idx = 0
-        if tensor.size(self.dim) % num_chunks != 0:
+        is_padded = tensor.size(self.dim) % num_chunks != 0
+        if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
@@ -212,9 +213,8 @@ class Shard(Placement):
             tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
         )
 
-        pad_size = pad_sizes[my_coordinate[mesh_dim]]
-        if pad_size != 0:
-            output = self._unpad_tensor(output, pad_size)
+        if is_padded:
+            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])
         return output
 
     def _to_replicate_tensor(
@@ -251,7 +251,8 @@ class Shard(Placement):
 
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
         if pad_size > 0:
-            local_tensor = self._pad_tensor(local_tensor, pad_size).contiguous()
+            local_tensor = self._pad_tensor(local_tensor, pad_size)
+        local_tensor = local_tensor.contiguous()
 
         result = mesh.all_gather(
             tensor=local_tensor,
