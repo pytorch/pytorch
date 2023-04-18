@@ -461,8 +461,12 @@ STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 def _get_pg_device(group: ProcessGroup):
     """
     Returns the device to use with ``group``.
-    This is cuda for NCCL and CPU for everything else
+    While group isn't ProcessGroup, this is cuda for NCCL and CPU for everything else
     """
+    if isinstance(group, ProcessGroup):
+        device = _get_device(group)
+        if device is not None:
+            return device
     if _check_for_nccl_backend(group):
         return torch.device("cuda", torch.cuda.current_device())
     return torch.device("cpu")
@@ -774,6 +778,21 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     backend_config = _world.pg_backend_config.get(pg)
     assert backend_config is not None
     return str(backend_config)
+
+def _get_device(group: Optional[ProcessGroup] = None) -> torch.device:
+    """
+    Returns the device of the given backend.
+    If a ProcessGroup has multiple devices, the earlier the device is, the higher the priority.
+    For example, if the user sets the ProcessGroup's backend as 'cpu:gloo,cuda:gloo',
+    'cpu' has higher priority and will be returned by thi function.
+    """
+    backend = get_backend(group)
+    priority_backend = backend.split(",")[0]
+    device = priority_backend.split(":")[0]
+    device_module = getattr(torch, device, None)
+    if device_module is None or device == "cpu":
+        return None
+    return torch.device(device, device_module.current_device())
 
 def get_backend(group: Optional[ProcessGroup] = None) -> str:
     """

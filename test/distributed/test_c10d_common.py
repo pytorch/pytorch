@@ -1936,6 +1936,64 @@ class ReduceOpTest(TestCase):
             self.assertFalse(None in (reduce_op, reduce_op_obj))
             self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
+class CustomBackendTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @staticmethod
+    def create_dummy(store, group_rank, group_size, timeout):
+        return DummyProcessGroup(group_rank, group_size)
+
+    def test_get_pg_device(self):
+        dist.Backend.register_backend(
+            "dummy",
+            CustomBackendTest.create_dummy
+        )
+
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+
+        backend_strings_and_expected_values = [
+            (dist.Backend.GLOO, "cpu"),
+            (dist.Backend.DUMMY, "cpu"),
+            ("cpu:dummy,cuda:dummy", "cpu")
+        ]
+
+        for backend, expected_value in backend_strings_and_expected_values:
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                dist.init_process_group(
+                    backend=backend,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store
+                )
+                pg = c10d._get_default_group()
+                device = c10d._get_pg_device(pg)
+                self.assertEqual(device.type, expected_value)
+                dist.destroy_process_group()
+
+        process_group_without_init = [
+            (dist.ProcessGroupGloo, "cpu"),
+        ]
+        for pg_class, expected_value in process_group_without_init:
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                pg = pg_class(store, self.rank, self.world_size)
+                device = c10d._get_pg_device(pg)
+                self.assertEqual(device.type, expected_value)
 
 if __name__ == "__main__":
     assert (
