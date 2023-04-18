@@ -744,6 +744,15 @@ def _convert_to_distributed(
         elif node.op == OP.CALL_FUNCTION:
             args = tree_map(partial(_remap_arg, node_to_obj), node.args)
             kwargs = tree_map(partial(_remap_arg, node_to_obj), node.kwargs)
+
+            # FIXME: non-op functions always use local value of SymInt for now
+            args = tree_map(
+                lambda a: a.local_value if isinstance(a, DSymInt) else a, args
+            )
+            kwargs = tree_map(
+                lambda a: a.local_value if isinstance(a, DSymInt) else a, kwargs
+            )
+
             node_to_obj[node] = node.target(*args, **kwargs)
         else:
             raise ValueError(f"Unrecognized node.op type {node.op}")
