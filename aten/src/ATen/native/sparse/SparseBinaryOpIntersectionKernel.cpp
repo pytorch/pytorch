@@ -5,8 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -146,4 +145,4 @@ REGISTER_AVX512_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_interse
 REGISTER_AVX2_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 REGISTER_VSX_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cpu_kernel);
-}}
+} // namespace at::native

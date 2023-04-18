@@ -246,7 +246,7 @@ def optimize_for_inference(
     3. MKL layout optimizations
 
     The third optimization takes a function `use_mkl_heuristic` that's used
-    to determine whether a subgraph should be explicity run in MKL layout.
+    to determine whether a subgraph should be explicitly run in MKL layout.
 
     Note: As FX does not currently handle aliasing, this pass currently
     assumes nothing aliases. If that isn't true, use at your own risk.

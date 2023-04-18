@@ -21,9 +21,9 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes
+    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
+    float_to_corresponding_complex_type_map
 )
-from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
@@ -941,17 +941,19 @@ class TestTensorCreation(TestCase):
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
 
-    def _float_to_int_conversion_helper(self, vals, device, dtype):
-        a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
+    def _float_to_int_conversion_helper(self, vals, device, dtype, refs=None):
+        if refs is None:
+            a = np.array(vals, dtype=np.float32).astype(torch_to_numpy_dtype_dict[dtype])
+            refs = torch.from_numpy(a)
         t = torch.tensor(vals, device=device, dtype=torch.float).to(dtype)
-        self.assertEqual(torch.from_numpy(a), t.cpu())
+        self.assertEqual(refs, t.cpu())
 
     # Checks that float->integer casts don't produce undefined behavior errors.
     # Note: In C++, casting from a floating value to an integral dtype
     # is undefined if the floating point value is not within the integral
     # dtype's dynamic range. This can (and should) cause undefined behavior
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
-    # NumPy has the same behavior.
+    # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
     @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetson, \
         see https://github.com/pytorch/pytorch/issues/38752")
@@ -963,14 +965,21 @@ class TestTensorCreation(TestCase):
 
         # Note: CUDA max float -> integer conversion is divergent on some dtypes
         vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
+        refs = None
         if self.device_type == 'cuda':
             if torch.version.hip:
                 # HIP min float -> int64 conversion is divergent
                 vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
             else:
                 vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+        elif dtype == torch.uint8:
+            # Note: CPU max float -> uint8 conversion is divergent
+            vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+            # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
+            #       see https://github.com/pytorch/pytorch/issues/97794
+            refs = (0, 254, 255, 0, 0, 0, 1, 2)
 
-        self._float_to_int_conversion_helper(vals, device, dtype)
+        self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
     @onlyCPU
@@ -2504,6 +2513,8 @@ class TestTensorCreation(TestCase):
             torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
             torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Stride calculation overflowed'):
+            torch.empty([0, 4, 2305843009213693952], dtype=torch.float32)
 
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -3948,6 +3959,13 @@ class TestAsArray(TestCase):
         self.assertEqual(tensor.dim(), 0)
         self.assertEqual(tensor.item(), scalar.item())
         self.assertEqual(tensor.dtype, torch.float64)
+        # Regression test for https://github.com/pytorch/pytorch/issues/97021
+        zerodim_arr = np.array(1.)
+        tensor = torch.asarray(zerodim_arr, dtype=torch.int32)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), zerodim_arr.item())
+        self.assertEqual(tensor.dtype, torch.int32)
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

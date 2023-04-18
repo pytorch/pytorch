@@ -25,6 +25,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(feature_dropout_);
 }
 
+void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+    TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__and__, Scalar);
   OP_DECOMPOSE2(__and__, Tensor);
@@ -94,24 +98,24 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(einsum);
   m.impl("embedding_backward", native::embedding_backward_symint);
   OP_DECOMPOSE(expand_as);
-  OP_DECOMPOSE(fft_fft);
+  m.impl("fft_fft", native::fft_fft_symint);
   OP_DECOMPOSE(fft_fftshift);
-  OP_DECOMPOSE(fft_fft2);
-  OP_DECOMPOSE(fft_fftn);
-  OP_DECOMPOSE(fft_hfft);
-  OP_DECOMPOSE(fft_hfft2);
-  OP_DECOMPOSE(fft_hfftn);
-  OP_DECOMPOSE(fft_ifft);
+  m.impl("fft_fft2", native::fft_fft2_symint);
+  m.impl("fft_fftn", native::fft_fftn_symint);
+  m.impl("fft_hfft", native::fft_hfft_symint);
+  m.impl("fft_hfft2", native::fft_hfft2_symint);
+  m.impl("fft_hfftn", native::fft_hfftn_symint);
+  m.impl("fft_ifft", native::fft_ifft_symint);
   OP_DECOMPOSE(fft_ifftshift);
-  OP_DECOMPOSE(fft_ifft2);
-  OP_DECOMPOSE(fft_ifftn);
-  OP_DECOMPOSE(fft_ihfft);
-  OP_DECOMPOSE(fft_irfft);
-  OP_DECOMPOSE(fft_irfft2);
-  OP_DECOMPOSE(fft_irfftn);
-  OP_DECOMPOSE(fft_rfft);
-  OP_DECOMPOSE(fft_rfft2);
-  OP_DECOMPOSE(fft_rfftn);
+  m.impl("fft_ifft2", native::fft_ifft2_symint);
+  m.impl("fft_ifftn", native::fft_ifftn_symint);
+  m.impl("fft_ihfft", native::fft_ihfft_symint);
+  m.impl("fft_irfft", native::fft_irfft_symint);
+  m.impl("fft_irfft2", native::fft_irfft2_symint);
+  m.impl("fft_irfftn", native::fft_irfftn_symint);
+  m.impl("fft_rfft", native::fft_rfft_symint);
+  m.impl("fft_rfft2", native::fft_rfft2_symint);
+  m.impl("fft_rfftn", native::fft_rfftn_symint);
   OP_DECOMPOSE(fix);
   OP_DECOMPOSE(fliplr);
   OP_DECOMPOSE(flipud);
@@ -326,12 +330,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
 
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_tensor);
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_float);
+  OP_DECOMPOSE(linalg_ldl_factor);
 
   // comparison ops
   OP_DECOMPOSE2(greater, Scalar);
   OP_DECOMPOSE2(less_equal, Scalar);
   OP_DECOMPOSE2(less, Scalar);
   OP_DECOMPOSE2(not_equal, Scalar);
+  m.impl("_has_compatible_shallow_copy_type", torch::CppFunction::makeFromBoxedFunction<&unsupportedData>());
 }
 
 }}
