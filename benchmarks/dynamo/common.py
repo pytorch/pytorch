@@ -211,6 +211,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "cait_m36_384",  # Accuracy
     "pnasnet5large",  # OOM
     "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
+    "opacus_cifar10",  # Fails to run https://github.com/pytorch/pytorch/issues/99201
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
