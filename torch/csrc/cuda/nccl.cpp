@@ -17,7 +17,7 @@
 #include <unordered_map>
 
 #if !defined(USE_ROCM) && \
-    ((NCCL_MACJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14)))
+    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14)))
 #define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
