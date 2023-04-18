@@ -150,10 +150,9 @@ class Shard(Placement):
 
         local_offset_on_dim = -1
         if return_offset:
-            # QQ: what would be the offset of an empty shard? -1?
-            local_offset_on_dim = (
-                sum(chunk_sizes[:rank]) if local_shard_size != 0 else -1
-            )
+            # Return global tensor dim size of current dimension if for empty shard
+            # to represent the end of the corresponding tensor dim.
+            local_offset_on_dim = sum(chunk_sizes[:rank])
 
         return (local_shard_size, local_offset_on_dim)
 
