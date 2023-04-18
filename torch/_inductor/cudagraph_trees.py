@@ -81,9 +81,16 @@ StorageDataPtr = int
 NBytes = int
 
 if torch.has_cuda:
-    from torch._C import _cuda_CUDAAllocator_AllocatorState as AllocatorState
+    from torch._C import (
+        _cuda_CUDAAllocator_AllocatorState as AllocatorState,
+        _set_cached_tensors_enabled as _set_cached_tensors_enabled,
+    )
 else:
     AllocatorState = Any
+
+    def _set_cached_tensors_enabled(enabled):
+        pass
+
 
 from . import config
 
@@ -259,7 +266,7 @@ def reset_cudagraph_trees():
 
             container.tree_manager.remove_all_cached_tensors()
 
-    torch._C._set_cudagraph_cached_tensors_enabled(False)
+    _set_cached_tensors_enabled(False)
     container_dict.clear()
 
 
@@ -295,11 +302,12 @@ def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
     # remove unaligned idxs on initial compilation before unaligned inputs have
     # been copied out
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+    del inputs
 
-    def deferred_cudagraphify(second_inputs):
+    def deferred_cudagraphify(inputs):
         nonlocal fn
         if fn is not None:
-            return fn(second_inputs)
+            return fn(inputs)
 
         fn, out = cudagraphify(model, inputs, static_input_idxs, *args, **kwargs)
         return out
@@ -354,6 +362,11 @@ class StorageWeakRefWrapper:
         inp: Union[Tensor, UntypedStorage],
         extra_ref_check: Optional[Callable[[], None]] = None,
     ):
+        """
+        extra_ref_check is an additional check we need to run to check if the
+        weak ref has expired. in checking storage use count we assume extra_ref_check
+        will hold an additional reference to the storage.
+        """
         if isinstance(inp, Tensor):
             stor = inp.untyped_storage()
         else:
@@ -1071,7 +1084,7 @@ class CUDAGraphNode:
             assert storage_info is UnaliasedStorage
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)
-            torch._C._add_cudagraph_cached_tensor(out)
+            torch._C._add_cached_tensor(out)
 
             self_ref = weakref.ref(self)
 
@@ -1250,7 +1263,7 @@ class CUDAGraphNode:
     def remove_node_cached_tensors(self):
         for t in self.cached_tensor_outputs:
             if t is not None:
-                torch._C._remove_cudagraph_cached_tensor(t)
+                torch._C._remove_cached_tensor(t)
         self.cached_tensor_outputs.clear()
 
         for i, unaliased in enumerate(self.unaliased_in_all_paths):
@@ -1479,7 +1492,7 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces: Dict[FunctionID, StackTraces] = {}
 
         self.warmed_up_functions: Set[FunctionID] = set()
-        torch._C._set_cudagraph_cached_tensors_enabled(True)
+        torch._C._set_cached_tensors_enabled(True)
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
