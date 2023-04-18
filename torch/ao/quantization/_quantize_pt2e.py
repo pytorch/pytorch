@@ -3,7 +3,7 @@ from torch.fx import GraphModule
 from ._pt2e.prepare import prepare
 from ._pt2e.qat_utils import _fuse_conv_bn_qat
 from ._pt2e.utils import (
-    _build_node_name_to_scope,
+    _get_node_name_to_scope,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
@@ -21,7 +21,7 @@ def prepare_pt2e(
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
 ):
-    node_name_to_scope = _build_node_name_to_scope(model)
+    node_name_to_scope = _get_node_name_to_scope(model)
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -47,7 +47,7 @@ def prepare_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
 ):
-    node_name_to_scope = _build_node_name_to_scope(model)
+    node_name_to_scope = _get_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
     # TODO: (maybe) rewrite this with subgraph_rewriter
@@ -65,7 +65,7 @@ def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
 ):
-    node_name_to_scope = _build_node_name_to_scope(model)
+    node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
     # Perform fusion after annotate to avoid quantizing ops in the new

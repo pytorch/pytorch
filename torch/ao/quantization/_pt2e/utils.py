@@ -129,7 +129,7 @@ def _rearrange_weight_observer_for_decomposed_linear(
     model.graph.lint()
     model.recompile()
 
-def _build_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
+def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
     for n in model.graph.nodes:

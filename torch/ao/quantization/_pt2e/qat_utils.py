@@ -3,14 +3,13 @@ import operator
 from typing import Any, Callable, Tuple
 
 import torch
-import torch._dynamo
 from torch.fx import GraphModule, Node
 from torch.fx.subgraph_rewriter import _replace_pattern
 import torch.nn.functional as F
 
 
-# Example inputs for both `_conv_bn_pattern` and `_fused_qat_conv_bn_pattern`
-_conv_bn_pattern_example_inputs = (
+# Example inputs for both `_conv2d_bn_pattern` and `_fused_qat_conv2d_bn_pattern`
+_conv2d_bn_pattern_example_inputs = (
     torch.randn(1, 1, 3, 3),  # x
     torch.randn(1, 1, 1, 1),  # conv_weight
     torch.randn(1),           # conv_bias
@@ -20,7 +19,7 @@ _conv_bn_pattern_example_inputs = (
     torch.randn(1),           # bn_running_var
 )
 
-def _conv_bn_pattern(
+def _conv2d_bn_pattern(
     x: torch.Tensor,
     conv_weight: torch.Tensor,
     conv_bias: torch.Tensor,
@@ -33,7 +32,7 @@ def _conv_bn_pattern(
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
     return x
 
-def _fused_qat_conv_bn_pattern(
+def _fused_qat_conv2d_bn_pattern(
     x: torch.Tensor,
     conv_weight: torch.Tensor,
     conv_bias: torch.Tensor,
@@ -70,6 +69,8 @@ def _get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
+    # Avoid circular imports
+    import torch._dynamo
     aten_pattern, _ = torch._dynamo.export(
         pattern,
         *copy.deepcopy(example_inputs),
@@ -89,22 +90,24 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     """
     m.graph.eliminate_dead_code()
     m.recompile()
-    example_inputs = _conv_bn_pattern_example_inputs
-    match_pattern = _get_aten_graph_module(_conv_bn_pattern, example_inputs)
-    replacement_pattern = _get_aten_graph_module(_fused_qat_conv_bn_pattern, example_inputs)
+    example_inputs = _conv2d_bn_pattern_example_inputs
+    match_pattern = _get_aten_graph_module(_conv2d_bn_pattern, example_inputs)
+    replacement_pattern = _get_aten_graph_module(_fused_qat_conv2d_bn_pattern, example_inputs)
+    # TODO: use the public replace_pattern API once it also returns replacement nodes
     match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern)
     m.recompile()
 
     # Copy over metadata from original subgraph
     # This ensures the stack traces and annotations are preserved in the new subgraph
+    # TODO: handle this in replace_pattern
     for mr in match_and_replacement:
         # Find replacement conv and bn nodes by climbing upwards from anchor node
         assert len(mr.replacements) == 1, "expected only one replacement node"
         replacement_conv_node = None
         replacement_bn_node = None
-        replacement_anchor = mr.replacements[0]
-        assert replacement_anchor.target == operator.getitem
-        n = replacement_anchor
+        replacement_getitem_node = mr.replacements[0]
+        assert replacement_getitem_node.target == operator.getitem
+        n = replacement_getitem_node
         while replacement_conv_node is None or replacement_bn_node is None:
             if n.target == torch.ops.aten.convolution.default:
                 replacement_conv_node = n
@@ -113,25 +116,12 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
             assert isinstance(n.args[0], Node)
             n = n.args[0]
 
-        # Copy over metadata for conv node, bn node, conv args, bn args, and bn users
+        # Copy over metadata for all three nodes in [conv - bn - getitem]
         for match_pattern_node, original_node in mr.nodes_map.items():
-            if match_pattern_node.target == torch.ops.aten.convolution.default:
-                # Matched: conv(_, weight, bias, ...)
-                (_, weight, bias, *_) = match_pattern_node.args
-                # Replaced: conv(_, mul(weight, ...), zeros_like(bias), ...)
-                (_, mul_node, zeros_like_node, *_) = replacement_conv_node.args
-                assert mul_node.target == torch.ops.aten.mul.Tensor
-                assert zeros_like_node.target == torch.ops.aten.zeros_like.default
-                mul_node.args[0].meta = mr.nodes_map[weight].meta
-                zeros_like_node.args[0].meta = mr.nodes_map[bias].meta
+            if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
-            if match_pattern_node.target == torch.ops.aten._native_batch_norm_legit.default:
-                (_, weight, bias, running_mean, running_var, *_) = match_pattern_node.args
-                replacement_bn_node.args[1].meta = mr.nodes_map[weight].meta
-                replacement_bn_node.args[2].meta = mr.nodes_map[bias].meta
-                replacement_bn_node.args[3].meta = mr.nodes_map[running_mean].meta
-                replacement_bn_node.args[4].meta = mr.nodes_map[running_var].meta
+            if original_node.target == torch.ops.aten._native_batch_norm_legit.default:
                 replacement_bn_node.meta = original_node.meta
-            if match_pattern_node.target == operator.getitem:
-                replacement_anchor.meta = original_node.meta
+            if original_node.target == operator.getitem:
+                replacement_getitem_node.meta = original_node.meta
     return m

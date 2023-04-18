@@ -32,6 +32,7 @@ import weakref
 import torch
 import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
+import torch.ao.quantization._pt2e.qat_utils
 
 from . import comptime, config, external_utils
 
@@ -122,11 +123,10 @@ FILENAME_ALLOWLIST |= {
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
-# Skip quantization patterns
-# TODO: How to make this less brittle without introducing circular dependencies?
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
-}
+# Do trace through match and replace patterns used in PT2E QAT
+# Note: These patterns are comprised of torch ops and for internal use only.
+# They are exported to aten graphs before being passed to the FX subgraph rewriter.
+FILENAME_ALLOWLIST |= {torch.ao.quantization._pt2e.qat_utils.__file__}
 
 
 SKIP_DIRS_RE = None
@@ -151,10 +151,7 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    try:
-        module_spec = importlib.util.find_spec(import_name)
-    except Exception:
-        return
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -197,7 +194,6 @@ for _name in (
     "tensorflow",
     "tensorrt",
     "torch2trt",
-    "torchrec.distributed",
     "tqdm",
     "tree",
     "tvm",

@@ -303,7 +303,7 @@ class QNNPackQuantizer(Quantizer):
 
         return model
 
-    def _annotate_conv2d_bn(self, node: Node, operator_spec: Optional[OperatorSpec]) -> None:
+    def _annotate_conv2d_bn(self, node: Node, quantization_spec: Optional[QuantizationSpec]) -> None:
         """
         Match the following pattern:
 
@@ -332,9 +332,9 @@ class QNNPackQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(operator_spec),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(operator_spec),
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_spec),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_spec),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_spec),
             "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
@@ -349,7 +349,7 @@ class QNNPackQuantizer(Quantizer):
         }
         getitem_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(operator_spec),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_spec),
             "_annotated": True,
         }
 
