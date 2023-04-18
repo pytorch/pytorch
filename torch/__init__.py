@@ -1484,6 +1484,10 @@ class _TorchCompileInductorWrapper:
         if dynamic:
             # cudagraphs conflicts with dynamic shapes
             self.config["triton.cudagraphs"] = False
+            # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
+            # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
+            # dynamic=True here to mean "fully dynamic from the start".
+            torch._dynamo.config.assume_static_by_default = False
             assert "triton.cudagraphs" not in (
                 options or ()
             ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
