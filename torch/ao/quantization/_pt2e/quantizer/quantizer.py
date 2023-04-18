@@ -28,7 +28,7 @@ _TORCH_DTYPE_TO_QDTYPE = {
 }
 
 
-@dataclass(eq=True)
+@dataclass(eq=True, frozen=True)
 class QuantizationSpec:
     dtype: torch.dtype
     is_dynamic: bool = False
@@ -41,20 +41,6 @@ class QuantizationSpec:
         # check dtype is one of the supported types
         if self.dtype not in SUPPORTED_DTYPES:
             raise TypeError(f"Unsupported dtype {self.dtype}.")
-
-        if self.quant_max is None:
-            if self.dtype in [torch.float16, torch.float32, torch.float64]:
-                # Right now only tracking quant_min/max for int type
-                self.quant_max = None
-            else:
-                self.quant_max = torch.iinfo(self.dtype).max
-
-        if self.quant_min is None:
-            if self.dtype in [torch.float16, torch.float32, torch.float64]:
-                # Right now only tracking quant_min/max for int type
-                self.quant_min = None
-            else:
-                self.quant_min = torch.iinfo(self.dtype).min
 
         # quant_min must be less than quant_max
         if (
