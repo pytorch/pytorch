@@ -178,7 +178,7 @@ __global__ void indexing_backward_kernel_stride_1(
   }
 }
 
-template <typename scalar_t, int UNROLL_FACTOR>
+template <typename scalar_t>
 __global__ void indexing_backward_kernel_small_stride(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
@@ -523,7 +523,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         if (sliceSize <= warp_size) {
           AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
           expandedValue.scalar_type(), "indexing_backward", [&] {
-            indexing_backward_kernel_small_stride<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+            indexing_backward_kernel_small_stride<scalar_t><<<grid, block, 0, stream>>>(
               sorted_indices.const_data_ptr<int64_t>(),
               orig_indices.const_data_ptr<int64_t>(),
               expandedValue.const_data_ptr<scalar_t>(),
