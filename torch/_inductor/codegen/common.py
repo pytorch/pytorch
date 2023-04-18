@@ -1,4 +1,6 @@
 import contextlib
+import dataclasses
+import functools
 import itertools
 import logging
 import re
@@ -25,6 +27,12 @@ from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
 
+
+def data_type_logger(msg):
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("Data type propagation: %s", msg)
+
+
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
@@ -34,6 +42,110 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 
     # added contiguous index prevents reordering
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
+
+
+def _data_type_propagation(sub_graph: torch.fx.Graph):
+    def propagate_node(node: torch.fx.Node):
+        _node: torch.fx.Node = node
+        ops_to_bool = [
+            "is_inf",
+            "is_nan",
+            "bitwise_xor",
+            "logical_not",
+            "signbit",
+            "le",
+            "lt",
+            "ge",
+            "gt",
+            "eq",
+            "ne",
+        ]
+        ops_with_dtype_arg = ["constant", "to_dtype", "rand", "randn"]
+        reduction_to_dtype = {
+            "any": torch.bool,
+            "argmin": torch.int64,
+            "argmax": torch.int64,
+        }
+        ops_without_dtype = ["ops", "get_index"]
+        if _node.target in ops_without_dtype:
+            return False
+        if OptimizationContext.key in _node.meta:
+            opt_ctx = _node.meta[OptimizationContext.key]
+        else:
+            opt_ctx = OptimizationContext()
+        if opt_ctx.dtype is not None:
+            return False
+        if _node.target in ops_to_bool:
+            opt_ctx.dtype = torch.bool
+        elif _node.target in ops_with_dtype_arg:
+            opt_ctx.dtype = _node.args[-1]
+        elif _node.target == "reduction":
+            reduction_type = _node.args[4]
+            if reduction_type in reduction_to_dtype:
+                opt_ctx.dtype = reduction_to_dtype[reduction_type]
+        elif _node.target == "load":
+            opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
+        if opt_ctx.dtype is not None:
+            data_type_logger(
+                f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}"
+            )
+            _node.meta[OptimizationContext.key] = opt_ctx
+            return True
+
+        # node.target not belong to any ops which can directly get the dtype
+        # need propogate dtype with it's input node
+        dtype = None
+        inputs = node.all_input_nodes
+        input_nodes = [
+            n
+            for n in inputs
+            if isinstance(n, torch.fx.node.Node) and n.target not in ops_without_dtype
+        ]
+        if len(input_nodes) == 0:
+            return False
+        all_input_nodes_propogated = all(
+            OptimizationContext.key in n.meta
+            and n.meta[OptimizationContext.key].dtype is not None
+            for n in input_nodes
+        )
+        if not all_input_nodes_propogated:
+            return False
+        # all input nodes have propogated dtype, we will promot to dtype with highest precision
+        dtype = functools.reduce(
+            torch.promote_types,
+            [n.meta[OptimizationContext.key].dtype for n in input_nodes],
+        )
+        opt_ctx.dtype = dtype
+        msg = f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}, "
+        input_msg = "inputs dtypes: "
+        for n in input_nodes:
+            input_msg += (
+                f"input {n.name}.dtype = {n.meta[OptimizationContext.key].dtype}"
+            )
+        data_type_logger(msg + input_msg)
+        _node.meta[OptimizationContext.key] = opt_ctx
+        return True
+
+    new_node_propogated = False
+    for node in sub_graph.nodes:
+        new_node_propogated = propagate_node(node) or new_node_propogated
+
+    if new_node_propogated:
+        _data_type_propagation(sub_graph)
+
+
+def data_type_propagation(node):
+    from ..ir import LoopBody
+    from ..scheduler import SchedulerNode
+
+    assert isinstance(node, SchedulerNode)
+    _node: SchedulerNode = node
+    if isinstance(_node._body, LoopBody):
+        body: LoopBody = node._body
+        sub_blocks = [body.root_block] + list(body.subblocks.values())
+        for sub_block in sub_blocks:
+            _sub_graph: torch.fx.Graph = sub_block.graph
+            _data_type_propagation(_sub_graph)
 
 
 class ExprPrinter(Printer):
@@ -670,3 +782,22 @@ class Kernel(CodeGen):
 
     def create_cse_var(self, *args, **kwargs):
         return CSEVariable(*args, **kwargs)
+
+
+@dataclasses.dataclass
+class OptimizationContext:
+    key: typing.ClassVar[str] = "opt_ctx"
+
+    # Load value as mask
+    is_load_as_mask: bool = False
+    # Load bfloat16 value as float32
+    is_load_bf16_as_fp32: bool = False
+    # Store float32 value as bfloat16
+    is_store_fp32_as_bf16: bool = False
+    # do not  need type cast for
+    # for mem copy only node bf16 load -> bf16 store,
+    is_bf16_mem_copy: bool = False
+
+    dtype: torch.dtype = None
+    ops_name: str = ""
+    is_most_inner_loop_irrevelant: bool = False

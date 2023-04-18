@@ -541,6 +541,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
         from torch._functorch.aot_autograd import get_aot_graph_name
+
         graph_name = get_aot_graph_name()
 
         # TODO: Why do we have to save the orig_graph?
@@ -582,7 +583,9 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                 if inner_compiled_fn is None:
                     inner_compiled_fn = compiler_fn(gm, example_inputs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
-                    log.warning("Accuracy failed for the AOT Autograd graph %s", graph_name)
+                    log.warning(
+                        "Accuracy failed for the AOT Autograd graph %s", graph_name
+                    )
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
                         copy_tensor_attrs,
@@ -651,7 +654,8 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     # Set the requires_grad field explicitly because clone_inputs only sets
     # requires_grad for leaf tensors.
     for narg, arg in zip(new_args, args):
-        narg.requires_grad_(arg.requires_grad)
+        if isinstance(arg, torch.Tensor):
+            narg.requires_grad_(arg.requires_grad)
     args = new_args
 
     if hasattr(gm, "zero_grad"):
@@ -939,9 +943,6 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
-# Please see NOTE: [Real Tensors in Accuracy Evaluation]
-MINIFIER_SPAWNED = False
-
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
@@ -1015,7 +1016,6 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
-torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = lookup_backend("{minifier_backend}")
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
