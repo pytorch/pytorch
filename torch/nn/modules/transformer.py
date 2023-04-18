@@ -829,10 +829,14 @@ def _detect_is_causal_mask(mask: Optional[Tensor], is_causal: Optional[bool]) ->
     make_causal = (is_causal is True)
 
     if is_causal is None and mask is not None:
-        sz = mask.size(0)
+        # Handles mask being 3-D or 4-D; since mask should be square,
+        # this returns the correct sequence length in any case.
+        sz = mask.size(-2)
         causal_comparison = Transformer.generate_square_subsequent_mask(
             sz, device=mask.device, dtype=mask.dtype)
 
-        make_causal = torch.equal(mask, causal_comparison)
+        # Do not use `torch.equal` so we handle batched masks by
+        # broadcasting the comparison.
+        make_causal = (mask == causal_comparison).all()
 
     return make_causal
