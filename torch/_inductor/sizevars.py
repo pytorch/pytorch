@@ -1,7 +1,6 @@
 import functools
 import itertools
 import logging
-import sys
 from typing import Callable, Dict, List, Union
 
 import sympy
@@ -103,7 +102,7 @@ class SizeVarAllocator:
                     if m and v not in m[rest].free_symbols:
                         gcd = sympy.gcd(m[rest], divisor)
                         if gcd == divisor:
-                            if self.should_optimize_leq(var_ranges[v], divisor):
+                            if self.statically_known_leq(var_ranges[v], divisor):
                                 base = m[rest]
             return base
 
@@ -120,14 +119,14 @@ class SizeVarAllocator:
                 # actual iteration range is to size-1
                 iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
                 base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.should_optimize_lt(base_lowest, 0):
+                if self.statically_known_lt(base_lowest, 0):
                     # can't replace with indexing div if base can be negative
                     return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
                 base_s = base
-            if self.should_optimize_lt(base_s, modulus * divisor):
+            if self.statically_known_lt(base_s, modulus * divisor):
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -225,9 +224,9 @@ class SizeVarAllocator:
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
-    # Note - [On Should Optimize]
+    # Note - [On Statically Known]
     #
-    # The should_optimize_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
+    # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
     # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
     # true, we add a guard and return True, otherwise, False.
     #
@@ -249,62 +248,57 @@ class SizeVarAllocator:
     #   else:
     #       return False # No guard, no optim
 
-    # See Note - [On Should Optimize]
-    def should_optimize_equals(self, left: Expr, right: Expr) -> bool:
+    # See Note - [On Statically Known]
+    def statically_known_equals(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
         if left == right:
             return True
-        if is_expr_static(left) and is_expr_static(right):
-            return int(left) - int(right) == 0
-        return False
+        expr = sympy.Eq(left, right)
+        simplified = self.shape_env._maybe_evaluate_static(expr)
+        return is_expr_static(simplified)
 
-    # See Note - [On Should Optimize]
-    def should_optimize_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
+    # See Note - [On Statically Known]
+    def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
         if len(left) != len(right):
             return False
-        if all(self.should_optimize_equals(l, r) for l, r in zip(left, right)):
+        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
             return True
         return False
 
-    # See Note - [On Should Optimize]
-    def should_optimize_leq(self, left: Expr, right: Expr) -> bool:
+    # See Note - [On Statically Known]
+    def statically_known_leq(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
         """
-        if is_expr_static(left) and is_expr_static(right):
-            return int(left) <= int(right)
-        if is_expr_static(right) and right == sys.maxsize:
-            return True
-        return False
+        expr = left <= right
+        simplified = self.shape_env._maybe_evaluate_static(expr)
+        return is_expr_static(simplified)
 
-    # See Note - [On Should Optimize]
-    def should_optimize_lt(self, left: Expr, right: Expr) -> bool:
+    # See Note - [On Statically Known]
+    def statically_known_lt(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than right.
         """
-        if is_expr_static(left) and is_expr_static(right):
-            return int(left) < int(right)
-        if is_expr_static(right) and right == sys.maxsize:
-            return True
-        return False
+        expr = left < right
+        simplified = self.shape_env._maybe_evaluate_static(expr)
+        return is_expr_static(simplified)
 
-    # See Note - [On Should Optimize]
-    def should_optimize_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+    # See Note - [On Statically Known]
+    def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
         if sympy.gcd(numerator, denominator) == denominator:
             # can prove it symbolically
             return True
-        if is_expr_static(numerator) and is_expr_static(denominator):
-            if int(numerator) % int(denominator) == 0:
-                return True
-        return False
+        expr = sympy.Eq(numerator % denominator, 0)
+        simplified = self.shape_env._maybe_evaluate_static(expr)
+        return is_expr_static(simplified)
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
