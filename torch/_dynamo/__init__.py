@@ -205,3 +205,21 @@ def mark_static(t, index=None):
         assert isinstance(index, (list, tuple))
         for i in index:
             mark_static(t, i)
+
+
+def allow_in_graph_einops():
+    try:
+        from einops.einops import einsum, rearrange, reduce, repeat
+        from einops.packing import pack, unpack
+
+        allow_in_graph(rearrange)
+        allow_in_graph(reduce)
+        allow_in_graph(repeat)
+        allow_in_graph(einsum)
+        allow_in_graph(pack)
+        allow_in_graph(unpack)
+    except ImportError:
+        pass
+
+
+allow_in_graph_einops()
