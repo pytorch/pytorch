@@ -6,7 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -461,10 +461,14 @@ class SymNodeVariable(VariableTracker):
     def __init__(self, proxy, sym_num, **kwargs):
         super().__init__(**kwargs)
         self.proxy = proxy
+        # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
 
     def python_type(self):
-        return type(self.sym_num)
+        if isinstance(self.sym_num, SymTypes):
+            return self.sym_num.node.pytype
+        else:
+            return type(self.sym_num)
 
     def unpack_var_sequence(self, tx):
         super().unpack_var_sequence(tx)
