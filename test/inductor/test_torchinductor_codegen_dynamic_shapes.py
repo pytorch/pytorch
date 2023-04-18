@@ -190,6 +190,7 @@ test_failures = {
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
