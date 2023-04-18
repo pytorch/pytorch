@@ -932,7 +932,7 @@ def forward(self, x):
 
         def pattern(x, kernel_size, stride):
             # default padding is [0, 0]
-            return torch.ops.aten.max_pool2d_with_indices.default(x, kernel_size, stride, [0, 0])
+            return torch.ops.aten.max_pool2d_with_indices.default(x, kernel_size, stride, padding=[0, 0])
 
         traced = symbolic_trace(M())
         matches = subgraph_rewriter.replace_pattern(traced, pattern, pattern)

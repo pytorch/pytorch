@@ -231,7 +231,7 @@ class SubgraphMatcher:
         # Flatten all args/kwargs into 1 list of args
         pn_args, gn_args = None, None
         if (
-            (len(pn.args) != len(gn.args) or len(pn.kwargs) != len(gn.kwargs)) and
+            (len(pn.args) != len(gn.args) or list(pn.kwargs.keys()) != list(gn.kwargs.keys())) and
             pn.op == "call_function" and
             isinstance(pn.target, torch._ops.OpOverload)
         ):
@@ -251,7 +251,7 @@ class SubgraphMatcher:
             pn_args = get_all_arguments(pn.args, pn.kwargs)
             gn_args = get_all_arguments(gn.args, gn.kwargs)
 
-        elif len(pn.args) == len(gn.args) and len(pn.kwargs) == len(gn.kwargs):
+        elif len(pn.args) == len(gn.args) and list(pn.kwargs.keys()) == list(gn.kwargs.keys()):
             pn_args = list(pn.args)
             gn_args = list(gn.args)
             pn_args.extend(list(pn.kwargs.values()))
