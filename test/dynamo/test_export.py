@@ -2422,6 +2422,55 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    @config.patch(dynamic_shapes=True, functionalize=True)
+    def test_functionalize(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 2))
+
+            def forward(self, x):
+                x.add_(2)
+                return x.sum() + self.buffer1.sum()
+
+        example_inputs = (torch.ones(1, 2, 3),)
+        gm, _ = torch._dynamo.export(
+            Foo(), *example_inputs, aten_graph=True, tracing_mode="symbolic_mode"
+        )
+
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten.add_.Tensor:
+                count += 1
+        self.assertEqual(count, 0)
+        test_inp = (torch.ones(1, 2, 3),)
+        test_inp_v2 = (torch.ones(1, 2, 3),)
+        self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
+
+    @config.patch(dynamic_shapes=True, functionalize=False)
+    def test_not_functionalize(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 2))
+
+            def forward(self, x):
+                x.add_(2)
+                return x.sum() + self.buffer1.sum()
+
+        example_inputs = (torch.ones(1, 2, 3),)
+        gm, _ = torch._dynamo.export(
+            Foo(), *example_inputs, aten_graph=True, tracing_mode="symbolic_mode"
+        )
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten.add_.Tensor:
+                count += 1
+        self.assertEqual(count, 1)
+        test_inp = (torch.ones(1, 2, 3),)
+        test_inp_v2 = (torch.ones(1, 2, 3),)
+        self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
+
     @config.patch(dynamic_shapes=True)
     def test_round_dynamic_shapes(self):
         def f(x):

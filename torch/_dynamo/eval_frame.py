@@ -166,6 +166,31 @@ def enable_dynamic(enable: bool = True, export: bool = False):
         yield
 
 
+@contextlib.contextmanager
+def enable_functionalization(enable: bool, args):
+    if not enable:
+        yield args
+        return
+
+    memo: Dict[torch.Tensor, torch.Tensor] = {}
+
+    def to_fun(t):
+        if isinstance(t, torch.Tensor):
+            if t in memo:
+                return memo[t]
+            r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+            memo[t] = r
+            return r
+        else:
+            return t
+
+    try:
+        torch._enable_functionalization(reapply_views=True)
+        yield pytree.tree_map(to_fun, args)
+    finally:
+        torch._disable_functionalization()
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -833,10 +858,21 @@ def export(
     example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
+
+        def from_fun(t):
+            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.preserve_node_meta():
-                return torch.fx.Interpreter(graph).run(*args)
+            with enable_functionalization(
+                config.functionalize, args
+            ) as functional_args, torch.fx.traceback.preserve_node_meta():
+                return pytree.tree_map(
+                    from_fun, torch.fx.Interpreter(graph).run(*functional_args)
+                )
 
         with enable_python_dispatcher(), fake_mode:
             graph = make_fx(
@@ -941,10 +977,6 @@ def export(
     )
 
     new_graph.recompile()
-
-    # TODO remove this once Executorch uses proper functionalization
-    new_graph._example_fake_inputs = example_fake_inputs
-    new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)
 
