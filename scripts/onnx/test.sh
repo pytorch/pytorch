@@ -80,6 +80,9 @@ if [[ "${SHARD_NUMBER}" == "2" ]]; then
 
   pytest "${args[@]}" "${args_parallel[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
+
+  # xdoctests on onnx
+  xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/

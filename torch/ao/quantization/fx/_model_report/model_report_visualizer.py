@@ -58,7 +58,7 @@ class ModelReportVisualizer:
     General Use Flow Expected
     1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects
     2.) Prepare your model with prepare_fx
-    3.) Call model_report.prepare_detailed_calibration on your model to add relavent observers
+    3.) Call model_report.prepare_detailed_calibration on your model to add relevant observers
     4.) Callibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     6.) Use output of model_report.generate_report to initialize ModelReportVisualizer instance
@@ -132,7 +132,7 @@ class ModelReportVisualizer:
 
     def _get_filtered_data(self, feature_filter: str, module_fqn_filter: str) -> OrderedDict[str, Any]:
         r"""
-        Filters the data and returns it in the same ordered dictionary format so the relavent views can be displayed.
+        Filters the data and returns it in the same ordered dictionary format so the relevant views can be displayed.
 
         Args:
             feature_filter (str): The feature filter, if we want to filter the set of data to only include
@@ -430,11 +430,11 @@ class ModelReportVisualizer:
         # ex. table index, module name, channel index, etc.
         # we want to look at header columns for features, that come after those headers
         if len(tensor_headers) > self.NUM_NON_FEATURE_TENSOR_HEADERS:
-            # if we have at least one tensor level feature to be addded we add tensor table
+            # if we have at least one tensor level feature to be added we add tensor table
             table_str += "Tensor Level Information \n"
             table_str += tabulate(tensor_table, headers=tensor_headers)
         if len(channel_headers) > self.NUM_NON_FEATURE_CHANNEL_HEADERS:
-            # if we have at least one channel level feature to be addded we add tensor table
+            # if we have at least one channel level feature to be added we add tensor table
             table_str += "\n\n Channel Level Information \n"
             table_str += tabulate(channel_table, headers=channel_headers)
 
@@ -454,7 +454,7 @@ class ModelReportVisualizer:
             module_fqn_filter (str): Only includes modules that contains this string
 
         Returns a tuple of three elements
-            The first is a list containing relavent x-axis data
+            The first is a list containing relevant x-axis data
             The second is a list containing the corresponding y-axis data
             If the data is per channel
         """
@@ -504,7 +504,7 @@ class ModelReportVisualizer:
             for table_row_num, row in enumerate(table):
                 # get x_value to append
                 x_val_to_append = table_row_num
-                current_channel = row[self.CHANNEL_NUM_INDEX]  # intially chose current channel
+                current_channel = row[self.CHANNEL_NUM_INDEX]  # initially chose current channel
                 new_module_index: int = table_row_num // num_channels
                 x_val_to_append = new_module_index
 
@@ -534,7 +534,7 @@ class ModelReportVisualizer:
 
         For per channel features, it averages the value across the channels and plots a point
         per module. The reason for this is that for models with hundreds of channels, it can
-        be hard to diffrentiate one channel line from another, and so the point of generating
+        be hard to differentiate one channel line from another, and so the point of generating
         a single average point per module is to give a sense of general trends that encourage
         further deep dives.
 

@@ -129,13 +129,15 @@ def set_logs(
     graph=False,
     graph_code=False,
     guards=False,
+    recompiles=False,
     output_code=False,
     schedule=False,
+    modules=None,
 ):
     """
     Enable setting the log level of individual components through kwargs.
     Args are set using the following format:
-        set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>)
+        set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>, ...,modules={"module.qualified.name":<log_level>})
     """
     # ignore if env var is set
     if LOG_ENV_VAR in os.environ:
@@ -146,8 +148,11 @@ def set_logs(
 
     log_state.clear()
 
+    if modules is None:
+        modules = {}
+
     def _set_logs(**kwargs):
-        for alias, val in kwargs.items():
+        for alias, val in itertools.chain(kwargs.items(), modules.items()):
             if log_registry.is_artifact(alias):
                 if val:
                     log_state.enable_artifact(alias)
@@ -178,6 +183,7 @@ def set_logs(
         graph=graph,
         graph_code=graph_code,
         guards=guards,
+        recompiles=recompiles,
         output_code=output_code,
         schedule=schedule,
     )
@@ -228,14 +234,10 @@ VERBOSITY_REGEX = (
 
 
 def configure_artifact_log(log):
-    # if parent log is set to debug, but this artifact is off by default
-    # set propagate to False so that this artifact is not propagated
+    # If the artifact is off by default, then it should only be logged when explicitly
+    # enabled; set propagate to False so that this artifact is not propagated
     # to its ancestor logger
-    # this artifact is only logged when explicitly enabled (occurs below)
-    if (
-        log_registry.is_off_by_default(log.artifact_name)
-        and log.getEffectiveLevel() == logging.DEBUG
-    ):
+    if log_registry.is_off_by_default(log.artifact_name):
         log.propagate = False
 
     # enable artifact logging when explicitly enabled
