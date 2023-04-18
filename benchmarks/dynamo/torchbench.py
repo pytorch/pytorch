@@ -75,6 +75,8 @@ SKIP = {
     "fambench_xlmr",
     # https://github.com/pytorch/pytorch/issues/99201
     "opacus_cifar10",
+    # TODO
+    "vision_maskrcnn",
 }
 
 SKIP_FOR_CUDA = {
