@@ -127,7 +127,10 @@ def _query_changed_test_files() -> List[str]:
 
 
 def get_reordered_tests(tests: List[str]) -> List[str]:
-    """Prioritize running test files that were edited in the git history."""
+    """
+    Get the reordered test filename list based on github PR history or git changed file.
+    We prioritize running test files that were changed.
+    """
     prioritized_tests: List[str] = []
     if len(prioritized_tests) == 0:
         try:

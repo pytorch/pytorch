@@ -254,7 +254,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
-# Test files that should always be run serially with other test files, 
+# Test files that should always be run serially with other test files,
 # but it's okay if the tests inside them are run in parallel with each other.
 CI_SERIAL_LIST = [
     "test_nn",
@@ -825,7 +825,6 @@ def get_pytest_args(options):
     pytest_args.extend(rerun_options)
     return pytest_args
 
-# What are these for? We need to run them serially for some reason
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
@@ -1321,14 +1320,17 @@ def main():
     )
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    def success_callback(err_message):
+    def handle_error_messages(err_message):
         if err_message is None:
-            return True
+            return False
         failure_messages.append(err_message)
         print_to_stderr(err_message)
-        if not options.continue_through_error:
+        return True
+
+    def parallel_test_completion_callback(err_message):
+        test_failed = handle_error_messages(err_message)
+        if test_failed and not options.continue_through_error:
             pool.terminate()
-        return False
 
     try:
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
@@ -1339,7 +1341,7 @@ def main():
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
-                callback=success_callback,
+                callback=parallel_test_completion_callback,
             )
         pool.close()
         pool.join()
@@ -1359,12 +1361,9 @@ def main():
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
-            if err_message is None:
-                continue
-            failure_messages.append(err_message)
-            if not options_clone.continue_through_error:
+            test_failed = handle_error_messages(err_message)
+            if test_failed and not options.continue_through_error:
                 raise RuntimeError(err_message)
-            print_to_stderr(err_message)
     finally:
         pool.terminate()
         pool.join()
