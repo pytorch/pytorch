@@ -268,7 +268,7 @@ def _foreach_addcop_scalar_decomp(op, self, tensor1, tensor2, scalar=1):
 
 
 def _fused_adam_decomp(
-    self,
+    params,
     grads,
     exp_avgs,
     exp_avg_sqs,
@@ -285,9 +285,9 @@ def _fused_adam_decomp(
     grad_scale=None,
     found_inf=None,
 ):
-    orig_tuple = (self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs)
+    orig_tuple = (params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs)
     updated_tuple = aten._fused_adam.default(
-        self,
+        params,
         grads,
         exp_avgs,
         exp_avg_sqs,

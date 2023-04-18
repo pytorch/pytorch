@@ -1381,7 +1381,7 @@ def meta__foreach_pow_scalar_and_tensor(self, exponent):
 
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
-    self,
+    params,
     grads,
     exp_avgs,
     exp_avg_sqs,
@@ -1398,11 +1398,48 @@ def meta__fused_adam_(
     grad_scale=None,
     found_inf=None,
 ):
-    for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
+    for l in [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         check(
-            isinstance(self, List),
-            lambda: f"exponent must be a tensor list but got {type(self)}",
+            isinstance(l, List),
+            lambda: f"exponent must be a tensor list but got {type(l)}",
         )
+
+
+@register_meta([aten._fused_adam.default])
+def meta__fused_adam(
+    params,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    for l in [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
+        check(
+            isinstance(l, List),
+            lambda: f"exponent must be a tensor list but got {type(l)}",
+        )
+
+    def empty_like_list(tensor_list):
+        return [torch.empty_like(t) for t in tensor_list]
+
+    return (
+        empty_like_list(params),
+        empty_like_list(grads),
+        empty_like_list(exp_avgs),
+        empty_like_list(exp_avg_sqs),
+        empty_like_list(state_steps),
+    )
 
 
 @register_meta([aten._int_mm])

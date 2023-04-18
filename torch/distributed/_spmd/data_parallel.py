@@ -1,6 +1,5 @@
 import operator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from enum import Enum
 
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -15,8 +14,12 @@ import torch.utils._pytree as pytree
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import PlacementStrategy, StrategyList
-from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
+from torch.distributed._tensor.op_schema import (
+    OpStrategy,
+    PlacementStrategy,
+    StrategyType,
+)
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -71,15 +74,11 @@ class NodeType(Enum):
     NON_TENSOR = 4  # NON_TENSOR is to tag non tensor node (i.e. graph output)
 
 
-@dataclass
-class DataParallelStrategy(StrategyList):
+class DataParallelStrategy(OpStrategy):
     """
-    DataParallelStrategy is a special case of StrategyList that only records
+    DataParallelStrategy is a special case of OpStrategy that only records
     the "data parallel style" placement strategy for each fx Node.
     """
-
-    node_type: NodeType
-    reduction_over_batch: bool
 
     def __init__(
         self,
@@ -255,7 +254,7 @@ def build_data_parallel_strategies(
     num_states: int,
     mesh: DeviceMesh,
     batch_dim: int = 0,
-) -> Dict[fx.Node, DataParallelStrategy]:
+) -> Dict[fx.Node, StrategyType]:
     """
     This function loop through the train step graph and build the
     data parallel strategy for each fx Node
@@ -632,10 +631,8 @@ def partitioner(graph: GraphModule) -> GraphModule:
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
                 local_val = _to_local_shard(node.meta["val"], out_spec)
-                # local_tensor_meta = _extract_tensor_metadata(local_val)
-                # update metadata
+                # update node value
                 node.meta["val"] = local_val
-                # node.meta["tensor_meta"] = local_tensor_meta
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
             output_val = node.meta["val"]
@@ -757,11 +754,10 @@ def partition_data_parallel(
     #    DTensors base on the parallel style
     accessor = NamedMemberAccessor(model)
     for param_key, param in params_buffers.items():
-        if parallel_style == DataParallelStyle.REPLICATE:
-            placement = Replicate()
-        elif parallel_style == DataParallelStyle.FULLY_SHARD:
+        placement: Placement = Replicate()
+        if parallel_style == DataParallelStyle.FULLY_SHARD:
             placement = Shard(0)
-        else:
+        elif parallel_style != DataParallelStyle.REPLICATE:
             raise RuntimeError(f"parallel style {parallel_style} not supported yet")
 
         dtensor_param = distribute_tensor(param, mesh, [placement])
@@ -786,7 +782,7 @@ def partition_data_parallel(
                 else:
                     param_dtensor_states[state_key] = state_val
 
-            del optimizer.state[param]
+            optimizer.state.pop(param)
             optimizer.state[dtensor_param] = param_dtensor_states
 
     return partitioned_graph

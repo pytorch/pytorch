@@ -54,17 +54,49 @@ class PlacementStrategy(object):
         return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
 
 
-@dataclass
-class StrategyList(object):
+class StrategyType(object):
     """
-    List of placement strategies associated with an op
+    Base class type for op strategy, We have two StrategyType:
+        OpStrategy and TupleStrategy
     """
 
-    strategies: List[PlacementStrategy]
+    pass
+
+
+class OpStrategy(StrategyType):
+    """
+    OpStrategy that consists of a list of placement strategies associated with the op
+    """
+
+    def __init__(self, strategies: List[PlacementStrategy]) -> None:
+        super().__init__()
+        self.strategies = strategies
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        return f"StrategyList: [{strategy_list_str}]"
+        return f"OpStrategy: [{strategy_list_str}]"
+
+
+class TupleStrategy(StrategyType):
+    """
+    TupleStrategy represents the output strategy of this op is a tuple
+    of strategy lists, this would be used if the output strategies might
+    be different from each other
+    """
+
+    def __init__(self, childs: Tuple[StrategyType]) -> None:
+        super().__init__()
+        self.childs = childs
+
+    def __str__(self) -> str:
+        tuple_strategies_str = "TupleStrategy: \n"
+        child_strategies_str = "\n".join(
+            [
+                f" tuple idx: {idx}, strategy: {str(strat)}"
+                for idx, strat in enumerate(self.childs)
+            ]
+        )
+        return f"{tuple_strategies_str} {child_strategies_str}"
 
 
 @dataclass
