@@ -671,7 +671,8 @@ def export(
         tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
         If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
 
-        functionalize (bool): If True, the resulting graph module will be functional.
+        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
+        set aten_graph=True to see the effect.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
