@@ -177,13 +177,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+            )
         else:
             if input is not None:
                 input = torch.randn_like(input)
             ori_time = do_bench(
                 lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+            )
 
         mat1_pad = torch.randn_like(mat1)
         mat2_pad = torch.randn_like(mat2)
@@ -204,7 +204,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
                 lambda: pad_mm(
@@ -217,7 +217,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
         else:
             pad_time = do_bench(
                 lambda: pad_bmm(
@@ -230,7 +230,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
