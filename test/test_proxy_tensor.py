@@ -1389,35 +1389,11 @@ symbolic_tensor_failures = {
     xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
-    xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
-    xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
     xfail('combinations', ''),
-    xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
-    xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('fft.fft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.fft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.fftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.fftshift', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.hfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.hfft', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.hfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ifftshift', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ihfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ihfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.ihfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.irfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.irfft', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.irfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.rfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.rfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1431,7 +1407,6 @@ symbolic_tensor_failures = {
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
-    xfail('linalg.cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigvalsh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.householder_product', ''),  # aten.linalg_householder_product.default - couldn't find symbolic meta funct...
