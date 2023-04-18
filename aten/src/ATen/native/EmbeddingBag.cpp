@@ -177,18 +177,19 @@ void fbgemm_spmdm_report_error_(
       index_t idx = indices[i];
       TORCH_CHECK(
           0 <= idx && idx < N,
-          "Index ",
-          i,
-          " is out of bounds: ",
+          "Index value ",
           idx,
-          ", range 0 to ",
-          N);
+          " of input is out of bounds for range 0 to ",
+          N,
+          " (index ",
+          i,
+          " of offsets).");
     }
   }
   TORCH_CHECK(
       offsets[output_size] == index_size,
-      "Yout input seems to be incorrect: the last offset value should be "
-      "the size of the indices tensor, but it appears not.");
+      "Your input appears to be incorrect: the last offset value should be "
+       "the size of the indices tensor, but it seems not to be the case.");
 }
 } // namespace
 
