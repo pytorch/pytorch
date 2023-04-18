@@ -1,9 +1,11 @@
 from ._ops import OpOverload
-from typing import Set
+from typing import Callable, Dict, Set
 import traceback
 import torch
+import dataclasses
+import inspect
 
-__all__ = ['Library', 'impl', 'define']
+__all__ = ['Library', 'impl', 'define', 'impl_fake']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -131,6 +133,44 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
+    def impl_fake(self, op_name, fn, *, _stacklevel=2):
+        r'''Registers a FakeTensor implementation for an operator defined in the library.
+
+        The FakeTensor implementation is a shape propagation rule that gets invoked
+        for FakeTensors (Tensors that do not have storage).
+
+        All Tensor inputs to the FakeTensor implementation are FakeTensors
+        and all Tensor returns must be FakeTensors.
+
+        If the signature of your operator is (*args, **kwargs), then the
+        signature of the FakeTensor implementation must be (ctx, *args, **kwargs).
+        ctx is a context object that has helper functions for writing
+        FakeTensor implementations.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            fn: the FakeTensor implementation
+
+        Example::
+            >>> my_lib = Library("aten", "IMPL")
+            >>>
+            >>> def div_fake(ctx, self, other):
+            >>>     return self * other.reciprocal()
+            >>>
+            >>> my_lib.impl_fake("div.Tensor", div_fake)
+
+        '''
+        qualname = f'{self.ns}::{op_name}'
+        frame = inspect.stack()[_stacklevel]
+        location = f'{frame.filename}:{frame.lineno}'
+        if qualname in _fake_tensor_registry:
+            location = _fake_tensor_registry[qualname].location
+            raise RuntimeError(
+                f"Attempting to register a FakeTensor rule for operator {qualname} "
+                f"that already has a FakeTensor rule registered from Python at "
+                f"{location}. This is not supported.")
+        _fake_tensor_registry[qualname] = _FuncAndLocation(fn, location)
+
     def __del__(self):
         # _op_impls might not have been initialized if an error was thrown in __init__
         _op_impls_ = getattr(self, '_op_impls', None)
@@ -140,12 +180,78 @@ class Library:
             del self.m
 
 
+@dataclasses.dataclass
+class _FuncAndLocation:
+    func: Callable
+    location: str
+
+
+_fake_tensor_registry: Dict["qualname", _FuncAndLocation] = {}
+
 # decorator to register python functions for library ops
 # Note: this decorator API should remain consistent with `Library.impl` API
 def impl(lib, name, dispatch_key=""):
     def wrap(f):
         lib.impl(name, f, dispatch_key)
         return f
+    return wrap
+
+
+def impl_fake(lib, op_name, *, _stacklevel=3):
+    r"""Register a FakeTensor implementation.
+
+    The FakeTensor implementation is a shape propagation rule that gets invoked
+    for FakeTensors (Tensors that do not have storage).
+
+    All Tensor inputs to the FakeTensor implementation are FakeTensors
+    and all Tensor returns must be FakeTensors.
+
+    If the signature of your operator is (*args, **kwargs), then the
+    signature of the FakeTensor implementation must be (ctx, *args, **kwargs).
+    ctx is a context object that has helper functions for writing
+    FakeTensor implementations.
+
+    This API is used as a decorator (see examples).
+
+    Args:
+        lib: a torch.Library object
+        op_name: operator name (along with the overload) or OpOverload object.
+
+    Examples::
+        >>> import numpy as np
+        >>>
+        >>> lib = Library('custom', 'FRAGMENT')
+        >>>
+        >>> # Example 1: an operator without data-dependent output shape
+        >>> lib.define('linear(Tensor x, Tensor weight, Tensor bias) -> Tensor')
+        >>>
+        >>> @impl_fake(lib, 'linear'):
+        >>> def custom_linear_fake(x, weight):
+        >>>     assert x.dim() == 2
+        >>>     assert weight.dim() == 2
+        >>>     assert bias.dim() == 1
+        >>>     assert x.shape[1] == weight.shape[1]
+        >>>     assert weight.shape[0] == bias.shape[0]
+        >>>
+        >>>     return (x @ weight.t()) + bias
+        >>>
+        >>> # Example 2: an operator with data-dependent output shape
+        >>> lib.define('nonzero(Tensor x) -> Tensor')
+        >>>
+        >>> @impl_fake(lib, 'nonzero')
+        >>> def custom_nonzero(x):
+        >>>     x_np = to_numpy(x)
+        >>>     res = np.stack(np.nonzero(x_np), axis=1)
+        >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
+        >>>     # range to at least 2.
+        >>>     if res.shape[0] <= 1:
+        >>>         raise RuntimeError("not supported")
+        >>>     return torch.tensor(res, device=x.device)
+
+    """
+    def wrap(fn):
+        lib.impl_fake(op_name, fn, _stacklevel=_stacklevel)
+        return fn
     return wrap
 
 

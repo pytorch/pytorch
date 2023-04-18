@@ -14,6 +14,9 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -631,6 +634,22 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
+class FakeTensorOpInfoTest(TestCase):
+    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    def test_fake(self, device, dtype, op):
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in sample_inputs_itr:
+            args = (sample_input.input,) + sample_input.args
+            kwargs = sample_input.kwargs
+        with torch._subclasses.CrossRefFakeMode():
+            try:
+                op(*args, **kwargs)
+            # This is allowed from a FakeTensor implementation. Dynamo knows
+            # how to graph break on them.
+            except DynamicOutputShapeException:
+                pass
+
+
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -981,6 +1000,9 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 instantiate_parametrized_tests(FakeTensorTest)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=only_for)
 
 if __name__ == "__main__":
     run_tests()

@@ -262,6 +262,76 @@ class CustomOp:
 
         return inner
 
+    def impl_fake(self) -> typing.Callable:
+        r"""Register a FakeTensor implementation for this CustomOp object.
+
+        The FakeTensor implementation is a shape propagation rule that gets invoked
+        for FakeTensors (Tensors that do not have storage).
+
+        All Tensor inputs to the FakeTensor implementation are FakeTensors
+        and all Tensor returns must be FakeTensors.
+
+        If the signature of your operator is (*args, **kwargs), then the
+        signature of the FakeTensor implementation must be (ctx, *args, **kwargs).
+        ctx is a context object that has helper functions for writing
+        FakeTensor implementations.
+
+        This API is used as a decorator (see examples).
+
+        Examples::
+            >>> import numpy as np
+            >>>
+            >>> # Example 1: an operator without data-dependent output shape
+            >>> @custom_op('(Tensor x, Tensor weight, Tensor bias) -> Tensor', ns='custom')
+            >>> def custom_linear(x, weight, bias):
+            >>>     ...
+            >>>
+            >>> @custom_linear.impl_fake():
+            >>> def custom_linear_fake(x, weight):
+            >>>     assert x.dim() == 2
+            >>>     assert weight.dim() == 2
+            >>>     assert bias.dim() == 1
+            >>>     assert x.shape[1] == weight.shape[1]
+            >>>     assert weight.shape[0] == bias.shape[0]
+            >>>
+            >>>     return (x @ weight.t()) + bias
+            >>>
+            >>> # Example 2: an operator with data-dependent output shape
+            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
+            >>> def custom_nonzero(x):
+            >>>     ...
+            >>>
+            >>> @custom_nonzero.impl_fake():
+            >>> def custom_nonzero_fake(x):
+            >>>     # Number of nonzero-elements is data-dependent
+            >>>     nnz = ctx.new_data_dependent_symint()
+            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
+            >>>     # range to at least 2. Note that the operator implementation
+            >>>     # must also do this.
+            >>>     ctx.constrain_range(nnz, min=2)
+            >>>     shape = [x.dim(), nnz]
+            >>>     result = x.new_empty(shape, dtype=torch.long)
+            >>>     return result
+            >>>
+            >>> @numpy_nonzero.impl(['cpu', 'cuda'])
+            >>> def custom_nonzero_impl(x):
+            >>>     x_np = to_numpy(x)
+            >>>     res = np.stack(np.nonzero(x_np), axis=1)
+            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
+            >>>     # range to at least 2.
+            >>>     if res.shape[0] <= 1:
+            >>>         raise RuntimeError("not supported")
+            >>>     return torch.tensor(res, device=x.device)
+
+        """
+
+        def inner(f):
+            calling_frame = 3
+            library.impl_fake(self._lib, self._opname, _stacklevel=calling_frame)(f)
+            return f
+
+        return inner
+
 
 def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):
     overload_name = (

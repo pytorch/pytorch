@@ -20,6 +20,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 import logging
 import sys
+import torch._dynamo
+import torch.testing._internal.custom_op_db
+import re
 
 
 class TestDispatcherPythonBindings(TestCase):
@@ -644,6 +647,67 @@ class TestCustomOp(TestCase):
         gm = make_fx(foo, tracing_mode='symbolic')(x)
         self.assertTrue('_torch_testing.foo' in gm.code)
         del foo
+
+    def test_fake_registration_location(self):
+        loc = torch.library._fake_tensor_registry['_torch_testing::numpy_nonzero'].location
+        matches = re.match(r'.*/custom_op_db.py:\d+', loc)
+        self.assertIsNotNone(matches)
+
+    def test_data_dependent_basic(self):
+        from torch.testing._internal.custom_op_db import numpy_nonzero
+
+        def f(x):
+            return numpy_nonzero(x)
+
+        x = torch.randn(5, 5)
+        gm = make_fx(f, tracing_mode='symbolic')(x)
+        self.assertTrue('nonzero' in gm.code)
+
+    def test_data_dependent_fake_tracing(self):
+        from torch.testing._internal.custom_op_db import numpy_nonzero
+
+        def f(x):
+            return numpy_nonzero(x)
+
+        x = torch.randn(5, 5)
+        with self.assertRaises(torch._subclasses.fake_tensor.DynamicOutputShapeException):
+            make_fx(f, tracing_mode='fake')(x)
+
+    def test_data_dependent_compile(self):
+        import torch._dynamo.testing
+        from torch._dynamo.utils import counters
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return torch.ops._torch_testing.numpy_nonzero(x.clone()).clone()
+
+        f(torch.randn(10))
+
+        self.assertEqual(
+            dict(counters['graph_break']),
+            {'dynamic shape operator: _torch_testing.numpy_nonzero.default': 1},
+        )
+
+    # pre-existing problem: torch.compile(dynamic=True) will, by default,
+    # graph break on data-dependent operations. Eventually we'll make it so
+    # that it never graph breaks on data-dependent operations.
+    @unittest.expectedFailure
+    def test_data_dependent_nms_dynamic_compile(self):
+        import torch._dynamo.testing
+        from torch._dynamo.utils import counters
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def f(x, s, i):
+            return torch.ops._torch_testing.numpy_nms(x.clone(), s, i).clone()
+
+        f(torch.randn(20, 4), torch.randn(20), 0.1)
+
+        self.assertEqual(len(counters['graph_break']), 0)
+
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
