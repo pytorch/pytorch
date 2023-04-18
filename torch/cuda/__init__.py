@@ -1079,6 +1079,36 @@ torch._storage_classes.add(BFloat16Storage)
 torch._storage_classes.add(ComplexDoubleStorage)
 torch._storage_classes.add(ComplexFloatStorage)
 
+
+class _WrappedTritonKernel(object):
+    """ Just a simple wrapper to store some metadata for testing purposes.
+    """
+
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.kernel_invoked = False
+
+    def __call__(self, *args, **kwargs):
+        res = self.kernel(*args, **kwargs)
+        self.kernel_invoked = True
+        return res
+
+
+def _register_triton_kernels():
+    from torch.sparse._triton_ops import bsr_dense_mm
+
+    if bsr_dense_mm is not None:
+        torch._TritonLibrary.probablyRegisterOp(
+            "_triton_bsr_dense_mm_out",
+            "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
+            _WrappedTritonKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
+            "SparseCsrCUDA"
+        )
+
+
+_lazy_call(_register_triton_kernels)
+
+
 from . import sparse
 from . import profiler
 from . import nvtx

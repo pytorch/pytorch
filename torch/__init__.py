@@ -1590,8 +1590,6 @@ def compile(model: Optional[Callable] = None, *,
     import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
-    if torch.backends.mps.is_available():
-        backend = "aot_eager"
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
@@ -1663,35 +1661,6 @@ class _TritonLibrary(object):
 
         return cls.ops_table[op_key]
 
-
-class _WrappedTritonKernel(object):
-    """ Just a simple wrapper to store some metadata for testing purposes.
-    """
-
-    def __init__(self, kernel):
-        self.kernel = kernel
-        self.kernel_invoked = False
-
-    def __call__(self, *args, **kwargs):
-        res = self.kernel(*args, **kwargs)
-        self.kernel_invoked = True
-        return res
-
-
-def _register_triton_kernels():
-    from torch.sparse._triton_ops import bsr_dense_mm
-
-    if bsr_dense_mm is not None:
-        _TritonLibrary.probablyRegisterOp(
-            "_triton_bsr_dense_mm_out",
-            "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
-            _WrappedTritonKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
-            "SparseCsrCUDA"
-        )
-
-
-if torch.cuda.is_available():
-    torch.cuda._lazy_call(_register_triton_kernels)
 
 from . import _logging
 _logging._init_logs()
