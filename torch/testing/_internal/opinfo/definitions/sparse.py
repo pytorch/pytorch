@@ -1,3 +1,5 @@
+import itertools
+
 import torch
 from torch.testing import make_tensor  # noqa: F401
 from torch.testing._internal.opinfo.core import (  # noqa: F401
@@ -25,25 +27,27 @@ def _filter_sample_inputs(
 
 
 def _filter_error_inputs(sample_and_error_inputs_func, op_info, device, **kwargs):
-    for layout in (
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-        torch.sparse_coo,
+    for layout, dtype in itertools.product(
+        [
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch.sparse_coo,
+        ],
+        op_info.supported_dtypes(device),
     ):
-        for dtype in op_info.supported_dtypes(device):
-            for requires_grad in (
-                [False, True]
-                if op_info.supports_autograd
-                and (dtype.is_complex or dtype.is_floating_point)
-                else [False]
+        for requires_grad in (
+            [False, True]
+            if op_info.supports_autograd
+            and (dtype.is_complex or dtype.is_floating_point)
+            else [False]
+        ):
+            for sample in sample_and_error_inputs_func(
+                op_info, device, dtype, requires_grad, layout, **kwargs
             ):
-                for sample in sample_and_error_inputs_func(
-                    op_info, device, dtype, requires_grad, layout, **kwargs
-                ):
-                    if isinstance(sample, ErrorInput):
-                        yield sample
+                if isinstance(sample, ErrorInput):
+                    yield sample
 
 
 def sample_inputs_elementwise_binary_operation_sparse(

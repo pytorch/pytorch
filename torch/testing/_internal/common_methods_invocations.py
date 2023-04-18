@@ -9258,7 +9258,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
-                    error_inputs_func=error_inputs_mul_sparse,
+                    error_inputs_sparse_func=error_inputs_mul_sparse,
                     # Specifying sample input function for sparse layout implies the sparse layout support:
                     sample_inputs_sparse_coo_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_coo),
                     sample_inputs_sparse_csr_func=partial(sample_inputs_mul_sparse, layout=torch.sparse_csr),
@@ -17673,7 +17673,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
-        error_inputs_func=error_inputs_reduction_sparse_sum,
+        error_inputs_sparse_func=error_inputs_reduction_sparse_sum,
         sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_coo),
         sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_csr),
         sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse_sum, layout=torch.sparse_csc),

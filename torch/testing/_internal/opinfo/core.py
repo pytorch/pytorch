@@ -685,6 +685,9 @@ class OpInfo:
     # function to generate inputs that will throw errors
     error_inputs_func: Callable = None
 
+    # function to generate sparse (coo, csr, csc, bsr, bsc) inputs that will throw errors
+    error_inputs_sparse_func: Callable = None
+
     # function to generate sample inputs with sparse coo layouts
     sample_inputs_sparse_coo_func: Callable = None
 
@@ -1186,6 +1189,21 @@ class OpInfo:
         Returns an iterable of ErrorInputs.
         """
         return self.error_inputs_func(self, device, **kwargs)
+
+    def error_inputs_sparse(self, layout, device, **kwargs):
+        """
+        Returns an iterable of ErrorInputs that contain sparse sample
+        inputs with a specified layout.
+        """
+        def iterator():
+            for error_input in self.error_inputs_sparse_func(self, device, **kwargs):
+                if (
+                        isinstance(error_input.sample_input.input, torch.Tensor)
+                        and error_input.sample_input.input.layout is not layout
+                ):
+                    continue
+                yield error_input
+        return iterator()
 
     def supports_sparse_layout(self, layout):
         """Return True if OpInfo supports the specified sparse layout."""
