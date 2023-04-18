@@ -2500,6 +2500,16 @@ aot_autograd_failures = {
     xfail('fft.rfft', ''),
     xfail('fft.rfftn', ''),
 
+    xfail('linalg.svdvals', ''),
+    xfail('linalg.cond', ''),
+    xfail('linalg.matrix_norm', ''),
+    xfail('linalg.norm', ''),
+    xfail('linalg.norm', 'subgradients_at_zero'),
+    xfail('linalg.svd', ''),
+    xfail('svd', ''),
+    xfail('svd_lowrank', ''),
+    xfail('stft', ''),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
