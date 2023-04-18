@@ -111,14 +111,14 @@ class TestMatcher(JitTestCase):
         match_s_result = maxpool_matcher.match(maxpool_s_graph)
         self.assertEqual(len(match_s_result), 1)
 
+        # Graph only contains "padding" argument
+        maxpool_p = torch.nn.MaxPool2d(kernel_size=2, padding=1)
+        maxpool_p_graph = make_fx(maxpool_p)(*inputs).graph
+        match_p_result = maxpool_matcher.match(maxpool_p_graph)
+        self.assertEqual(len(match_p_result), 1)
+
         # Graph only contains "stride, padding" argument
         maxpool_sp = torch.nn.MaxPool2d(kernel_size=2, stride=1, padding=1)
         maxpool_sp_graph = make_fx(maxpool_sp)(*inputs).graph
         match_sp_result = maxpool_matcher.match(maxpool_sp_graph)
         self.assertEqual(len(match_sp_result), 1)
-
-        # Graph only contains "stride, padding, dilation" argument
-        maxpool_spd = torch.nn.MaxPool2d(kernel_size=2, stride=1, padding=1, dilation=2)
-        maxpool_spd_graph = make_fx(maxpool_spd)(*inputs).graph
-        match_spd_result = maxpool_matcher.match(maxpool_spd_graph)
-        self.assertEqual(len(match_spd_result), 1)

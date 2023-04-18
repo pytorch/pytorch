@@ -228,35 +228,43 @@ class SubgraphMatcher:
 
             return True
 
-        pn_args, gn_args = [], []
+        # Flatten all args/kwargs into 1 list of args
+        pn_args, gn_args = None, None
         if (
-            len(pn.args) != len(gn.args) and
+            (len(pn.args) != len(gn.args) or len(pn.kwargs) != len(gn.kwargs)) and
             pn.op == "call_function" and
             isinstance(pn.target, torch._ops.OpOverload)
         ):
-            # If the arguments are different lengths, fill in the remaining
-            # arguments with their default values
-            for i, schema in enumerate(pn.target._schema.arguments):
-                if not schema.kwarg_only and (i < len(pn.args) or i < len(gn.args)):
-                    pn_arg = pn.args[i] if i < len(pn.args) else schema.default_value
-                    gn_arg = gn.args[i] if i < len(gn.args) else schema.default_value
-                    pn_args.append(pn_arg)
-                    gn_args.append(gn_arg)
-        else:
+            args_schema = pn.target._schema.arguments
+
+            def get_all_arguments(orig_args, orig_kwargs):
+                all_args = []
+                for i, schema in enumerate(args_schema):
+                    if schema.name in orig_kwargs:
+                        all_args.append(orig_kwargs[schema.name])
+                    elif not schema.kwarg_only and i < len(orig_args):
+                        all_args.append(orig_args[i])
+                    else:
+                        all_args.append(schema.default_value)
+                return all_args
+
+            pn_args = get_all_arguments(pn.args, pn.kwargs)
+            gn_args = get_all_arguments(gn.args, gn.kwargs)
+
+        elif len(pn.args) == len(gn.args) and len(pn.kwargs) == len(gn.kwargs):
             pn_args = list(pn.args)
             gn_args = list(gn.args)
-
-        match_found = match_found and _match_args(pn_args, gn_args)
-
-        pn_kwargs, gn_kwargs = [], []
-        if pn.kwargs.keys() == gn.kwargs.keys():
-            for key in pn.kwargs.keys():
-                pn_kwargs.append(pn.kwargs[key])
-                gn_kwargs.append(gn.kwargs[key])
+            pn_args.extend(list(pn.kwargs.values()))
+            gn_args.extend(list(gn.kwargs.values()))
         else:
             match_found = False
 
-        match_found = match_found and _match_args(pn_kwargs, gn_kwargs)
+        match_found = (
+            match_found and
+            pn_args is not None and
+            gn_args is not None and
+            _match_args(pn_args, gn_args)
+        )
 
         if not match_found:
             # revert to saved_match before matching with current node

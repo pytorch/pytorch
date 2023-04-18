@@ -236,6 +236,7 @@ def _replace_pattern(
         pattern_graph = pattern.graph
     else:
         pattern_graph = symbolic_trace(pattern).graph
+    print(pattern_graph)
 
     if isinstance(replacement, GraphModule):
         replacement_graph = replacement.graph
