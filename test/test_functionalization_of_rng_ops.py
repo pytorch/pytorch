@@ -47,17 +47,20 @@ class TestFunctionalizationRngOps(TestCase):
             a = torch.rand_like(x) * a
             return a
 
-        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True)
         for seed in range(1, 10):
-            shape = seed
-            x = torch.rand(shape, device=device, dtype=dtype)
+            shape = (seed, seed)
+            x = torch.rand(shape, device=device, dtype=dtype, requires_grad=True)
             torch.cuda.manual_seed(seed)
             ref = fn(x)
+            ref.sum().backward()
 
             torch.cuda.manual_seed(seed)
-            res = opt_fn(x)
+            aot_fn = aot_function(fn, fw_compiler=functools.partial(count_philox_rand, freq=2), bw_compiler=nop, dynamic=True)
+            res = aot_fn(x)
+            res.sum().backward()
 
             self.assertEqual(ref, res)
+
 
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)

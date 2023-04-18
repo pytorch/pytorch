@@ -1774,12 +1774,11 @@ class CUDARngStateHelper:
                 offset = fake_mode.from_tensor(offset)
             return seed, offset
 
-        rng_state = torch.cuda.get_rng_state()
+        seed = torch.tensor(torch.cuda.initial_seed())
+        offset = torch.tensor(torch.cuda._get_rng_state_offset())
         if fake_mode:
-            rng_state = fake_mode.from_tensor(rng_state)
-        # Rng state is [64-bit seed, 64-bit offset]
-        seed = rng_state[0:8].view(dtype=torch.int64)[0]
-        offset = rng_state[8:].view(dtype=torch.int64)[0]
+            seed = fake_mode.from_tensor(seed)
+            offset = fake_mode.from_tensor(offset)
         return seed, offset
 
     @staticmethod
@@ -1791,10 +1790,5 @@ class CUDARngStateHelper:
         torch.cuda.set_rng_state(new_state)
 
     @staticmethod
-    def advance_torch_state(relative_offset):
-        rng_state = torch.cuda.get_rng_state()
-        # Rng state is [64-bit seed, 64-bit offset]
-        seed = rng_state[0:8].view(dtype=torch.int64)[0]
-        offset = rng_state[8:].view(dtype=torch.int64)[0]
-        new_offset = offset + relative_offset
-        CUDARngStateHelper.set_torch_state_tensor(seed, new_offset)
+    def set_new_offset(relative_offset):
+        torch.cuda._set_rng_state_offset(relative_offset.item())
