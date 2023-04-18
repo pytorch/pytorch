@@ -462,30 +462,25 @@ def detect_fake_mode(inputs: Any = None):
     if context is not None:
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, lambda: "tracing context"))
+            fake_modes.append((fake_mode, "tracing context", 0))
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            fake_modes.append((m, (lambda i: lambda: f"active fake mode {i}")(i)))
+            fake_modes.append((m, "active fake mode", i))
 
     flat_inputs, _ = tree_flatten(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            fake_modes.append(
-                (
-                    flat_input.fake_mode,
-                    lambda i: (lambda: f"fake tensor input {i} (flat)")(i),
-                )
-            )
+            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
 
     if fake_modes:
-        fake_mode, l1 = fake_modes[0]
-        for m, l2 in fake_modes[1:]:
+        fake_mode, desc1, i1 = fake_modes[0]
+        for m, desc2, i2 in fake_modes[1:]:
             assert (
                 fake_mode is m
-            ), f"fake mode ({fake_mode}) from {l1()} doesn't match mode ({m}) from {l2()}"
+            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
         return fake_mode
     else:
         return None
