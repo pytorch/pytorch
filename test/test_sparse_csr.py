@@ -3336,6 +3336,11 @@ class TestSparseCompressedTritonKernels(TestCase):
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [])
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
+        import sys
+
+        if sys.executable == 'torch_deploy':
+            self.skipTest("Skipped for torch_deploy")
+
         from functools import partial
         from torch.sparse._triton_ops import bsr_dense_mm
 

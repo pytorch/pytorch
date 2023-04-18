@@ -1648,18 +1648,19 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
     return torch.sparse_coo_tensor(*args, **kwargs)
 
 
-class _TritonLibrary(object):
-    lib = torch.library.Library("triton", "DEF")
-    ops_table = {}
+if sys.executable != 'torch_deploy':
+    class _TritonLibrary(object):
+        lib = torch.library.Library("triton", "DEF")
+        ops_table = {}
 
-    @classmethod
-    def probablyRegisterOp(cls, op_key, full_schema, op_impl, dispatch_key):
-        if op_key not in cls.ops_table:
-            cls.lib.define(full_schema)
-            cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
-            cls.ops_table[op_key] = op_impl
+        @classmethod
+        def probablyRegisterOp(cls, op_key, full_schema, op_impl, dispatch_key):
+            if op_key not in cls.ops_table:
+                cls.lib.define(full_schema)
+                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+                cls.ops_table[op_key] = op_impl
 
-        return cls.ops_table[op_key]
+            return cls.ops_table[op_key]
 
 
 from . import _logging
