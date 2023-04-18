@@ -1661,7 +1661,7 @@ class TestSDPA(NNTestCase):
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
             # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
             # See check_gpu_sm89_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if (isSM86Device or isSM89Device) and head_dim == 128:
+            if (isSM86Device or isSM89Device) and (head_dim > 64 and head_dim <= 128):
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
                                                                                        dropout_p=dropout_p,
                                                                                        is_causal=is_causal, scale=scale))
