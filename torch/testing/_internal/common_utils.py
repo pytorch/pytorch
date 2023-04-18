@@ -34,6 +34,7 @@ import warnings
 from collections.abc import Mapping, Sequence
 from contextlib import closing, contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
 from itertools import product, chain
@@ -134,6 +135,85 @@ def gcIfJetson(fn):
             torch.cuda.empty_cache()
         fn(*args, **kwargs)
     return wrapper
+
+# Tries to extract the test function and full test ID of the current function under test
+# by crawling the stack. If unsuccessful, returns a pair of Nones.
+def extract_test_fn_and_id() -> Optional[Tuple[Callable, str]]:
+    try:
+        stack = inspect.stack()
+        for frame_info in stack:
+            frame = frame_info.frame
+            if "self" not in frame.f_locals:
+                continue
+            self_val = frame.f_locals["self"]
+            if isinstance(self_val, unittest.TestCase):
+                test_id = self_val.id()
+                test_name = test_id.split('.')[2]
+                test_fn = getattr(self_val, test_name).__func__
+                return (test_fn, test_id)
+    except Exception:
+        pass
+    return (None, None)
+
+# Contains tracked input data useful for debugging purposes
+@dataclass
+class TrackedInput:
+    index: int
+    input_val: Any
+    input_type: str
+
+# Attempt to pull out tracked input information from the test function.
+# A TrackedInputIter is used to insert this information.
+def get_tracked_input() -> Optional[TrackedInput]:
+    test_fn, test_id = extract_test_fn_and_id()
+    if test_fn is None or test_id is None:
+        return None
+    if not hasattr(test_fn, "tracked_inputs"):
+        return None
+    tracked_input_dict = test_fn.tracked_inputs
+    if test_id not in tracked_input_dict:
+        return None
+    return tracked_input_dict[test_id]
+
+# Wraps an iterator and tracks the most recent value the iterator produces for debugging purposes.
+# Tracked values are stored in a dictionary named 'tracked_inputs' stored on the test function
+# and keyed on the full test ID.
+class TrackedInputIter:
+    def __init__(self, child_iter, input_type, callback=lambda x: x):
+        self.child_iter = enumerate(child_iter)
+        # Input type describes the things we're tracking (e.g. "sample input", "error input").
+        self.input_type = input_type
+        # Callback is run on each iterated thing to get the thing to track.
+        self.callback = callback
+        self.test_fn, self.test_id = extract_test_fn_and_id()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            input_idx, input_val = next(self.child_iter)
+            self._set_tracked_input(
+                TrackedInput(
+                    index=input_idx, input_val=self.callback(input_val), input_type=self.input_type
+                )
+            )
+            return input_val
+        except StopIteration as e:
+            self._clear_tracked_input()
+            raise e
+
+    def _set_tracked_input(self, tracked_input: TrackedInput):
+        if self.test_fn is None or self.test_id is None:
+            return
+        if not hasattr(self.test_fn, "tracked_inputs"):
+            return
+        self.test_fn.tracked_inputs[self.test_id] = tracked_input
+
+    def _clear_tracked_input(self):
+        if self.test_fn is not None and self.test_id is not None:
+            del self.test_fn.tracked_inputs[self.test_id]
+        self.test_fn, self.test_id = None, None
 
 class _TestParametrizer:
     """

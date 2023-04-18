@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-    NATIVE_DEVICES, skipIfTorchDynamo
+    NATIVE_DEVICES, skipIfTorchDynamo, get_tracked_input
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -843,7 +843,20 @@ class ops(_TestParametrizer):
                 try:
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
-                        return test(*args, **kwargs)
+                        try:
+                            return test(*args, **kwargs)
+                        except Exception as e:
+                            tracked_input = get_tracked_input()
+                            if tracked_input is not None:
+                                raise Exception(
+                                    f"Error caused by {tracked_input.input_type} "
+                                    f"{tracked_input.index}: {tracked_input.input_val}") from e
+                            raise e
+
+                    # Initialize info for the last inputs seen. This is useful for tracking
+                    # down which inputs caused a test failure.
+                    # Mapping format: test ID -> TrackedInput
+                    test.tracked_inputs = dict()
 
                     decorator_fn = partial(op.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)
