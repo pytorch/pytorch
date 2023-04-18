@@ -2901,15 +2901,15 @@ class ExternKernel(InputsKernel):
         if self.kwargs:
             if V.graph.cpp_wrapper:
                 # TODO: use native_functions.yaml as the ground truth
-                    assert (
-                        self.ordered_kwargs_for_cpp_kernel
-                    ), "ordered_kwargs_for_cpp_kernel has to be provided"
-                    for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                        assert arg_name in self.kwargs, (
-                            "arg %s not found in self.kwargs" % arg_name
-                        )
-                        v = self.kwargs.get(arg_name)
-                        kwargs.append(V.graph.wrapper_code.val_to_str(v))
+                assert (
+                    self.ordered_kwargs_for_cpp_kernel
+                ), "ordered_kwargs_for_cpp_kernel has to be provided"
+                for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                    assert arg_name in self.kwargs, (
+                        "arg %s not found in self.kwargs" % arg_name
+                    )
+                    v = self.kwargs.get(arg_name)
+                    kwargs.append(V.graph.wrapper_code.val_to_str(v))
             else:
                 kwargs = [
                     f"{k}={V.graph.wrapper_code.val_to_str(v)}"

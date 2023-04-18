@@ -2015,7 +2015,7 @@ class TritonScheduling:
         if isinstance(foreach_node, scheduler.FusedSchedulerNode):
             node_schedule = foreach_node.snodes
         else:
-            node_schedule = [foreach_node.node]
+            node_schedule = [foreach_node]
 
         kernel = ForeachKernel(node_schedule[0].node.get_layouts())
 
