@@ -331,14 +331,13 @@ class TransformerEncoder(Module):
         # Prevent type refinement
         make_causal = (is_causal is True)
 
-        if is_causal is None:
-            if mask is not None:
-                sz = mask.size(0)
-                causal_comparison = Transformer.generate_square_subsequent_mask(
-                    sz, device=mask.device, dtype=mask.dtype)
+        if is_causal is None and mask is not None:
+            sz = mask.size(0)
+            causal_comparison = Transformer.generate_square_subsequent_mask(
+                sz, device=mask.device, dtype=mask.dtype)
 
-                if torch.equal(mask, causal_comparison):
-                    make_causal = True
+            if torch.equal(mask, causal_comparison):
+                make_causal = True
 
         is_causal = make_causal
 
