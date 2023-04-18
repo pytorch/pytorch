@@ -1054,18 +1054,6 @@ std::tuple<Tensor,optional<int64_t>> index_fill_batch_rule_helper(
   return std::make_tuple(self_, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> index_fill_batch_rule_helper(
-  int64_t batch_size,
-  int64_t self_logical_rank,
-  int64_t index_logical_rank,
-  Tensor & self_,
-  int64_t dim,
-  Tensor & index_,
-  const Tensor & value
-  ) {
-  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());
-}
-
 std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
     Tensor & self, optional<int64_t> self_bdim,
     int64_t dim,
@@ -1168,7 +1156,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
 
   self_ = self_bdim.has_value() ? self_ : self_.clone();
 
-  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
+  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());
 }
 
 void index_fill__int_scalar_batch_rule(
