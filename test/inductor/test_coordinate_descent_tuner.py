@@ -21,4 +21,10 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import HAS_CUDA
+
+    # NOTE: the test does not really need CUDA. Without this check,
+    # the test fail on win-vs2019-cpu-py3 complaining triton not found.
+    # Not sure if we have a better flag to check here.
+    if HAS_CUDA:
+        run_tests()
