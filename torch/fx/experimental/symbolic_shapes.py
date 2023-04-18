@@ -31,7 +31,7 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 
 InputList = List
 DimList = List
@@ -51,7 +51,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
-    "method_to_operator", "hint_int", "SYMPY_INTERP",
+    "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
 ]
 
 # These are modules that contain generic code for interacting with ShapeEnv
@@ -170,6 +170,41 @@ def is_concrete_int(a: Union[int, SymInt]):
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
+def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+    if isinstance(val, (SymInt, SymFloat)):
+        return val.node.expr.free_symbols
+    elif isinstance(val, (int, float, bool)):
+        return set()
+    elif isinstance(val, torch.Tensor):
+        r = set()
+        for s in val.size():
+            r |= free_symbols(s)
+        for s in val.stride():
+            r |= free_symbols(s)
+        r |= free_symbols(val.storage_offset())
+        return r
+    else:
+        raise AssertionError(f"cannot compute free_symbols of {val}")
+
+# WARNING: Don't use this on Dynamo produced graphs, they don't have meta
+# setup!
+def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
+    if (
+        node.op == "placeholder" and
+        "val" in node.meta and
+        isinstance(node.meta["val"], torch.SymInt) and
+        isinstance(node.meta["val"].node.expr, sympy.Symbol)
+    ):
+        return node.meta["val"].node.expr
+    return None
+
+def find_symbol_binding_fx_nodes(graph):
+    return {
+        node.meta["val"].node.expr: node
+        for node in graph.nodes
+        if is_symbol_binding_fx_node(node)
+    }
+
 def definitely_true(a):
     """
     Returns True only if we can tell that a is True, possibly introducing
@@ -283,10 +318,12 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        assert min <= a <= max
+        if not (min <= a <= max):
+            raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
         return
     if isinstance(a.node.expr, sympy.Integer):
-        assert min <= int(a.node.expr) <= max
+        if not (min <= int(a.node.expr) <= max):
+            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
     # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
@@ -1390,7 +1427,7 @@ class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
         return '%s: %s' % (self.extra['envid'], msg), kwargs
 
 
-ENV_ID = 0
+ENV_COUNTER = collections.Counter()
 
 
 class ShapeEnv:
@@ -1417,6 +1454,8 @@ class ShapeEnv:
         # When True, assume input sizes which have the same size are
         # symbolically equal.
         duck_shape=True,
+        # For debugging
+        frame_id=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -1447,9 +1486,13 @@ class ShapeEnv:
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
-        global ENV_ID
-        self.log = ShapeEnvLoggerAdapter(log, {'envid': ENV_ID})
-        ENV_ID += 1
+        per_frame_id = ENV_COUNTER[frame_id]
+        ENV_COUNTER[frame_id] += 1
+        if frame_id is None:
+            env_id = per_frame_id
+        else:
+            env_id = f"{frame_id}.{per_frame_id}"
+        self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
         self.log.info("create_env")
 
     def _suppress_guards_tls(self):
@@ -1595,6 +1638,12 @@ class ShapeEnv:
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
+    def create_unbacked_symbool(self):
+        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges(0, 1)
+        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
+
     def create_symbol(
         self,
         val: int,
@@ -1694,6 +1743,8 @@ class ShapeEnv:
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
     ) -> List[str]:
+        self.log.info("produce_guards")
+
         assert len(placeholders) == len(sources)
 
         # Expand optional inputs, or verify invariants are upheld
@@ -1968,14 +2019,16 @@ class ShapeEnv:
             error_msgs = []
             for constraint, msg in constraint_violations:
                 if constraint.warn_only:
-                    msg = f"  {len(warn_msgs) + 1}. {msg}"
+                    msg = f"  {len(warn_msgs) + 1}. {msg()}"
                     warn_msgs.append(msg)
                 else:
-                    msg = f"  {len(error_msgs) + 1}. {msg}"
+                    msg = f"  {len(error_msgs) + 1}. {msg()}"
                     error_msgs.append(msg)
-            log.warning("Warning only constraints violated %s", warn_msgs)
             if len(error_msgs) > 0:
-                raise ConstraintViolationError(f"Constraints violated!\n{error_msgs}")
+                err = '\n'.join(error_msgs)
+                raise ConstraintViolationError(f"Constraints violated!\n{err}")
+            elif len(warn_msgs) > 0:
+                log.warning("%s Warning only constraints violated", len(warn_msgs))
 
         return exprs
 
@@ -2295,14 +2348,14 @@ class ShapeEnv:
         Given an expression, evaluates it, adding guards if necessary
         """
         if len(orig_expr.free_symbols) == 0:
-            self.log.debug("evaluate_expr %s [trivial]", orig_expr)
+            self.log.debug("eval %s [trivial]", orig_expr)
             return orig_expr
 
         expr = orig_expr
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
-            self.log.debug("evaluate_expr %s == %s [statically known]", orig_expr, static_expr)
+            self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -2370,7 +2423,7 @@ class ShapeEnv:
                         ''.join(traceback.format_list(user_tb))
                     )
                 self.log.info(
-                    "evaluate_expr %s [guard added]%s (%s)%s",
+                    "eval %s [guard added]%s (%s)%s",
                     g,
                     maybe_user_loc,
                     format_frame(frame),
@@ -2378,7 +2431,7 @@ class ShapeEnv:
                     stack_info=is_debug,
                 )
         else:
-            self.log.debug("evaluate_expr %s [guard suppressed]", g)
+            self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
 

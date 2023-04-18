@@ -429,6 +429,7 @@ class FlatParamHandle:
                 "for parameter or gradient writeback. Changing parameter or "
                 "gradient storages may lead to silent correctness errors.",
             )
+        # Only align addresses for `use_orig_params=True` (for now)
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
@@ -580,12 +581,29 @@ class FlatParamHandle:
         ):
             log.info(
                 "FSDP FlatParameter address alignment created "
-                "%s "
-                "numel of padding (%s vs. %s)",
+                "%s numel of padding (%s vs. %s)",
                 total_numel - total_numel_without_padding,
                 total_numel,
                 total_numel_without_padding,
             )
+        if aligned_numel > 0:
+            # Pad to be divisible by world size to avoid a copy for the
+            # post-backward reduce-scatter
+            numel_to_pad = self.world_size - (total_numel % self.world_size)
+            if numel_to_pad > 0 and numel_to_pad < self.world_size:
+                if self.rank == 0:
+                    log.info(
+                        "FSDP FlatParameter world size divisibility created "
+                        "%s numel of padding",
+                        numel_to_pad,
+                    )
+                padding_tensor = _construct_padding_tensor(
+                    numel_to_pad, dtype, False, device
+                )
+                params_to_flatten.append(padding_tensor)
+                is_padding_mask.append(True)
+                numels.append(numel_to_pad)
+                total_numel += numel_to_pad
         # Pass `aligned_numel=0` since we already included padding tensors
         self.flat_param: FlatParameter = self.flatten_tensors_into_flat_param(
             params_to_flatten,
@@ -680,6 +698,13 @@ class FlatParamHandle:
                     total_numel += numel_to_pad
                 flat_tensors.append(torch.flatten(_detach_if_needed(tensor)))
                 total_numel += tensor.numel()
+            numel_to_pad = self.world_size - (total_numel % self.world_size)
+            if numel_to_pad > 0 and numel_to_pad < self.world_size:
+                padding_tensor = _construct_padding_tensor(
+                    numel_to_pad, dtype, False, device
+                )
+                flat_tensors.append(padding_tensor)
+                total_numel += numel_to_pad
         else:
             flat_tensors = [
                 torch.flatten(_detach_if_needed(tensor)) for tensor in tensors
