@@ -123,7 +123,7 @@ __global__ void indexing_backward_kernel(
 
 template <typename scalar_t>
 __global__ void indexing_backward_kernel_stride_1(
-  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, const scalar_t* grad_weight,
+  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
   using opmath_t = at::opmath_type<scalar_t>;
 
@@ -179,7 +179,7 @@ __global__ void indexing_backward_kernel_stride_1(
 
 template <typename scalar_t, int UNROLL_FACTOR>
 __global__ void indexing_backward_kernel_small_stride(
-  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, const scalar_t* grad_weight,
+  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
   using opmath_t = at::opmath_type<scalar_t>;
 
@@ -510,7 +510,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
             sorted_indices.const_data_ptr<int64_t>(),
             orig_indices.const_data_ptr<int64_t>(),
             expandedValue.const_data_ptr<scalar_t>(),
-            src_.const_data_ptr<scalar_t>(),
+            src_.mutable_data_ptr<scalar_t>(),
             num_indices,
             sliceSize,
             strideBefore,
@@ -526,7 +526,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
               sorted_indices.const_data_ptr<int64_t>(),
               orig_indices.const_data_ptr<int64_t>(),
               expandedValue.const_data_ptr<scalar_t>(),
-              src_.const_data_ptr<scalar_t>(),
+              src_.mutable_data_ptr<scalar_t>(),
               num_indices,
               sliceSize,
               strideBefore,
@@ -541,7 +541,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
               sorted_indices.const_data_ptr<int64_t>(),
               orig_indices.const_data_ptr<int64_t>(),
               expandedValue.const_data_ptr<scalar_t>(),
-              src_.const_data_ptr<scalar_t>(),
+              src_.mutable_data_ptr<scalar_t>(),
               num_indices,
               sliceSize,
               strideBefore,
