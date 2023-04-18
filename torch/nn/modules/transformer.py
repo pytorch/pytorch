@@ -334,9 +334,8 @@ class TransformerEncoder(Module):
         if is_causal is None:
             if mask is not None:
                 sz = mask.size(0)
-                causal_comparison = torch.triu(
-                    torch.ones(sz, sz, device=mask.device) * float('-inf'), diagonal=1
-                ).to(mask.dtype)
+                causal_comparison = Transformer.generate_square_subsequent_mask(
+                    sz, device=mask.device, dtype=mask.dtype)
 
                 if torch.equal(mask, causal_comparison):
                     make_causal = True
