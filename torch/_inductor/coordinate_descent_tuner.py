@@ -4,6 +4,8 @@ from typing import Callable, Optional
 
 import triton
 
+from . import config
+
 from .utils import triton_config_to_hashable
 
 log = logging.getLogger(__name__)
@@ -43,6 +45,11 @@ class CoordescTuner:
         self.cached_benchmark_results = {}
         self.name = name
 
+        # for backtracking when checking all directions
+        self.best_config = None
+        self.best_timing = None
+        self.cur_config = None
+
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
 
@@ -80,26 +87,121 @@ class CoordescTuner:
         return out
 
     @staticmethod
-    def get_neighbour_values(name, cur_val):
-        lhs_val = None
-        rhs_val = None
-        if name == "num_stages":
-            lhs_val = cur_val - 1
-            rhs_val = cur_val + 1
-        else:
-            lhs_val = cur_val // 2
-            rhs_val = cur_val * 2
+    def get_neighbour_values(name, orig_val, radius=1):
+        """
+        Get neighbour values in 'radius' steps. The original value is not
+        returned as it's own neighbour.
+        """
+        assert radius >= 1
+
+        def update(cur_val, inc=True):
+            if name == "num_stages":
+                if inc:
+                    return cur_val + 1
+                else:
+                    return cur_val - 1
+            else:
+                if inc:
+                    return cur_val * 2
+                else:
+                    return cur_val // 2
 
         out = []
-        if lhs_val > 0:
-            out.append(lhs_val)
-        out.append(rhs_val)
+        # increment loop
+        cur_val = orig_val
+        for _ in range(radius):
+            cur_val = update(cur_val, True)
+            out.append(cur_val)
+
+        # decrement loop
+        cur_val = orig_val
+        for _ in range(radius):
+            cur_val = update(cur_val, False)
+            if cur_val <= 0:
+                break
+            out.append(cur_val)
+
         return out
 
     @staticmethod
     def has_improvement(baseline, test):
         threshold = 0.001  # 0.1%
         return test is not None and test < baseline * (1 - threshold)
+
+    def check_all_dir(
+        self, func: Callable[[triton.Config], float], next_field_idx: int = 0
+    ):
+        """
+        Check all directions. We only do this once the regular coordinate
+        descent tuning find no better choices any more.
+        We only have a few tunable fields, so this should be fine.
+        """
+        if next_field_idx == len(self.tunable_fields):
+            # check if self.cur_config is better
+            # do deepcopy before running func since func may associate the
+            # config to the launcher.  If we do deepcopy after calling func,
+            # we may not able to find the launcher based on the copy of the config.
+            # That's because triton.Config uses class object's hash function.
+            config_copy = copy.deepcopy(self.cur_config)
+            cmp_res, candidate_timing = self.compare_config(
+                func, config_copy, self.best_config, self.best_timing
+            )
+            if cmp_res:
+                self.best_config = config_copy
+                self.best_timing = candidate_timing
+            else:
+                config_copy = None
+            return cmp_res
+
+        field = self.tunable_fields[next_field_idx]
+
+        # go thru different tuning choices for field
+        old_val = get_field(self.cur_config, field)
+
+        out = self.check_all_dir(func, next_field_idx + 1)
+
+        # we can tune this field only if the value in the config is not None
+        if old_val is not None:
+            candidate_values = self.get_neighbour_values(
+                field, old_val, radius=config.coordinate_descent_search_radius
+            )
+            assert len(candidate_values) > 0
+
+            for next_val in candidate_values:
+                set_field(self.cur_config, field, next_val)
+                # operands for 'or' matters due to short-circuit
+                out = self.check_all_dir(func, next_field_idx + 1) or out
+
+            # recover the old value for field
+            set_field(self.cur_config, field, old_val)
+
+        return out
+
+    def compare_config(self, func, candidate_config, best_config, best_timing):
+        """
+        Check if candidate_config is better than best_config.
+
+        Return a touple of (compare_result, candidate_timing).
+        compare_result is true iff condidate_config is better.
+        """
+        log.debug("Try config %s", candidate_config)
+        try:
+            candidate_timing = self.call_func(func, candidate_config)
+        except Exception as e:
+            log.debug("Got exception %s", e)
+            return False, float("inf")
+
+        if self.has_improvement(best_timing, candidate_timing):
+            log.debug(
+                "Tune from %s %f -> %s %f",
+                best_config,
+                best_timing,
+                candidate_config,
+                candidate_timing,
+            )
+
+            return True, candidate_timing
+        return False, candidate_timing
 
     def autotune(
         self,
@@ -134,24 +236,36 @@ class CoordescTuner:
                 for next_val in candidate_values:
                     candidate_config = copy.deepcopy(best_config)
                     set_field(candidate_config, name, next_val)
-                    log.debug("Try config %s", candidate_config)
-                    try:
-                        candidate_timing = self.call_func(func, candidate_config)
-                    except Exception as e:
-                        log.debug("Got exception %s", e)
-                        continue
 
-                    if self.has_improvement(best_timing, candidate_timing):
-                        improved = True
-                        log.debug(
-                            "Tune from %s %f -> %s %f",
-                            best_config,
-                            best_timing,
-                            candidate_config,
-                            candidate_timing,
-                        )
-                        best_timing = candidate_timing
-                        best_config = candidate_config
+                    cmp_res, candidate_timing = self.compare_config(
+                        func, candidate_config, best_config, best_timing
+                    )
+                    if cmp_res:
+                        best_config, best_timing = candidate_config, candidate_timing
+
+            if not improved and config.coordinate_descent_check_all_dir:
+                self.best_config = best_config
+                self.best_timing = best_timing
+                self.cur_config = copy.deepcopy(self.best_config)
+
+                improved = self.check_all_dir(func)
+
+                if improved:
+                    import colorama
+
+                    msg = (
+                        colorama.Fore.RED
+                        + "LOOKING IN ALL DIR FOUND BETTER CONFIGS, IMPROVE %.3fx"
+                        + colorama.Fore.RESET
+                    )
+                    log.debug(
+                        msg,
+                        best_timing / self.best_timing,
+                    )
+
+                best_config = self.best_config
+                best_timing = self.best_timing
+                self.best_config = self.best_timing = self.cur_config = None
 
         log.debug(
             "Improve from %s %f -> %s %f, %.3fx",

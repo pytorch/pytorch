@@ -30,6 +30,14 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16)
 
+    def test_get_neighbour_values(self):
+        tuner = CoordescTuner()
+
+        neighbours = tuner.get_neighbour_values("num_stages", 2, radius=2)
+        self.assertEquals(set(neighbours), {1, 3, 4})
+        neighbours = tuner.get_neighbour_values("num_warps", 2, radius=2)
+        self.assertEquals(set(neighbours), {1, 4, 8})
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
