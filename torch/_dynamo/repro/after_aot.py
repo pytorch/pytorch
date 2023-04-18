@@ -136,7 +136,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
-            compiled_fn._boxed_call = True
+            compiled_fn._boxed_call = True  # type: ignore[attr-defined]
         else:
             compiled_fn = compiler_fn(gm, example_inputs)
 
