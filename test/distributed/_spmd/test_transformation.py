@@ -9,6 +9,12 @@ import torch.nn as nn
 from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
+from torch.distributed._spmd.graph_optimization import (
+    get_all_fused_optimizer_blocks,
+    remove_copy_from_optimizer,
+    split_fused_optimizer,
+)
+from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -79,7 +85,9 @@ class TransformationTest(DTensorTestBase):
         self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
         return model, optim, ddp_model, ddp_optim
 
-    def _test_tran_step_with_ddp(self, train_step, num_iters, batch_size, layers, dim):
+    def _test_train_step(
+        self, train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=False
+    ):
         def _ddp_train_step(model, optim, batch):
             model(batch).sum().backward()
             with torch.no_grad():
@@ -88,12 +96,18 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        model, optim, ddp_model, ddp_optim = self._init(batch_size, layers, dim)
+        model, optim, ddp_model, ddp_optim = self._init(
+            batch_size,
+            layers,
+            dim,
+            foreach=(not use_fused_optimizer),
+            fused=use_fused_optimizer,
+        )
         for _ in range(num_iters):
             batch = torch.randn(batch_size, dim).cuda()
             out = train_step(model, optim, batch)
             ddp_out = _ddp_train_step(ddp_model, ddp_optim, batch)
-            self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
+        self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -109,20 +123,21 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step_with_ddp(train_step, num_iters, batch_size, layers, dim)
+        self._test_train_step(train_step, num_iters, batch_size, layers, dim)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_inductor(self):
         batch_size = 100
-        layers = 10
+        # Too many layers will cause test timeout due to the compilation.
+        layers = 2
         dim = 100
         num_iters = 5
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters, enable_inductor=True
+                num_iters=num_iters, enable_inductor=True, dump_graphs=True
             )
         )
         def train_step(model, optim, batch):
@@ -130,13 +145,9 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        # TODO: there are issues when lowering the optimizer. Disable
-        # the test for now.
-        """
-        self._test_tran_step_with_ddp(
-            train_step, num_iters, batch_size, layers, dim
+        self._test_train_step(
+            train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
         )
-        """
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -158,7 +169,7 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        self._test_tran_step_with_ddp(train_step, num_iters, batch_size, layers, dim)
+        self._test_train_step(train_step, num_iters, batch_size, layers, dim)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -180,12 +191,41 @@ class TransformationTest(DTensorTestBase):
             optim.step()
             optim.zero_grad()
 
-        model, optim, _, _ = self._init(
-            batch_size, layers, dim, foreach=False, fused=True
+        self._test_train_step(
+            train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
         )
-        for _ in range(num_iters):
-            batch = torch.randn(batch_size, dim).cuda()
-            out = train_step(model, optim, batch)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_split_fused_optimizer(self):
+        batch_size = 100
+        layers = 2
+        dim = 4096
+        num_iters = 5
+
+        def my_transformation(gm):
+            gm = IterGraphModule(gm)
+            remove_copy_from_optimizer(gm)
+            opt_block = get_all_fused_optimizer_blocks(gm, "_fused_adam")[0]
+            gradients = {
+                opt_block.optim.optim_node.args[1][1],
+                opt_block.optim.optim_node.args[1][2],
+            }
+            split_fused_optimizer(gm, opt_block, gradients)
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            return gm
+
+        @compile(gm_transformation=my_transformation)
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+        self._test_train_step(
+            train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
+        )
 
 
 if __name__ == "__main__":
