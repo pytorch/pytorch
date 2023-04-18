@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import copy
+import functools
 import operator
-from dataclasses import asdict
 from typing import Callable, Dict, List, Optional, Set
 
 import torch
 import torch.nn.functional as F
+
+from torch.ao.quantization._pt2e.quantizer.utils import (
+    get_act_obs_or_fq_ctr,
+    get_bias_obs_or_fq_ctr,
+    get_weight_obs_or_fq_ctr,
+)
+
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
@@ -27,6 +34,22 @@ __all__ = [
     "QNNPackQuantizer",
     "get_symmetric_quantization_config",
 ]
+
+_QUANT_CONFIG_TO_ANNOTATOR = {}
+
+
+def register_annotator(quantization_configs: List[QuantizationConfig]):
+    def decorator(fn: Callable):
+        for quantization_config in quantization_configs:
+            if quantization_config in _QUANT_CONFIG_TO_ANNOTATOR:
+                raise KeyError(
+                    f"Annotator for quantization config {quantization_config} is already registered"
+                )
+            _QUANT_CONFIG_TO_ANNOTATOR[quantization_config] = functools.partial(
+                fn, config=quantization_config
+            )
+
+    return decorator
 
 
 def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
@@ -66,6 +89,7 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     return copy.deepcopy(supported_config_and_operators)
 
 
+@functools.lru_cache
 def get_symmetric_quantization_config(is_per_channel=False):
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
@@ -96,96 +120,6 @@ def get_supported_config_and_operators() -> List[OperatorConfig]:
     return get_supported_symmetric_config_and_operators()
 
 
-# TODO: add support for torch dtype in quant code base
-# this includes observers and prepare/convert code
-_TORCH_DTYPE_TO_QDTYPE = {
-    torch.int8: torch.qint8,
-    torch.uint8: torch.quint8,
-    torch.int32: torch.qint32,
-    torch.float16: torch.float16,
-}
-
-
-def _get_obs_or_fq_module(
-    quantization_spec: QuantizationSpec, extra_kwargs, observer_type
-):
-    return observer_type.with_args(**asdict(quantization_spec), **extra_kwargs)
-
-
-def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
-    if quantization_config is None:
-        return None
-    assert quantization_config is not None
-    if quantization_config.activation is None:
-        return None
-    quantization_spec: QuantizationSpec = quantization_config.activation
-    qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
-    assert quantization_spec.qscheme in [
-        torch.per_tensor_affine,
-        torch.per_tensor_symmetric,
-    ]
-    if not quantization_spec.is_dynamic:
-        return HistogramObserver.with_args(
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-            reduce_range=False,
-            eps=2**-12,
-        )
-    else:
-        # TODO: extend this helper function to support dynamic quantization
-        raise Exception(
-            "Unsupported quantization_spec for activation: {}".format(quantization_spec)
-        )
-
-
-def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
-    if quantization_config is None:
-        return None
-    assert quantization_config is not None
-    if quantization_config.weight is None:
-        return None
-    quantization_spec: QuantizationSpec = quantization_config.weight
-    qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
-    if quantization_spec.qscheme == torch.per_tensor_symmetric:
-        return MinMaxObserver.with_args(
-            qscheme=quantization_spec.qscheme,
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-            eps=2**-12,
-        )
-    elif quantization_spec.qscheme == torch.per_channel_symmetric:
-        return PerChannelMinMaxObserver.with_args(
-            qscheme=quantization_spec.qscheme,
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-            eps=2**-12,
-        )
-    else:
-        raise Exception(
-            "Unsupported quantization_spec for weight: {}".format(quantization_spec)
-        )
-
-
-def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
-    if quantization_config is None:
-        return None
-    assert quantization_config is not None
-    if quantization_config.bias is None:
-        return None
-    quantization_spec: QuantizationSpec = quantization_config.bias
-    assert (
-        quantization_spec.dtype == torch.float
-    ), "Only float dtype for bias is supported for bias right now"
-    return PlaceholderObserver.with_args(dtype=quantization_spec.dtype)
-
-
-def _get_default_obs_or_fq_ctr():
-    return PlaceholderObserver.with_args(dtype=torch.float)
-
-
 def _is_annotated(nodes: List[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
@@ -206,7 +140,7 @@ class QNNPackQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: Optional[QuantizationConfig] = None
+        self.global_config: QuantizationConfig = None
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -236,14 +170,12 @@ class QNNPackQuantizer(Quantizer):
                 return ops
         return []
 
-    def set_global(
-        self, quantization_config: Optional[QuantizationConfig]
-    ) -> QNNPackQuantizer:
+    def set_global(self, quantization_config: QuantizationConfig) -> QNNPackQuantizer:
         self.global_config = quantization_config
         return self
 
     def set_config_for_operator_type(
-        self, operator_type: str, quantization_config: Optional[QuantizationConfig]
+        self, operator_type: str, quantization_config: QuantizationConfig
     ) -> QNNPackQuantizer:
         self.operator_type_config[operator_type] = quantization_config
         return self
@@ -251,7 +183,19 @@ class QNNPackQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         global_config = self.global_config
-        ops = self.get_supported_operator_for_quantization_config(global_config)
+        _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
+
+        return model
+
+    @register_annotator(
+        [
+            get_symmetric_quantization_config(),
+            get_symmetric_quantization_config(is_per_channel=True),
+        ]
+    )
+    def annotate_symmetric_config(
+        self, model: torch.fx.GraphModule, config: QuantizationConfig
+    ) -> torch.fx.GraphModule:
         # annotate the nodes from last to first since the matching is in the reversed order
         # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
         # and we will mark the matched node with "_annoated" so fusion operator pattern
@@ -259,20 +203,20 @@ class QNNPackQuantizer(Quantizer):
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
-            self._annotate_conv2d_relu(node, global_config)
-            self._annotate_conv2d(node, global_config)
-            self._annotate_linear(node, global_config)
-            self._annotate_maxpool2d(node, global_config)
-            self._annotate_add_relu(node, global_config)
-            self._annotate_add(node, global_config)
-            self._annotate_hardtanh(node, global_config)
-            self._annotate_mean(node, global_config)
-            self._annotate_adaptive_avg_pool2d(node, global_config)
+            self._annotate_conv2d_relu(node, config)
+            self._annotate_conv2d(node, config)
+            self._annotate_linear(node, config)
+            self._annotate_maxpool2d(node, config)
+            self._annotate_add_relu(node, config)
+            self._annotate_add(node, config)
+            self._annotate_hardtanh(node, config)
+            self._annotate_mean(node, config)
+            self._annotate_adaptive_avg_pool2d(node, config)
 
         return model
 
     def _annotate_conv2d_relu(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         if node.op != "call_function" or node.target not in [
             torch.ops.aten.relu_.default,
@@ -291,10 +235,12 @@ class QNNPackQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
+                dtype=torch.float
+            ),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -302,13 +248,13 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
     def _annotate_conv2d(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         conv_node = node
         if (
@@ -320,10 +266,10 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([conv_node]):
             return
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -332,7 +278,7 @@ class QNNPackQuantizer(Quantizer):
         }
 
     def _annotate_linear(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         addmm_node = node
         if (
@@ -356,27 +302,31 @@ class QNNPackQuantizer(Quantizer):
 
         # bias and output act
         addmm_node.meta["target_dtype_info"] = {
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "bias_index": 0,
             "_annotated": True,
         }
         # input act
         view_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
+                dtype=torch.float
+            ),
             "_annotated": True,
         }
         # weight
         t_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
+                dtype=torch.float
+            ),
             "_annotated": True,
         }
 
     def _annotate_maxpool2d(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         if (
             node.op != "call_function"
@@ -396,13 +346,15 @@ class QNNPackQuantizer(Quantizer):
             return
 
         maxpool_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
+                dtype=torch.float
+            ),
             "_annotated": True,
         }
         getitem_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "input_output_share_observers": True,
             "_annotated": True,
         }
@@ -411,7 +363,7 @@ class QNNPackQuantizer(Quantizer):
         self,
         op: Callable,
         node: Node,
-        quantization_config: Optional[QuantizationConfig],
+        quantization_config: QuantizationConfig,
     ) -> None:
         io_obs_sharing_node = node
         if (
@@ -423,21 +375,21 @@ class QNNPackQuantizer(Quantizer):
             return
 
         io_obs_sharing_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "input_output_share_observers": True,
             "_annotated": True,
         }
 
     def _annotate_hardtanh(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
             torch.ops.aten.hardtanh.default, node, quantization_config
         )
 
     def _annotate_mean(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
             torch.ops.aten.mean.default, node, quantization_config
@@ -447,14 +399,14 @@ class QNNPackQuantizer(Quantizer):
         )
 
     def _annotate_adaptive_avg_pool2d(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
             torch.ops.aten.adaptive_avg_pool2d.default, node, quantization_config
         )
 
     def _annotate_add_relu(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         if node.op != "call_function" or node.target not in [
             torch.ops.aten.relu_.default,
@@ -473,18 +425,20 @@ class QNNPackQuantizer(Quantizer):
             return
 
         add_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
+                dtype=torch.float
+            ),
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
     def _annotate_add(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         add_node = node
         if add_node.op != "call_function" or add_node.target not in [
@@ -496,8 +450,8 @@ class QNNPackQuantizer(Quantizer):
             return
 
         add_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
