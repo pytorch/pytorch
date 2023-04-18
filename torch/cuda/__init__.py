@@ -1153,6 +1153,11 @@ class _WrappedTritonKernel(object):
 
 
 def _register_triton_kernels():
+    import sys
+
+    if sys.executable == "torch_deploy":
+        return
+
     from torch.sparse._triton_ops import bsr_dense_mm
 
     if bsr_dense_mm is not None:
