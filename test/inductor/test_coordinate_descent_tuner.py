@@ -1,8 +1,17 @@
 # Owner(s): ["module: inductor"]
 
-import triton
+import sys
+import unittest
+
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.coordinate_descent_tuner import CoordescTuner
+
+try:
+    import triton
+except ImportError:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires triton")
 
 
 class TestCoordinateDescentTuner(TestCase):
@@ -21,10 +30,4 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    from torch.testing._internal.inductor_utils import HAS_CUDA
-
-    # NOTE: the test does not really need CUDA. Without this check,
-    # the test fail on win-vs2019-cpu-py3 complaining triton not found.
-    # Not sure if we have a better flag to check here.
-    if HAS_CUDA:
-        run_tests()
+    run_tests()
