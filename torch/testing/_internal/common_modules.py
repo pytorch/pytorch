@@ -1711,6 +1711,23 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     return samples
 
 
+def module_inputs_torch_nn_TransformerDecoder(module_info, device, dtype, requires_grad, training, **kwargs):
+    # Reuse the TransformerDecoderLayer samples since the forward args are the same.
+    for layer_module_input in module_inputs_torch_nn_TransformerDecoderLayer(
+            None, device, dtype, requires_grad, training):
+        # Construct a TransformerDecoderLayer object to pass to TransformerDecoder.
+        l_args, l_kwargs = (layer_module_input.constructor_input.args,
+                            layer_module_input.constructor_input.kwargs)
+        decoder_layer = torch.nn.TransformerDecoderLayer(*l_args, **l_kwargs)
+        num_layers = 2
+        forward_input = layer_module_input.forward_input
+        yield ModuleInput(
+            constructor_input=FunctionInput(decoder_layer, num_layers),
+            forward_input=forward_input,
+            desc=layer_module_input.desc
+        )
+
+
 def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2813,6 +2830,16 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.TransformerDecoder,
+               module_inputs_func=module_inputs_torch_nn_TransformerDecoder,
+               skips=(
+                   # No channels_last support for TransformerDecoderLayer currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   # Doesn't support device / dtype kwargs directly because it is just a
+                   # container of TransformerDecoderLayers.
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_factory_kwargs'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                ),
     ModuleInfo(torch.nn.TransformerDecoderLayer,
