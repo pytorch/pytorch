@@ -194,6 +194,9 @@ class BaseSchedulerNode:
     def is_extern(self):
         return False
 
+    def is_foreach(self):
+        return False
+
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
 
