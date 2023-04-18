@@ -4337,6 +4337,18 @@ class OutputBuffer(ExternKernel):
         wrapper.writeline(f"# collective out buffer {self.name}")
 
 
+class MultiOutputNoSizeAssert(MultiOutput):
+    """
+    Extract partial output from a multi-output OP.
+    Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
+    """
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        )
+
+
 class AllGatherIntoTensorCoalesced(ExternKernel):
     def __init__(self, layout, inputs, constant_args, outputs):
         super().__init__(None, layout, inputs + outputs, constant_args)
