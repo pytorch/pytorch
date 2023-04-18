@@ -328,17 +328,7 @@ class TransformerEncoder(Module):
                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
-        # Prevent type refinement
-        make_causal = (is_causal is True)
-
-        if is_causal is None and mask is not None:
-            sz = mask.size(0)
-            causal_comparison = Transformer.generate_square_subsequent_mask(
-                sz, device=mask.device, dtype=mask.dtype)
-
-            make_causal = torch.equal(mask, causal_comparison)
-
-        is_causal = make_causal
+        is_causal = _detect_is_causal_mask(mask, is_causal)
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
@@ -821,3 +811,22 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
         return F.gelu
 
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
+
+
+def _detect_is_causal_mask(mask: Optional[Tensor], is_causal: Optional[bool]) -> bool:
+    """Return whether the given attention mask is causal.
+
+    Warning:
+    If ``is_causal`` is not ``None``, its value will be returned as is and may be incorrect.
+    """
+    # Prevent type refinement
+    make_causal = (is_causal is True)
+
+    if is_causal is None and mask is not None:
+        sz = mask.size(0)
+        causal_comparison = Transformer.generate_square_subsequent_mask(
+            sz, device=mask.device, dtype=mask.dtype)
+
+        make_causal = torch.equal(mask, causal_comparison)
+
+    return make_causal
