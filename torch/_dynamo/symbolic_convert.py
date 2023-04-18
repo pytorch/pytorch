@@ -42,7 +42,13 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented, Unsupported, UserError, UserErrorType
+from .exc import (
+    BackendCompilerFailed,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -2032,18 +2038,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if isinstance(func, NestedUserFunctionVariable) and func.closure is not None:
             # closure vars other than 'self' are not in scope of generated code, so error early
-            # TODO(avik): these should be supported eventually
+            # TODO(avik): we should eventually support this.
+            # (Feature request tracked here: https://github.com/pytorch/pytorch/issues/99401)
             closure_vars = [
                 var.name
                 for var in func.closure.items
-                if isinstance(var, ClosureVariable) and var.name != "self"]
+                if isinstance(var, ClosureVariable) and var.name != "self"
+            ]
             if closure_vars:
                 code = func.get_code()
-                UserError(
+                raise UserError(
                     UserErrorType.ANTI_PATTERN,
                     f"Cannot inline nested function '{code.co_name}' at {code.co_filename}:{code.co_firstlineno} "
                     f"because it closes over variables {closure_vars}. "
-                    f"Please rewrite '{code.co_name}' to take {closure_vars} as additional arguments."
+                    f"Please rewrite '{code.co_name}' to take {closure_vars} as additional arguments.",
                 )
 
     @staticmethod
