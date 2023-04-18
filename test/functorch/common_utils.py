@@ -83,7 +83,6 @@ def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
         return False
     if not isinstance(sample_input.input, torch.Tensor):
         return False
-
     # Check if input's dtype matches the output's dtype
     args = (sample_input.input,) + sample_input.args
     kwargs = sample_input.kwargs
@@ -198,6 +197,12 @@ def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=Fa
     # For Batch Norm, if there's only an input, we can't
     # batch it since running_mean/var will be seen as unbatched tensors
     if num_tensors == 1 and is_batch_norm_and_training:
+        return
+    if any(a.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc, torch.sparse_coo}
+           for a in flat_args if isinstance(a, torch.Tensor)):
+        # When add_batch_dim tries to call repeat() on a sparse
+        # tensor, it will fail: expand is unsupported for SparseCsr
+        # tensors.
         return
     bdim_choices = get_bdim_choices_batch_norm(
         num_tensors, *arg_values) if is_batch_norm_and_training else get_bdim_choices(num_tensors)
