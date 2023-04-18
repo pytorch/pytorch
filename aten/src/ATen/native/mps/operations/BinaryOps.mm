@@ -1,13 +1,37 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/Optional.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/atan2_native.h>
+#include <ATen/ops/div_native.h>
+#include <ATen/ops/eq_native.h>
+#include <ATen/ops/fmod_native.h>
+#include <ATen/ops/ge_native.h>
+#include <ATen/ops/gt_native.h>
+#include <ATen/ops/hypot_native.h>
+#include <ATen/ops/le_native.h>
+#include <ATen/ops/logaddexp2_native.h>
+#include <ATen/ops/logaddexp_native.h>
+#include <ATen/ops/lt_native.h>
+#include <ATen/ops/maximum_native.h>
+#include <ATen/ops/minimum_native.h>
+#include <ATen/ops/mul_native.h>
+#include <ATen/ops/ne_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/pow_native.h>
+#include <ATen/ops/remainder_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/sub_native.h>
+#include <ATen/ops/xlogy_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -61,7 +85,7 @@ void binaryOpTensor(const Tensor& self,
     needsCopyToOutput = true;
     // else, determine if this is an in-place operation on a view output
   } else if (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))) {
-    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }
 

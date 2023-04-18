@@ -13,7 +13,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Un
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer
+from sympy import Expr, Integer, simplify
 
 import torch._dynamo.config as dynamo_config
 import torch._logging
@@ -86,28 +86,28 @@ In these cases, the underlying StorageBox/Buffer will be shared with the pre-vie
 
 
 def validate_ir(node_or_nodes):
-    def _check_tensorbox(node):
+    def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        assert isinstance(
-            node,
-            (
-                DynamicScalar,
-                TensorBox,
-                TensorList,
-                RandSeedBuffer,
-                sympy.Symbol,
-                sympy.core.relational.Relational,
-                Expr,
-            ),
-        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+        if isinstance(nodes, (List, Tuple)):
+            for node in nodes:
+                _check_tensorbox(node)
+        else:
+            assert isinstance(
+                nodes,
+                (
+                    DynamicScalar,
+                    TensorBox,
+                    TensorList,
+                    RandSeedBuffer,
+                    sympy.Symbol,
+                    sympy.core.relational.Relational,
+                    Expr,
+                ),
+            ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
     # Be picky about the accepted data structure (don't use pytree here)
-    if isinstance(node_or_nodes, (List, Tuple)):
-        for node in node_or_nodes:
-            _check_tensorbox(node)
-    else:
-        _check_tensorbox(node_or_nodes)
+    _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -202,7 +202,9 @@ class ModularIndexing(sympy.Function):
         if divisor != 1:
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
-                return ModularIndexing(base / gcd, divisor / gcd, modulus)
+                return ModularIndexing(
+                    simplify(base / gcd), simplify(divisor / gcd), modulus
+                )
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -2807,7 +2809,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, int)):
+        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -2886,22 +2888,19 @@ class ExternKernel(InputsKernel):
     def apply_constraint(self):
         pass
 
+    def codegen_const_args(self):
+        return map(V.graph.wrapper_code.val_to_str, self.constant_args)
+
     def codegen_args(self):
         args = [x.codegen_reference() for x in self.inputs]
-        args.extend(
-            map(
-                V.graph.wrapper_code.val_to_str,
-                self.constant_args,
-            )
-        )
+        args.extend(self.codegen_const_args())
         return args
 
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
             if V.graph.cpp_wrapper:
-                if self.kwargs:
-                    # TODO: use native_functions.yaml as the ground truth
+                # TODO: use native_functions.yaml as the ground truth
                     assert (
                         self.ordered_kwargs_for_cpp_kernel
                     ), "ordered_kwargs_for_cpp_kernel has to be provided"
