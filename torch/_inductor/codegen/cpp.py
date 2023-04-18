@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from pathlib import Path
-from typing import ClassVar, Dict, List
+from typing import Dict, List
 
 import numpy
 import sympy
@@ -28,12 +28,14 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
+    data_type_propagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
     OpOverrides,
+    OptimizationContext,
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -229,25 +231,6 @@ cexpr = CppPrinter().doprint
 
 def cexpr_index(index):
     return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
-
-
-@dataclasses.dataclass
-class OptimizationContext:
-    key: ClassVar[str] = "opt_ctx"
-
-    # Load value as mask
-    is_load_as_mask: bool = False
-    # Load bfloat16 value as float32
-    is_load_bf16_as_fp32: bool = False
-    # Store float32 value as bfloat16
-    is_store_fp32_as_bf16: bool = False
-    # do not  need type cast for
-    # for mem copy only node bf16 load -> bf16 store,
-    is_bf16_mem_copy: bool = False
-
-    dtype: torch.dtype = torch.float
-    ops_name: str = ""
-    is_most_inner_loop_irrevelant: bool = False
 
 
 class RecordOptimizationContext:
@@ -1258,7 +1241,7 @@ class CppVecKernel(CppKernel):
                 assert opt_ctx.is_bf16_mem_copy
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
         elif (V.graph.get_dtype(name) in [torch.uint8]) and (
-            opt_ctx.is_store_fp32_as_uint8
+            opt_ctx.is_store_float_as_uint8
         ):
             # TODO(Leslie): Optimize the implementation of store_float_as_uint8
             # * Pattern match of quantization op in the loop body.
@@ -1723,10 +1706,10 @@ class CppVecKernelChecker(CppVecKernel):
                     return self.simd_vec
             elif store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_uint8 = self.can_store_fp32_as_uint8(
+                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
                     name, value_node
                 )
-                if not opt_ctx.is_store_fp32_as_uint8:
+                if not opt_ctx.is_store_float_as_uint8:
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -2041,6 +2024,11 @@ class CppKernelProxy(CppKernel):
         self.call_ranges = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
 
+    def data_type_propagation(self, nodes):
+        for _node in nodes:
+            assert isinstance(_node, SchedulerNode)
+            data_type_propagation(_node)
+
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_bf16_mem_copy(node: torch.fx.Node):
@@ -2187,6 +2175,7 @@ class CppKernelProxy(CppKernel):
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
+        self.data_type_propagation(nodes)
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
