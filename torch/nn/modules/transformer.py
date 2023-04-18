@@ -231,6 +231,7 @@ class TransformerEncoder(Module):
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
             is_causal: If specified, applies a causal mask as mask.
                 Default: ``False``.
                 Warning:
@@ -238,7 +239,6 @@ class TransformerEncoder(Module):
                 causal mask. Providing incorrect hints can result in
                 incorrect execution, including forward and backward
                 compatibility.
-            src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
@@ -536,6 +536,7 @@ class TransformerEncoderLayer(Module):
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
             is_causal: If specified, applies a causal mask as src mask.
                 Default: ``False``.
                 Warning:
@@ -543,7 +544,6 @@ class TransformerEncoderLayer(Module):
                 causal mask. Providing incorrect hints can result in
                 incorrect execution, including forward and backward
                 compatibility.
-            src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
@@ -768,6 +768,7 @@ class TransformerDecoderLayer(Module):
                 ``memory_mask`` is the causal mask. Providing incorrect
                 hints can result in incorrect execution, including
                 forward and backward compatibility.
+
         Shape:
             see the docs in Transformer class.
         """
