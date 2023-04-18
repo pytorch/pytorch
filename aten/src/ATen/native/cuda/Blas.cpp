@@ -146,18 +146,6 @@ static bool getDisableAddmmCudaLt() {
     return false;
 }
 
-uint8_t getAlignment(const Tensor &t) {
-  // alignment are in bytes
-  uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.const_data_ptr());
-  for (; alignment < 4; alignment *= 2) {
-    if (address % (alignment * 2)) {
-      return alignment;
-    }
-  }
-  return alignment;
-}
-
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
@@ -185,18 +173,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
     if (!disable_addmm_cuda_lt) {
-      auto self_alignment = getAlignment(self);
-      auto mat1_alignment = getAlignment(mat1);
-      auto mat2_alignment = getAlignment(mat2);
-      // due to a heuristic bug, cuBlasLt requires all alignments > 2 or the same ( == 2)
-      // should we err on the side of caution and remove the second dispatch path?
-      bool alignment_ok = (self_alignment > 2 &&
-                           mat1_alignment > 2 &&
-                           mat2_alignment > 2) ||
-                          (self_alignment == 2 &&
-                           mat1_alignment == 2 &&
-                           mat2_alignment == 2);
-
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() &&
@@ -204,7 +180,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
-          alignment_ok &&
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&

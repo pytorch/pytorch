@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.interpreter import Interpreter
+from torch._guards import detect_fake_mode
 from torch.nn.utils import stateless
 
 
@@ -63,7 +64,7 @@ def train_step_compiler(backend_compile_fn):
         backend_compile_fn (callable): A dynamo compiler function, to be invoked to compile each subgraph.
     """
 
-    def _compile_fn(mod: fx.GraphModule, fake_inputs: List[torch.Tensor]):
+    def _compile_fn(mod: fx.GraphModule, real_inputs: List[torch.Tensor]):
         """
         Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
                 (created by dynamo) to fakeify the module's parameters
@@ -72,11 +73,11 @@ def train_step_compiler(backend_compile_fn):
             torch.is_grad_enabled()
         ), "Expected grad enabled when calling train_step_compile"
         torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
-        assert len(fake_inputs) > 0, "Expected at least one input"
-        fake_mode = fake_inputs[0].fake_mode
+        assert len(real_inputs) > 0, "Expected at least one input"
+        fake_mode = detect_fake_mode()
         assert isinstance(
             fake_mode, FakeTensorMode
-        ), "Expected a valid FakeTensorMode on dynamo inputs"
+        ), "Expected a valid FakeTensorMode"
 
         def fakeify_inputs(flat_args):
             already_fake = {}
@@ -102,7 +103,7 @@ def train_step_compiler(backend_compile_fn):
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
-
+        fake_inputs = fakeify_inputs(real_inputs)
         assert (
             "optimizers" in mod.meta
         ), "Dynamo should populate GraphModule meta with optimizers dict"
