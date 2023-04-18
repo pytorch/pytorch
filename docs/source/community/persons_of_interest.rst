@@ -142,7 +142,7 @@ Fast Fourier Transform (torch.fft)
 
 CPU Performance (Torch Inductor / MKLDNN)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  
+
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
 -  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 -  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
