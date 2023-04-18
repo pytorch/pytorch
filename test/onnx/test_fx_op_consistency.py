@@ -5,11 +5,11 @@ and torch operators given the same inputs.
 
 Usage:
 
-    pytest test/onnx/test_op_consistency.py
+    pytest test/onnx/test_fx_op_consistency.py
 
     To run tests on a specific operator (e.g. torch.ceil):
 
-    pytest test/onnx/test_op_consistency.py -k ceil
+    pytest test/onnx/test_fx_op_consistency.py -k ceil
 
     Read more on Running and writing tests:
         https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
@@ -29,22 +29,22 @@ import unittest
 import warnings
 from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
-import onnx_test_common
 import parameterized
 
 import torch
-from torch.onnx import _constants
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
     common_utils,
 )
 from torch.testing._internal.opinfo import core as opinfo_core
+from test_fx_to_onnx_with_onnxruntime import _run_test_with_fx_to_onnx_exporter_and_onnx_runtime, TestFxToOnnxWithOnnxRuntime
 
+# TODO(titaiwang): Change this when more versions are supported
 # The min onnx opset version to test for
-MIN_ONNX_OPSET_VERSION = 9
+MIN_ONNX_OPSET_VERSION = 18
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = 18
 
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
@@ -305,11 +305,6 @@ def reason_flaky() -> str:
 TESTED_OPS: frozenset[str] = frozenset(
     [
         "ceil",
-        "flatten",
-        "logical_not",
-        "sqrt",
-        "stft",
-        "t",
         "unflatten",
     ]
 )
@@ -330,18 +325,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    skip("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
-    skip("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
-    fixme("unflatten", opsets=[opsets_before(13)], reason="helper function is needed to support legacy ops."),
+    fixme("unflatten", reason="AssertionError: Expected 1 inputs, got 3"),
 )
 # fmt: on
 
 SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
-    skip(
-        "stft",
-        reason="ONNX STFT does not support complex results",
-        matcher=lambda sample: sample.kwargs.get("return_complex") is True,
-    ),
     fixme(
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
@@ -400,13 +388,15 @@ def _get_test_class_name(cls, num, params_dict) -> str:
     ],
     class_name_func=_get_test_class_name,
 )
-class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
+class TestOnnxModelOutputConsistency(TestFxToOnnxWithOnnxRuntime):
     """Test output consistency between exported ONNX models and PyTorch eager mode.
 
     This is a parameterized test suite.
     """
 
     opset_version = -1
+    op_level_debug: bool = False
+    dynamic_shapes: bool = False
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
@@ -439,7 +429,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     warnings.warn(f"skipped sample {i}. Reason: {skip_reason}")
                     continue
 
-                model = SingleOpModel(op, cpu_sample.kwargs)
+                model = SingleOpModel(op.op, cpu_sample.kwargs)
                 model.eval()
 
                 if dtype == torch.float32:
@@ -455,7 +445,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     rtol = None
                     atol = None
                 # Run the test
-                self.run_test(model, inputs, rtol=rtol, atol=atol)
+                _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, model, inputs, rtol=rtol, atol=atol)
 
 
 for opset in TESTED_OPSETS:
