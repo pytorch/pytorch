@@ -3897,7 +3897,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     "output size in (o1, o2, ...,oK) format."
                 )
             if not torch.jit.is_scripting():
-                if not all(isinstance(x, (int, torch.SymInt)) for x in size):
+                def is_integer(x) -> bool:
+                    if isinstance(x, (int, torch.SymInt)):
+                        return True
+                    return isinstance(x, Tensor) and not x.is_floating_point()
+
+                if not all(is_integer(x) for x in size):
                     raise TypeError(
                         "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
                         f"Tuple[int, int, int], but got size with types {[type(x) for x in size]}"
