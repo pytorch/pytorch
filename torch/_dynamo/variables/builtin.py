@@ -26,13 +26,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
-from .lists import (
-    BaseListVariable,
-    ListIteratorVariable,
-    ListVariable,
-    TupleIteratorVariable,
-    TupleVariable,
-)
+from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
@@ -201,7 +195,7 @@ class BuiltinVariable(VariableTracker):
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers = {}
-        for (op, magic_method_names) in itertools.chain(
+        for op, magic_method_names in itertools.chain(
             BuiltinVariable._inplace_binops().items(),
             BuiltinVariable._reversible_binops().items(),
         ):
@@ -361,7 +355,7 @@ class BuiltinVariable(VariableTracker):
             return None
 
         # Return first handler that matches the type checks
-        for ((type1, type2), handler) in handlers[op]:
+        for (type1, type2), handler in handlers[op]:
             if isinstance(a, type1) and isinstance(b, type2):
                 return handler
 
@@ -652,7 +646,6 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
-
                 if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
@@ -689,7 +682,6 @@ class BuiltinVariable(VariableTracker):
             )
             return SymNodeVariable.create(tx, proxy, None)
         else:
-
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max

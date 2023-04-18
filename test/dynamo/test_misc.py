@@ -2294,7 +2294,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertIs(x_ref(), None)
 
     def test_release_module_memory(self):
-
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
         mod_weight_ref = weakref.ref(mod.weight)
@@ -2640,7 +2639,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 self.names = []
 
             def forward(self, idx, targets=None):
-
                 b, t = idx.size()
                 assert (
                     t <= self.block_size
@@ -3763,7 +3761,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_disable_flag(self):
-
         cnt = torch._dynamo.testing.CompileCounter()
 
         with patch.dict(os.environ, {"TORCH_COMPILE_DISABLE": "1"}):
