@@ -669,10 +669,6 @@ aten::copy_
 aten::copy_sparse_to_sparse
 aten::copy_sparse_to_sparse.out
 aten::copy_sparse_to_sparse_
-aten::count_nonzero
-aten::count_nonzero.dim_IntList
-aten::count_nonzero.dim_IntList_out
-aten::count_nonzero.out
 aten::crow_indices
 aten::crow_indices_copy
 aten::crow_indices_copy.out
@@ -696,11 +692,6 @@ aten::cummax
 aten::cummax.out
 aten::cummin
 aten::cummin.out
-aten::cumprod
-aten::cumprod.out
-aten::deg2rad
-aten::deg2rad.out
-aten::deg2rad_
 aten::dense_dim
 aten::dequantize.self
 aten::dequantize.self_out
@@ -967,6 +958,8 @@ aten::nll_loss2d_forward
 aten::nll_loss2d_forward.output
 aten::nonzero
 aten::nonzero.out
+aten::nonzero_static
+aten::nonzero_static.out
 aten::normal_functional
 aten::ones.names
 aten::ones.names_out
@@ -1021,9 +1014,6 @@ aten::quantized_max_pool1d
 aten::quantized_max_pool1d.out
 aten::quantized_max_pool2d
 aten::quantized_max_pool2d.out
-aten::rad2deg
-aten::rad2deg.out
-aten::rad2deg_
 aten::rand
 aten::rand.generator
 aten::rand.generator_with_names

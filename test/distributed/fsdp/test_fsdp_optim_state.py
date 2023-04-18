@@ -358,7 +358,7 @@ class TestFSDPOptimState(FSDPTest):
             # Keep these as arguments for parity with `_init_nested_model()`;
             # these settings are not implemented since the transformer is
             # wrapped with FSDP at the top-level, which means that there is
-            # only a single flattened parameter, making these booleans vacuous
+            # only a single flat parameter, making these booleans vacuous
             raise NotImplementedError()
         if group is None:
             group = dist.distributed_c10d._get_default_group()
@@ -454,7 +454,7 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_osd_param_ids = set(fsdp_osd_state.keys())
             self.assertTrue(
                 ref_osd_param_ids == fsdp_osd_param_ids,
-                (ref_osd_param_ids, fsdp_osd_param_ids),
+                f"Rank {self.rank}: {(ref_osd_param_ids, fsdp_osd_param_ids)}",
             )
             # Check state values are the same
             for param_id, param_state in fsdp_osd_state.items():
@@ -936,6 +936,8 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_kwargs={"use_orig_params": True},
         )
 
+        # Enable this once use_orig_params supports rank0_only=Treu
+        """
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
             state_dict_settings=StateDictSettings(
@@ -950,6 +952,7 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
             fsdp_kwargs={"use_orig_params": True},
         )
+        """
 
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
@@ -1146,8 +1149,8 @@ class TestFSDPOptimState(FSDPTest):
           - If ``add_to_fsdp_module=True``, then the unmanaged parameters are
           added to a module to be wrapped with FSDP, in which case there should
           be an error since we require that all unflattened parameter
-          comprising a flattened parameter have the same scalar state (e.g.
-          Adam "step") but the added parameter is missing its entry.
+          comprising a flat parameter have the same scalar state (e.g. Adam
+          "step") but the added parameter is missing its entry.
           - If ``add_to_fsdp_module=False``, then the unmanaged parameters are
           added to a module not to be wrapped with FSDP, in which case there
           should be no error (emulating model parallel use cases where some
@@ -1199,13 +1202,13 @@ class TestFSDPOptimState(FSDPTest):
         optim = torch.optim.Adam(optim_input, lr=1e-3)
         if add_to_fsdp_module:
             # If we add the unmanaged parameters to a module wrapped with FSDP,
-            # then the flattened parameter will be comprised of some
-            # unflattened parameters with zero-dimensional tensor state (i.e.
-            # Adam "step") and others without (i.e. the unmanaged parameters),
-            # which triggers an error that we have to ensure correctness
+            # then the flat parameter will be comprised of some unflattened
+            # parameters with zero-dimensional tensor state (i.e. Adam "step")
+            # and others without (i.e. the unmanaged parameters), which
+            # triggers an error that we have to ensure correctness
             error_prefix = (
                 "^(All unflattened parameters comprising a "
-                "single flattened parameter must have scalar state with the "
+                "single flat parameter must have scalar state with the "
                 "same value and dtype)"
             )
             with self.assertRaisesRegex(ValueError, error_prefix):
@@ -1806,6 +1809,32 @@ class TestFSDPOptimState(FSDPTest):
 
         # TODO: add local/sharded/full state_dict and CPU offloading and rank0
         # interface test here, https://github.com/pytorch/pytorch/issues/97163
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_none_tensor_state(self):
+        def _run_test(use_orig_params):
+            model = FSDP(TestDummyModel().cuda(), use_orig_params=use_orig_params)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+            def step():
+                loss = model(model.get_input())
+                loss.backward(loss)
+                optim.step()
+
+            step()
+            original_osd = deepcopy(optim.state_dict())
+            for param_id, state in original_osd["state"].items():
+                # Add customized value
+                state["value1"] = 2.74
+                state["value2"] = None
+
+            osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+            osd_to_load = FSDP.optim_state_dict_to_load(model, optim, osd)
+            for param_id, state in osd_to_load["state"].items():
+                self.assertEqual(state["value1"], 2.74)
+                self.assertEqual(state["value2"], None)
+
+        self.run_subtests({"use_orig_params": [False, True]}, _run_test)
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)

@@ -2,23 +2,18 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, List, Optional, Tuple
 
-
 import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
-    get_innermost_proxy_mode,
     fetch_tensor_proxy,
+    get_innermost_proxy_mode,
     get_proxy_slot,
     set_proxy_slot,
     track_tensor_tree,
 )
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import (
-    tree_flatten,
-    tree_map,
-    tree_map_only,
-)
+from torch.utils._pytree import tree_flatten, tree_map, tree_map_only
 
 
 @dataclass
@@ -65,7 +60,7 @@ class CommTensor(torch.Tensor):
 
     In eager mode, it will record whether the inplace collective communication
     has been launched using this Tensor and remember the corresponding work
-    handle. If yes, it will expliclty call wait() in the ``__torch_dispatch__``
+    handle. If yes, it will explicitly call wait() in the ``__torch_dispatch__``
     function before subsequent operations consuming the value of the Tensor.
 
     In tracing mode, ``CommTensor`` inserts two node into the graph using the
@@ -221,9 +216,7 @@ class CommTensor(torch.Tensor):
 
                 # wrap output with the proxy of _CommResult, so that subsequent
                 # ops and link to it.
-                track_tensor_tree(
-                    out, comm_result_proxy, constant=None, tracer=tracer
-                )
+                track_tensor_tree(out, comm_result_proxy, constant=None, tracer=tracer)
 
                 # N.B.: we still need to remember the work handle here, and wait
                 # for it later to make sure the execution during tracing is

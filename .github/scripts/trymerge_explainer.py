@@ -45,7 +45,10 @@ class TryMergeExplainer(object):
         self.ignore_current = ignore_current
 
     def _get_flag_msg(
-        self, ignore_current_checks: Optional[List[Tuple[str, Optional[str]]]] = None
+        self,
+        ignore_current_checks: Optional[
+            List[Tuple[str, Optional[str], Optional[int]]]
+        ] = None,
     ) -> str:
         if self.force:
             return (
@@ -60,7 +63,10 @@ class TryMergeExplainer(object):
             return "Your change will be merged once all checks pass (ETA 0-4 Hours)."
 
     def get_merge_message(
-        self, ignore_current_checks: Optional[List[Tuple[str, Optional[str]]]] = None
+        self,
+        ignore_current_checks: Optional[
+            List[Tuple[str, Optional[str], Optional[int]]]
+        ] = None,
     ) -> str:
         title = "### Merge started"
         main_message = self._get_flag_msg(ignore_current_checks)

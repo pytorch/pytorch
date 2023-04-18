@@ -33,14 +33,16 @@ class TensorCheck {
         device_index_(v.device().index()),
         requires_grad_(state.grad_mode_enabled && v.requires_grad()),
         dynamic_shapes_(dynamic_shapes) {
-    auto ndim = v.ndimension();
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
-    sizes_.reserve(ndim);
-    strides_.reserve(ndim);
-    for (auto i : c10::irange(ndim)) {
-      sizes_.emplace_back(sizes[i]);
-      strides_.emplace_back(strides[i]);
+    dim_ = v.ndimension();
+    if (!dynamic_shapes_) {
+      const auto& sizes = v.sizes();
+      const auto& strides = v.strides();
+      sizes_.reserve(dim_);
+      strides_.reserve(dim_);
+      for (auto i : c10::irange(dim_)) {
+        sizes_.emplace_back(sizes[i]);
+        strides_.emplace_back(strides[i]);
+      }
     }
   }
 
@@ -53,8 +55,8 @@ class TensorCheck {
         requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
       return false;
     }
-    auto ndim = static_cast<size_t>(v.ndimension());
-    if (ndim != sizes_.size()) {
+    auto ndim = v.ndimension();
+    if (ndim != dim_) {
       return false;
     }
     if (!dynamic_shapes_) {
@@ -102,8 +104,8 @@ class TensorCheck {
                   << requires_grad_;
       return fail_reason.str();
     }
-    size_t ndim = static_cast<size_t>(v.ndimension());
-    if (ndim != sizes_.size()) {
+    auto ndim = v.ndimension();
+    if (ndim != dim_) {
       // return fmt::format("tensor rank mismatch. expected {}, actual {}",
       // sizes_.size(), ndim);
       fail_reason << "rank mismatch. expected " << sizes_.size() << ", actual "
@@ -143,8 +145,11 @@ class TensorCheck {
   at::DeviceIndex device_index_;
   bool requires_grad_;
   bool dynamic_shapes_;
+  // NB: These are unset if dynamic shapes is enabled.
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
+  // Not strictly required for dense tensors, but nested tensors need it.
+  int64_t dim_;
 };
 
 typedef std::vector<TensorCheck> ChecksList;

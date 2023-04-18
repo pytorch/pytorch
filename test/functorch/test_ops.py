@@ -788,7 +788,6 @@ class TestOperators(TestCase):
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
-        xfail("put"),  # vmap: inplace into a regular tensor
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('linalg.pinv', 'hermitian', decorator=skipIfRocm),
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
@@ -882,7 +881,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
-        xfail('take'),  # dynamic
         xfail('pca_lowrank', ''),  # randomness
         xfail('svd_lowrank', ''),  # randomness
         xfail('to_sparse', ''),  # non-dense output
@@ -1068,7 +1066,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('nn.functional.huber_loss'),
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
@@ -1168,7 +1165,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.ctc_loss'),
@@ -1370,13 +1366,11 @@ class TestOperators(TestCase):
         xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
-        xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
-        xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
-        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
+        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
@@ -1520,14 +1514,12 @@ class TestOperators(TestCase):
         # running_mean or running_var, which will be updated in place,
         # were not batched.
         xfail('nn.functional.instance_norm'),
-        xfail('nn.functional.logsigmoid'),  # Forward AD not implemented and no decomposition
         # NYI: Tensor.clone(memory_format) inside vmap is only supported with
         # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.multi_margin_loss'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.multilabel_margin_loss'),  # Forward AD not implemented and no decomposition
-        xfail('nn.functional.multilabel_soft_margin_loss'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.pdist'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.rrelu'),  # vmap: we do not yet support aten::rrelu_with_noise.
         xfail('nn.functional.soft_margin_loss'),  # Forward AD not implemented and no decomposition
@@ -2204,6 +2196,37 @@ class TestOperators(TestCase):
                 result = jvpvjpvmap_fn(*new_args)
                 self.assertEqual(result, expected)
 
+    def test_data_write_errors_under_transform(self, device):
+        t = torch.randn(3, 3, device=device)
+
+        def fn(t):
+            t.data = torch.randn(3, 3)
+            return t.sum()
+
+        msg = "mutating directly with `.data` inside functorch transform"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            grad(fn)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vjp(fn, t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            jvp(fn, (t,), (torch.randn_like(t),))
+
+    def test_tensor_with_scalar_list(self, device):
+        x = torch.randn((), device=device)
+
+        def func_list_of_scalar(x):
+            return torch.tensor([x], device=device)
+
+        def func(x):
+            return torch.tensor(x, device=device).view(1)
+
+        actual_o, actual_fn = vjp(func_list_of_scalar, x)
+        expected_o, expected_fn = vjp(func, x)
+
+        self.assertEqual(actual_o, expected_o)
+        self.assertEqual(expected_fn(torch.ones_like(expected_o)), actual_fn(torch.ones_like(actual_o)))
 
 
 only_for = ("cpu", "cuda")
