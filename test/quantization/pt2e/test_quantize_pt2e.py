@@ -173,7 +173,6 @@ class TestQuantizePT2E(QuantizationTestCase):
         m = prepare_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
         m = convert_pt2e(m)
-        print("m:", m)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
@@ -188,6 +187,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             ns.call_function(torch.ops.aten.addmm.default),
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
         ]
+        print("m:", m)
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
@@ -235,6 +235,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             ns.call_function(torch.ops.aten.view.default),
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
         ]
+        print("m:", m)
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )

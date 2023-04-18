@@ -258,8 +258,7 @@ class QNNPackQuantizer(Quantizer):
             # supported op type.
             self._annotate_conv2d_relu(node, global_config)
             self._annotate_conv2d(node, global_config)
-            self._annotate_linear3d(node, global_config)
-            self._annotate_linear2d(node, global_config)
+            self._annotate_linear(node, global_config)
             self._annotate_maxpool2d(node, global_config)
             self._annotate_add_relu(node, global_config)
             self._annotate_add(node, global_config)
@@ -329,6 +328,12 @@ class QNNPackQuantizer(Quantizer):
             "bias_index": 2,
             "_annotated": True,
         }
+
+    def _annotate_linear(
+        self, node: Node, quantization_config: Optional[QuantizationConfig]
+    ) -> None:
+        self._annoate_linear3d(node, quantization_config)
+        self._annoate_linear2d(node, quantization_config)
 
     def _annotate_linear3d(
         self, node: Node, quantization_config: Optional[QuantizationConfig]
