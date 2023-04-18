@@ -1313,6 +1313,7 @@ make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.cumsum, require_dense, warn=False)
+make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1347,11 +1348,9 @@ make_fallback(aten.addmv, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
-make_fallback(aten.count_nonzero)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.cumprod)
-make_fallback(aten.deg2rad)
+make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.diagonal_copy, warn=False)
 make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
@@ -1406,7 +1405,6 @@ make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
-make_fallback(aten.rad2deg)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
 make_fallback(aten.replication_pad1d)
@@ -2913,10 +2911,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -2926,10 +2924,14 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32)))
+                        ops.int_minimum(
+                            ph, ops.sub(phend, ops.constant(1, torch.int32))
+                        )
                     ),
                     ops.indirect_indexing(
-                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32)))
+                        ops.int_minimum(
+                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
+                        )
                     ),
                 ]
 
@@ -3315,18 +3317,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.minimum(
+        hend = ops.int_minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.minimum(
+        wend = ops.int_minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3343,10 +3345,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3364,12 +3366,12 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 )
                             ),
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 )
                             ),
@@ -3563,29 +3565,27 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-def _is_ir_node_and_cuda(x):
-    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
-        return True
-
-    return False
+fallback_pow = fallback_handler(aten.pow)
 
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
-        assert a.get_dtype() in (
-            torch.float16,
-            torch.float32,
-            torch.float64,
-        ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
-    elif isinstance(b, int) and -32 < b < 32:
-        # Optimize away small fixed powers
+
+    # Type promotion ensures all tensor arguments have the same type
+    dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
+    is_integer_pow = is_integer_dtype(dtype)
+
+    # Optimize away small fixed powers, or for integers avoid falling back to ATen
+    embed_exponent = isinstance(b, int) and (
+        -32 < b < 32 or (is_integer_pow and b >= 0)
+    )
+    if embed_exponent:
         loader = a.make_loader()
 
         def fn(idx):
@@ -3603,6 +3603,10 @@ def pow(a, b):
             return full_like(b, 1)
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
+
+    if is_integer_pow:
+        # ops.pow doesn't work for integers
+        return fallback_pow(a, b)
 
     return pow_native(a, b)
 
@@ -3916,28 +3920,28 @@ def _realize(x):
 try:
     import torch.distributed._functional_collectives
 
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
+    @register_lowering(aten.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
-    @register_lowering(c10d_functional.all_reduce)
+    @register_lowering(aten.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.all_gather_into_tensor)
+    @register_lowering(aten.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
+    @register_lowering(aten.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
         return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
         )
 
 except ImportError:
