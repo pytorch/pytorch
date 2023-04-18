@@ -121,7 +121,7 @@ def einop_rule(
             if sum_dim not in pending_sums_counter:
                 seen_shardings[sum_dim] = "+"
             # update pending sum counter for pending sum mesh
-            # dimension with the occurance from each input
+            # dimension with the occurrence from each input
             pending_sums_counter[sum_dim] = pending_sums_counter.get(sum_dim, 0) + 1
 
         for idx, (dim, mesh_dim) in enumerate(zip(input_dim, input_spec.dim_map)):

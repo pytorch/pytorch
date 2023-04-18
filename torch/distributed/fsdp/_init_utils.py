@@ -3,6 +3,7 @@ import warnings
 from typing import (
     Any,
     Callable,
+    Deque,
     Dict,
     Generator,
     Iterable,
@@ -75,11 +76,14 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-
 HYBRID_SHARDING_STRATEGIES = {
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
 }
+NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
+    ShardingStrategy.SHARD_GRAD_OP,
+    ShardingStrategy._HYBRID_SHARD_ZERO2,
+)
 
 
 # NOTE: Since non-self attributes cannot be type annotated, several attributes
@@ -414,8 +418,6 @@ def _init_param_handle_from_module(
             fully_sharded_module,
             check_fn=lambda k: not isinstance(k, module_wrapper_cls),
         )
-    # TODO: Investigate refactoring `_move_module_to_device()` to
-    # `_move_states_to_device()` to avoid the `device_id` + CPU offload hack
     _move_module_to_device(
         fully_sharded_module, state._ignored_params, device_from_device_id
     )
@@ -462,7 +464,7 @@ def _init_param_handles_from_module(
     # reverse topological sort order. This avoids increasing peak GPU memory
     # usage when the unsharded model exists on CPU or meta device.
     # NOTE: This order differs from that followed by the wrapper path when
-    # using auto wrapping, which also represents a valid reverse toplogical
+    # using auto wrapping, which also represents a valid reverse topological
     # sort order, but the difference does not matter.
     materialized_module = False
     for fully_sharded_module, (params, buffers) in reversed(
@@ -501,7 +503,7 @@ def _init_param_handles_from_module(
                 for buffer_name in buffer_names
             ]
         _move_states_to_device(params, buffers, device_from_device_id)
-        if not hasattr(state, "compute_device"):  # only need to set once
+        if state.compute_device is None:  # only need to set once
             state.compute_device = _get_compute_device(
                 fully_sharded_module,
                 state._ignored_params,
@@ -569,7 +571,8 @@ def _get_state_names_for_states(
     param_names: List[str] = []
     buffer_names: List[str] = []
     param_to_param_name = {
-        param: param_name for param_name, param in module.named_parameters()
+        param: param_name
+        for param_name, param in module.named_parameters(remove_duplicate=False)
     }
     buffer_to_buffer_name = {
         buffer: buffer_name for buffer_name, buffer in module.named_buffers()
@@ -800,20 +803,27 @@ def _move_module_to_device(
     if param is None:
         return  # no original parameters to manage
     cpu_device = torch.device("cpu")
+    # TODO: This only checks the parameter's device, not any buffers. Thus, a
+    # buffer-only module will not get offloaded to CPU.
     if device_from_device_id is not None:
         if param.device == cpu_device:
-            # NOTE: This includes moving ignored modules' parameters.
-            module = module.to(device_from_device_id)
-            # TODO: This is a temporary fix to move already-constructed
-            # `FlatParameter`s back to CPU if needed. This is needed to
-            # make CPU offload work with `device_id`.
-            for submodule in module.modules():
-                if (
-                    isinstance(submodule, fsdp_file.FullyShardedDataParallel)
-                    and submodule.cpu_offload.offload_params
-                ):
-                    for handle in submodule._handles:
-                        handle.flat_param_to(torch.device("cpu"))
+            # BFS from `module` without traversing any nested FSDP instances to
+            # collect the parameters/buffers that have not yet been managed
+            queue: Deque[nn.Module] = collections.deque()
+            queue.append(module)
+            params: List[nn.Parameter] = []
+            buffers: List[torch.Tensor] = []
+            while queue:
+                curr_module = queue.popleft()
+                params.extend(curr_module.parameters(recurse=False))
+                buffers.extend(curr_module.buffers(recurse=False))
+                for submodule in curr_module.children():
+                    if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
+                        queue.append(submodule)
+            # NOTE: This includes moving ignored modules' parameters. If we
+            # decide to change the semantics in the future, simply filter based
+            # on the ignored parameters (and buffers).
+            _move_states_to_device(params, buffers, device_from_device_id)
     elif param.device == cpu_device:
         _warn_cpu_init()
 
@@ -824,7 +834,8 @@ def _move_states_to_device(
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
-    Precondition: ``_check_single_device_module()``.
+    Precondition: ``_check_single_device_module()`` and module's parameters and
+    buffers have been materialized if needed.
     """
     if len(params) == 0 and len(buffers) == 0:
         return
@@ -982,7 +993,7 @@ def _check_orig_params_flattened(
     ``fsdp_module``. This should be called as a sanity check after flattening
     the wrapped module's parameters.
     """
-    for param_name, param in fsdp_module.named_parameters():
+    for param_name, param in fsdp_module.named_parameters(remove_duplicate=False):
         if param not in ignored_params and not _is_fsdp_flattened(param):
             raise RuntimeError(
                 f"Found an unflattened parameter: {param_name}; "

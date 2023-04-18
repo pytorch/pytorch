@@ -234,21 +234,25 @@ class TorchVariable(VariableTracker):
                 return ConstantVariable(True, **options)
             else:
                 return ConstantVariable(False, **options)
-        elif (
-            self.value
-            in (
-                torch.is_floating_point,
-                torch.is_complex,
-            )
-            and isinstance(args[0], TensorVariable)
-            and args[0].dtype is not None
+        elif self.value in (
+            torch.is_floating_point,
+            torch.is_complex,
         ):
-            if self.value is torch.is_floating_point:
-                return ConstantVariable(args[0].dtype.is_floating_point, **options)
-            elif self.value is torch.is_complex:
-                return ConstantVariable(args[0].dtype.is_complex, **options)
+            input_arg = None
+            if args:
+                input_arg = args[0]
             else:
-                raise AssertionError()
+                assert "input" in kwargs
+                input_arg = kwargs["input"]
+            if isinstance(input_arg, TensorVariable) and input_arg.dtype is not None:
+                if self.value is torch.is_floating_point:
+                    return ConstantVariable(
+                        input_arg.dtype.is_floating_point, **options
+                    )
+                elif self.value is torch.is_complex:
+                    return ConstantVariable(input_arg.dtype.is_complex, **options)
+                else:
+                    raise AssertionError(f"calling {self.value}")
         elif (
             self.value is torch.numel
             and isinstance(args[0], TensorVariable)
@@ -778,6 +782,7 @@ class TorchHigherOrderOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -823,16 +828,13 @@ class TorchHigherOrderOperator(VariableTracker):
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
-                    # Unused in branches
-                    graphargs=[],
                 )
             )
 
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
-            tx.output.graphargs = []
-            tx.output.name_to_input.clear()
+            tx.output.input_name_to_proxy.clear()
 
             args = []
             # One argument to graph per sub_args
@@ -882,9 +884,12 @@ class TorchHigherOrderOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-
             assert len(args) == 4
-            assert type(args[0]) in (TensorVariable, SymNodeVariable), str(
+            assert type(args[0]) in (
+                TensorVariable,
+                SymNodeVariable,
+                ConstantVariable,
+            ), str(
                 type(args[0])
             )  # predicate
             assert isinstance(

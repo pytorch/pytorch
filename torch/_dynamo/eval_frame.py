@@ -52,10 +52,18 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
+
+
+import sympy
+
+from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 # See https://github.com/python/typing/pull/240
@@ -360,14 +368,16 @@ def first_real_inst_idx(code):
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
-    def catch_errors(frame, cache_size):
+    def catch_errors(frame, cache_size, frame_state):
+        assert frame_state is not None
+
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
-            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -386,10 +396,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         ddp_optimizer.compile_fn,
                         hooks=hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks)
+                    return hijacked_callback(frame, cache_size, hooks, frame_state)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks)
+            return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return catch_errors
@@ -429,8 +439,13 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.platform == "win32":
         raise RuntimeError("Windows not yet supported for torch.compile")
-    if sys.version_info >= (3, 11):
-        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 12):
+        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
+    elif sys.version_info >= (3, 11):
+        warnings.warn(
+            "torch.compile support of Python 3.11 is experimental. "
+            "Program may generate incorrect results or segfault."
+        )
 
 
 def is_dynamo_supported():
@@ -531,7 +546,7 @@ def explain(f, *args, **kwargs):
 
         op_count += len(ops)
         ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason is not None:
+        if gm.compile_subgraph_reason.graph_break:
             break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
@@ -594,9 +609,38 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
-    constraint_range: Optional[
-        torch.fx.experimental.symbolic_shapes.StrictMinMaxConstraint
-    ]
+    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
+    constraint_range: StrictMinMaxConstraint
+
+    def _clone_with_range(self, lower=2, upper=sympy.oo):
+        constraint_range = StrictMinMaxConstraint(
+            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
+            warn_only=False,
+        )
+        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
+
+    def __ge__(self, lower):
+        return self._clone_with_range(lower=lower)
+
+    def __gt__(self, lower):
+        return self._clone_with_range(lower=lower + 1)
+
+    def __le__(self, upper):
+        return self._clone_with_range(upper=upper)
+
+    def __lt__(self, upper):
+        return self._clone_with_range(upper=upper - 1)
+
+    def __bool__(self):
+        # NOTE(avik): We do not support compound expressions like a <= x <= b.
+        # This is because Python implicitly desugars them into bool(a <= x) and bool(x <= b),
+        # and moreover, enforces that any overload of __bool__ must return True or False.
+        # FWIW, sympy also raises TypeError in this case.
+        raise TypeError(
+            "Cannot determine truth value of Constraint. "
+            "If you are trying to combine Constraints with logical connectives, "
+            "you can specify them separately instead."
+        )
 
 
 def export(
@@ -653,6 +697,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
+    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -698,6 +743,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
+        nonlocal example_fake_inputs
+        example_fake_inputs = example_inputs
+
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
@@ -717,7 +765,10 @@ def export(
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
-            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+            hooks=Hooks(
+                guard_export_fn=guard_export_print,
+                guard_fail_fn=None,
+            ),
             export=True,
             export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
@@ -781,12 +832,19 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        fake_tensor_mode = null_context()
+        for val in example_fake_inputs:
+            if isinstance(val, FakeTensor):
+                fake_tensor_mode = val.fake_mode
+                break
+
+        with enable_python_dispatcher(), fake_tensor_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                _allow_non_fake_inputs=True,
+            )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -884,6 +942,10 @@ def export(
 
     new_graph.recompile()
 
+    # TODO remove this once Executorch uses proper functionalization
+    new_graph._example_fake_inputs = example_fake_inputs
+    new_graph._matched_input_elements_positions = matched_input_elements_positions
+
     return (new_graph, out_guards)
 
 
@@ -928,13 +990,24 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None):
-    """Decorator and context manager to disable TorchDynamo"""
-    if fn is not None:
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        return DisableContext()(fn)
-    return DisableContext()
+def disable(fn=None, recursive=True):
+    """
+    Decorator and context manager to disable TorchDynamo
+
+    If recursive=True, Dynamo is completely skipped on the decorated function
+    frame as well as the recursively invoked functions.
+
+    If recursive=False, Dynamo skips frames associated with the function code,
+    but still process recursively invoked frames.
+    """
+    if recursive:
+        if fn is not None:
+            fn = innermost_fn(fn)
+            assert callable(fn)
+            return DisableContext()(fn)
+        return DisableContext()
+    else:
+        return skip(fn)
 
 
 def skip(fn=None):
@@ -978,8 +1051,8 @@ class TorchPatcher:
 
         # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
         if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
-            DistributedDataParallel._inside_ddp_forward = skip(
-                DistributedDataParallel._inside_ddp_forward
+            DistributedDataParallel._inside_ddp_forward = disable(
+                DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
         from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd

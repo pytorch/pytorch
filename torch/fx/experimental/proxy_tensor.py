@@ -20,7 +20,12 @@ import weakref
 import operator
 from torch.utils._stats import count
 
-from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
+from torch.utils._python_dispatch import (
+    TorchDispatchMode,
+    _pop_mode_temporarily,
+    _get_current_dispatch_mode,
+)
+
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
@@ -559,7 +564,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         self.tracer = tracer
         # When false, we don't trace operations.  If you do this, you MUST
         # call track_tensor/track_tensor_tree on all results of the operation
-        # to ensure we can adeduately track the results
+        # to ensure we can adequately track the results
         self.enable_tracing = True
 
     @contextmanager
@@ -693,15 +698,23 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=True,
-                allow_non_fake_inputs=_allow_non_fake_inputs)
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=True,
+                    allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=_allow_non_fake_inputs,
-                shape_env=shape_env)
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                shape_env = ShapeEnv()
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=False,
+                    allow_non_fake_inputs=_allow_non_fake_inputs,
+                    shape_env=shape_env)
+            else:
+                shape_env = fake_tensor_mode.shape_env
+                assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
+
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 

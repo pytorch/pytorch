@@ -30,29 +30,6 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  # We only have the configs that are not already on the same pull job here
-  linux-bionic-cuda11_7-py3_10-gcc7-build:
-    name: linux-bionic-cuda11.7-py3.10-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
-      test-matrix: |
-        { include: [
-          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-bionic-cuda11_7-py3_10-gcc7-test:
-    name: linux-bionic-cuda11.7-py3.10-gcc7
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_7-py3_10-gcc7-build
-    with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-build.outputs.test-matrix }}
-
   linux-bionic-cuda11_8-py3_10-gcc7-build:
     name: linux-bionic-cuda11.8-py3.10-gcc7
     uses: ./.github/workflows/_linux-build.yml
@@ -61,17 +38,9 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_8-py3_10-gcc7-test:
@@ -83,12 +52,12 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.test-matrix }}
 
-  libtorch-linux-bionic-cuda11_7-py3_7-gcc7-build:
-    name: libtorch-linux-bionic-cuda11.7-py3.7-gcc7
+  libtorch-linux-bionic-cuda11_8-py3_7-gcc7-build:
+    name: libtorch-linux-bionic-cuda11.8-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: libtorch-linux-bionic-cuda11.7-py3.7-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      build-environment: libtorch-linux-bionic-cuda11.8-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
       build-generates-artifacts: false
       runner: linux.4xlarge
       test-matrix: |
@@ -97,12 +66,12 @@ jobs:
         ]}
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-bionic-cuda11_7-py3_10-gcc7-no-ops-build:
-    name: linux-bionic-cuda11.7-py3.10-gcc7-no-ops
+  linux-bionic-cuda11_8-py3_10-gcc7-no-ops-build:
+    name: linux-bionic-cuda11.8-py3.10-gcc7-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-no-ops
-      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-no-ops
+      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -118,26 +87,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
-
-  linux-focal-py3_9-clang7-tsan-build:
-    name: linux-focal-py3.9-clang7-tsan
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-focal-py3.9-clang7-tsan
-      docker-image-name: pytorch-linux-focal-py3-clang7-asan
-      test-matrix: |
-        { include: [
-          { config: "tsan", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-
-  linux-focal-py3_9-clang7-tsan-test:
-    name: linux-focal-py3.9-clang7-tsan
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_9-clang7-tsan-build
-    with:
-      build-environment: linux-focal-py3.9-clang7-tsan
-      docker-image: ${{ needs.linux-focal-py3_9-clang7-tsan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_9-clang7-tsan-build.outputs.test-matrix }}
 
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64
@@ -160,7 +109,7 @@ jobs:
       runner-type: macos-m1-12
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
-      python_version: 3.9.12
+      python-version: 3.9.12
       # We need to set the environment file here instead of trying to detect it automatically because
       # MacOS arm64 is cross-compiled from x86-64. Specifically, it means that arm64 conda environment
       # is needed when building PyTorch MacOS arm64 from x86-64
@@ -171,9 +120,6 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-12" },
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-12" },
         ]}
-    secrets:
-      MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
     name: macos-12-py3-arm64-mps
@@ -183,6 +129,8 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-mps-test
       build-environment: macos-12-py3-arm64
+      # Same as the build job
+      python-version: 3.9.12
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -194,11 +142,10 @@ jobs:
     needs: macos-12-py3-arm64-build
     with:
       build-environment: macos-12-py3-arm64
+      # Same as the build job
+      python-version: 3.9.12
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
       arch: arm64
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   win-vs2019-cuda11_7-py3-build:
     name: win-vs2019-cuda11.7-py3
@@ -252,12 +199,3 @@ jobs:
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
-
-  android-emulator-build-test:
-    name: android-emulator-build-test
-    uses: ./.github/workflows/_run_android_tests.yml
-    with:
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
-        ]}

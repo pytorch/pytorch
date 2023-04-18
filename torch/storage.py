@@ -30,6 +30,7 @@ class _StorageBase:
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
+    def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
 
     def size(self) -> int:
@@ -190,10 +191,16 @@ class _StorageBase:
         """Casts this storage to complex float type"""
         return self._to(torch.cfloat)
 
-    def pin_memory(self):
+    def pin_memory(self, device="cuda"):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
+        """For other backends, device need to set.
+           If not set, the default behaviour is CUDA device. Currently, only CUDA is supported.
+        """
+        if device != "cuda":
+            raise TypeError(f"cannot pin memory to {device} device, only CUDA is supported.")
+
         import torch.cuda
         allocator = torch.cuda.memory._host_allocator()  # type: ignore[attr-defined]
         return type(self)(self.size(), allocator=allocator).copy_(self)
@@ -758,10 +765,10 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def pin_memory(self):
+    def pin_memory(self, device="cuda"):
         """Copies the  storage to pinned memory, if it's not already pinned."""
         _warn_typed_storage_removal()
-        return self._new_wrapped_storage(self._untyped_storage.pin_memory())
+        return self._new_wrapped_storage(self._untyped_storage.pin_memory(device=device))
 
     def share_memory_(self):
         """Moves the storage to shared memory.
