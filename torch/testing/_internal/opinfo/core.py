@@ -1195,14 +1195,16 @@ class OpInfo:
         Returns an iterable of ErrorInputs that contain sparse sample
         inputs with a specified layout.
         """
+
         def iterator():
             for error_input in self.error_inputs_sparse_func(self, device, **kwargs):
                 if (
-                        isinstance(error_input.sample_input.input, torch.Tensor)
-                        and error_input.sample_input.input.layout is not layout
+                    isinstance(error_input.sample_input.input, torch.Tensor)
+                    and error_input.sample_input.input.layout is not layout
                 ):
                     continue
                 yield error_input
+
         return iterator()
 
     def supports_sparse_layout(self, layout):
