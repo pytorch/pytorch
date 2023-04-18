@@ -841,6 +841,6 @@ def _detect_is_causal_mask(mask: Optional[Tensor], is_causal: Optional[bool]) ->
 
         # Do not use `torch.equal` so we handle batched masks by
         # broadcasting the comparison.
-        make_causal = (mask == causal_comparison).all()
+        make_causal = bool((mask == causal_comparison).all())
 
     return make_causal
