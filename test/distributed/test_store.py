@@ -6,10 +6,12 @@ import tempfile
 import time
 from datetime import timedelta
 from sys import platform
+from parameterized import parameterized_class
 
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -109,6 +111,15 @@ class StoreTestBase:
 
     def test_compare_set(self):
         self._test_compare_set(self._create_store())
+
+    def _test_wait_single_thread(self, fs):
+        with self.assertRaisesRegex(RuntimeError, "[t -i]imeout"):
+            fs.wait(["bad_key"], timedelta(seconds=0.25))
+        fs.add("good_key", 1)
+        fs.wait(["good_key"])
+
+    def test_wait_single_thread(self):
+        self._test_wait(self._create_store())
 
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
@@ -484,6 +495,29 @@ class RendezvousTCPTest(TestCase):
         end = time.time()
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+
+@parameterized_class([
+    {"store": dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)},
+    {"store": dist.HashStore()},
+    {"store": dist.PrefixStore("prefix", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1))},
+    {"store": create_tcp_store()},
+    {"store": dist.PrefixStore("prefix", create_tcp_store())},
+])
+class MultiThreadedStoreTest(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def test_wait(self):
+        if dist.get_rank() == 0:
+            self.store.wait(["key1"])
+            self.assertEqual(b"value1", self.store.get("key1"))
+        if dist.get_rank() == 1:
+            self.store.set("key1", "value1")
 
 
 if __name__ == "__main__":
