@@ -1674,6 +1674,13 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
+            node2, scheduler.ForeachKernelSchedulerNode
+        ):
+            # If node 1 writes to all of the reads of node 2, then we can fuse,
+            # we are guaranteed at this point that ForeachKernels only process valid lists of buffers.
+            return True
+
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
 
@@ -1997,11 +2004,17 @@ class TritonScheduling:
         if isinstance(foreach_node.node, ir.ListElemBuffer):
             return
 
-        kernel = ForeachKernel(foreach_node.node.get_layouts())
+        if isinstance(foreach_node, scheduler.FusedSchedulerNode):
+            node_schedule = foreach_node.snodes
+        else:
+            node_schedule = [foreach_node.node]
+
+        kernel = ForeachKernel(node_schedule[0].node.get_layouts())
 
         with kernel:
-            foreach_node.mark_run()
-            foreach_node.codegen()
+            for node in node_schedule:
+                node.mark_run()
+                node.codegen()
             src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, [foreach_node])
         # self.scheduler.free_buffers()
