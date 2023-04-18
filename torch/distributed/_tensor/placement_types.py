@@ -67,14 +67,15 @@ class Shard(Placement):
         ]
         # Compute pad size on each chunk
         pad_sizes = [
-            full_chunk_size - chunk_size
-            for idx, chunk_size in enumerate(chunk_sizes)
+            full_chunk_size - chunk_size for idx, chunk_size in enumerate(chunk_sizes)
         ]
 
         # Reuse tensor to fill empty chunk with empty tensor
         num_empty_tensors = num_chunks - len(tensor_list)
         tensor_size = list(tensor_list[0].size())
-        tensor_size = [size if idx != self.dim else 0 for idx,size in enumerate(tensor_size)]
+        tensor_size = [
+            size if idx != self.dim else 0 for idx, size in enumerate(tensor_size)
+        ]
         tensor = tensor.new_zeros(tensor_size)
         for _ in range(num_empty_tensors):
             tensor_list.append(tensor)
@@ -107,7 +108,7 @@ class Shard(Placement):
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
-        tensor =  tensor.narrow(
+        tensor = tensor.narrow(
             self.dim,
             start=0,
             length=tensor.size(self.dim) - pad_size,
@@ -170,7 +171,7 @@ class Shard(Placement):
             # if rank is not part of mesh, we simply return an empty tensor
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
-        scatter_list, _, pad_sizes = self._split_tensor(
+        scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
 
@@ -202,7 +203,7 @@ class Shard(Placement):
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
         pad_idx = 0
         if tensor.size(self.dim) % num_chunks != 0:
-            scattered_list, _, pad_sizes = self._split_tensor(
+            scattered_list, pad_sizes = self._split_tensor(
                 tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
@@ -211,8 +212,8 @@ class Shard(Placement):
             tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
         )
 
-        if pad_idx != 0:
-            pad_size = pad_sizes[my_coordinate[mesh_dim]]
+        pad_size = pad_sizes[my_coordinate[mesh_dim]]
+        if pad_size != 0:
             output = self._unpad_tensor(output, pad_size)
         return output
 
