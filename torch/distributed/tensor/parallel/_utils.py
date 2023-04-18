@@ -147,10 +147,10 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
         -1, device_mesh.mesh.size(tp_mesh_dim)
     )
     for mesh_1d in pg_ranks_by_dim:
-        mesh = DeviceMesh(device_mesh.device_type, mesh_1d, _init_process_groups=False)
+        sub_mesh = DeviceMesh(device_mesh.device_type, mesh_1d, _init_process_groups=False)
         if cur_rank in mesh_1d:
-            result_mesh = mesh
+            res_sub_mesh = sub_mesh
 
     sub_pg = device_mesh.get_dim_groups()[tp_mesh_dim]
-    result_mesh._dim_groups = [sub_pg]
-    return result_mesh
+    res_sub_mesh._dim_groups = [sub_pg]
+    return res_sub_mesh

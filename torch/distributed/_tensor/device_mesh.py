@@ -114,14 +114,18 @@ class DeviceMesh(object):
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
-        # validate that all calling ranks pass in the same `mesh`` argument.
-        mesh_list = [torch.empty_like(self.mesh) for _ in range(get_world_size())]
-        all_gather(mesh_list, self.mesh)
+        # validate that all calling ranks pass in the same `mesh` argument.
+        mesh_list = [
+            torch.empty_like(self.mesh, device=self.device_type)
+            for _ in range(get_world_size())
+        ]
+        self_mesh = self.mesh.to(self.device_type)
+        all_gather(mesh_list, self_mesh)
         for other_rank, other_mesh in enumerate(mesh_list):
-            if not torch.equal(self.mesh, other_mesh):
+            if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
                     f"DeviceMesh.__init__ does not allow different mesh argument:"
-                    f"rank {get_rank()} has mesh {self.mesh} while rank {other_rank}"
+                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
                     f"has mesh {other_mesh}!"
                 )
         if _init_process_groups:
@@ -139,7 +143,6 @@ class DeviceMesh(object):
                 f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
             )
 
-        # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
         # TODO: if user want to pass pg_options, offer a way to do it
         world_backend = get_backend()
         if self.device_type == "cpu":
@@ -498,7 +501,7 @@ class DeviceMesh(object):
                     async_op=async_op,
                 )
 
-        elif self._backend == "nccl":
+        elif self._backend == "nccl" or self._backend == "threaded":
             work = all_to_all(
                 output_tensor_list,
                 input_tensor_list,
