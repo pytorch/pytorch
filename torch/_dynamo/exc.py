@@ -82,6 +82,7 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
+    CONSTRAIN_VIOLATION = auto()
 
 
 class UserError(Unsupported):
@@ -163,7 +164,7 @@ def augment_exc_message(exc, msg="\n"):
             "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    old_msg = "" if len(exc.args) == 0 else exc.args[0]
+    old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]
