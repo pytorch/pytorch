@@ -6,6 +6,8 @@ alexnet,pass,9
 attention_is_all_you_need_pytorch,pass,9
 dcgan,pass,9
 densenet121,pass,9
+doctr_det_predictor,0.0000,0
+doctr_reco_predictor,0.0000,0
 drq,pass,8
 fastNLP_Bert,pass,14
 functorch_dp_cifar10,pass,9
