@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import sys
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -21,6 +22,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
@@ -1085,10 +1087,18 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn:
-        developer_warning(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+    if get_decompositions([kernel]) and warn and IS_CI:
+        # Note: 'warn' is holdover from when this was a warning, but for ops that previously
+        # set warn=False we do not want a CI error.
+        log.error(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
+            " or inductor_decompositions, and delete the corresponding `make_fallback` line."
+            " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself."
         )
+        # Make sure the process exits and CI flags an error, raising
+        # an exception could allow a graph-break and silently pass CI in some configs
+        sys.exit(1)
 
     add_needs_realized_inputs(kernel)
     if layout_constraint is not None:
