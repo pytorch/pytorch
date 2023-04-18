@@ -28,8 +28,8 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
-    _set_fsdp_flattened,
     _named_parameters_with_duplicates,
+    _set_fsdp_flattened,
     HandleTrainingState,
 )
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
@@ -556,7 +556,8 @@ class FlatParamHandle:
                             is_padding_mask.append(True)
                             numels.append(numel_to_pad)
                             total_numel += numel_to_pad
-                    param, extension = _ext_pre_flatten_transform(param)
+                    transform_t, extension = _ext_pre_flatten_transform(param)
+                    param = cast(nn.Parameter, transform_t)
                     param_extensions.append(extension)
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
                     params_to_flatten.append(param)

@@ -98,7 +98,7 @@ class _ExecOrderTracer:
         tracer.call_module = functools.partial(
             self._patched_call_module, orig_call_module, self.exec_info
         )
-        fqn_to_param = dict(root_module.named_params())
+        fqn_to_param = dict(root_module.named_parameters())
         tracer.create_proxy = functools.partial(
             self._patched_create_proxy,
             orig_create_proxy,

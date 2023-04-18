@@ -186,7 +186,9 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
-def _named_parameters_with_duplicates(module: nn.Module, **kwargs: Any) -> List[Tuple[str, nn.Parameter]]:
+def _named_parameters_with_duplicates(
+    module: nn.Module, **kwargs: Any
+) -> List[Tuple[str, nn.Parameter]]:
     """
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
