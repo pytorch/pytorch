@@ -171,7 +171,7 @@ class C10_API Scalar {
   }
 
   bool isSymbolic() const {
-    return Tag::HAS_si == tag || Tag::HAS_sd == tag || Tag::HAS_sb == tag;
+    return Tag::HAS_si == tag || Tag::HAS_sd == tag;
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) noexcept {

@@ -623,7 +623,6 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
-    'c10/cuda/CUDACachingAllocator.cpp',
 ]
 command = [
     'python3',
@@ -658,8 +657,8 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=cudaSetDevice(',
-    '--pattern=cudaGetDevice(',
+    '--pattern=cudaSetDevice',
+    '--pattern=cudaGetDevice',
     '--linter-name=RAWCUDADEVICE',
     '--error-name=raw CUDA API usage',
     """--error-description=\

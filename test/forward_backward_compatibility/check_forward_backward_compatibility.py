@@ -357,12 +357,6 @@ ALLOW_LIST = [
     ("aten::_nested_view_from_buffer_copy.out", datetime.date(2023, 5, 1)),
     ("aten::_nested_view_from_buffer_copy", datetime.date(2023, 5, 1)),
     ("aten::_nested_view_from_buffer", datetime.date(2023, 5, 1)),
-    # These ops were moved to python under the c10d_functional namespace
-    ("aten::wait_tensor", datetime.date(9999, 1, 30)),
-    ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
-    ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
-    ("aten::all_reduce", datetime.date(9999, 1, 30)),
-
 ]
 
 ALLOW_LIST_COMPILED = [

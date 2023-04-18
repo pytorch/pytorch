@@ -2496,25 +2496,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             tracing_mode="real",
         )
 
-    @config.patch(
-        dynamic_shapes=True,
-        capture_dynamic_output_shape_ops=True,
-        capture_scalar_outputs=True,
-        assume_static_by_default=False,
-    )
-    def test_sym_contains(self):
-        def f(x, y):
-            return x.size(0) in y
-
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(2), torch.ones(3), aten_graph=True, tracing_mode="symbolic"
-        )
-
-        true_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(5))
-        false_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(2))
-        self.assertEqual(gm(*true_inp), f(*true_inp))
-        self.assertEqual(gm(*false_inp), f(*false_inp))
-
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
