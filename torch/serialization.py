@@ -332,11 +332,22 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name) -> None:
-        super().__init__(torch._C.PyTorchFileWriter(str(name)))
+        self.buffer = None
+        self.name = str(name)
+        try:
+            self.name.encode('ascii')
+        except UnicodeEncodeError:
+            self.buffer = io.BytesIO()
+            super().__init__(torch._C.PyTorchFileWriter(self.buffer))
+        else:
+            super().__init__(torch._C.PyTorchFileWriter(self.name))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
-
+        if self.buffer is not None:
+            self.buffer.flush()
+            with open(self.name, 'wb') as non_ascii_file:
+                non_ascii_file.write(self.buffer.getbuffer())
 
 class _open_zipfile_writer_buffer(_opener):
     def __init__(self, buffer) -> None:

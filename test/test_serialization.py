@@ -21,8 +21,9 @@ from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, TEST_DILL, \
-    run_tests, download_file, BytesIOContext, TemporaryFileName, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, \
+    TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, \
+    parametrize, instantiate_parametrized_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
@@ -923,6 +924,11 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with TemporaryFileName() as fname:
             test(fname)
+
+        if IS_FILESYSTEM_UTF8_ENCODING:
+            with (TemporaryDirectoryName(suffix='中文路径测试') as dname,
+                  TemporaryFileName(dir=dname) as fname):
+                test(fname)
 
         test(io.BytesIO())
 
