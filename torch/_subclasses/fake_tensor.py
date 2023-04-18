@@ -15,6 +15,7 @@ from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
 )
@@ -428,6 +429,8 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symint()
+    elif is_boolean_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
 
@@ -920,12 +923,6 @@ class FakeTensor(torch.Tensor):
     @staticmethod
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
-
-    # TODO: resolve error in default __repr__
-    def __repr__(self):
-        with in_kernel_invocation_manager(self.fake_mode):
-            self_repr = super().__repr__()
-        return f"FakeTensor({self_repr}, {self.fake_device})"
 
     @classmethod
     @count
