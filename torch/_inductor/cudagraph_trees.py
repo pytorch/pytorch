@@ -294,11 +294,12 @@ def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
     # remove unaligned idxs on initial compilation before unaligned inputs have
     # been copied out
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+    del inputs
 
-    def deferred_cudagraphify(second_inputs):
+    def deferred_cudagraphify(inputs):
         nonlocal fn
         if fn is not None:
-            return fn(second_inputs)
+            return fn(inputs)
 
         fn, out = cudagraphify(model, inputs, static_input_idxs, *args, **kwargs)
         return out
@@ -353,6 +354,11 @@ class StorageWeakRefWrapper:
         inp: Union[Tensor, UntypedStorage],
         extra_ref_check: Optional[Callable[[], None]] = None,
     ):
+        """
+        extra_ref_check is an additional check we need to run to check if the
+        weak ref has expired. in checking storage use count we assume extra_ref_check
+        will hold an additional reference to the storage.
+        """
         if isinstance(inp, Tensor):
             stor = inp.untyped_storage()
         else:
