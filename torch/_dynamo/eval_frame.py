@@ -721,7 +721,10 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
                 (arg, constraint.constraint_dim),
                 {},
             )
-            assert_msg = f"Input #{self.count}'s dimension #{constraint.constraint_dim} size is outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
+            assert_msg = (
+                f"Input #{self.count}'s dimension #{constraint.constraint_dim} size is "
+                f"outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
+            )
 
             if constraint.min_val > 2:
                 ge = self.tracer.create_proxy(
