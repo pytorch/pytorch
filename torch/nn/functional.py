@@ -3766,6 +3766,15 @@ if upsample.__doc__:
     upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
+def is_integer(x) -> bool:
+    r"""Type check the input number is an integer.
+    Will return True for int, SymInt and Tensors with integer elements.
+    """
+    if isinstance(x, (int, torch.SymInt)):
+        return True
+    return isinstance(x, Tensor) and not x.is_floating_point()
+
+
 @_overload  # noqa: F811
 def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
@@ -3897,11 +3906,6 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     "output size in (o1, o2, ...,oK) format."
                 )
             if not torch.jit.is_scripting():
-                def is_integer(x) -> bool:
-                    if isinstance(x, (int, torch.SymInt)):
-                        return True
-                    return isinstance(x, Tensor) and not x.is_floating_point()
-
                 if not all(is_integer(x) for x in size):
                     raise TypeError(
                         "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
