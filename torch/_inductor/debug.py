@@ -16,8 +16,7 @@ from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_co
 import torch
 from torch import fx as fx
 
-from torch._dynamo.debug_utils import save_graph_repro
-from torch._dynamo.repro.after_aot import wrap_compiler_debug
+from torch._dynamo.repro.after_aot import wrap_compiler_debug, save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
