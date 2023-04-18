@@ -237,7 +237,9 @@ def _dtensor_expand(
     with FakeTensorMode(allow_non_fake_inputs=True):
         fake_inps = [torch.empty_like(inp) for inp in inps]
 
-    return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
+    return _convert_to_distributed(
+        gm, fake_inps, schemas, default_mesh=mesh, _allow_partial=False
+    )[0]
 
 
 @contextmanager
@@ -466,8 +468,6 @@ def _compile(
 
     named_states = {}
     if opt is not None:
-        opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
