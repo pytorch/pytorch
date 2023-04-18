@@ -24,6 +24,7 @@ import torch._dynamo
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
+from torch._inductor.codegen.common import _data_type_propagation, OptimizationContext
 from torch._inductor.utils import run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -54,7 +55,6 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from functorch.compile import config as functorch_config
 from torch._inductor import config, test_operators
 
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
@@ -88,49 +88,6 @@ def has_bf16_support():
     with open("/proc/cpuinfo", encoding="ascii") as f:
         lines = f.read()
     return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
-
-
-unary_list = [
-    torch.nn.ReLU(),
-    torch.nn.Sigmoid(),
-    torch.nn.Tanh(),
-    torch.nn.Hardswish(),
-    torch.nn.LeakyReLU(0.1, inplace=False),
-    torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
-    torch.nn.GELU(approximate="none"),
-    torch.nn.GELU(approximate="tanh"),
-    torch.nn.ReLU6(),
-    torch.nn.SiLU(),
-    torch.nn.Hardsigmoid(),
-    lambda x: F.relu(x),
-    lambda x: F.sigmoid(x),
-    lambda x: F.tanh(x),
-    lambda x: F.hardswish(x),
-    lambda x: F.leaky_relu(x, 0.1),
-    lambda x: F.hardtanh(x, min_val=-0.5, max_val=4),
-    lambda x: F.gelu(x, approximate="none"),
-    lambda x: F.gelu(x, approximate="tanh"),
-    lambda x: F.relu6(x),
-    lambda x: F.silu(x),
-    lambda x: F.hardsigmoid(x),
-    lambda x: torch.relu(x),
-    lambda x: torch.sigmoid(x),
-    lambda x: torch.tanh(x),
-    lambda x: x.relu(),
-    lambda x: x.sigmoid(),
-    lambda x: x.tanh(),
-]
-
-
-binary_list = [
-    lambda x, y: torch.add(x, y),  # call_function
-    lambda x, y: torch.add(y, x),  # call_function
-    lambda x, y: x.add(y),  # call_method
-    lambda x, y: x.add_(y),  # call_method
-    lambda x, y: torch.sub(x, y),  # call_function
-    lambda x, y: x.sub(y),  # call_method
-    lambda x, y: x.sub_(y),  # call_method
-]
 
 
 class TestCase(TorchTestCase):
@@ -229,12 +186,16 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x):
+def clone_preserve_strides(x, device=None):
     if not isinstance(x, torch.Tensor):
         return x
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    ).clone()
+    )
+    if not device:
+        buffer = buffer.clone()
+    else:
+        buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
@@ -390,16 +351,32 @@ def check_model(
             g /= g.norm()
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
-        actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
-
-        self.assertEqual(
-            actual_grad,
-            correct_grad,
-            atol=atol,
-            rtol=rtol,
-            equal_nan=True,
-            exact_dtype=exact_dtype,
-        )
+        flat_grads, _ = tree_flatten(correct_grad)
+        all_none_grads = all([x is None for x in flat_grads])
+        if all_none_grads:
+            # See Note [Detaching inputs that never need gradients]
+            # There are a handful of ops that can return None gradients, into of zero gradients.
+            # If all inputs to an AOTAutograd graph are supposed to get None gradients,
+            # AOTAutograd will end up forcing all of the outputs of the forward to not require grad.
+            # There's no easy fix to this (see the note above), although one option is to
+            # force any derivative formulas in core to return tensors of zeros instead of None.
+            flat_results, _ = tree_flatten(actual)
+            results_that_require_grad = [
+                x
+                for x in flat_results
+                if isinstance(x, torch.Tensor) and x.requires_grad
+            ]
+            self.assertEqual(len(results_that_require_grad), 0)
+        else:
+            actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+            self.assertEqual(
+                actual_grad,
+                correct_grad,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=exact_dtype,
+            )
 
     torch._dynamo.reset()
 
@@ -425,16 +402,10 @@ def check_model_cuda(
     if hasattr(model, "to"):
         model = model.to("cuda")
 
-    def copy_fn(x):
-        # preserve strides of the input on the device
-        if not isinstance(x, torch.Tensor):
-            return x
-        return torch.empty_strided(
-            x.size(), x.stride(), device="cuda", dtype=x.dtype
-        ).copy_(x)
-
     if copy_to_cuda:
-        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+        example_inputs = tuple(
+            clone_preserve_strides(x, device="cuda") for x in example_inputs
+        )
 
     check_model(
         self,
@@ -1528,6 +1499,13 @@ class CommonTemplate:
             ),
         )
 
+    # https://github.com/pytorch/pytorch/issues/98979
+    @unittest.skipIf(HAS_CUDA, "cuda failed for float64 linear")
+    def test_linear_float64(self):
+        mod = torch.nn.Sequential(torch.nn.Linear(8, 16).to(torch.float64)).eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(2, 8).to(torch.float64),))
+
     def test_linear1(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(8, 16),
@@ -1850,180 +1828,6 @@ class CommonTemplate:
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
-    @slowTest
-    def test_conv2d_unary(self):
-        # For gpu path, there is an accuracy issue
-        # see https://github.com/pytorch/pytorch/issues/87745
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv2d unary test")
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_channels,
-                out_channels,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.conv(x)
-                return self.unary_fn(x)
-
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
-        options = itertools.product(
-            unary_list,
-            [True, False],
-            [1, 3],
-            [1, 2],
-            [1, 4],
-            ["same", 0],
-            test_memory_format,
-            [True, False],
-        )
-
-        for (
-            unary_fn,
-            bias,
-            kernel_size,
-            dilation,
-            groups,
-            padding,
-            memory_format,
-            mode_train,
-        ) in options:
-            oC = 32 * groups
-            iC = 3 * groups
-            x_shape = (1, iC, 112, 112)
-            mod = M(
-                unary_fn,
-                iC,
-                oC,
-                kernel_size=kernel_size,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
-                bias=bias,
-            ).train(mode=mode_train)
-
-            # TODO: add bf16 test for cpu path?
-            # TODO: this test fails when requires_grad=False
-            v = (
-                torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
-                .add(1)
-                .to(memory_format=memory_format)
-            )
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    @slowTest
-    def test_conv2d_binary(self):
-        # For gpu path, there is an accuracy issue
-        # see https://github.com/pytorch/pytorch/issues/87745
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv2d binary test")
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                binary_fn,
-                unary_fn,
-                in_channels,
-                out_channels,
-                dilation,
-                groups,
-                padding,
-                bias,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    dilation=dilation,
-                    groups=groups,
-                    padding=padding,
-                    bias=bias,
-                    **kwargs,
-                )
-                self.conv2 = torch.nn.Sequential(
-                    torch.nn.Conv2d(
-                        in_channels,
-                        out_channels,
-                        dilation=dilation,
-                        groups=groups,
-                        padding=padding,
-                        bias=bias,
-                        **kwargs,
-                    )
-                )
-                self.binary_fn = binary_fn
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x1 = self.conv1(x)
-                x2 = self.conv2(x)
-                return self.unary_fn(self.binary_fn(x1, x2))
-
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
-        options = itertools.product(
-            binary_list,
-            unary_list[:2],
-            [True, False],
-            [1, 3],
-            [1, 2],
-            [1, 4],
-            ["same", 0],
-            test_memory_format,
-            [True, False],
-        )
-
-        for (
-            binary_fn,
-            unary_fn,
-            bias,
-            kernel_size,
-            dilation,
-            groups,
-            padding,
-            memory_format,
-            mode_train,
-        ) in options:
-            oC = 32 * groups
-            iC = 3 * groups
-            x_shape = (1, iC, 112, 112)
-            mod = M(
-                binary_fn,
-                unary_fn,
-                iC,
-                oC,
-                dilation,
-                groups,
-                padding,
-                bias,
-                kernel_size=kernel_size,
-            ).train(mode=mode_train)
-            mod = mod.to(memory_format=memory_format)
-            # TODO: add bf16 test
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
-            )
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
     def test_linear_packed(self):
         options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
         for input_shape, bias in options:
@@ -2076,72 +1880,6 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
-    @slowTest
-    @unittest.skipIf(not has_bf16_support(), "requires bf16 support")
-    def test_linear_unary(self):
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_features,
-                out_features,
-                bias,
-                **kwargs,
-            ):
-                super().__init__()
-                self.linear = torch.nn.Linear(
-                    in_features,
-                    out_features,
-                    bias,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.linear(x)
-                return self.unary_fn(x)
-
-        options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
-        dtype = torch.bfloat16
-        for eltwise_fn, input_shape, bias in options:
-            mod = M(eltwise_fn, input_shape[-1], 30, bias=bias).eval()
-            # only fuse for linear when the dtype is bf16
-            mod = mod.to(dtype)
-            v = torch.randn(input_shape).to(dtype)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    def test_linear_binary(self):
-        class M(torch.nn.Module):
-            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
-                super().__init__()
-                self.linear = torch.nn.Linear(
-                    in_channels, out_channels, bias=bias, **kwargs
-                )
-                self.eltwise = eltwise_fn
-
-            def forward(self, x, y):
-                x = self.linear(x)
-                x = self.eltwise(x, y)
-                return x
-
-        options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
-        dtype = torch.bfloat16
-        out_feature = 30
-        if has_bf16_support():
-            for binary_ops, input_shape, bias in options:
-                mod = M(binary_ops, input_shape[-1], out_feature, bias).eval()
-
-                # only fuse for linear when the dtype is bf16
-                mod = mod.to(dtype)
-                v = torch.randn(input_shape).to(dtype)
-                other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-                with torch.no_grad():
-                    self.common(mod, (v, other), atol=2e-3, rtol=0.016)
-
     def test_conv_transpose2d_packed(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d packed test")
@@ -2154,74 +1892,6 @@ class CommonTemplate:
                 mod,
                 (v,),
             )
-
-    @slowTest
-    def test_conv_transpose2d_unary(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
-
-        class M(torch.nn.Module):
-            def __init__(
-                self,
-                unary_fn,
-                in_channels,
-                out_channels,
-                **kwargs,
-            ):
-                super().__init__()
-                self.conv_transpose2d = torch.nn.ConvTranspose2d(
-                    in_channels,
-                    out_channels,
-                    **kwargs,
-                )
-                self.unary_fn = unary_fn
-
-            def forward(self, x):
-                x = self.conv_transpose2d(x)
-                return self.unary_fn(x)
-
-        test_memory_format = [torch.contiguous_format, torch.channels_last]
-        options = itertools.product(
-            unary_list,
-            [True, False],
-            [1, 3],
-            [1, 2],
-            [1, 4],
-            [0, 1],
-            test_memory_format,
-        )
-
-        for (
-            unary_fn,
-            bias,
-            kernel_size,
-            dilation,
-            groups,
-            padding,
-            memory_format,
-        ) in options:
-            oC = 32 * groups
-            iC = 3 * groups
-            x_shape = (1, iC, 28, 28)
-            mod = M(
-                unary_fn,
-                iC,
-                oC,
-                kernel_size=kernel_size,
-                padding=padding,
-                dilation=dilation,
-                groups=groups,
-                bias=bias,
-            ).eval()
-
-            v = torch.randn(x_shape, dtype=torch.float32).to(
-                memory_format=memory_format
-            )
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
 
     def test_view_detach(self):
         def fn(a):
@@ -3231,6 +2901,23 @@ class CommonTemplate:
         input = torch.rand(())
         self.assertTrue(same(opt(input), fn(input)))
 
+    def test_pow_int(self):
+        def fn(x, y):
+            return torch.pow(x, 0x57), torch.pow(x, y)
+
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            intmax = torch.iinfo(dtype).max
+            make_arg = functools.partial(
+                make_tensor, dtype=dtype, device="cpu", requires_grad=False
+            )
+            self.common(
+                fn,
+                (
+                    make_arg(16, 16),
+                    make_arg(16, 16, high=intmax),
+                ),
+            )
+
     def test_glu(self):
         def fn(x):
             return aten.glu(x, -1), aten.glu(x, 1), aten.glu(x, 2)
@@ -4103,7 +3790,6 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     @config.patch({"triton.cudagraphs": True})
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -4126,7 +3812,6 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -4145,7 +3830,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -4180,7 +3864,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -4193,7 +3876,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -6006,6 +5688,132 @@ class CommonTemplate:
                 ]
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(x), opt_fn(x))
+
+    def test_pad_view(self):
+        def fn(a):
+            y = torch.nn.functional.pad(a, (0, 0, 0, 1))
+            y = y.view(*y.size()[:-2], y.size(-1), y.size(-2))
+            return y
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
+
+    def test_data_type_propogation(self):
+        _graph: torch.fx.Graph = torch.fx.Graph()
+        ops: torch.fx.Node = _graph.create_node("placeholder", "ops")
+        get_index: torch.fx.Node = _graph.create_node(
+            "call_module", "get_index", args=("index0",)
+        )
+        c1: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "constant",
+            args=(
+                ops,
+                get_index,
+                torch.bfloat16,
+            ),
+        )
+        c2: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "constant",
+            args=(
+                ops,
+                get_index,
+                torch.float,
+            ),
+        )
+        add: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "add",
+            args=(
+                ops,
+                c1,
+                c2,
+            ),
+        )
+        eq: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "eq",
+            args=(
+                ops,
+                add,
+                add,
+            ),
+        )
+        argmin: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "reduction",
+            args=(
+                ops,
+                "buf",
+                torch.float,
+                torch.int64,
+                "argmin",
+                get_index,
+                add,
+            ),
+        )
+        any: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "reduction",
+            args=(
+                ops,
+                "buf",
+                torch.float,
+                torch.bool,
+                "any",
+                get_index,
+                add,
+            ),
+        )
+        bitwise_not: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "bitwise_not",
+            args=(
+                ops,
+                argmin,
+            ),
+        )
+        bitwise_or: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "bitwise_or",
+            args=(
+                ops,
+                eq,
+                any,
+            ),
+        )
+        bitwise_left_shift: torch.fx.Node = _graph.create_node(
+            "call_method",
+            "bitwise_left_shift",
+            args=(
+                ops,
+                argmin,
+                bitwise_not,
+            ),
+        )
+        _data_type_propagation(_graph)
+
+        def get_data_type(node: torch.fx.Node):
+            if OptimizationContext.key in node.meta:
+                return node.meta[OptimizationContext.key].dtype
+            else:
+                return None
+
+        self.assertEqual(get_data_type(ops), None)
+        self.assertEqual(get_data_type(c1), torch.bfloat16)
+        self.assertEqual(get_data_type(c2), torch.float)
+        self.assertEqual(get_data_type(add), torch.float)
+        self.assertEqual(get_data_type(eq), torch.bool)
+        self.assertEqual(get_data_type(argmin), torch.int64)
+        self.assertEqual(get_data_type(any), torch.bool)
+        self.assertEqual(get_data_type(bitwise_not), torch.int64)
+        self.assertEqual(get_data_type(bitwise_or), torch.bool)
+        self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
 
 
 @dataclasses.dataclass
