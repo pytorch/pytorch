@@ -1444,12 +1444,25 @@ class TritonKernel(Kernel):
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
+
+        This code stomps on the passed-in values by writing an constant to the top of the kernel.
+
+        In a kernel like:
+        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, RBLOCK : tl.constexpr):
+
+        We would add
+        xnumel = 4096
+        rnumel = 768
+
+        After the signature, before the kernel code, if we decided to make these static. As its hardcoded, it becomes 
+        a better signal to triton on how to unroll and do some static indexing. So, it's not so much that downstream 
+        knows that its a static numel, as that you just plop a constant into the kernel.
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
                 postfix = "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if isinstance(simplified_tree_numel, sympy.Integer):
+                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     code.writeline(
                         f"{tree.prefix}numel = {int(simplified_tree_numel)} {postfix}"
                     )
@@ -1457,7 +1470,7 @@ class TritonKernel(Kernel):
             if tree.prefix == "r" and self.persistent_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if dynamo_config.dynamic_shapes:
-                    if isinstance(simplified_tree_numel, sympy.Integer):
+                    if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                         val = int(simplified_tree_numel)
                     else:
                         continue
