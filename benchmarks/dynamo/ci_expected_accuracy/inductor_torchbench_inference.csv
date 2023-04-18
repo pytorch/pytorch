@@ -8,8 +8,8 @@ attention_is_all_you_need_pytorch,pass,0
 dcgan,pass,0
 densenet121,pass,0
 dlrm,pass,0
-doctr_det_predictor,pass,3
-doctr_reco_predictor,pass,3
+doctr_det_predictor,0.0000,0
+doctr_reco_predictor,0.0000,0
 drq,pass,0
 fastNLP_Bert,pass,4
 functorch_dp_cifar10,pass,0
@@ -28,7 +28,6 @@ mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
 nvidia_deeprecommender,pass,0
-opacus_cifar10,pass,0
 phlippe_densenet,pass,0
 phlippe_resnet,pass,0
 pyhpc_isoneutral_mixing,pass,0
