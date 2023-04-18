@@ -1,10 +1,10 @@
 import functools
 import itertools
 import logging
+import sys
 from typing import Callable, Dict, List, Union
 
 import sympy
-import sys
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -226,6 +226,9 @@ class SizeVarAllocator:
         return left
 
     def should_optimize_equals(self, left: Expr, right: Expr) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left and right are equal.
+        """
         if left == right:
             return True
         if is_expr_static(left) and is_expr_static(right):
@@ -233,6 +236,9 @@ class SizeVarAllocator:
         return False
 
     def should_optimize_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
+        """
         if len(left) != len(right):
             return False
         if all(self.should_optimize_equals(l, r) for l, r in zip(left, right)):
@@ -240,6 +246,9 @@ class SizeVarAllocator:
         return False
 
     def should_optimize_leq(self, left: Expr, right: Expr) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
+        """
         if is_expr_static(left) and is_expr_static(right):
             return int(left) <= int(right)
         if is_expr_static(right) and right == sys.maxsize:
@@ -247,6 +256,9 @@ class SizeVarAllocator:
         return False
 
     def should_optimize_lt(self, left: Expr, right: Expr) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left is less than right.
+        """
         if is_expr_static(left) and is_expr_static(right):
             return int(left) < int(right)
         if is_expr_static(right) and right == sys.maxsize:
@@ -281,6 +293,9 @@ class SizeVarAllocator:
         return -self.guard_min(-left, -right)
 
     def should_optimize_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+        """
+        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
+        """
         if sympy.gcd(numerator, denominator) == denominator:
             # can prove it symbolically
             return True
