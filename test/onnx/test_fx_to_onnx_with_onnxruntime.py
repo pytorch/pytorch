@@ -141,27 +141,33 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     test_suite: TestFxToOnnxWithOnnxRuntime,
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
+    input_kwargs: Mapping[str, _InputArgsType] = {},
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
     has_mutation: bool = False,
-    additional_test_inputs: Optional[Sequence[Sequence[_InputArgsType]]] = None,
-    **input_kwargs,
+    additional_test_inputs: Optional[
+        List[
+            List[
+                Union[Sequence[_InputArgsType], Optional[Mapping[str, _InputArgsType]]]
+            ]
+        ]
+    ] = None,
 ):
     """Compare the results of PyTorch model with exported ONNX model
 
     Args:
         model (_ModelType): PyTorch model
-        input_args (_InputArgsType): torch input arguments
+        input_args (Sequence[_InputArgsType]): torch input arguments
+        input_kwargs (Mapping[str, _InputArgsType]): torch input kwargs
         rtol (float, optional): relative tolerance. Defaults to 1e-3.
         atol (float, optional): absolute tolerance. Defaults to 1e-7.
         opset_version (int, optional): ONNX opset version. Defaults to 18.
         has_mutation (bool, optional): Whether the model mutates its input or state.
             `mutation` as `True` incurs extra overhead of cloning the inputs and model.
             Defaults to False.
-        additional_test_inputs (Optional[Sequence[_InputArgsType]], optional):
-            Test the models with another dataset, which is designed for dynamic axes
-            testing. Defaults to None.
+        additional_test_inputs: Test the models with another dataset input, which
+            is designed for dynamic axes testing. Defaults to None.
 
     """
 
@@ -198,14 +204,22 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     )
     # This confirms the exported mode accepts different input shapes
     # when dynamic shape is enabled.
-    # TODO(titaiwangms): additional input kwargs.
     if additional_test_inputs and test_suite.dynamic_shapes:
-        for additional_input_args in additional_test_inputs:
+        for another_input in additional_test_inputs:
+            if len(another_input) == 2:
+                additional_input_args, additional_input_kwargs = another_input
+            elif len(another_input) == 1:
+                additional_input_args = another_input[0]
+                additional_input_kwargs = {}
+            else:
+                raise ValueError(
+                    f"test_inputs should only have tuple args and dictionary kwargs. But receives: {len(another_input)}"
+                )
             _compare_pytorch_onnx_with_ort(
                 export_output,
                 model,
                 additional_input_args,
-                {},
+                additional_input_kwargs,
                 atol,
                 rtol,
                 has_mutation=has_mutation,
@@ -317,7 +331,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             z = y.relu()
             return (y, z)
 
-        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+        tensor_x = torch.randn(1, 2, 3, dtype=torch.float32)
+        another_x = torch.randn(2, 4, 3, dtype=torch.float32)
 
         # Test without providing optional kwarg.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
@@ -327,7 +342,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         # Test while specifying optional kwarg.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, func, (tensor_x,), b=torch.tensor(5.0)
+            self, func, (tensor_x,), {"b": torch.tensor(5.0)}
         )
 
     # beartype.roar.BeartypeCallHintParamViolation:
@@ -485,7 +500,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             model,
             (dummy_input,),
-            additional_test_inputs=[(dummy_input,), (test_inputs,)],
+            additional_test_inputs=[[(test_inputs,)]],
             rtol=1e-3,
             atol=1e-5,
         )
@@ -506,7 +521,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         another_y = torch.randn(3, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, DynamicAdd(), (x, y), additional_test_inputs=[(another_x, another_y)]
+            self,
+            DynamicAdd(),
+            (x, y),
+            additional_test_inputs=[[(another_x, another_y)]],
         )
 
     @pytorch_test_common.skip_min_ort_version(
@@ -532,7 +550,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(1, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
+            self, DynamicAdd(), (x, y), additional_test_inputs=[[(input_x, input_y)]]
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
@@ -556,7 +574,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_y = torch.randn(2, 4, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
+            self, DynamicMatMul(), (x, y), additional_test_inputs=[[(input_x, input_y)]]
         )
 
     @pytorch_test_common.xfail(
@@ -575,7 +593,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             test(),
             (x,),
-            additional_test_inputs=[(y,)],
+            additional_test_inputs=[[(y,)]],
         )
 
     def test_transpose_infer_shape(self):
@@ -594,7 +612,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             TransposeModule(),
             (x,),
-            additional_test_inputs=[(y,)],
+            additional_test_inputs=[[(y,)]],
         )
 
     @pytorch_test_common.xfail("torch._dynamo.exc.TorchRuntimeError")
@@ -608,10 +626,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         d3 = torch.tensor([3])
         d4 = torch.tensor([4])
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, Squeeze(), (d1, d4), additional_test_inputs=[(d3, d4)]
+            self, Squeeze(), (d1, d4), additional_test_inputs=[[(d3, d4)]]
         )
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
+            self, Squeeze(), (d3, d4), additional_test_inputs=[[(d1, d3)]]
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
@@ -633,7 +651,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             DynamicSliceExportMod(),
             (x,),
-            additional_test_inputs=[(y,)],
+            additional_test_inputs=[[(y,)]],
         )
 
     # TODO(titaiwang): This is also detected flaky in static shape:
@@ -669,7 +687,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             ArangeModel(),
             (x,),
-            additional_test_inputs=[(y,)],
+            additional_test_inputs=[[(y,)]],
         )
 
     @pytorch_test_common.xfail(
@@ -688,7 +706,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             Model(),
             (x,),
-            additional_test_inputs=[(x2,)],
+            additional_test_inputs=[[(x2,)]],
         )
 
     @pytorch_test_common.xfail(
@@ -706,7 +724,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             Model(),
             (x,),
-            additional_test_inputs=[(x2,)],
+            additional_test_inputs=[[(x2,)]],
         )
 
     @pytorch_test_common.skip_min_ort_version(
@@ -729,7 +747,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             Model(),
             (x,),
-            additional_test_inputs=[(x2,)],
+            additional_test_inputs=[[(x2,)]],
         )
 
     @pytorch_test_common.skip_min_ort_version(
@@ -749,7 +767,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self,
             ViewModel(),
             (x,),
-            additional_test_inputs=[(another_x,)],
+            additional_test_inputs=[[(another_x,)]],
         )
 
     @pytorch_test_common.skip_min_ort_version(
@@ -770,7 +788,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(5, 5, 4, 5)
         model = MyModule()
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, model, (x,), additional_test_inputs=[(y,)]
+            self, model, (x,), additional_test_inputs=[[(y,)]]
         )
 
     @pytorch_test_common.skip_min_ort_version(
@@ -804,8 +822,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         # Transform input tokens
         inputs = tokenizer("Hello world!", return_tensors="pt")
+        another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
 
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, model, [], **inputs)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self, model, [], inputs, additional_test_inputs=[[(), another_inputs]]
+        )
 
     @_beartype.beartype
     def _test_large_scale_exporter(
