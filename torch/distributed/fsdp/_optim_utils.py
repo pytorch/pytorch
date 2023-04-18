@@ -960,11 +960,8 @@ def _rekey_sharded_optim_state_dict(
     """
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
-    param_to_param_key: Dict[nn.Parameter, Union[int, str]] = cast(
-        Dict[nn.Parameter, Union[int, str]],
-         _get_param_to_param_key(
-            optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
-        )
+    param_to_param_key: Dict[nn.Parameter, Union[int, str]] = _get_param_to_param_key(
+        optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
     )
     # All parameter keys in `param_to_param_key` should be in
     # `param_to_fqns` -- strict inequality follows when not all parameters are
@@ -1308,11 +1305,8 @@ def _optim_state_dict(
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
     is_named_optimizer = _is_named_optimizer(optim_state_dict)
 
-    param_key_to_param = cast(
-        Dict[Union[int, str], nn.Parameter],
-        _get_param_key_to_param(
-            optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
-        )
+    param_key_to_param = _get_param_key_to_param(
+        optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
     )
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
 

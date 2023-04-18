@@ -553,7 +553,9 @@ class TestFSDPOptimState(FSDPTest):
         losses1 = self._step_model(model1, optim1, num_iters=NUM_ITERS)
         if state_dict_type == StateDictType.FULL_STATE_DICT:
             fsdp_osd = FSDP.full_optim_state_dict(
-                model1, optim1, rank0_only=rank0_only,
+                model1,
+                optim1,
+                rank0_only=rank0_only,
             )
         else:
             fsdp_osd = FSDP.sharded_optim_state_dict(model1, optim1)
@@ -1069,9 +1071,7 @@ class TestFSDPOptimState(FSDPTest):
         self._step_model(model, optim, num_iters=NUM_ITERS)
 
         if state_dict_type == StateDictType.FULL_STATE_DICT:
-            fsdp_osd = FSDP.full_optim_state_dict(
-                model, optim, rank0_only=False
-            )
+            fsdp_osd = FSDP.full_optim_state_dict(model, optim, rank0_only=False)
         else:
             fsdp_osd = FSDP.sharded_optim_state_dict(model, optim)
         # Create a new model with the same structure but additional unmanaged
@@ -1200,9 +1200,7 @@ class TestFSDPOptimState(FSDPTest):
         output of :meth:`full_optim_state_dict`, hence be sharded using
         :meth:`shard_full_optim_state_dict`, and finally match the per-rank
         optimizer state dict of a wrapped model (i.e. with FSDP modules)."""
-        self._test_rekey_optim_state_dict_to_names(
-            use_multiple_param_groups=False
-        )
+        self._test_rekey_optim_state_dict_to_names(use_multiple_param_groups=False)
 
     def _test_rekey_optim_state_dict_to_names(
         self,
@@ -1376,7 +1374,9 @@ class TestFSDPOptimState(FSDPTest):
         # Check that save and load does not error
         if state_dict_type == StateDictType.FULL_STATE_DICT:
             fsdp_osd = FSDP.full_optim_state_dict(fsdp_model, optim, rank0_only=False)
-            flattened_osd = FSDP.shard_full_optim_state_dict(fsdp_osd, fsdp_model, optim)
+            flattened_osd = FSDP.shard_full_optim_state_dict(
+                fsdp_osd, fsdp_model, optim
+            )
         elif state_dict_type == StateDictType.SHARDED_STATE_DICT:
             fsdp_osd = FSDP.sharded_optim_state_dict(fsdp_model, optim)
             flattened_osd = FSDP.flatten_sharded_optim_state_dict(
