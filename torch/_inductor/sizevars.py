@@ -1,9 +1,10 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Union
 
 import sympy
+import sys
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -14,28 +15,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-# Note [maybe_guard vs guard]
-#
-# maybe_guard should only be used in situations where we would generate
-# correct code even if the guard always returned False; in other words,
-# it should be used to guard optional optimizations which could be applied,
-# but only if we can statically determine that the condition we're guarding on
-# is true.  NB: this means that
-#
-#   maybe_guard_leq(lhs, rhs)
-#
-# and
-#
-#   not maybe_guard_lt(rhs, lhs)
-#
-# are not equivalent!
-#
-# maybe_guard is useful in two situations: (1) we have an optional
-# optimization that may be valid if some condition holds, but we do not know
-# for certain if the condition holds,  and (2) with dynamic shapes, we may
-# decide we don't want to do the optimization if it would require a guard on a
-# dynamic shape, because guarding on it would force us to generate multiple
-# kernels as this size varies.
+# Util for readability, could just replace w/ isinstance
+def is_expr_static(expr: Union[Expr, int]) -> bool:
+    return isinstance(expr, (int, sympy.Integer))
 
 
 class SizeVarAllocator:
@@ -121,7 +103,7 @@ class SizeVarAllocator:
                     if m and v not in m[rest].free_symbols:
                         gcd = sympy.gcd(m[rest], divisor)
                         if gcd == divisor:
-                            if self.maybe_guard_leq(var_ranges[v], divisor):
+                            if self.should_optimize_leq(var_ranges[v], divisor):
                                 base = m[rest]
             return base
 
@@ -138,14 +120,14 @@ class SizeVarAllocator:
                 # actual iteration range is to size-1
                 iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
                 base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.maybe_guard_lt(base_lowest, 0):
+                if self.should_optimize_lt(base_lowest, 0):
                     # can't replace with indexing div if base can be negative
                     return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
                 base_s = base
-            if self.maybe_guard_lt(base_s, modulus * divisor):
+            if self.should_optimize_lt(base_s, modulus * divisor):
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -243,46 +225,33 @@ class SizeVarAllocator:
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
-    # See Note [maybe_guard vs guard]
-    def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
-        """if left==right, guard on that fact and return true"""
+    def should_optimize_equals(self, left: Expr, right: Expr) -> bool:
         if left == right:
             return True
-        if self.size_hint(left - right) == 0:
-            self.guard_equals(left, right)
-            return True
+        if is_expr_static(left) and is_expr_static(right):
+            return int(left) - int(right) == 0
         return False
 
-    # See Note [maybe_guard vs guard]
-    def maybe_guard_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
-        """if left==right, guard on that fact and return true"""
+    def should_optimize_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         if len(left) != len(right):
             return False
-        if all(self.size_hint(a - b) == 0 for a, b in zip(left, right)):
-            for a, b in zip(left, right):
-                self.guard_equals(a, b)
+        if all(self.should_optimize_equals(l, r) for l, r in zip(left, right)):
             return True
         return False
 
-    # See Note [maybe_guard vs guard]
-    def maybe_guard_leq(self, left: Expr, right: Expr) -> bool:
-        try:
-            if self.size_hint(left) > self.size_hint(right):
-                return False
-        except TypeError:
-            return False
-        self.guard_leq(left, right)
-        return True
+    def should_optimize_leq(self, left: Expr, right: Expr) -> bool:
+        if is_expr_static(left) and is_expr_static(right):
+            return int(left) <= int(right)
+        if is_expr_static(right) and right == sys.maxsize:
+            return True
+        return False
 
-    # See Note [maybe_guard vs guard]
-    def maybe_guard_lt(self, left: Expr, right: Expr) -> bool:
-        try:
-            if self.size_hint(left) >= self.size_hint(right):
-                return False
-        except TypeError:
-            return False
-        self.guard_lt(left, right)
-        return True
+    def should_optimize_lt(self, left: Expr, right: Expr) -> bool:
+        if is_expr_static(left) and is_expr_static(right):
+            return int(left) < int(right)
+        if is_expr_static(right) and right == sys.maxsize:
+            return True
+        return False
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
@@ -311,15 +280,13 @@ class SizeVarAllocator:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
 
-    # See Note [maybe_guard vs guard]
-    def maybe_guard_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
-        """if denominator divides numerator, return True and guard on that fact"""
+    def should_optimize_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
         if sympy.gcd(numerator, denominator) == denominator:
             # can prove it symbolically
             return True
-        if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            self.guard_equals(numerator % denominator, 0)
-            return True
+        if is_expr_static(numerator) and is_expr_static(denominator):
+            if int(numerator) % int(denominator) == 0:
+                return True
         return False
 
     def guard_static_shape(self, left: Expr) -> int:

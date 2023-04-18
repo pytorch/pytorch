@@ -234,10 +234,14 @@ VERBOSITY_REGEX = (
 
 
 def configure_artifact_log(log):
-    # If the artifact is off by default, then it should only be logged when explicitly
-    # enabled; set propagate to False so that this artifact is not propagated
+    # if parent log is set to debug, but this artifact is off by default
+    # set propagate to False so that this artifact is not propagated
     # to its ancestor logger
-    if log_registry.is_off_by_default(log.artifact_name):
+    # this artifact is only logged when explicitly enabled (occurs below)
+    if (
+        log_registry.is_off_by_default(log.artifact_name)
+        and log.getEffectiveLevel() == logging.DEBUG
+    ):
         log.propagate = False
 
     # enable artifact logging when explicitly enabled

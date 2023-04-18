@@ -71,13 +71,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -180,13 +177,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -306,13 +300,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -416,13 +407,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -543,13 +531,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -653,13 +638,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -779,13 +761,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -888,13 +867,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1014,13 +990,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1124,13 +1097,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1251,13 +1221,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1361,13 +1328,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1487,13 +1451,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1596,13 +1557,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1722,13 +1680,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1832,13 +1787,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1959,13 +1911,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2069,13 +2018,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2195,13 +2141,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2304,13 +2247,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2430,13 +2370,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2540,13 +2477,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2667,13 +2601,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2777,13 +2708,10 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.

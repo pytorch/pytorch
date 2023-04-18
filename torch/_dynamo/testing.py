@@ -300,8 +300,9 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
     return DummyTestClass
 
 
-# test Python 3.11+ specific features
-def skipIfNotPy311(fn):
-    if sys.version_info >= (3, 11):
+# temporary decorator to skip failing 3.11 dynamo tests
+def skipIfPy311(fn):
+    if sys.version_info < (3, 11):
         return fn
-    return unittest.skip(fn)
+    else:
+        return unittest.skip(fn)

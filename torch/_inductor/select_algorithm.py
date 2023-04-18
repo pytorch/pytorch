@@ -786,7 +786,7 @@ class AlgorithmSelectorCache(PersistentCache):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
