@@ -443,7 +443,7 @@ def check_if_dynamo_supported():
     elif sys.version_info >= (3, 11):
         warnings.warn(
             "torch.compile support of Python 3.11 is experimental. "
-            "Program may generate incorrect results or segfault."
+            "Program may segfault."
         )
 
 
