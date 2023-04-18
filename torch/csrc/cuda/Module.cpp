@@ -8,6 +8,7 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
+#include <ATen/cached_tensor_utils.h>
 
 #if AT_CUDNN_ENABLED()
 
@@ -656,6 +657,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str cpp_frames_s = "cpp_frames";
   py::str history_s = "history";
   py::str blocks_s = "blocks";
+  py::str is_expandable_s = "is_expandable";
 
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
@@ -673,6 +675,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     segmentDict[stream_s] = int64_t(segmentInfo.stream);
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
     segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
+    segmentDict[is_expandable_s] = segmentInfo.is_expandable;
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -720,6 +723,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str free_completed_s = "free_completed";
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
+  py::str segment_map_s = "segment_map";
+  py::str segment_unmap_s = "segment_unmap";
+
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
@@ -742,6 +748,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return oom_s;
       case TraceEntry::SNAPSHOT:
         return snapshot_s;
+      case TraceEntry::SEGMENT_UNMAP:
+        return segment_unmap_s;
+      case TraceEntry::SEGMENT_MAP:
+        return segment_map_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -1081,16 +1091,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
-  m.def("_set_cudagraph_cached_tensors_enabled", [](bool enabled) {
-    at::autocast::set_cudagraph_cached_tensors_enabled(enabled);
+  m.def("_set_cached_tensors_enabled", [](bool enabled) {
+    at::caching::set_cached_tensors_enabled(enabled);
   });
 
-  m.def("_add_cudagraph_cached_tensor", [](const at::Tensor& t) {
-    at::autocast::add_cudagraph_cached_tensor(t);
+  m.def("_add_cached_tensor", [](const at::Tensor& t) {
+    at::caching::add_cached_tensor(t);
   });
 
-  m.def("_remove_cudagraph_cached_tensor", [](const at::Tensor& t) {
-    at::autocast::remove_cudagraph_cached_tensor(t);
+  m.def("_remove_cached_tensor", [](const at::Tensor& t) {
+    at::caching::remove_cached_tensor(t);
   });
 
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
