@@ -27,7 +27,7 @@ from typing import Any, Dict, Tuple, Union
 
 import torch._logging
 from torch._guards import detect_fake_mode  # noqa: F401
-from .config_utils import config
+from . import config
 
 try:
     import numpy as np
@@ -1170,7 +1170,13 @@ def get_fake_value(node, tx):
     """
     Run the computation represented by `node` using fake tensors and return the result.
     """
-    from .exc import TorchRuntimeError, unimplemented, Unsupported
+    from .exc import (
+        TorchRuntimeError,
+        unimplemented,
+        Unsupported,
+        UserError,
+        UserErrorType,
+    )
 
     op = node.op
 
@@ -1187,6 +1193,10 @@ def get_fake_value(node, tx):
     kwargs = tree_map(fake_wrapper, kwargs)
 
     nnmodule = None
+    if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
+        # If the first argument is nn.Module, should copy to fake mode.
+        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
@@ -1231,6 +1241,8 @@ def get_fake_value(node, tx):
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
             unimplemented("guard on data-dependent symbolic int/float")
+        elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
+            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError() from e
 
 
@@ -1382,6 +1394,7 @@ class TensorStaticReason(enum.Enum):
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
+    NN_MODULE_PROPERTY = 5
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
@@ -1391,11 +1404,13 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
         return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
+    if reason == TensorStaticReason.NN_MODULE_PROPERTY:
+        return "tensor is static because it is nn module associated."
     raise AssertionError(f"Illegal reason {reason}")
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool, guard_source: "GuardSource"
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -1414,6 +1429,8 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
+    if guard_source.is_nn_module():
+        return True, TensorStaticReason.NN_MODULE_PROPERTY
     return False, None
 
 

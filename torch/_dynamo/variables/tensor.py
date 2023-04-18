@@ -8,8 +8,7 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
-from .. import variables
-from ..config_utils import config
+from .. import config, variables
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -424,6 +423,16 @@ class TensorVariable(VariableTracker):
                 tx, [result, kwargs["value"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
+        elif name == "__contains__":
+            # Rewrite __contains__ here so that downstream passes can trace through
+            # without dealing with unbacked symbool. Roughly the code we translate is:
+            # def __contains__(self, x):
+            #     return (x == self).any().item()
+            result = TorchVariable(torch.eq, **options).call_function(
+                tx, [self, args[0]], {}
+            )
+            result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
+            return result.call_method(tx, "item", [], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
