@@ -7,7 +7,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
 import torch
 
@@ -116,7 +116,10 @@ class _missing:
 @dataclasses.dataclass
 class GraphArg:
     source: Source
-    example: Any
+    # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
+    # thing to do.  Probably should have example (which stores an int) and
+    # fake_example
+    example: Union[torch.Tensor, torch.SymInt]
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
@@ -136,19 +139,6 @@ class GraphArg:
 
     def load(self, tx):
         return self.source.reconstruct(tx)
-
-    def get_examples(self):
-        return [self.example]
-
-    def get_fake_examples(self):
-        if self.fake_tensor is not None:
-            assert isinstance(
-                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-            )
-            return [self.fake_tensor]
-
-    def __len__(self):
-        return 1
 
     def erase(self):
         self.example = None
@@ -224,7 +214,6 @@ class VariableBuilder:
                 (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
-            ((torch.SymInt, torch.SymFloat), cls.wrap_sym),
             ((tuple, list, odict_values), cls.wrap_listlike),
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
@@ -583,31 +572,6 @@ class VariableBuilder:
             )
         )
 
-    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
-        is_duplicate_sym = self.get_source() in self.tx.output.input_source_to_var
-        if is_duplicate_sym:
-            return self.tx.output.input_source_to_var[self.get_source()]
-        if not is_constant_source(self.get_source()):
-            self.tx.output.add_grapharg(GraphArg(self.get_source(), value, False, None))
-        elif is_constant_source(self.get_source()):
-            return self.tx.output.register_attr_or_module(
-                value,
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                source=None,
-                sym_num=value
-                # shape Guards live their own rich life via shape_env
-            )
-        sym_node_var = SymNodeVariable.create(
-            tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
-            sym_num=value
-            # shape Guards live their own rich life via shape_env
-        )
-        self.tx.output.input_source_to_var[self.get_source()] = sym_node_var
-        return sym_node_var
-
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
@@ -829,7 +793,9 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        self.tx.output.add_grapharg(GraphArg(source, value, False, fake_tensor_value))
+        grapharg = GraphArg(source, value, False, fake_tensor_value)
+        tensor_proxy.node.meta["grapharg"] = grapharg
+        self.tx.output.add_symbol_bindings(grapharg)
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__
@@ -873,11 +839,7 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                # TODO: This should be dynamic, as we in general do not
-                # know if bare integers are actually going to be sizevars
-                # and it is inappropriate to eagerly duck size them with
-                # real sizevars
-                dynamic_dim = DimDynamic.DUCK
+                dynamic_dim = DimDynamic.DYNAMIC
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -929,14 +891,12 @@ class VariableBuilder:
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
-                self.tx.output.add_grapharg(
-                    GraphArg(
-                        self.get_source(),
-                        wrapped_value,
-                        isinstance(wrapped_value, torch.Tensor),
-                        fake_tensor_value,
-                        is_tensor=False,
-                    )
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.get_source(),
+                    wrapped_value,
+                    isinstance(wrapped_value, torch.Tensor),
+                    fake_tensor_value,
+                    is_tensor=False,
                 )
             return unspec_var
 
@@ -1128,7 +1088,7 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
+    elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
@@ -1155,7 +1115,7 @@ class TrackedFake:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, TrackedFake):
-            return self.fake == other.fake and self.source.name() == other.source.name()
+            return self.fake is other.fake and self.source.name() == other.source.name()
         return False
 
 
@@ -1166,7 +1126,9 @@ def wrap_to_fake_tensor_and_record(
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(
+            e, is_tensor, guard_source=source.guard_source()
+        )
 
         name = source.name()
 
