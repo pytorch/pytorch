@@ -554,7 +554,7 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         "--include_all_operators",
         action="store_true",
         default=False,
-        help="Set this flag to request inclusion of all opeators (i.e. build is not selective).",
+        help="Set this flag to request inclusion of all operators (i.e. build is not selective).",
         required=False,
     )
     parser.add_argument(

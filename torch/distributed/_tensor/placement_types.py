@@ -5,7 +5,6 @@ from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 import torch.distributed.distributed_c10d as c10d
-from torch.distributed._spmd.comm_tensor import CommTensor
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -47,7 +46,7 @@ class Shard(Placement):
         # it might be slow compared to even size collective, we need to pad tensor
         # before really calling the collective, and unpad/narrow it afterwards
         # TODO: consider if we should remove this logic once ProcessGroupGloo
-        # support uneven list, and collective perfomance on par
+        # support uneven list, and collective performance on par
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
@@ -63,7 +62,7 @@ class Shard(Placement):
             for i, shard in enumerate(tensor_list):
                 if with_padding and idx_start_to_pad != 0 and i >= idx_start_to_pad:
                     shard = self._pad_tensor(shard)
-                # input tensors are expected to be congtiguous by the collective backend
+                # input tensors are expected to be contiguous by the collective backend
                 shard = shard.contiguous() if contiguous else shard
                 shard_list.append(shard)
             return shard_list, idx_start_to_pad
@@ -79,6 +78,16 @@ class Shard(Placement):
     def _unpad_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         # unpad tensor by 1 on the shard dim
         return tensor.narrow(self.dim, start=0, length=tensor.size(self.dim) - 1)
+
+    def _unpad_concat_tensor(
+        self, tensor: torch.Tensor, padding_idx: int, shard_count: int
+    ) -> torch.Tensor:
+        gathered_list = torch.chunk(tensor, shard_count, dim=self.dim)
+        gathered_list = [
+            self._unpad_tensor(gathered_tensor) if i >= padding_idx else gathered_tensor
+            for i, gathered_tensor in enumerate(gathered_list)
+        ]
+        return torch.cat(gathered_list, dim=self.dim)
 
     def _local_shard_size_on_dim(
         self,
@@ -144,18 +153,18 @@ class Shard(Placement):
         assert (
             my_coordinate is not None
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
-        scattered_list, pad_idx = self._split_tensor(
-            tensor, num_chunks, with_padding=True, contiguous=True
+
+        pad_idx = 0
+        if tensor.size(self.dim) % num_chunks != 0:
+            scattered_list, pad_idx = self._split_tensor(
+                tensor, num_chunks, with_padding=True, contiguous=False
+            )
+            tensor = torch.cat(scattered_list, dim=self.dim)
+
+        output = mesh.reduce_scatter(
+            tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
         )
-        # wrap with comm tensor
-        scattered_list = [CommTensor(t) for t in scattered_list]
-        output = torch.empty_like(scattered_list[my_coordinate[mesh_dim]])
-        mesh.reduce_scatter(
-            CommTensor(output),
-            scattered_list,  # pyre-ignore[6]
-            op=reduce_op,
-            mesh_dim=mesh_dim,
-        )
+
         if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
             output = self._unpad_tensor(output)
         return output
@@ -181,32 +190,23 @@ class Shard(Placement):
         # check if it needs to pad input tensor before all_gather
         pad_idx = size[self.dim] % num_chunks
         if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
-            local_tensor = self._pad_tensor(local_tensor).contiguous()
+            local_tensor = self._pad_tensor(local_tensor)
+        local_tensor = local_tensor.contiguous()
 
-        gathered_list = []
-        # N.B. CommTensor does not change eager mode behavior. During tracing, it
-        # makes sure communication result is properly waited before subsequent
-        # read operations.
-        for _ in range(num_chunks):
-            gathered_list.append(
-                CommTensor(
-                    torch.empty_like(
-                        local_tensor,
-                        memory_format=torch.contiguous_format,
-                    )
-                )
-            )
-
-        mesh.all_gather(gathered_list, CommTensor(local_tensor.contiguous()), mesh_dim=mesh_dim)  # type: ignore[arg-type]
-        # unpad the tensor if the input tensor was padded
+        result = mesh.all_gather(
+            tensor=local_tensor,
+            mesh_dim=mesh_dim,
+            gather_dim=self.dim,
+        )
         if pad_idx != 0:
+            gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
             gathered_list = [
-                self._unpad_tensor(gathered_tensor)  # type: ignore[misc]
-                if i >= pad_idx
-                else gathered_tensor
+                self._unpad_tensor(gathered_tensor) if i >= pad_idx else gathered_tensor
                 for i, gathered_tensor in enumerate(gathered_list)
             ]
-        return torch.cat(gathered_list, dim=self.dim)  # type: ignore[arg-type]
+
+            result = torch.cat(gathered_list, dim=self.dim)
+        return result
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
@@ -217,7 +217,14 @@ class Shard(Placement):
         return hash(self.dim)
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Shard placement
+        """
         return f"Shard(dim={self.dim})"
+
+    def __str__(self) -> str:
+        """human readable representation of the Shard placement"""
+        return f"S({self.dim})"
 
 
 class Replicate(Placement):
@@ -232,13 +239,19 @@ class Replicate(Placement):
         return -1
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Replicate placement
+        """
         return "Replicate()"
 
+    def __str__(self) -> str:
+        """
+        human readable representation of the Replicate placement
+        """
+        return "R"
+
     def _replicate_tensor(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         """
         Replicate (broadcast) a torch.Tensor on a mesh dimension (use
@@ -295,7 +308,16 @@ class _Partial(Placement):
         return hash(self.reduce_op)
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Partial placement
+        """
         return f"_Partial(reduce_op={self.reduce_op})"
+
+    def __str__(self) -> str:
+        """
+        human readable representation of the Partial placement
+        """
+        return "P"
 
 
 # used internally to propagate the placements
