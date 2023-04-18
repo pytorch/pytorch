@@ -1,10 +1,12 @@
 import builtins
 import collections
 import functools
+import inspect
 import itertools
 import logging
 import math
 import operator
+import os
 import sys
 import textwrap
 import threading
@@ -29,7 +31,7 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 
 InputList = List
 DimList = List
@@ -47,10 +49,26 @@ from sympy.core.logic import fuzzy_and, fuzzy_or
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
-    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
+    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
-    "method_to_operator", "hint_int", "SYMPY_INTERP",
+    "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
 ]
+
+# These are modules that contain generic code for interacting with ShapeEnv
+# which are unlikely to identify a particular interesting guard statement
+@lru_cache(None)
+def uninteresting_files():
+    import torch._inductor.sizevars
+    mods = [
+        sys.modules[__name__],
+        torch,
+        torch._inductor.sizevars,
+    ]
+    return {inspect.getfile(m) for m in mods}
+
+def shorten_filename(fn):
+    prefix = os.path.commonprefix([fn, __file__])
+    return fn[len(prefix):]
 
 SYM_FUNCTION_MODE = None
 
@@ -128,11 +146,64 @@ def has_hint(a):
         return a.node.has_hint()
     return True
 
+def is_concrete_int(a: Union[int, SymInt]):
+    r""" Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or int): Object to test if it int
+    """
+    assert isinstance(a, (SymInt, int))
+
+    if isinstance(a, int):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
+
 # Returns True if every size dim on the tensor has a hint
 # TODO: Should this include strides too?  For now it doesn't matter,
 # that's quite an obscure case
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
+
+def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+    if isinstance(val, (SymInt, SymFloat)):
+        return val.node.expr.free_symbols
+    elif isinstance(val, (int, float, bool)):
+        return set()
+    elif isinstance(val, torch.Tensor):
+        r = set()
+        for s in val.size():
+            r |= free_symbols(s)
+        for s in val.stride():
+            r |= free_symbols(s)
+        r |= free_symbols(val.storage_offset())
+        return r
+    else:
+        raise AssertionError(f"cannot compute free_symbols of {val}")
+
+# WARNING: Don't use this on Dynamo produced graphs, they don't have meta
+# setup!
+def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
+    if (
+        node.op == "placeholder" and
+        "val" in node.meta and
+        isinstance(node.meta["val"], torch.SymInt) and
+        isinstance(node.meta["val"].node.expr, sympy.Symbol)
+    ):
+        return node.meta["val"].node.expr
+    return None
+
+def find_symbol_binding_fx_nodes(graph):
+    return {
+        node.meta["val"].node.expr: node
+        for node in graph.nodes
+        if is_symbol_binding_fx_node(node)
+    }
 
 def definitely_true(a):
     """
@@ -247,10 +318,12 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        assert min <= a <= max
+        if not (min <= a <= max):
+            raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
         return
     if isinstance(a.node.expr, sympy.Integer):
-        assert min <= int(a.node.expr) <= max
+        if not (min <= int(a.node.expr) <= max):
+            raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
     # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
@@ -391,7 +464,11 @@ class DimDynamic(Enum):
 # eager code with StrictMinMaxConstraint will keep working in the future!
 
 @dataclass(frozen=True)
-class StrictMinMaxConstraint:
+class Constraint:
+    warn_only: bool
+
+@dataclass(frozen=True)
+class StrictMinMaxConstraint(Constraint):
     """
     For clients: the size at this dimension must be within 'vr' (which
     specifies a lower and upper bound, inclusive-inclusive) AND it
@@ -417,7 +494,7 @@ class StrictMinMaxConstraint:
         return f"{self.vr.lower} <= {source.name()} <= {self.vr.upper}"
 
 @dataclass(frozen=True)
-class RelaxedUnspecConstraint:
+class RelaxedUnspecConstraint(Constraint):
     """
     For clients: no explicit constraint; constraint is whatever is implicitly
     inferred by guards from tracing.
@@ -671,7 +748,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            log.warning(f"Failed to convert to int: {r}")
+            log.warning("Failed to convert to int: %s", r)
             raise
 
     def guard_float(self, file, line):
@@ -681,7 +758,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            log.warning(f"Failed to convert to float: {r}")
+            log.warning("Failed to convert to float: %s", r)
             raise
 
     def guard_bool(self, file, line):
@@ -691,7 +768,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            log.warning(f"Failed to convert to bool: {r}")
+            log.warning("Failed to convert to bool: %s", r)
             raise
 
     def bool_(self):
@@ -744,7 +821,7 @@ class FloorDiv(sympy.Function):
     def _sympystr(self, printer):
         base = printer.parenthesize(self.base, self.precedence)
         divisor = printer.parenthesize(self.divisor, self.precedence)
-        return f"{base}//{divisor}"
+        return f"({base}//{divisor})"
 
     # SymPy assumptions based on argument types.
     def _eval_is_real(self):
@@ -832,7 +909,7 @@ def safe_expand(r):
         try:
             return sympy.expand(r)
         except RecursionError:
-            log.warning(f"RecursionError in sympy.expand({r})")
+            log.warning("RecursionError in sympy.expand(%s)", r)
             return r
     else:
         return r
@@ -1108,7 +1185,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr, other_expr)
         except Exception:
-            log.warning(f"failed to eval {method}({expr}, {other_expr})")
+            log.warning("failed to eval %s(%s, %s)", method, expr, other_expr)
             raise
         out = safe_expand(out)
         pytype: Type
@@ -1142,7 +1219,7 @@ def _make_node_magic(method, func):
         try:
             out = func(expr)
         except Exception:
-            log.warning(f"failed to eval {method}({expr})")
+            log.warning("failed to eval %s(%s)", method, expr)
             raise
 
         out_hint = None
@@ -1183,7 +1260,7 @@ def _make_node_sizes_strides(method, func):
         try:
             out = func(size_exprs, stride_exprs)
         except Exception:
-            log.warning(f"failed to eval {method}({size_exprs}, {stride_exprs})")
+            log.warning("failed to eval %s(%s, %s)", method, size_exprs, stride_exprs)
             raise
         # bool is never expandable
 
@@ -1344,6 +1421,15 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
 TLS = threading.local()
 
 
+class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        # TODO: Maybe suppress the envid if not DEBUG?
+        return '%s: %s' % (self.extra['envid'], msg), kwargs
+
+
+ENV_COUNTER = collections.Counter()
+
+
 class ShapeEnv:
     def __init__(
         self, *,
@@ -1368,6 +1454,8 @@ class ShapeEnv:
         # When True, assume input sizes which have the same size are
         # symbolically equal.
         duck_shape=True,
+        # For debugging
+        frame_id=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -1398,6 +1486,14 @@ class ShapeEnv:
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
+        per_frame_id = ENV_COUNTER[frame_id]
+        ENV_COUNTER[frame_id] += 1
+        if frame_id is None:
+            env_id = per_frame_id
+        else:
+            env_id = f"{frame_id}.{per_frame_id}"
+        self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
+        self.log.info("create_env")
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1579,7 +1675,7 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-            log.info("create_symbol %s = %s", sympy_expr, val)
+            self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -1607,6 +1703,7 @@ class ShapeEnv:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.val_to_var[val]
+            self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
@@ -1640,6 +1737,8 @@ class ShapeEnv:
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
     ) -> List[str]:
+        self.log.info("produce_guards")
+
         assert len(placeholders) == len(sources)
 
         # Expand optional inputs, or verify invariants are upheld
@@ -1718,7 +1817,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        from torch._dynamo.source import TensorPropertySource, TensorProperty, NegateSource
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1727,11 +1826,11 @@ class ShapeEnv:
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(list)
         dynamic_sources = []
-        constraint_violations = []
+        constraint_violations : List[Tuple[Constraint, Callable[[], str]]] = []
 
-        def record_constraint_violation(msg_fn):
+        def record_constraint_violation(constraint, msg_fn):
             assert callable(msg_fn)
-            constraint_violations.append(msg_fn)
+            constraint_violations.append((constraint, msg_fn))
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -1770,7 +1869,7 @@ class ShapeEnv:
                             else:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
-                        record_constraint_violation(lambda: (
+                        record_constraint_violation(constraint, lambda: (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
                             f"{s}.  {hint()}"
@@ -1781,7 +1880,7 @@ class ShapeEnv:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 if constraint is not None:
-                    record_constraint_violation(lambda: (
+                    record_constraint_violation(constraint, lambda: (
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
                         # TODO: fold this into TORCH_LOGS
@@ -1845,7 +1944,7 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            record_constraint_violation(lambda: (
+                            record_constraint_violation(c, lambda: (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "
                                 f"was allocated at:\n{tb}"
@@ -1859,7 +1958,7 @@ class ShapeEnv:
                         else:
                             raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
-                log.warning(f"Failing guard allocated at: \n{tb}")
+                self.log.warning("Failing guard allocated at: \n%s", tb)
                 raise
 
         # 3. Every symbol must be within its value range (this handles 0/1
@@ -1882,9 +1981,9 @@ class ShapeEnv:
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
-                            record_constraint_violation(lambda: (
+                            record_constraint_violation(c_vr, lambda: (
                                 f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
+                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
                                 "constrain_range manually, or we forgot to update this error message? "
@@ -1910,9 +2009,21 @@ class ShapeEnv:
                     exprs.append(" <= ".join(bounds))
 
         if constraint_violations:
-            msgs = [f"  {i + 1}. {msg()}" for i, msg in enumerate(constraint_violations)]
-            msgs = "\n".join(msgs)
-            raise ConstraintViolationError(f"Constraints violated!\n{msgs}")
+            warn_msgs = []
+            error_msgs = []
+            for constraint, msg in constraint_violations:
+                if constraint.warn_only:
+                    msg = f"  {len(warn_msgs) + 1}. {msg()}"
+                    warn_msgs.append(msg)
+                else:
+                    msg = f"  {len(error_msgs) + 1}. {msg()}"
+                    error_msgs.append(msg)
+            if len(error_msgs) > 0:
+                err = '\n'.join(error_msgs)
+                raise ConstraintViolationError(f"Constraints violated!\n{err}")
+            elif len(warn_msgs) > 0:
+                log.warning("%s Warning only constraints violated", len(warn_msgs))
+
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
@@ -2108,7 +2219,7 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            log.debug(f"Data dependent variable '{s}' allocated at:\n{self.var_to_stack[s]}")
+            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, self.var_to_stack[s])
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
@@ -2131,8 +2242,8 @@ class ShapeEnv:
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
             # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
             if a not in self.replacements or expr != self.replacements[a]:
-                log.warning(f"Specializing {self.var_to_sources[a][0].name()} to {expr}")
-                log.debug("SPECIALIZATION", stack_info=True)
+                self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
+                self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
 
     @_lru_cache
@@ -2192,7 +2303,7 @@ class ShapeEnv:
             except NotImplementedError:
                 pass
             except RecursionError:
-                log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
+                self.log.warning("RecursionError in sympy.solve(%s - %s, %s)", lhs, rhs, free[0])
         if expr.has(sympy.Mod):
             mod_expr = tuple(expr.atoms(sympy.Mod))[0]
             try:
@@ -2225,34 +2336,20 @@ class ShapeEnv:
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
 
-    def _add_guard(self, expr: "sympy.Expr") -> None:
-        stack = get_debugging_stack()
-        guard = ShapeGuard(expr, stack)
-        if torch._dynamo.config.print_guards:
-            if log.level <= logging.WARNING:
-                # reusing flag that prints guards
-                frame_summaries = TracingContext.get().frame_summary_stack
-                # frame_summaries describes a stack of functions
-                # TODO(avik): It would be better to describe a stack of function calls instead
-                current_loc = TracingContext.get().loc_in_frame
-                # current_loc describes a line in the current frame
-                user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
-                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
-                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
-            log.debug("SHAPE GUARD", stack_info=True)
-        self.guards.append(guard)
-
     @lru_cache(256)
-    def evaluate_expr(self, expr: "sympy.Expr", hint=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if len(expr.free_symbols) == 0:
-            return expr
-        expr = self.simplify(expr)
+        if len(orig_expr.free_symbols) == 0:
+            self.log.debug("eval %s [trivial]", orig_expr)
+            return orig_expr
+
+        expr = orig_expr
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
+            self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -2284,13 +2381,52 @@ class ShapeEnv:
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
+        if concrete_val is sympy.true:
+            g = expr
+        elif concrete_val is sympy.false:
+            g = sympy.Not(expr)
+        else:
+            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
         if not self._suppress_guards_tls():
-            if concrete_val is sympy.true:
-                self._add_guard(expr)
-            elif concrete_val is sympy.false:
-                self._add_guard(sympy.Not(expr))
-            else:
-                self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
+            tb = traceback.extract_stack()[:-1]
+            stack = ''.join(traceback.format_list(tb))
+            guard = ShapeGuard(g, stack)
+            self.guards.append(guard)
+            if self.log.isEnabledFor(logging.INFO):
+                for frame in reversed(tb):
+                    if frame.filename not in uninteresting_files():
+                        break
+
+                def format_frame(frame):
+                    return f"{shorten_filename(frame.filename)}:{frame.lineno} in {frame.name}"
+
+                # NB: this stack is truncated, but it's fine because the main
+                # stack_info will give you the rest of the info you need
+                maybe_user_loc = ""
+                user_tb = TracingContext.extract_stack()
+                if user_tb:
+                    maybe_user_loc = " at " + format_frame(user_tb[-1])
+
+                is_debug = self.log.isEnabledFor(logging.DEBUG)
+                maybe_extra_debug = ""
+                if is_debug and user_tb:
+                    maybe_extra_debug = (
+                        '\nUser Stack (most recent call last):\n' +
+                        '  (snipped, see stack below for prefix)\n' +
+                        ''.join(traceback.format_list(user_tb))
+                    )
+                self.log.info(
+                    "eval %s [guard added]%s (%s)%s",
+                    g,
+                    maybe_user_loc,
+                    format_frame(frame),
+                    maybe_extra_debug,
+                    stack_info=is_debug,
+                )
+        else:
+            self.log.debug("eval %s [guard suppressed]", g)
+
         return concrete_val
 
 def _is_int(expr):

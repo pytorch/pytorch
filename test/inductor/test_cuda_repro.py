@@ -177,7 +177,7 @@ class CudaReproTests(TestCase):
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     # TODO: Abstract this out, test more extensively
-    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
     def test_dynamic_shapes(self):
         torch._dynamo.reset()  # Needed since everywhere else uses "inductor"
 
@@ -210,6 +210,8 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
+    # TODO: enable
+    @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):

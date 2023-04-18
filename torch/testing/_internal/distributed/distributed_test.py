@@ -4977,7 +4977,7 @@ class DistributedTest:
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
-                    for i in range(100):
+                    for i in range(8):
                         inp = (
                             torch.randn(1, 3, 1000, 1000, device="cuda")
                             if j == 1
@@ -6244,6 +6244,26 @@ class DistributedTest:
                 global_bs=global_bs,
                 offset=bs_offset,
             )
+
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_half(self):
+            group, group_id, rank = self._init_global_test()
+
+            model = copy.deepcopy(BN_NET)
+            model = model.half()
+            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+            model = nn.parallel.DistributedDataParallel(model.cuda(rank), device_ids=[rank])
+            inp = torch.randn(2, 2, dtype=torch.float16, device=torch.device(rank))
+            # Check that forward/backward do not error with dtype mismatch
+            out = model(inp)
+            self.assertEqual(out.dtype, torch.float16)
+            out.sum().backward()
+            for param in model.parameters():
+                self.assertEqual(param.grad.dtype, torch.float16)
 
         def _test_ddp_logging_data(self, is_gpu):
             rank = dist.get_rank()

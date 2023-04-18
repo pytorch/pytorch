@@ -665,11 +665,6 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
     # Creates device-specific test cases
     for base in desired_device_type_test_bases:
-        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
-        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
-        if TEST_WITH_ROCM and base.device_type != 'cuda':
-            continue
-
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:

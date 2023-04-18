@@ -1032,12 +1032,16 @@ Vectorized<c10::complex<float>> inline operator^(const Vectorized<c10::complex<f
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::eq(
     const Vectorized<c10::complex<float>>& other) const {
-  return (*this == other) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
+  auto eq = (*this == other);  // compares real and imag individually
+  // If both real numbers and imag numbers are equal, then the complex numbers are equal
+  return (eq.real() & eq.imag()) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
 }
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
     const Vectorized<c10::complex<float>>& other) const {
-  return (*this != other) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
+  auto ne = (*this != other);  // compares real and imag individually
+  // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+  return (ne.real() | ne.imag()) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
 }
 
 #endif

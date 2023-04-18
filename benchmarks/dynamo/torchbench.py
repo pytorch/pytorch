@@ -73,6 +73,8 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
+    # https://github.com/pytorch/pytorch/issues/99201
+    "opacus_cifar10",
 }
 
 SKIP_FOR_CUDA = {
@@ -135,7 +137,11 @@ REQUIRE_COSINE_TOLERACE = {
 }
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = set()
+NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/98355
+    "mobilenet_v3_large",
+    "vision_maskrcnn",  # eager variant
+}
 
 # These benchmarks took >600s on an i9-11900K CPU
 VERY_SLOW_BENCHMARKS = {

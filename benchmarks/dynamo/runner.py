@@ -73,13 +73,24 @@ TABLE = {
         "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",
         "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
+        "inductor_max_autotune": "--training --inductor --inductor-compile-mode max-autotune ",
+        "inductor_max_autotune_no_cudagraphs": (
+            "--training --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
+        ),
     },
     "inference": {
-        "ts_nnc": "--inference --speedup-ts",
-        "ts_nvfuser": "--inference -n100 --speedup-ts --nvfuser",
-        "trt": "--inference -n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--inference --backend=cudagraphs_ts",
-        "inductor": "--inference -n50 --inductor",
+        "aot_eager": "--inference --backend=aot_eager ",
+        "eager": "--inference --backend=eager ",
+        "ts_nnc": "--inference --speedup-ts ",
+        "ts_nvfuser": "--inference -n100 --speedup-ts --nvfuser ",
+        "trt": "--inference -n100 --speedup-trt ",
+        "ts_nvfuser_cudagraphs": "--inference --backend=cudagraphs_ts ",
+        "inductor": "--inference -n50 --inductor ",
+        "inductor_no_cudagraphs": "--inference -n50 --inductor --disable-cudagraphs ",
+        "inductor_max_autotune": "--inference -n50 --inductor --inductor-compile-mode max-autotune ",
+        "inductor_max_autotune_no_cudagraphs": (
+            "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
+        ),
     },
 }
 
@@ -93,10 +104,15 @@ DEFAULTS = {
         "inductor",
         "inductor_no_cudagraphs",
     ],
-    "inference": ["ts_nvfuser_cudagraphs", "inductor"],
+    "inference": [
+        "eager",
+        "aot_eager",
+        "inductor",
+        "inductor_no_cudagraphs",
+    ],
     "flag_compilers": {
         "training": ["inductor", "inductor_no_cudagraphs"],
-        "inference": ["inductor"],
+        "inference": ["inductor", "inductor_no_cudagraphs"],
     },
     "dtypes": [
         "float32",
@@ -259,6 +275,12 @@ def parse_args():
         action="store_true",
         default=False,
         help="Do not write a comment to github",
+    )
+    parser.add_argument(
+        "--no-detect-regressions",
+        action="store_true",
+        default=False,
+        help="Do not compare to previous runs for regressions or metric graphs.",
     )
     parser.add_argument(
         "--update-dashboard-test",
@@ -1330,7 +1352,7 @@ class DashboardUpdater:
             "gh_warnings.txt",
             "gh_regression.txt",
             "gh_metric_regression.txt",
-            "gh_training.txt",
+            "gh_training.txt" if self.args.training else "gh_inference.txt",
             "gh_graphs.txt",
             "gh_build_summary.txt",
         ]
@@ -1372,14 +1394,15 @@ class DashboardUpdater:
 
     def update(self):
         self.upload_graphs()
-        SummaryStatDiffer(self.args).generate_comment()
-        RegressionDetector(self.args).generate_comment()
-        try:
-            RegressionTracker(self.args).diff()
-        except Exception as e:
-            logging.exception(e)
-            with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
-                gh_fh.write("")
+        if not self.args.no_detect_regressions:
+            SummaryStatDiffer(self.args).generate_comment()
+            RegressionDetector(self.args).generate_comment()
+            try:
+                RegressionTracker(self.args).diff()
+            except Exception as e:
+                logging.exception(e)
+                with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
+                    gh_fh.write("")
 
         comment = self.gen_comment()
         print(comment)

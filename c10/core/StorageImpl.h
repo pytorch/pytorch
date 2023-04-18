@@ -44,7 +44,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
         size_bytes_(std::move(size_bytes)),
-        size_bytes_is_symbolic_(size_bytes_.is_symbolic()),
+        size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
@@ -62,7 +62,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            size_bytes.is_symbolic()
+            size_bytes.is_heap_allocated()
                 ? allocator->allocate(0)
                 : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
@@ -78,17 +78,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
-    size_bytes_is_symbolic_ = false;
-  }
-
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(data_ptr_.get());
-  }
-
-  template <typename T>
-  inline T* mutable_unsafe_data() {
-    return static_cast<T*>(this->data_ptr_.get());
+    size_bytes_is_heap_allocated_ = false;
   }
 
   // Destructor doesn't call release_resources because it's
@@ -98,7 +88,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   size_t nbytes() const {
-    TORCH_CHECK(!size_bytes_is_symbolic_);
+    // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
+    TORCH_CHECK(!size_bytes_is_heap_allocated_);
     return size_bytes_.as_int_unchecked();
   }
 
@@ -109,7 +100,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
     size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
+    size_bytes_is_heap_allocated_ = false;
   }
 
   void set_nbytes(c10::SymInt size_bytes) {
@@ -144,7 +135,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
-    return data_ptr_.get();
+    return data_ptr_.mutable_get();
   }
 
   at::DeviceType device_type() const {
@@ -198,7 +189,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
     size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
+    size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
     resizable_ = false;
   }
@@ -216,7 +207,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  private:
   DataPtr data_ptr_;
   SymInt size_bytes_;
-  bool size_bytes_is_symbolic_;
+  bool size_bytes_is_heap_allocated_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
