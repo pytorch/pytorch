@@ -205,9 +205,7 @@ def _get_param_to_fqns(
     """
 
     def module_fn(module, prefix, param_to_fqns):
-        for param_name, param in module.named_parameters(
-            recurse=False, remove_duplicate=False
-        ):
+        for param_name, param in module.named_parameters(recurse=False):
             local_fqns = (
                 param._fqns
                 if type(param) is flat_param_file.FlatParameter
@@ -249,7 +247,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
-        [key for key, _ in model.named_parameters(remove_duplicate=False)],
+        [key for key, _ in model.named_parameters()],
         param_to_unflat_param_names,
     )
 
