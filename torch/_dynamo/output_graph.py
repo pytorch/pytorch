@@ -595,7 +595,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                         )
                     )
                 else:
-                    prefix_insts.append(inst)
+                    prefix_insts.append(copy.copy(inst))
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
