@@ -333,28 +333,6 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "__call__":
-            # TODO(whc)  do we really need this special case?
-            return self.call_function(tx, args, kwargs)
-
-        elif name in ["forward", "_call_impl"]:
-            # TODO(whc)
-            # This is the old special case moved to a new place.  (copy from call_function below)
-            # Old behavior: we'd route "forward" meth call to 'call_function', which inlined forward.
-            # New behavior: since call_function now hits '__call__', forward would fall through to 'wrap_proxy' below,
-            # instead of being inlined.  What should we do about this?
-            #   1) all methods get inlined now at the bottom of this call_method, instead of put into the graph as calls
-            #   2) we maintain this special case just for forward
-            assert self.source, (
-                "Must provide a valid source in order to inline, "
-                "since inlined function may have default args which must be guarded."
-            )
-            fn = getattr(module, name).__func__
-
-            assert istype(fn, types.FunctionType)
-            options["source"] = AttrSource(AttrSource(self.source, name), "__func__")
-            args = [self] + args
-
         def generic_call_method_helper(name):
             # Helper function to put a `call_method` node in FX graph,
             # with nn.Module as the first arg.
