@@ -365,11 +365,15 @@ def mse_loss_backward(
 @register_decomposition(aten.smooth_l1_loss_backward)
 @pw_cast_for_opmath
 def smooth_l1_loss_backward(
-    grad_output: Tensor, input: Tensor, target: Tensor, reduction: int, beta: float = 1.0
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+    beta: float = 1.0,
 ):
     diff = input - target
     abs_diff = diff.abs()
-    smooth_l1_condition = (abs_diff < beta)
+    smooth_l1_condition = abs_diff < beta
 
     grad = torch.where(smooth_l1_condition, diff, abs_diff.sign() * beta)
 
