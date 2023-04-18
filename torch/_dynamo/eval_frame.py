@@ -676,6 +676,7 @@ def export(
     ] = None,
     tracing_mode: str = "real",
     constraints: List[Constraint] = None,
+    functionalize: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -694,6 +695,8 @@ def export(
 
         tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
         If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
+
+        functionalize (bool): If True, the resulting graph module will be functional.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -858,6 +861,17 @@ def export(
     example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
+        memo: Dict[torch.Tensor, torch.Tensor] = {}
+
+        def to_fun(t):
+            if isinstance(t, torch.Tensor):
+                if t in memo:
+                    return memo[t]
+                r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+                memo[t] = r
+                return r
+            else:
+                return t
 
         def from_fun(t):
             if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
@@ -867,12 +881,20 @@ def export(
 
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with enable_functionalization(
-                config.functionalize, args
-            ) as functional_args, torch.fx.traceback.preserve_node_meta():
-                return pytree.tree_map(
-                    from_fun, torch.fx.Interpreter(graph).run(*functional_args)
-                )
+            with torch.fx.traceback.preserve_node_meta():
+                if functionalize:
+                    torch._enable_functionalization(reapply_views=True)
+                    try:
+                        return pytree.tree_map(
+                            from_fun,
+                            torch.fx.Interpreter(graph).run(
+                                *pytree.tree_map(to_fun, args)
+                            ),
+                        )
+                    finally:
+                        torch._disable_functionalization()
+                else:
+                    return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
             graph = make_fx(

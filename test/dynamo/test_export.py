@@ -2422,7 +2422,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
-    @config.patch(dynamic_shapes=True, functionalize=True)
+    @config.patch(dynamic_shapes=True)
     def test_functionalize(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2435,7 +2435,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         example_inputs = (torch.ones(1, 2, 3),)
         gm, _ = torch._dynamo.export(
-            Foo(), *example_inputs, aten_graph=True, tracing_mode="symbolic_mode"
+            Foo(),
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="symbolic_mode",
+            functionalize=True,
         )
 
         count = 0
@@ -2447,7 +2451,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         test_inp_v2 = (torch.ones(1, 2, 3),)
         self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
 
-    @config.patch(dynamic_shapes=True, functionalize=False)
+    @config.patch(dynamic_shapes=True)
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2460,7 +2464,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         example_inputs = (torch.ones(1, 2, 3),)
         gm, _ = torch._dynamo.export(
-            Foo(), *example_inputs, aten_graph=True, tracing_mode="symbolic_mode"
+            Foo(),
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="symbolic_mode",
+            functionalize=False,
         )
         count = 0
         for node in gm.graph.nodes:
