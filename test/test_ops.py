@@ -539,6 +539,20 @@ class TestCommon(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
+    @ops([op for op in op_db if op.error_inputs_sparse_func is not None], dtypes=OpDTypes.none)
+    def test_errors_sparse(self, device, op):
+        for layout in (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc, torch.sparse_coo):
+            if not op.supports_sparse_layout(layout):
+                continue
+            error_inputs = op.error_inputs_sparse(layout, device)
+            for ei in error_inputs:
+                si = ei.sample_input
+                with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                    out = op(si.input, *si.args, **si.kwargs)
+                    self.assertFalse(isinstance(out, type(NotImplemented)))
+
+    @skipMeta
+    @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_errors(self, device, op):
