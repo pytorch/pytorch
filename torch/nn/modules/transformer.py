@@ -368,7 +368,7 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: bool = False,
+                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: Optional[bool] = None,
                 memory_is_causal: bool = False) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
@@ -380,7 +380,7 @@ class TransformerDecoder(Module):
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Default: ``False``.
+                Default: ``None``; try to detect a causal mask.
                 Warning:
                 ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
                 the causal mask. Providing incorrect hints can result in
@@ -399,6 +399,8 @@ class TransformerDecoder(Module):
             see the docs in Transformer class.
         """
         output = tgt
+
+        tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal)
 
         for mod in self.layers:
             output = mod(output, memory, tgt_mask=tgt_mask,
