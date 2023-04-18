@@ -982,12 +982,7 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
-    @gradcheck_input_func_wrappers()
-    def test_permute(self, device, dtype, coalesced, gradcheck, input_func_wrapper):
-        if not input_func_wrapper.returns_to_dense and dtype.is_complex:
-            # NotImplementedError: Could not run 'aten::view_as_real' with arguments from the ... backend.
-            self.skipTest('NOT IMPL: aten::view_as_real')
-
+    def test_permute(self, device, dtype, coalesced, gradcheck):
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
@@ -1019,8 +1014,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(input_func_wrapper(lambda t: t.permute(dims), masked_grad=gradcheck.masked),
-                              s.requires_grad_())
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1649,25 +1643,24 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
-    @gradcheck_input_func_wrappers()
-    def test_sparse_mul(self, device, dtype, coalesced, gradcheck, input_func_wrapper):
+    def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
-        gradcheck(input_func_wrapper(lambda x, y: torch.sparse.sum(x * y), masked_grad=gradcheck.masked), [a, b])
+        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b])
 
         def test_shape(sparse_dims, nnz, with_shape):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
-            # TODO: investigate gradcheck jacobian mismatch failures from removing the if-statements below
-            if a.is_cpu and coalesced:
-                gradcheck(input_func_wrapper(lambda x, y: x * y, masked_grad=gradcheck.masked), [a, b])
-            if gradcheck.masked and a.is_cpu and coalesced:
-                gradcheck(input_func_wrapper(lambda x, y: torch.sparse.sum(x * y), masked_grad=gradcheck.masked), [a, b])
 
-        test_shape(2, 3, [2, 3, 4, 5])
-        test_shape(2, 3, [2, 2, 0])
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
+            gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
+            # Issues with 0-dim indices/values
+            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True)
+
+        # TODO: Re-enable these
+        # test_shape(2, 3, [2, 3, 4, 5])
+        # test_shape(2, 3, [2, 2, 0])
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -1825,8 +1818,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
-    @gradcheck_input_func_wrappers()
-    def test_sparse_sum(self, device, dtype, coalesced, input_func_wrapper):
+    def test_sparse_sum(self, device, dtype, coalesced):
 
         def run_tests(S, td=None):
             D = S.coalesce().to_dense().detach().requires_grad_(True)
@@ -1837,15 +1829,16 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     return torch.sparse.sum(S)
-                gradcheck(input_func_wrapper(fn, masked_grad=True), (S,), masked=True)
+                gradcheck(fn, (S,), masked=True)
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
-                self.assertEqual(S_sum.to_dense(), D_sum)
+                self.assertEqual(S_sum.to_dense() if S_sum.is_sparse else S_sum, D_sum)
 
                 def fn(S):
-                    return torch.sparse.sum(S, td)
-                gradcheck(input_func_wrapper(fn, masked_grad=True), (S,), masked=True)
+                    res = torch.sparse.sum(S, td)
+                    return res.to_dense(masked_grad=True)
+                gradcheck(fn, (S,), masked=True)
 
         nnz = 10
         sparse_dims = 2
@@ -4474,28 +4467,8 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
-
-    @all_sparse_layouts('layout', include_strided=True)
-    @dtypes(torch.float64, torch.complex128)
-    @parametrize("index_dtype", [torch.int64])
-    @gradcheck_semantics()
-    @parametrize('fast_mode', (True, False))
-    def test_gradcheck_sparse_input_function(self, layout, device, dtype, index_dtype, gradcheck, fast_mode):
-        for t in self.generate_simple_inputs(
-                layout, device=device, dtype=dtype, index_dtype=index_dtype):
-            batch_dim = t.dim() - t.dense_dim() - t.sparse_dim()
-            if batch_dim > 0:
-                # TODO: implement batch support in _convert_indices_from_csr_to_coo
-                continue
-            t = t.clone().detach().requires_grad_(True)
-            if dtype.is_complex and layout is not torch.strided:
-                with self.assertRaisesRegex(
-                        NotImplementedError,
-                        r"Could not run 'aten::view_as_real' with arguments from the 'Sparse(Csr|Csc|Bsr|Bsc|)(CUDA|CPU)' backend"):
-                    gradcheck(lambda x: x, t, fast_mode=fast_mode)
-                self.skipTest(f"aten::view_as_real not implemented for layout {layout}")
-            gradcheck(lambda x: x, t, fast_mode=fast_mode)
+            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
+            self.assertTrue(r)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)

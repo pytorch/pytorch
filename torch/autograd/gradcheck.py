@@ -48,10 +48,10 @@ def _allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output) -> Tuple
 
 def _allocate_jacobians_with_outputs(output_tensors: Tuple, numel_input, dtype=None,
                                      device=None) -> Tuple[torch.Tensor, ...]:
-    # Makes zero-filled tensors from outputs. If `numel_input` is not
-    # None, for each tensor in `output_tensors`, returns a new
-    # zero-filled tensor with height of `numel_input` and width of
-    # `t.numel`.
+    # Makes zero-filled tensors from outputs. If `dim` is not None, for each tensor
+    # in `output_tensors`, returns a new zero-filled tensor with height of `dim` and
+    # width of `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size
+    # (t.numel,).
     out: List[torch.Tensor] = []
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
     for t in output_tensors:
@@ -106,36 +106,6 @@ def _densify(x):
     elif _is_sparse_any_tensor(x):
         raise NotImplementedError(x.layout)
     return x
-
-
-def _zeros_like(x):
-    # Return tensor filled with scalar value 0 that has the same size as x.
-    #
-    # If x is a sparse tensor then the returned tensor has the same
-    # indices as x and values are filled with zero. This is different
-    # from torch.zeros_like behaviour that returns a sparse tensor
-    # with zero nnz.
-    #
-    # _get_values(_zeros_like(x)) is a strided contiguous tensor.
-    #
-    # If x is list or tuple then apply _zeros_like to x items.
-    if isinstance(x, (tuple, list)):
-        return type(x)(map(_zeros_like, x))
-    if x.layout is torch.sparse_coo:
-        y = x.detach().coalesce()
-        values = torch.zeros_like(y._values(), memory_format=torch.legacy_contiguous_format)
-        return torch.sparse_coo_tensor(y._indices().clone(), values, x.shape)
-    elif _is_sparse_compressed_tensor(x):
-        y = x.detach()
-        if y.layout in {torch.sparse_csr, torch.sparse_bsr}:
-            compressed_indices, plain_indices = y.crow_indices(), y.col_indices()
-        else:
-            compressed_indices, plain_indices = y.ccol_indices(), y.row_indices()
-        values = torch.zeros_like(y.values(), memory_format=torch.legacy_contiguous_format)
-        return torch.sparse_compressed_tensor(compressed_indices.clone(), plain_indices.clone(), values, y.shape, layout=x.layout)
-    elif _is_sparse_any_tensor(x):
-        raise NotImplementedError(x.layout)
-    return torch.zeros_like(x, memory_format=torch.legacy_contiguous_format)
 
 
 def _iter_tensor(x_tensor):
@@ -288,32 +258,18 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     return tuple(jacobian_for_each_output[0] for jacobian_for_each_output in jacobians)
 
 
-def _get_values(x):
-    # Return values content of x.
-    if isinstance(x, (tuple, list)):
-        return type(x)(map(_get_values, x))
-    elif not is_tensor_like(x) or x.layout in {torch.strided, torch._mkldnn}:  # type: ignore[attr-defined] # no attr _mkldnn
-        return x
-    elif x.layout is torch.sparse_coo:
-        return x._values()
-    elif _is_sparse_compressed_tensor(x):
-        return x.values()
-    elif _is_sparse_any_tensor(x):
-        raise NotImplementedError(x.layout)
-    return x
-
-
 def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
-    if _is_sparse_any_tensor(entry):
-        # Sparse entry and v have the same indices so that the finite
-        # differencing can be performed on values only.
+    if _is_sparse_compressed_tensor(entry):
+        # sparse compressed tensors don't implement sub/add/copy_
+        # yet. However, in non-masked semantics context entry and v
+        # have the same sparse indices ...
         assert entry.layout == v.layout, (entry.layout, v.layout)
         assert entry._nnz() == v._nnz(), (entry._nnz(), v._nnz(), entry.shape)
-        entry = _get_values(entry)
-        v = _get_values(v)
-        assert entry.shape == v.shape, (entry, v)
+        # ... the finite differencing can be performed on values only:
+        entry = entry.values()
+        v = v.values()
         # we'll detach to avoid backward computations that sparse
         # tensors have limited support for.
         entry = entry.detach()
@@ -325,27 +281,12 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     outb = fn()
     entry.copy_(orig)
 
-    def compute_sparse_compressed(a, b):
-        # TODO: implement sub and div operations support for sparse
-        # compressed tensors and delete this function
-        nbhd_checks_fn(a, b)
-        a_ = _get_values(a).detach()
-        b_ = _get_values(b).detach()
-        ret = (b_ - a_) / (2 * norm_v)
-        a_.copy_(ret)
-        # conversion to strided tensor guarantees the gradient
-        # invariance with respect to tensor layout:
-        return a.detach().to_dense().reshape(-1)
-
     def compute(a, b):
         nbhd_checks_fn(a, b)
         ret = (b - a) / (2 * norm_v)
-        # conversion to strided tensor guarantees the gradient
-        # invariance with respect to tensor layout:
-        return ret.detach().to_dense().reshape(-1)
+        return ret.detach().reshape(-1)
 
-    return tuple(compute_sparse_compressed(a, b) if _is_sparse_compressed_tensor(a) else compute(a, b)
-                 for (a, b) in zip(outa, outb))
+    return tuple(compute(a, b) for (a, b) in zip(outa, outb))
 
 
 def _compute_numerical_jvps_wrt_specific_input(jvp_fn, delta, input_is_complex,
@@ -359,8 +300,7 @@ def _compute_numerical_jvps_wrt_specific_input(jvp_fn, delta, input_is_complex,
     ds_dx_tup = jvp_fn(delta[0] if isinstance(delta, tuple) else delta)
 
     if input_is_complex:  # C -> R
-        delta_1j = _mul_tensor_or_tuple(delta, 1j)
-        ds_dy_tup = jvp_fn(delta_1j[1]) if isinstance(delta_1j, tuple) else jvp_fn(delta_1j)
+        ds_dy_tup = jvp_fn(delta[1] * 1j) if isinstance(delta, tuple) else jvp_fn(delta * 1j)
         for ds_dx, ds_dy in zip(ds_dx_tup, ds_dy_tup):
             assert(not ds_dx.is_complex())
             # conjugate wirtinger derivative
@@ -419,10 +359,6 @@ def _check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None
         (f"Expected `func` to return outputs with the same dtype"
          f" when inputs are perturbed {on_index}by {eps}, but got:"
          f" dtypes {output1.dtype} and {output2.dtype}.")
-    assert output1.layout == output2.layout, \
-        (f"Expected `func` to return outputs with the same layout"
-         f" when inputs are perturbed {on_index}by {eps}, but got:"
-         f" layouts {output1.layout} and {output2.layout}.")
 
 
 def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, eps,
@@ -573,11 +509,8 @@ def _reshape_tensor_or_tuple(u, shape):
 
 def _mul_tensor_or_tuple(u, k):
     if isinstance(u, tuple):
-        return tuple(_mul_tensor_or_tuple(u_, k) for u_ in u)
+        return (k * u[0], k * u[1])
     else:
-        if is_tensor_like(u) and u.layout is torch.sparse_coo:
-            # workaround https://github.com/pytorch/pytorch/issues/97627
-            return torch.sparse_coo_tensor(u._indices(), k * u._values(), u.shape)
         return k * u
 
 
@@ -610,7 +543,6 @@ def _get_numerical_vJu(fn, inputs, inp_indices, func_out, all_u, all_v, eps, is_
         if all_v is not None:
             jacobian_scalars: List[torch.Tensor] = []
             for v, Ju in zip(all_v, filtered_Ju):
-                v = v.to_dense().reshape(-1)
                 jacobian_scalars.append(_dot_with_type_promotion(v, Ju))
             reduced_jacobians.append(jacobian_scalars)
         else:
@@ -646,7 +578,7 @@ def _stack_and_check_tensors(list_of_list_of_tensors, inputs,
             if tensor is None:
                 out_jacobian[:, j].zero_()
             else:
-                dense = tensor.to_dense()
+                dense = tensor.to_dense() if not tensor.layout == torch.strided else tensor
                 assert out_jacobian[:, j].numel() == dense.numel()
                 out_jacobian[:, j] = dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types
@@ -670,7 +602,7 @@ If the test
 
 
 def _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
-                                          fast_mode=False, v=None, masked=False) -> Tuple[torch.Tensor, ...]:
+                                          fast_mode=False, v=None) -> Tuple[torch.Tensor, ...]:
     # This is used by both fast and slow mode:
     #  - For slow mode, vjps[i][j] is the jth row the Jacobian wrt the ith
     #    input.
@@ -683,13 +615,12 @@ def _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad
                                    retain_graph=True, allow_unused=True)
     # Compute everything twice to check for nondeterminism (which we call reentrancy)
     if fast_mode:
-        vjps1 = _get_analytical_vjps_wrt_specific_output(vjp_fn, output, v)
-        vjps2 = _get_analytical_vjps_wrt_specific_output(vjp_fn, output, v)
+        vjps1 = _get_analytical_vjps_wrt_specific_output(vjp_fn, output.clone(), v)
+        vjps2 = _get_analytical_vjps_wrt_specific_output(vjp_fn, output.clone(), v)
     else:
-        # sparse sample output needs to be densified for non-masked semantics:
-        sample_output = output if masked else _densify(output)
-        vjps1 = _compute_analytical_jacobian_rows(vjp_fn, sample_output)
-        vjps2 = _compute_analytical_jacobian_rows(vjp_fn, sample_output)
+        vjps1 = _compute_analytical_jacobian_rows(vjp_fn, output.clone())
+        vjps2 = _compute_analytical_jacobian_rows(vjp_fn, output.clone())
+
     output_numel = output.numel() if not fast_mode else 1
     jacobians1, types_ok, sizes_ok = _stack_and_check_tensors(vjps1, inputs, output_numel)
     jacobians2, _, _ = _stack_and_check_tensors(vjps2, inputs, output_numel)
@@ -708,11 +639,11 @@ def _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad
     return jacobians1
 
 
-def _get_analytical_vJu_backward_mode(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u, masked):
+def _get_analytical_vJu_backward_mode(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u):
     reduced_jacobians: List[List[torch.Tensor]] = []
     for output, v in zip(outputs, all_v):
         all_vJ = _check_analytical_jacobian_attributes(inputs, output, nondet_tol, check_grad_dtypes,
-                                                       fast_mode=True, v=v, masked=masked)
+                                                       fast_mode=True, v=v)
         jacobian_scalars: List[torch.Tensor] = []
         for vJ, u in zip(all_vJ, all_u):
             # Why do we need squeeze here? vJ is a 2-d tensor so that we can reuse
@@ -728,7 +659,7 @@ def _get_analytical_vJu_backward_mode(inputs, outputs, nondet_tol, check_grad_dt
         reduced_jacobians.append(jacobian_scalars)
     return reduced_jacobians
 
-def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0, masked=False):
+def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0):
     # Replicates the behavior of the old get_analytical_jacobian before the refactor
     # This shares much of its code with _check_analytical_jacobian_attributes
     warnings.warn("get_analytical_jacobian was part of PyTorch's private API and not "
@@ -747,10 +678,9 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0, masked
     def vjp_fn(grad_output):
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
-    sample_output = output if masked else _densify(output)
     # Compute everything twice to check for nondeterminism (which we call reentrancy)
-    vjps1 = _compute_analytical_jacobian_rows(vjp_fn, sample_output)
-    vjps2 = _compute_analytical_jacobian_rows(vjp_fn, sample_output)
+    vjps1 = _compute_analytical_jacobian_rows(vjp_fn, output.clone())
+    vjps2 = _compute_analytical_jacobian_rows(vjp_fn, output.clone())
 
     output_numel = output.numel()
     jacobians1, types_ok, sizes_ok = _stack_and_check_tensors(vjps1, inputs, output_numel)
@@ -760,39 +690,12 @@ def get_analytical_jacobian(inputs, output, nondet_tol=0.0, grad_out=1.0, masked
     return jacobians1, reentrant, sizes_ok, types_ok
 
 
-def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx, masked):
+def _get_analytical_jacobian(inputs, outputs, input_idx, output_idx):
     # Computes the analytical Jacobian in slow mode for a single input-output pair.
     # Forgoes performing checks on dtype, shape, and reentrancy.
     jacobians = _check_analytical_jacobian_attributes(inputs, outputs[output_idx],
-                                                      nondet_tol=float('inf'), check_grad_dtypes=False,
-                                                      masked=masked)
+                                                      nondet_tol=float('inf'), check_grad_dtypes=False)
     return jacobians[input_idx]
-
-
-def _get_layout_to_strided_permutation(x):
-    # Return 1-D permutation int64-tensor p such that
-    #   x.to_dense().view(-1)[i] == _get_values(x).to_dense().view()[k - 1]
-    # holds for i, k in enumerate(p) and k > 0. k == 0 means that the
-    # corresponding element in x is unspecified.
-    if x.layout is torch.sparse_coo:
-        values = torch.zeros_like(x._values(), dtype=torch.int64)
-        flat_values = values.view(-1)
-        flat_values.copy_(torch.arange(1, flat_values.numel() + 1, dtype=flat_values.dtype, device=flat_values.device))
-        return torch.sparse_coo_tensor(x._indices(), values, x.shape).to_dense().view(-1)
-    elif _is_sparse_compressed_tensor(x):
-        values = torch.zeros_like(x.values(), dtype=torch.int64)
-        flat_values = values.view(-1)
-        flat_values.copy_(torch.arange(1, flat_values.numel() + 1, dtype=flat_values.dtype, device=flat_values.device))
-        if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
-            compressed_indices, plain_indices = x.crow_indices(), x.col_indices()
-        else:
-            compressed_indices, plain_indices = x.ccol_indices(), x.row_indices()
-        return torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, x.shape,
-                                              layout=x.layout).to_dense().reshape(-1)
-    elif _is_sparse_any_tensor(x):
-        raise NotImplementedError(x.layout)
-    else:
-        return torch.arange(1, x.numel() + 1, dtype=torch.int64, device=x.device)
 
 
 def _compute_analytical_jacobian_rows(vjp_fn, sample_output) -> List[List[Optional[torch.Tensor]]]:
@@ -800,26 +703,14 @@ def _compute_analytical_jacobian_rows(vjp_fn, sample_output) -> List[List[Option
     # NB: this function does not assume vjp_fn(v) to return tensors with the same
     # number of elements for different v. This is checked when we later combine the
     # rows into a single tensor.
-    grad_out_base = _zeros_like(sample_output)
-    flat_grad_out = _get_values(grad_out_base).view(-1)
-    # The mapping of values in grad_out_base.to_dense().view(-1) and
-    # _get_values(grad_out_base).to_dense().view(-1) depends on the
-    # grad_out_base layout (for the strided layout, this mapping is
-    # identity). To enforce the jacobian invariance with respect to
-    # layout, we'll compute the mapping:
-    p = _get_layout_to_strided_permutation(grad_out_base)
+    grad_out_base = torch.zeros_like(sample_output, memory_format=torch.legacy_contiguous_format)
+    flat_grad_out = grad_out_base.view(-1)
     # jacobians_rows[i][j] represents the jth row of the ith input
     jacobians_rows: List[List[Optional[torch.Tensor]]] = []
-    z_grad_inputs = None  # storage of vjp_fn(<grad_out_base with all zeros>) result
-    for j, k in enumerate(p):
+    for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
-        if k:
-            flat_grad_out[k - 1] = 1.0
-            grad_inputs = vjp_fn(grad_out_base)
-        elif z_grad_inputs is None:
-            z_grad_inputs = grad_inputs = vjp_fn(grad_out_base)
-        else:
-            grad_inputs = z_grad_inputs
+        flat_grad_out[j] = 1.0
+        grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
             if j == 0:
                 jacobians_rows.append([])
@@ -829,9 +720,7 @@ def _compute_analytical_jacobian_rows(vjp_fn, sample_output) -> List[List[Option
 
 def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[List[Optional[torch.Tensor]]]:
     vjps: List[List[Optional[torch.Tensor]]] = []
-    if v.shape != sample_output.shape:
-        v = v.reshape(sample_output.shape)
-    grad_inputs = vjp_fn(v)
+    grad_inputs = vjp_fn(v.reshape(sample_output.shape))
     for vjp in grad_inputs:
         vjps.append([vjp.clone() if isinstance(vjp, torch.Tensor) else None])
     return vjps
@@ -873,6 +762,11 @@ def _check_inputs(tupled_inputs) -> bool:
 
 
 def _check_outputs(outputs) -> None:
+    if any(_is_sparse_any_tensor(t) for t in outputs if isinstance(t, torch.Tensor)):
+        # it is easier to call to_dense() on the sparse output than
+        # to modify analytical jacobian
+        raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense(masked_grad=...) on the output of fn for gradcheck.')
     if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore[attr-defined]
         raise ValueError('MKLDNN output is not supported at gradcheck yet. '
                          'Please call to_dense(masked_grad=...) on the output of fn for gradcheck.')
@@ -1047,10 +941,8 @@ def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
     diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
         raise GradcheckError("no Tensors requiring grad found in input")
-    if not masked:
-        diff_input_list = _densify(diff_input_list)
     grads_input = torch.autograd.grad(outputs, diff_input_list,
-                                      _zeros_like(outputs),
+                                      [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in outputs],
                                       allow_unused=True)
     for gi, di in zip(grads_input, diff_input_list):
         if gi is None:
@@ -1068,7 +960,10 @@ def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
                                          f' {gi.dense_dim()}, expected {di.dense_dim()}')
             gi = gi.to_dense()
             di = di.to_dense()
-        if not gi.eq(0).all():
+        if masked:
+            if not torch.allclose(gi, torch.zeros_like(gi)):
+                raise GradcheckError('backward not multiplied by grad_output')
+        elif not gi.eq(0).all():
             raise GradcheckError('backward not multiplied by grad_output')
         if gi.dtype != di.dtype:
             raise GradcheckError("grad is incorrect type")
@@ -1147,7 +1042,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             'function with "check_undefined_grad=False" to disable the feature'))
 
     def check_undefined_grad_support(output_to_check):
-        grads_output = _zeros_like(outputs)
+        grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
         try:
             grads_input = torch.autograd.grad(output_to_check, diff_input_list,
                                               grads_output, allow_unused=True)
@@ -1320,7 +1215,7 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
                                                               is_forward_ad=True))
     else:
         for i, o in enumerate(outputs):
-            analytical = _check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, check_grad_dtypes, masked=masked)
+            analytical = _check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, check_grad_dtypes)
 
             for j, (a, n) in enumerate(zip(analytical, numerical[i])):
                 if not _allclose_with_type_promotion(a, n.to(a.device), rtol, atol):
@@ -1419,7 +1314,7 @@ If the test
 """.strip()
 
 
-def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad, masked):
+def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output_idx, rtol, atol, is_forward_ad):
     # Compute jacobians in slow mode for better error message
     slow_numerical = _get_numerical_jacobian(func, tupled_inputs, outputs, is_forward_ad=is_forward_ad)[input_idx][output_idx]
     if is_forward_ad:
@@ -1429,7 +1324,7 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
             return _as_tuple(func(*new_inputs))[output_idx]
         slow_analytical = _get_analytical_jacobian_forward_ad(new_fn, (tupled_inputs[input_idx],), (outputs[output_idx],))[0][0]
     else:
-        slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx, masked)
+        slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
 
 
     # Assume jacobians are non-empty and have the same shape
@@ -1476,7 +1371,7 @@ def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
 
 
 def _check_analytical_numerical_equal(all_analytical, all_numerical, complex_indices, tupled_inputs, outputs,
-                                      func, all_v, all_u, rtol, atol, test_imag, *, is_forward_ad=False, masked=False):
+                                      func, all_v, all_u, rtol, atol, test_imag, *, is_forward_ad=False):
     for i, all_numerical_for_input_i in enumerate(all_numerical):
         for j, n in enumerate(all_numerical_for_input_i):
             # Forward AD generates the transpose of what this function expects
@@ -1487,7 +1382,7 @@ def _check_analytical_numerical_equal(all_analytical, all_numerical, complex_ind
             n = n.to(device=a.device)
             updated_atol = _adjusted_atol(atol, all_u[i], all_v[j] if all_v else None)
             if not _allclose_with_type_promotion(a, n.to(a.device), rtol, updated_atol):
-                jacobians_str = _run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad, masked)
+                jacobians_str = _run_slow_mode_and_get_error(func, tupled_inputs, outputs, i, j, rtol, atol, is_forward_ad)
                 raise GradcheckError(_get_notallclose_msg(a, n, j, i, complex_indices, test_imag, is_forward_ad) + jacobians_str)
 
 
@@ -1517,12 +1412,11 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     else:
         if not outputs:
             _check_no_differentiable_outputs_fast(func, func_out, inputs, inp_tensors_idx, all_u, eps, nondet_tol)
-        analytical_vJu = _get_analytical_vJu_backward_mode(inputs, outputs, nondet_tol, check_grad_dtypes,
-                                                           all_v, all_u_dense, masked)
+
+        analytical_vJu = _get_analytical_vJu_backward_mode(inputs, outputs, nondet_tol, check_grad_dtypes, all_v, all_u_dense)
 
     _check_analytical_numerical_equal(analytical_vJu, numerical_vJu, complex_indices,
-                                      inputs, outputs, func, all_v, all_u, rtol, atol, test_imag,
-                                      is_forward_ad=use_forward_ad, masked=masked)
+                                      inputs, outputs, func, all_v, all_u, rtol, atol, test_imag, is_forward_ad=use_forward_ad)
 
     return True
 

@@ -4767,6 +4767,12 @@ Done""")
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_gradcheck_test_outputs(self):
         def check(fast_mode):
+            # when sparse outputs (always raise even if raise_exception=False)
+            x = torch.rand(10, requires_grad=True).to_sparse()
+            with self.assertRaisesRegex(ValueError, 'Sparse output is not supported at gradcheck yet'):
+                gradcheck(lambda x: x, (x,), masked=True, check_batched_grad=False, raise_exception=False,
+                          fast_mode=fast_mode)
+
             # when mkldnn outputs (always raise even if raise_exception=False)
             root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
             with self.assertRaisesRegex(ValueError, 'MKLDNN output is not supported at gradcheck yet'):
