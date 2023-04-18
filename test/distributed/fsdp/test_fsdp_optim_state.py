@@ -1699,13 +1699,13 @@ class TestFSDPOptimState(FSDPTest):
             original_osd_no_param_groups.pop("param_groups")
         )
         # passing the osd without param_groups to FSDP
-        original_fsdp_state_dict = deepcopy(
+        original_fsdp_optim_state_dict = deepcopy(
             FSDP.optim_state_dict(
                 model, optim, optim_state_dict=original_osd_no_param_groups
             )
         )
         # check the state_dict sharded by FSDP does not contain param_groups.
-        self.assertEqual(None, original_fsdp_state_dict.get("param_groups"))
+        self.assertEqual(None, original_fsdp_optim_state_dict.get("param_groups"))
 
         # train another step to make optim a different state.
         for param in model.parameters():
@@ -1717,7 +1717,7 @@ class TestFSDPOptimState(FSDPTest):
         loss.backward()
 
         state_dict_to_load = FSDP.optim_state_dict_to_load(
-            model, optim, original_fsdp_state_dict
+            model, optim, original_fsdp_optim_state_dict
         )
         # manually add param_groups to state_dict_to_load before loading the optimizer state
         state_dict_to_load["param_groups"] = original_param_groups
@@ -1726,7 +1726,7 @@ class TestFSDPOptimState(FSDPTest):
 
         fsdp_optim_state = FSDP.optim_state_dict(model, optim)
         self._check_same_state(
-            original_fsdp_state_dict, fsdp_optim_state, check_same_param_keys=True
+            original_fsdp_optim_state_dict, fsdp_optim_state, check_same_param_keys=True
         )
         self.assertEqual(original_param_groups, optim.state_dict()["param_groups"])
 
