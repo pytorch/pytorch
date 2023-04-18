@@ -246,13 +246,17 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             big_tensor = device_mesh.all_gather(
                 local_tensor, mesh_dim=0, gather_dim=shard_dim
             )
-            if pad_idx != 0:
-                big_tensor = shard_placement._unpad_concat_tensor(
-                    big_tensor, pad_sizes, device_mesh.size()
-                )
+            big_tensor_chunks = list(torch.chunk(big_tensor, device_mesh.size(), dim=shard_dim))
+            unpadded_list = [
+                shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                if pad_sizes[i] > 0
+                else big_tensor_chunks[i]
+                for i, big_tensor in enumerate(big_tensor_chunks)
+            ]
+            all_gathered_tensor = torch.cat(unpadded_list, dim=shard_dim)
 
-            self.assertEqual(big_tensor.size(), tensor_to_split.size())
-            self.assertEqual(big_tensor, tensor_to_split)
+            self.assertEqual(all_gathered_tensor.size(), tensor_to_split.size())
+            self.assertEqual(all_gathered_tensor, tensor_to_split)
 
     @with_comms
     def test_reduce_scatter_1d(self):
@@ -307,7 +311,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
 
             # unpad scattered_tensor
-            if my_rank >= pad_idx:
+            if pad_sizes[my_rank] > 0:
                 scattered_tensor = shard_placement._unpad_tensor(
                     scattered_tensor, pad_sizes[my_rank]
                 )

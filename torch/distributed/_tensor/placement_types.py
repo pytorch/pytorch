@@ -105,7 +105,9 @@ class Shard(Placement):
                 tensor.get_device() if torch.cuda.is_available() else "cpu"
             )
             tensor_size = list(reference_tensor.size())
-            tensor_size = [dim if dim >= self.dim else 0 for dim in tensor_size]  # type: ignore[attr-defined]
+            # print(f"before tensor_size: {tensor_size}")
+            # tensor_size = [dim if dim >= self.dim else 0 for dim in tensor_size]  # type: ignore[attr-defined]
+            # print(f"after tensor_size: {tensor_size}")
             return torch.zeros(tensor_size, device=device)
         else:
             pad = [0, 0] * (tensor.ndim - self.dim)
@@ -132,18 +134,6 @@ class Shard(Placement):
             return torch.tensor([], device=device)
         else:
             return tensor
-
-    def _unpad_concat_tensor(
-        self, tensor: torch.Tensor, pad_sizes: List[int], shard_count: int
-    ) -> torch.Tensor:
-        gathered_list = torch.chunk(tensor, shard_count, dim=self.dim)
-        gathered_list = [
-            self._unpad_tensor(gathered_tensor, pad_sizes[i])
-            if pad_sizes[i] > 0
-            else gathered_tensor
-            for i, gathered_tensor in enumerate(gathered_list)
-        ]
-        return torch.cat(gathered_list, dim=self.dim)
 
     def _local_shard_size_on_dim(
         self,
