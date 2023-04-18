@@ -166,31 +166,6 @@ def enable_dynamic(enable: bool = True, export: bool = False):
         yield
 
 
-@contextlib.contextmanager
-def enable_functionalization(enable: bool, args):
-    if not enable:
-        yield args
-        return
-
-    memo: Dict[torch.Tensor, torch.Tensor] = {}
-
-    def to_fun(t):
-        if isinstance(t, torch.Tensor):
-            if t in memo:
-                return memo[t]
-            r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
-            memo[t] = r
-            return r
-        else:
-            return t
-
-    try:
-        torch._enable_functionalization(reapply_views=True)
-        yield pytree.tree_map(to_fun, args)
-    finally:
-        torch._disable_functionalization()
-
-
 class _TorchDynamoContext:
     def __init__(
         self,
