@@ -49,7 +49,7 @@ concurrency:
       - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TMPDIR -ErrorAction Ignore
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
           # Let's both exclude the path and disable Windows Defender completely just to be sure
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True
