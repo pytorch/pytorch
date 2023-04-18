@@ -15,6 +15,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
