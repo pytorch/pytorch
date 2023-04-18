@@ -501,7 +501,7 @@ class DeviceMesh(object):
                     async_op=async_op,
                 )
 
-        elif self._backend == "nccl" or self._backend == "threaded":
+        elif self._backend == "nccl":
             work = all_to_all(
                 output_tensor_list,
                 input_tensor_list,
