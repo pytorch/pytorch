@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
@@ -216,6 +216,50 @@ def _prop_nll_loss_backward(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(grad_output, DTensorSpec)
     assert isinstance(self, DTensorSpec)
     return OutputSharding(output_spec=self)
+
+
+@register_prop_rule(aten.stack.default)
+def _prop_stack(op_schema: OpSchema) -> OutputSharding:
+    tensors = op_schema.args_schema[0]
+    dim = 0 if len(op_schema.args_schema) == 1 else cast(int, op_schema.args_schema[1])
+    assert len(tensors) > 0, "expect at least one tensor to stack"
+    assert all(
+        isinstance(t, DTensorSpec) for t in tensors
+    ), f"expect a list of DTensorSpecs, but got {tensors}"
+    assert all(
+        t.shape == tensors[0].shape for t in tensors
+    ), f"expect all tensors to have the same shape, but got {tensors}."
+    # TODO: provide schema_suggestions when placements do not match
+    assert all(
+        t.placements == tensors[0].placements for t in tensors
+    ), f"expect all tensors to have the same placements, but got {tensors}."
+    assert all(
+        not p.is_shard(dim) for p in tensors[0].placements
+    ), f"DTensor does not support stack on sharded dimension."
+
+    return OutputSharding(
+        output_spec=DTensorSpec(mesh=tensors[0].mesh, placements=tensors[0].placements)
+    )
+
+
+@register_prop_rule(aten.select.int)
+def _prop_select(op_schema: OpSchema) -> OutputSharding:
+    tensor, dim, index = op_schema.args_schema
+    assert isinstance(tensor, DTensorSpec)
+    assert all(
+        not p.is_shard(dim) for p in tensor.placements
+    ), f"DTensor does not support select on sharded dimension."
+
+    new_placements = []
+    for p in tensor.placements:
+        if p.is_shard() and p.dim > dim:
+            new_placements.append(Shard(p.dim - 1))
+        else:
+            new_placements.append(p)
+
+    return OutputSharding(
+        output_spec=DTensorSpec(mesh=tensor.mesh, placements=new_placements)
+    )
 
 
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
