@@ -41,7 +41,9 @@ from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
+_InputArgsType = Optional[
+    Union[torch.Tensor, int, float, bool, Sequence[Any], Mapping[str, Any]]
+]
 _OutputsType = Sequence[_NumericType]
 
 
@@ -332,7 +334,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return (y, z)
 
         tensor_x = torch.randn(1, 2, 3, dtype=torch.float32)
-        another_x = torch.randn(2, 4, 3, dtype=torch.float32)
 
         # Test without providing optional kwarg.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
@@ -345,17 +346,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (tensor_x,), {"b": torch.tensor(5.0)}
         )
 
-    # beartype.roar.BeartypeCallHintParamViolation:
-    # @beartyped onnxscript.function_libs.torch_aten.graph_building.TorchScriptGraph.add_input()
-    # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
-    # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
-    # @unittest.expectedFailure
     @pytorch_test_common.xfail(
-        "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
-        "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
-        "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
-        "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
-        "instance of <protocol 'torch.Tensor'>."
+        "AssertionError: Expected 1 inputs, got 2"
+        "Captured fx graph does not have any information of the constant input (arg1). "
+        "The constant input is inserted into op.target args directly."
+        "This might be a bug in fx tracer regarding potential break in dynamic shapes."
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -369,13 +364,20 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return (y, z)
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+        another_x = torch.randn(2, 2, 4, dtype=torch.float32)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
         # Test with only positional args.
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x, 8.0))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self, func, (tensor_x, 8.0), additional_test_inputs=[[(another_x, 9.0)]]
+        )
         # Test while specifying optional kwarg.
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, func, (tensor_x,), b=5.0
+            self,
+            func,
+            (tensor_x,),
+            {"b": 5.0},
+            additional_test_inputs=[[(another_x,), {"b": 6.0}]],
         )
 
     @pytorch_test_common.skip_min_ort_version(
@@ -464,25 +466,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MNISTModel(), (tensor_x,)
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
-    # test single op with no kwargs
-    def test_sigmoid(self):
-        x = torch.randn(1, 4, 2, 3)
-
-        class SigmoidModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.sigmoid = torch.nn.Sigmoid()
-
-            def forward(self, x):
-                return self.sigmoid(x)
-
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
-
     @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "
         "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
@@ -557,6 +540,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
         "while running Expand node. Name:'_0x55b501ebaf10_n2' "
         "Status Message: invalid expand shape"
+        "https://github.com/pytorch/pytorch/issues/99360"
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -577,8 +561,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[[(input_x, input_y)]]
         )
 
-    @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "fx graph does not capture symbolic value for aten::scalar_tensor."
     )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
@@ -633,9 +617,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
-        "AssertionError: The values for attribute 'shape' do not match:"
-        " torch.Size([5, 6, 2]) != torch.Size([4, 4, 2]). Even symbolic "
-        "fx.graph can't get dynamic arguments from this Module."
+        "https://github.com/pytorch/pytorch/issues/99360"
     )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
@@ -671,7 +653,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    @pytorch_test_common.xfail("TypeError: missing a required argument: 'end'")
+    # TODO(justinchuby): A known limitation in aten::arange support.
+    @pytorch_test_common.xfail(
+        "arange overload does not support positional 'end' argument"
+    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -710,7 +695,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.copy.default"
+        "RuntimeError: Unknown call_function target: aten.lift_fresh_copy.default"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -727,11 +712,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[[(x2,)]],
         )
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     @pytorch_test_common.xfail(
         "Unknown call_function target: aten.lift_fresh_copy.default"
     )
@@ -813,6 +793,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
+    )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "onnxruntime::ReshapeHelper::ReshapeHelper(const onnxruntime::TensorShape&, "
+        "onnxruntime::TensorShapeVector&, bool) size != 0 && "
+        "(input_shape.Size() % size) == 0 was false. The input tensor cannot be "
+        "reshaped to the requested shape. Input shape:{1,4}, requested shape:{-1,3}\n"
+        "fx graph captures static graph."
     )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
