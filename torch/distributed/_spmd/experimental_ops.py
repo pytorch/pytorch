@@ -222,7 +222,9 @@ def _prop_nll_loss_backward(op_schema: OpSchema) -> OutputSharding:
 def _prop_stack(op_schema: OpSchema) -> OutputSharding:
     tensors = op_schema.args_schema[0]
     dim = 0 if len(op_schema.args_schema) == 1 else cast(int, op_schema.args_schema[1])
-    assert len(tensors) > 0, "expect at least one tensor to stack"
+    assert (
+        isinstance(tensors, list) and len(tensors) > 0
+    ), "expect at least one tensor to stack"
     assert all(
         isinstance(t, DTensorSpec) for t in tensors
     ), f"expect a list of DTensorSpecs, but got {tensors}"
@@ -235,7 +237,7 @@ def _prop_stack(op_schema: OpSchema) -> OutputSharding:
     ), f"expect all tensors to have the same placements, but got {tensors}."
     assert all(
         not p.is_shard(dim) for p in tensors[0].placements
-    ), f"DTensor does not support stack on sharded dimension."
+    ), "DTensor does not support stack on sharded dimension."
 
     return OutputSharding(
         output_spec=DTensorSpec(mesh=tensors[0].mesh, placements=tensors[0].placements)
@@ -244,15 +246,21 @@ def _prop_stack(op_schema: OpSchema) -> OutputSharding:
 
 @register_prop_rule(aten.select.int)
 def _prop_select(op_schema: OpSchema) -> OutputSharding:
-    tensor, dim, index = op_schema.args_schema
+    tensor, dim = op_schema.args_schema[:2]
     assert isinstance(tensor, DTensorSpec)
+    assert isinstance(dim, int)
+    placements: Sequence[Placement] = tensor.placements
     assert all(
-        not p.is_shard(dim) for p in tensor.placements
-    ), f"DTensor does not support select on sharded dimension."
+        not p.is_shard(dim) for p in placements
+    ), "DTensor does not support select on sharded dimension."
 
-    new_placements = []
-    for p in tensor.placements:
-        if p.is_shard() and p.dim > dim:
+    # select will remove one dimension, decrement dim of Shard placements by 1
+    # if they are larger than dim.
+    new_placements: List[Placement] = []
+    for p in placements:
+        # Using isinstance instead of is_shard to so that mypy won't complain
+        # about accessing dim attribute.
+        if isinstance(p, Shard) and p.dim > dim:
             new_placements.append(Shard(p.dim - 1))
         else:
             new_placements.append(p)
