@@ -2195,6 +2195,8 @@ Example::
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
 #endif
 
+#endif
+
 #ifdef USE_C10D_MPI
   auto processGroupMPI =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
