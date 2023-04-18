@@ -6,7 +6,7 @@ import uuid
 import shutil
 import subprocess
 import textwrap
-from tmpfile import TemporaryFile
+from tempfile import TemporaryFile
 from importlib import import_module
 
 import torch
