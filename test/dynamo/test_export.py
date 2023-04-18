@@ -2548,7 +2548,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(5, 4, 6)
         y = torch.randn(6, 4, 7)
 
-        constraint = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(y, 0)]
+        constraint = [
+            3 <= dynamic_dim(x, 0),
+            dynamic_dim(x, 0) <= 6,
+            dynamic_dim(x, 1),
+            dynamic_dim(y, 0),
+        ]
 
         gm, guard = torch._dynamo.export(
             f, x, y, aten_graph=True, tracing_mode="symbolic", constraints=constraint
@@ -2559,10 +2564,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if node.target == torch.ops.aten._assert_async.msg:
                 count += 1
 
-        # Dim constraints are too wide so we don't asserts in this case
-        self.assertEqual(count, 0)
+        # Dim constraints for x[1] and y[0] are too wide so we don't asserts in those case
+        self.assertEqual(count, 2)
         test_inps = (torch.randn(3, 4, 5), torch.randn(6, 4, 7))
         self.assertEqual(gm(*test_inps), f(*test_inps))
+        test_inps_v2 = (torch.randn(2, 4, 5), torch.randn(6, 4, 7))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Input #0's dimension #0 size is outside of specified dynamic range \[3, 6\]",
+        ):
+            gm(*test_inps_v2)
 
     @config.patch(
         dynamic_shapes=True,
@@ -2585,7 +2596,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 count += 1
         self.assertEqual(count, 2)
 
-        with self.assertRaisesRegex(RuntimeError, "max_val"):
+        with self.assertRaisesRegexp(RuntimeError, "Intermediate variable is outside"):
             gm(torch.tensor(9))
 
 

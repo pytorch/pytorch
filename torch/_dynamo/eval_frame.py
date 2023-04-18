@@ -16,7 +16,7 @@ import traceback
 import types
 import warnings
 import weakref
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
@@ -645,6 +645,9 @@ class Constraint:
         )
 
 
+ConstraintSpec = namedtuple("ConstraintSpec", ["constraint_dim", "min_val", "max_val"])
+
+
 class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
     def __init__(
         self,
@@ -655,11 +658,51 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
         super().__init__(m)
         self.count = 0
         self.flat_args = flat_args
-        self.constraints_id_to_constraint = defaultdict(list)
-        if constraints is not None:
-            # map input tensor to it's constraints
-            for constraint in constraints:
-                self.constraints_id_to_constraint[constraint.t_id].append(constraint)
+        self.constraints_id_to_constraint = self._process_constraints(constraints)
+
+    def _process_constraints(self, constraints) -> Dict[int, List[ConstraintSpec]]:
+        constraints_id_to_constraint: Dict[int, List[ConstraintSpec]] = defaultdict(
+            list
+        )
+        if constraints is None:
+            return constraints_id_to_constraint
+
+        # Convert simple sympy Integers into concrete int to
+        # insert into graph
+        def _convert_to_int(val):
+            if val == sympy.oo:
+                return math.inf
+            if isinstance(val, sympy.Integer):
+                return int(val)
+            raise RuntimeError(
+                "torchdynamo.export cannot parse non-integer expressions"
+            )
+
+        constraint_id_to_dim: Dict[int, Dict[int, List[Tuple[int, int]]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        for constraint in constraints:
+            min_int_val = _convert_to_int(constraint.constraint_range.vr.lower)
+            max_int_val = _convert_to_int(constraint.constraint_range.vr.upper)
+            constraint_id_to_dim[constraint.t_id][constraint.dim].append(
+                (min_int_val, max_int_val)
+            )
+
+        # Merge the constraints into a single list of constraints
+        for t_id in constraint_id_to_dim:
+            for dim, constraints in constraint_id_to_dim[t_id].items():
+                min_vals = [x[0] for x in constraints]
+                max_vals = [x[1] for x in constraints]
+                min_val = sorted(min_vals, reverse=True)[0]
+                max_val = sorted(max_vals, reverse=False)[0]
+
+                assert min_val <= max_val
+
+                constraints_id_to_constraint[t_id].append(
+                    ConstraintSpec(constraint_dim=dim, min_val=min_val, max_val=max_val)
+                )
+
+        return constraints_id_to_constraint
 
     def placeholder(self, target, args, kwargs):
         arg = super().placeholder(target, args, kwargs)
@@ -671,57 +714,40 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
 
         constraints = self.constraints_id_to_constraint[orig_inp_id]
 
-        # Convert simple sympy Integers into concrete int to
-        # insert into graph
-        def _convert_to_int(val):
-            if val == sympy.oo:
-                return math.inf
-            if isinstance(val, sympy.Integer):
-                return int(val)
-            # TODO ignore expressions for now
-            return None
-
         for constraint in constraints:
-            constraint_range = constraint.constraint_range
-            if constraint_range is None:
-                continue
-
-            min_int_val = _convert_to_int(constraint_range.vr.lower)
-            max_int_val = _convert_to_int(constraint_range.vr.upper)
-
-            if min_int_val is None and max_int_val is None:
-                continue
-
             dim = self.tracer.create_proxy(
-                "call_function", torch.ops.aten.sym_size, (arg, constraint.dim), {}
+                "call_function",
+                torch.ops.aten.sym_size,
+                (arg, constraint.constraint_dim),
+                {},
             )
-            assert_msg = f"Input #{self.count}'s dimension #{constraint.dim} size is outside of supported dynamic range"
+            assert_msg = f"Input #{self.count}'s dimension #{constraint.constraint_dim} size is outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
 
-            if min_int_val and min_int_val > 2:
-                gt = self.tracer.create_proxy(
-                    "call_function", operator.gt, (dim, min_int_val), {}
+            if constraint.min_val > 2:
+                ge = self.tracer.create_proxy(
+                    "call_function", operator.ge, (dim, constraint.min_val), {}
                 )
-                tensor_gt = self.tracer.create_proxy(
-                    "call_function", torch.scalar_tensor, (gt,), {}
+                tensor_ge = self.tracer.create_proxy(
+                    "call_function", torch.scalar_tensor, (ge,), {}
                 )
                 self.tracer.create_proxy(
                     "call_function",
                     torch._assert_async,
-                    (tensor_gt, assert_msg),
+                    (tensor_ge, assert_msg),
                     {},
                 )
 
-            if max_int_val and max_int_val < math.inf:
-                lt = self.tracer.create_proxy(
-                    "call_function", operator.lt, (dim, max_int_val), {}
+            if constraint.max_val < math.inf:
+                le = self.tracer.create_proxy(
+                    "call_function", operator.le, (dim, constraint.max_val), {}
                 )
-                tensor_lt = self.tracer.create_proxy(
-                    "call_function", torch.scalar_tensor, (lt,), {}
+                tensor_le = self.tracer.create_proxy(
+                    "call_function", torch.scalar_tensor, (le,), {}
                 )
                 self.tracer.create_proxy(
                     "call_function",
                     torch._assert_async,
-                    (tensor_lt, assert_msg),
+                    (tensor_le, assert_msg),
                     {},
                 )
 
@@ -735,32 +761,47 @@ class _AddRuntimeAssertsInInputConstraint(torch.fx.interpreter.Transformer):
         if target == constrain_as_size:
             min_val = kwargs["min"]
             max_val = kwargs["max"]
-            gt = self.tracer.create_proxy(
-                "call_function", operator.gt, (args[0], min_val), {}
+            # TODO: Would be nice if we can extract the intermediate
+            # variable name
+            stack_trace_msg = ""
+            if "stack_trace" in arg.node.meta:
+                stack_trace_msg = (
+                    "\nPlease refer to following stacktrace for more details:\n"
+                    + arg.node.meta["stack_trace"]
+                )
+
+            assert_msg = (
+                f"Intermediate variable is outside of specified dynamic range [{min_val}, {max_val}]"
+                + stack_trace_msg
             )
-            tensor_gt = self.tracer.create_proxy(
-                "call_function", torch.scalar_tensor, (gt,), {}
+
+            ge = self.tracer.create_proxy(
+                "call_function", operator.ge, (args[0], min_val), {}
             )
-            lt = self.tracer.create_proxy(
-                "call_function", operator.lt, (args[0], max_val), {}
+            tensor_ge = self.tracer.create_proxy(
+                "call_function", torch.scalar_tensor, (ge,), {}
             )
-            tensor_lt = self.tracer.create_proxy(
-                "call_function", torch.scalar_tensor, (lt,), {}
+            le = self.tracer.create_proxy(
+                "call_function", operator.le, (args[0], max_val), {}
+            )
+            tensor_le = self.tracer.create_proxy(
+                "call_function", torch.scalar_tensor, (le,), {}
             )
 
             self.tracer.create_proxy(
                 "call_function",
                 torch._assert_async,
-                (tensor_gt, "min_val"),
+                (tensor_ge, assert_msg),
                 {},
             )
 
             self.tracer.create_proxy(
                 "call_function",
                 torch._assert_async,
-                (tensor_lt, "max_val"),
+                (tensor_le, assert_msg),
                 {},
             )
+            return
         return arg
 
     def run_node(self, n):
@@ -995,9 +1036,6 @@ def export(
         matched_input_elements_positions,
         matched_output_elements_positions,
     ).transform()
-
-    new_graph.graph.eliminate_dead_code()
-    new_graph.recompile()
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
