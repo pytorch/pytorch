@@ -336,8 +336,7 @@ class TransformerEncoder(Module):
             causal_comparison = Transformer.generate_square_subsequent_mask(
                 sz, device=mask.device, dtype=mask.dtype)
 
-            if torch.equal(mask, causal_comparison):
-                make_causal = True
+            make_causal = torch.equal(mask, causal_comparison)
 
         is_causal = make_causal
 
