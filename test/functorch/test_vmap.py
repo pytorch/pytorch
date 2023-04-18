@@ -3669,7 +3669,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.huber_loss'),
         # We can get this to work on CUDA through decomposition,
         # but fails on CPU due to max_pool1d_cpu not having a derivative
         xfail('nn.functional.max_pool1d'),
@@ -3701,7 +3700,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'amax'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.multi_margin_loss', ''),
