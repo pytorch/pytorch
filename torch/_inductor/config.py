@@ -65,7 +65,7 @@ coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
 coordinate_descent_check_all_dir = (
-    os.environ.get("COORDINATE_DESCENT_CHECK_ALL_DIR", "0") == "1"
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIR", "0") == "1"
 )
 coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
