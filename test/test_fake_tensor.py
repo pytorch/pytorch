@@ -76,6 +76,13 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cpu")
             self.assertTrue(isinstance(out, FakeTensor))
 
+    def test_repr(self):
+        with FakeTensorMode():
+            x = torch.empty(2, 2, device="cpu")
+            self.assertEqual(repr(x), 'FakeTensor(..., size=(2, 2))')
+            x = torch.empty(2, 2, device="meta")
+            self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
@@ -498,6 +505,13 @@ class FakeTensorTest(TestCase):
 
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
+
+    def test_untyped_storage_size(self):
+        with FakeTensorMode():
+            x = torch.rand((4, 1))
+            storage_size = x.untyped_storage().size()
+            expected_size = x.element_size() * 4
+            self.assertEqual(storage_size, expected_size)
 
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
