@@ -6,7 +6,6 @@ from typing import (
     Any,
     cast,
     Dict,
-    Iterable,
     Iterator,
     List,
     NamedTuple,
