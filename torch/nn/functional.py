@@ -5184,6 +5184,15 @@ def multi_head_attention_forward(
         # Otherwise, we use the is_causal hint go as is_causal
         # indicator to SDPA.
         attn_mask = None
+    else:
+        attn_mask = _canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
 
         if key_padding_mask is not None:
             # We have the attn_mask, and use that to merge kpm into it.
