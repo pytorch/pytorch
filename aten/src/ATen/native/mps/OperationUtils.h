@@ -2,14 +2,25 @@
 
 #pragma once
 
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
+#include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 #include <unordered_map>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -99,6 +110,7 @@ class Placeholder {
 };
 
 void resize_tensor(Tensor* output);
+Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
@@ -148,12 +160,30 @@ struct MPSUnaryCachedGraph : public MPSCachedGraph
   MPSGraphTensor *outputTensor_ = nil;
 };
 
+struct MPSUnaryGradCachedGraph : public MPSCachedGraph
+{
+  MPSUnaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *gradOutputTensor_ = nil;
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil; // some backward input is actually the forward's output
+  MPSGraphTensor *gradInputTensor_ = nil;
+};
+
 struct MPSBinaryCachedGraph : public MPSCachedGraph
 {
   MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
   MPSGraphTensor *inputTensor_ = nil;
   MPSGraphTensor *otherTensor_ = nil;
   MPSGraphTensor *outputTensor_ = nil;
+};
+
+struct MPSBinaryGradCachedGraph : public MPSCachedGraph
+{
+  MPSBinaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *gradOutputTensor_ = nil;
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *otherTensor_ = nil;
+  MPSGraphTensor *gradInputTensor_ = nil;
 };
 
 // TODO: Improve the overall design of MPSGraphCache.

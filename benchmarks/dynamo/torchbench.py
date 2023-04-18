@@ -73,6 +73,16 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
+    # https://github.com/pytorch/pytorch/issues/99201
+    "opacus_cifar10",
+    # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
+    "tacotron2",
+}
+
+SKIP_FOR_CUDA = {
+    "gat",  # only works on CPU
+    "gcn",  # only works on CPU
+    "sage",  # only works on CPU
 }
 
 # Additional models that are skipped in training
@@ -129,7 +139,11 @@ REQUIRE_COSINE_TOLERACE = {
 }
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = set()
+NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/98355
+    "mobilenet_v3_large",
+    "vision_maskrcnn",  # eager variant
+}
 
 # These benchmarks took >600s on an i9-11900K CPU
 VERY_SLOW_BENCHMARKS = {
@@ -206,6 +220,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return SKIP
 
     @property
+    def skip_models_for_cuda(self):
+        return SKIP_FOR_CUDA
+
+    @property
     def slow_models(self):
         return SLOW_BENCHMARKS
 
@@ -242,7 +260,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         part=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
@@ -326,7 +343,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
 

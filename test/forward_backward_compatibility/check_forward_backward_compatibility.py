@@ -348,6 +348,15 @@ ALLOW_LIST = [
     ("prim::infer_unsqueeze_size", datetime.date(2023, 2, 1)),
     ("prim::t_copy", datetime.date(2023, 2, 1)),
     ("prim::view_copy", datetime.date(2023, 2, 1)),
+    # BetterTransformer 1.0 internal operators
+    ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
+    ("aten::_native_decoder_only_multi_head_attention",
+     datetime.date(9999, 1, 1)),
+    ("aten::_int_mm.out", datetime.date(2023, 4, 1)),
+    ("aten::_int_mm", datetime.date(2023, 4, 1)),
+    ("aten::_nested_view_from_buffer_copy.out", datetime.date(2023, 5, 1)),
+    ("aten::_nested_view_from_buffer_copy", datetime.date(2023, 5, 1)),
+    ("aten::_nested_view_from_buffer", datetime.date(2023, 5, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [

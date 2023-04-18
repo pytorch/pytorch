@@ -169,6 +169,7 @@ def get_decompositions(
 import torch._decomp.decompositions
 import torch._refs
 
+
 # This list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
@@ -190,8 +191,10 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.bucketize,
             aten.celu,
             aten.col2im,
+            aten.count_nonzero,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
+            aten.deg2rad,
             aten.detach,
             aten.diag_embed,
             aten.diagonal,
@@ -280,6 +283,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten._prelu_kernel,
             aten._prelu_kernel_backward,
             aten._reshape_alias,
+            aten.rad2deg,
             aten.rot90,
             aten.rsub.Scalar,
             aten.rsub.Tensor,

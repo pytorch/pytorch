@@ -12,10 +12,11 @@ from torch.distributed._tensor.api import (
 )
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
-from torch.distributed._tensor.ops.utils import register_prop_rule, normalize_dim
+from torch.distributed._tensor.ops.utils import normalize_dim, register_prop_rule
 
 
 aten = torch.ops.aten
+
 
 # NOTE: the default propagation rule should apply for
 # any operator that does not return a DTensor, i.e.
@@ -72,17 +73,15 @@ def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
         output_spec=DTensorSpec(
             mesh=input.mesh,
             placements=[Replicate()] * input.mesh.ndim,
-            tensor_meta=input.tensor_meta
+            tensor_meta=input.tensor_meta,
         )
     )
 
 
-@register_prop_rule(aten.is_same_size.default)
+@register_prop_rule([aten.equal.default, aten.is_same_size.default])
 def non_tensor_prop_rule(op_schema: OpSchema) -> OutputSharding:
     # simply return None as it does not return DTensor
-    return OutputSharding(
-        output_spec=None
-    )
+    return OutputSharding(output_spec=None)
 
 
 default_prop_ops = [
@@ -161,9 +160,7 @@ def unshard_tensor_dim(
     )
 
 
-def is_tensor_dim_sharded(
-    spec: DTensorSpec, dim: int
-) -> bool:
+def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     """Return True if tensor dim is sharded"""
     return (dim < spec.ndim) and spec.dim_map[dim] >= 0
 
@@ -188,7 +185,7 @@ def _prop_all_but_dim(op_schema: OpSchema, dim: int) -> OutputSharding:
         suggested_input_spec = DTensorSpec(
             mesh=input_spec.mesh,
             placements=output_placements,
-            tensor_meta=input_spec.tensor_meta
+            tensor_meta=input_spec.tensor_meta,
         )
         out = OutputSharding(
             output_spec=None,
@@ -464,7 +461,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
         ndim = max(ndim, spec.ndim)
 
     dim = 0  # default dim = 0
-    if (len(op_schema.args_schema) > 1):
+    if len(op_schema.args_schema) > 1:
         dim = cast(int, op_schema.args_schema[1])
     dim = normalize_dim(dim, ndim)
 
@@ -496,7 +493,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
     einop_notation_list = []
 
     l = len(tensor_list_specs)
-    free_dim = alphabet[l:l + ndim - 1]
+    free_dim = alphabet[l : l + ndim - 1]
     for i, spec in enumerate(tensor_list_specs):
         if spec.ndim == ndim:
             # rewrite concat dim
@@ -515,13 +512,10 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
             args_schema=tuple(tensor_list_specs),
             kwargs_schema={},
         ),
-        linearity=False
+        linearity=False,
     )
 
-    if (
-        (output_sharding.output_spec is not None) and
-        need_reshard
-    ):
+    if (output_sharding.output_spec is not None) and need_reshard:
         output_sharding.output_spec = None
         output_sharding.schema_suggestions = [
             OpSchema(
@@ -569,11 +563,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
     ndim = input_spec.ndim
     split_size_or_sections = op_schema.args_schema[1]
-    dim = (
-        cast(int, op_schema.args_schema[2])
-        if len(op_schema.args_schema) > 2
-        else 0
-    )
+    dim = cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
     dim = normalize_dim(dim, ndim)
 
     # TODO: tensor to split cannot have _Partial
@@ -606,7 +596,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
                     args_schema=(input_spec,) + op_schema.args_schema[1:],
                     kwargs_schema=op_schema.kwargs_schema,
                 ),
-            ]
+            ],
         )
 
     def size_split(N, i):

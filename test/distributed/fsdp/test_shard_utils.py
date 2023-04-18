@@ -31,7 +31,6 @@ class TestShardUtils(TestCase):
             out_offsets,
             in_split_sizes,
         ):
-
             for my_rank in range(world_size):
                 _in_split_sizes = in_split_sizes[my_rank]
                 _out_split_sizes = [

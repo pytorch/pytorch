@@ -1,13 +1,15 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_native.h>
+#endif
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
@@ -16,18 +18,12 @@ namespace at::native {
 TORCH_IMPL_FUNC(triu_mps_out)
 (const Tensor& self, int64_t k, const Tensor& output) {
   using namespace mps;
+  using CachedGraph = MPSUnaryCachedGraph;
 
   if (self.numel() == 0) {
     return;
   }
   MPSStream* stream = getCurrentMPSStream();
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -88,19 +84,13 @@ TORCH_IMPL_FUNC(triu_mps_out)
 TORCH_IMPL_FUNC(tril_mps_out)
 (const Tensor& self, int64_t k, const Tensor& output) {
   using namespace mps;
+  using CachedGraph = MPSUnaryCachedGraph;
 
   if (self.numel() == 0) {
     return;
   }
+
   MPSStream* stream = getCurrentMPSStream();
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {

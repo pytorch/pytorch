@@ -349,7 +349,8 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: bool = False,
+                memory_is_causal: bool = False) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -359,6 +360,10 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
+            tgt_is_causal: If specified, applies a causal mask as tgt mask.
+                Mutually exclusive with providing tgt_mask. Default: ``False``.
+            memory_is_causal: If specified, applies a causal mask as memory mask.
+                Mutually exclusive with providing memory_mask. Default: ``False``.
 
         Shape:
             see the docs in Transformer class.
@@ -369,7 +374,9 @@ class TransformerDecoder(Module):
             output = mod(output, memory, tgt_mask=tgt_mask,
                          memory_mask=memory_mask,
                          tgt_key_padding_mask=tgt_key_padding_mask,
-                         memory_key_padding_mask=memory_key_padding_mask)
+                         memory_key_padding_mask=memory_key_padding_mask,
+                         tgt_is_causal=tgt_is_causal,
+                         memory_is_causal=memory_is_causal)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -585,21 +592,21 @@ class TransformerEncoderLayer(Module):
 
         x = src
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
+            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal)
             x = x + self._ff_block(self.norm2(x))
         else:
-            x = self.norm1(x + self._sa_block(x, src_mask, src_key_padding_mask))
+            x = self.norm1(x + self._sa_block(x, src_mask, src_key_padding_mask, is_causal=is_causal))
             x = self.norm2(x + self._ff_block(x))
 
         return x
 
     # self-attention block
     def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+                           need_weights=False, is_causal=is_causal)[0]
         return self.dropout1(x)
 
     # feed forward block
@@ -700,7 +707,7 @@ class TransformerDecoderLayer(Module):
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
                 Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as tgt mask.
+            memory_is_causal: If specified, applies a causal mask as memory mask.
                 Mutually exclusive with providing memory_mask. Default: ``False``.
         Shape:
             see the docs in Transformer class.

@@ -449,8 +449,16 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_set_grads_to_none",
-          [](::c10d::Reducer& reducer) { reducer.set_grads_to_none(true); },
+          "_set_optimizer_in_backward",
+          [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_mixed_precision_param_dtype",
+          [](::c10d::Reducer& reducer, py::object data_type_obj) {
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+            reducer.set_mixed_precision_param_dtype(scalar_type);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",
@@ -498,12 +506,22 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_autograd_hook",
+          [](::c10d::Reducer& reducer, int index) -> void {
+            reducer.autograd_hook(index);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "set_logger",
           [](::c10d::Reducer& reducer,
              const std::shared_ptr<::c10d::Logger> logger) {
             std::weak_ptr<::c10d::Logger> logger_weakref = logger;
             reducer.set_logger(logger_weakref);
-          });
+          })
+      .def(
+          "_remove_autograd_hooks",
+          [](::c10d::Reducer& reducer) { reducer.remove_autograd_hooks(); },
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -1952,6 +1970,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
+          .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
+          .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly(
@@ -1981,10 +2001,6 @@ Example::
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
-  processGroupNCCL.def_static(
-      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
-  processGroupNCCL.def_static(
-      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
 #endif
 
 #ifdef USE_C10D_MPI

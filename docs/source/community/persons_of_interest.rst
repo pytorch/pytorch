@@ -87,7 +87,7 @@ Distributed
 -  Alisson Azzolini (`aazzolini <https://github.com/aazzolini>`__)
 -  Ke Wen (`kwen2501 <https://github.com/kwen2501>`__)
 -  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
--  (emeritus) Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
+-  Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
 -  (emeritus) Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  (emeritus) Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
 -  (emeritus) Omkar Salpekar (`osalpekar <https://github.com/osalpekar>`__)

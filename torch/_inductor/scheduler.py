@@ -674,6 +674,10 @@ class Scheduler:
         self.buffer_names_to_free = set()
         self.buffer_names_no_longer_needed = set()
 
+        # fx graph node to the position it appears in the graph
+        # for debug attribution
+        self.origin_to_index = {}
+
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
         if os.environ.get("INDUCTOR_WRITE_SCHEDULER_GRAPH", None) == "1":
@@ -1140,11 +1144,13 @@ class Scheduler:
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.device_types.add(device.type)
+        V.graph.add_device_idx(device.index)
+
         if device.type == "cpu":
             from .codegen.cpp import CppScheduling
 
             return CppScheduling(self)
-        else:
+        elif device.type == "cuda":
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
                 if device_props.major < 7:
@@ -1158,15 +1164,29 @@ class Scheduler:
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
+        else:
+            raise RuntimeError(f"Unsupported device type: {device.type}")
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
+    def enter_context(self, node):
+        def get_order(n):
+            if n not in self.origin_to_index:
+                self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
+            return self.origin_to_index[n]
+
+        origins = [(get_order(e), e) for n in node.get_nodes() for e in n.node.origins]
+        if origins:
+            _, last = max(origins)
+            V.graph.wrapper_code.enter_context(last)
+
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            self.enter_context(node)
             self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):

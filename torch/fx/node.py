@@ -32,6 +32,7 @@ Argument = Optional[Union[
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
+    _ops.aten.copy_.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit}
@@ -404,7 +405,7 @@ class Node:
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
         2) operators will be printed as `operator.xyz`
-        3) other callables will be printed with qualfied name, e.g. torch.add
+        3) other callables will be printed with qualified name, e.g. torch.add
         """
         if isinstance(target, str):
             return target

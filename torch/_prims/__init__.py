@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
@@ -14,6 +13,7 @@ import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
+from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     check,
     Dim,
@@ -940,6 +940,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 #   doc="",
 # )
 
+
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
@@ -1047,7 +1048,7 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-# Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
+# Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
@@ -1150,6 +1151,7 @@ zeta = _make_elementwise_binary_prim(
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
 
 #
 # View operations
@@ -1521,7 +1523,7 @@ def _slice_meta(
 
     new_shape = []
     for x, y, z in zip(start_indices, limit_indices, _strides):
-        new_shape.append(math.floor((y - x) / z))
+        new_shape.append(1 + (y - x - 1) // z)
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):
@@ -1701,6 +1703,7 @@ split_dim = _make_prim(
     doc=_split_dim_doc,
 )
 
+
 # Note: allows dimensions to be specified redundantly
 def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     assert isinstance(a, TensorLike)
@@ -1812,14 +1815,17 @@ def _as_strided_scatter_meta(
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
-    required_size = utils.compute_required_storage_length(size, stride, storage_offset)
+    input_size = input.untyped_storage().size()  # type: ignore[attr-defined]
+    required_view_size = input.element_size() * utils.compute_required_storage_length(
+        size, stride, storage_offset
+    )
     utils.check(
-        input.numel() >= required_size,
+        input_size >= required_view_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
             f" and itemsize {input.element_size()} requiring a storage size of "
-            f"{required_size * input.element_size()} are out of bounds "
-            f"for storage of size {input.numel() * input.element_size()}"
+            f"{required_view_size} are out of bounds "
+            f"for storage of size {input_size}"
         ),
     )
     utils.check(
@@ -1980,7 +1986,6 @@ rev = _make_prim(
 def _where_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
-
     return _elementwise_meta(
         a,
         b,
@@ -2004,6 +2009,7 @@ where = _make_prim(
     doc=_where_doc,
 )
 
+
 #
 # Type conversions
 #
@@ -2022,7 +2028,6 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-
     # Propagates requires grad when possible
     if not utils.is_grad_dtype(dtype):
         requires_grad = False
@@ -2078,6 +2083,7 @@ device_put = _make_prim(
     doc=_device_put_doc,
 )
 
+
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
 def _item_meta(a: TensorLikeType) -> FakeTensor:
@@ -2099,6 +2105,7 @@ item = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_item_doc,
 )
+
 
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
@@ -2149,14 +2156,14 @@ def _minimum_value_aten(dtype: torch.dtype):
 
 
 _minimum_value_doc = """
-    Return the mimimum finite value for a dtype.
+    Return the minimum finite value for a dtype.
 """
 
 # TODO: create a new return type for scalars?
 # FIXME: currently returns integers for boolean tensors
 # https://github.com/pytorch/pytorch/issues/78071
 minimum_value = _make_prim(
-    schema="minium_value(ScalarType dtype) -> Scalar",
+    schema="minimum_value(ScalarType dtype) -> Scalar",
     meta=_minimum_value_meta,
     impl_aten=_minimum_value_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2732,6 +2739,7 @@ svd = _make_prim(
 # Randomness Prims
 #
 
+
 # TODO: add generator support
 # NOTE: there is currently no way of acquiring the "default" torch generator
 def _normal_meta(
@@ -2959,3 +2967,4 @@ fft_c2r = _make_prim(
 )
 
 register_nvprims()
+register_rng_prims()

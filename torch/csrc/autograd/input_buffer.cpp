@@ -2,9 +2,9 @@
 
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>

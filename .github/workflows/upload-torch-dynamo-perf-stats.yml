@@ -5,9 +5,6 @@ on:
     workflows: [inductor-A100-perf-nightly]
     types:
       - completed
-    branches:
-      - master
-      - main
 
 jobs:
   get-conclusion:
@@ -31,7 +28,7 @@ jobs:
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: 1
@@ -59,5 +56,6 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}"

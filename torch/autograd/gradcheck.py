@@ -68,8 +68,7 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
             yield x  # type: ignore[misc]
     elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
-            for result in _iter_tensors(elem, only_requiring_grad):
-                yield result
+            yield from _iter_tensors(elem, only_requiring_grad)
 
 
 def _densify(x):
@@ -727,10 +726,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
     return vjps
 
 
-def _check_inputs(tupled_inputs, check_sparse_nnz, masked) -> bool:
-    if masked and not check_sparse_nnz and any(_is_sparse_any_tensor(t) for t in tupled_inputs if isinstance(t, torch.Tensor)):
-        raise GradcheckError('gradcheck expects all tensor inputs are dense'
-                             ' when check_sparse_nnz is set to False and masked is set to True.')
+def _check_inputs(tupled_inputs) -> bool:
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
     for idx, inp in enumerate(tupled_inputs):
@@ -757,7 +753,7 @@ def _check_inputs(tupled_inputs, check_sparse_nnz, masked) -> bool:
                         'compute the numerical gradients correctly. You should call '
                         '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
-            inp.retain_grad()
+
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
@@ -770,10 +766,10 @@ def _check_outputs(outputs) -> None:
         # it is easier to call to_dense() on the sparse output than
         # to modify analytical jacobian
         raise ValueError('Sparse output is not supported at gradcheck yet. '
-                         'Please call to_dense() on the output of fn for gradcheck.')
+                         'Please call to_dense(masked_grad=...) on the output of fn for gradcheck.')
     if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore[attr-defined]
         raise ValueError('MKLDNN output is not supported at gradcheck yet. '
-                         'Please call to_dense() on the output of fn for gradcheck.')
+                         'Please call to_dense(masked_grad=...) on the output of fn for gradcheck.')
 
 
 def _check_no_differentiable_outputs(func, inputs, func_out, eps, *, is_forward_ad) -> bool:
@@ -940,7 +936,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     return True
 
 
-def _test_backward_mul_by_grad_output(outputs, inputs, check_sparse_nnz) -> bool:
+def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
     # Tests that backward is multiplied by grad_output
     diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
@@ -957,13 +953,14 @@ def _test_backward_mul_by_grad_output(outputs, inputs, check_sparse_nnz) -> bool
             if _is_sparse_any_tensor(gi):
                 sparse_kind = str(gi.layout).replace('torch.', '').replace('_coo', '')
                 if gi.sparse_dim() != di.sparse_dim():
-                    raise GradcheckError(f'grad is {sparse_kind} tensor, but has incorrect sparse_dim')
+                    raise GradcheckError(f'grad is {sparse_kind} tensor, but has incorrect sparse_dim'
+                                         f' {gi.sparse_dim()}, expected {di.sparse_dim()}')
                 if gi.dense_dim() != di.dense_dim():
-                    raise GradcheckError(f'grad is {sparse_kind} tensor, but has incorrect dense_dim')
+                    raise GradcheckError(f'grad is {sparse_kind} tensor, but has incorrect dense_dim'
+                                         f' {gi.dense_dim()}, expected {di.dense_dim()}')
             gi = gi.to_dense()
             di = di.to_dense()
-
-        if check_sparse_nnz:
+        if masked:
             if not torch.allclose(gi, torch.zeros_like(gi)):
                 raise GradcheckError('backward not multiplied by grad_output')
         elif not gi.eq(0).all():
@@ -1440,7 +1437,7 @@ def gradcheck(
     atol: float = 1e-5,
     rtol: float = 1e-3,
     raise_exception: bool = True,
-    check_sparse_nnz: bool = False,
+    check_sparse_nnz: Optional[bool] = None,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
@@ -1449,7 +1446,7 @@ def gradcheck(
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
-    masked: bool = False,
+    masked: Optional[bool] = None,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -1495,30 +1492,48 @@ def gradcheck(
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        check_sparse_nnz (bool, optional): if True, gradcheck allows for SparseTensor input,
-            and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
+        check_sparse_nnz (bool, optional): if ``True``, gradcheck allows
+            for SparseTensor input, and for any SparseTensor inputs,
+            gradcheck will perform its check at ``nnz`` positions only.
+            The ``check_sparse_nnz`` argument is deprecated, use the
+            ``masked`` argument instead. If ``check_sparse_nnz != masked``, an
+            exception is raised.
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
-        check_undefined_grad (bool, optional): if True, check if undefined output grads
+        check_undefined_grad (bool, optional): if ``True``, check if undefined output grads
             are supported and treated as zeros, for ``Tensor`` outputs.
-        check_batched_grad (bool, optional): if True, check if we can compute
+        check_batched_grad (bool, optional): if ``True``, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
-        check_batched_forward_grad (bool, optional): if True, checks if we can compute
-            batched forward gradients using forward ad and prototype vmap support. Defaults to False.
-        check_forward_ad (bool, optional): if True, check that the gradients computed with forward
-            mode AD match the numerical ones. Defaults to False.
-        check_backward_ad (bool, optional): if False, do not perform any checks that rely on
-            backward mode AD to be implemented. Defaults to True.
+        check_batched_forward_grad (bool, optional): if ``True``, checks if we can compute
+            batched forward gradients using forward ad and prototype vmap support. Defaults to ``False``.
+        check_forward_ad (bool, optional): if ``True``, check that the gradients computed with forward
+            mode AD match the numerical ones. Defaults to ``False``.
+        check_backward_ad (bool, optional): if ``False``, do not perform any checks that rely on
+            backward mode AD to be implemented. Defaults to ``True``.
         fast_mode (bool, optional): Fast mode for gradcheck and gradgradcheck is currently only
             implemented for R to R functions. If none of the inputs and outputs are complex
             a faster implementation of gradcheck that no longer computes the entire jacobian
             is run; otherwise, we fall back to the slow implementation.
-        masked (bool, optional): if True, the gradients of unspecified elements of
-            sparse tensors are ignored (default, False).
+        masked (bool, optional): if ``True``, the gradients of unspecified elements of
+            sparse tensors are ignored. Defaults to ``False``.
     Returns:
-        True if all differences satisfy allclose condition
+        ``True`` if all differences satisfy allclose condition
+
     """
+    if check_sparse_nnz is None:
+        if masked is None:
+            check_sparse_nnz = masked = False
+        else:
+            check_sparse_nnz = masked
+    else:
+        warnings.warn((
+            'Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
+            f' Use masked={check_sparse_nnz} instead.'))
+        if masked is None:
+            masked = check_sparse_nnz
+        elif check_sparse_nnz != masked:
+            raise ValueError(f"Expected specified check_sparse_nnz (={check_sparse_nnz}) to be equal to masked (={masked}).")
     assert check_forward_ad or check_backward_ad, \
         "Expected at least one of check_forward_ad or check_backward_ad to be True"
     assert not (check_batched_grad and not check_backward_ad), (
@@ -1527,6 +1542,7 @@ def gradcheck(
         "Setting check_batched_forward_grad=True requires check_forward_ad to be True")
     args = locals().copy()
     args.pop("raise_exception")
+    args.pop("check_sparse_nnz")
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)
@@ -1536,11 +1552,11 @@ def gradcheck(
         return _gradcheck_helper(**args)
 
 
-def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_tol, check_undefined_grad,
+def _gradcheck_helper(func, inputs, eps, atol, rtol, nondet_tol, check_undefined_grad,
                       check_grad_dtypes, check_batched_grad, check_batched_forward_grad, check_forward_ad,
                       check_backward_ad, fast_mode, masked):
     tupled_inputs = _as_tuple(inputs)
-    _check_inputs(tupled_inputs, check_sparse_nnz, masked)
+    _check_inputs(tupled_inputs)
 
     func_out = func(*tupled_inputs)
     outputs = _differentiable_outputs(func_out)
@@ -1563,7 +1579,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
         if check_batched_grad:
             _test_batched_grad(tupled_inputs, o, i)
 
-    _test_backward_mul_by_grad_output(outputs, tupled_inputs, check_sparse_nnz)
+    _test_backward_mul_by_grad_output(outputs, tupled_inputs, masked)
 
     if check_undefined_grad and check_backward_ad:
         _test_undefined_backward_mode(func, outputs, tupled_inputs)

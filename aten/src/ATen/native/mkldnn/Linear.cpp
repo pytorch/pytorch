@@ -216,29 +216,26 @@ Tensor mkldnn_linear_pointwise(
   }
   const ideep::tensor w = itensor_from_tensor(weight_t);
 
-  auto it = fusion_unary_attr_map().find(attr);
-  TORCH_CHECK(
-      it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
-  ideep::attr_t op_attr = it->second(scalars, algorithm);
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fusion_unary_attr_map().find(attr);
+    TORCH_CHECK(
+        it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
+  }
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute(
+    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_bias.value(),
         mkldnn_output,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
         op_attr);
   } else {
-    ideep::inner_product_forward::compute(
+    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_output,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
         op_attr);
   }
 
@@ -305,7 +302,7 @@ Tensor mkldnn_linear_pointwise_binary(
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute_binary(
+    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         mkldnn_other,
         w,
@@ -313,7 +310,7 @@ Tensor mkldnn_linear_pointwise_binary(
         mkldnn_output,
         op_attr);
   } else {
-    ideep::inner_product_forward::compute_binary(
+    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr);
   }
 
@@ -324,25 +321,8 @@ Tensor mkldnn_linear_pointwise_binary(
   return output;
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
-      TORCH_FN(mkldnn_linear_pointwise));
-  m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
-      TORCH_FN(mkldnn_linear_pointwise_binary));
-}
-
-} // namespace native
-} // namespace at
-
-#endif // AT_MKLDNN_ENABLED
-
-#if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
+#if AT_MKL_ENABLED()
 #include <mkl.h>
-
-namespace at {
-namespace native {
 
 Tensor mkl_linear(
     const Tensor& self,
@@ -423,7 +403,38 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
+#else // AT_MKL_ENABLED
+
+Tensor mkl_linear(
+    const Tensor& self,
+    const Tensor& mkl_weight_t,
+    const Tensor& origin_weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    const int64_t prepack_batch_size) {
+  TORCH_CHECK(false, "mkl_linear: ATen not compiled with MKL support");
+}
+
+#endif// AT_MKL_ENABLED
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_FN(mkldnn_linear_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_FN(mkldnn_linear_pointwise_binary));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_FN(mkldnn_linear_pointwise));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_FN(mkldnn_linear_pointwise_binary));
+}
+
 } // namespace native
 } // namespace at
 
-#endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
+#endif // AT_MKLDNN_ENABLED
