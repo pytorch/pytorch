@@ -134,7 +134,7 @@ void CUDAGeneratorImpl::set_offset(uint64_t offset) {
 uint64_t CUDAGeneratorImpl::get_offset() const {
   // Debatable if get_offset() should be allowed in captured regions.
   // Conservatively disallow it for now.
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::current_seed");
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::get_offset");
   return philox_offset_per_thread_;
 }
 
