@@ -9,6 +9,71 @@ import torch._dynamo.test_case
 from torch._dynamo.testing import same
 
 
+import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import PythonKeyTracer, ProxyTorchDispatchMode
+from torch.fx import Graph, GraphModule
+
+# Limitations:
+#   - initialization cannot refer to external tensors
+#   - parameters are these weird ProxyTensors, should have a custom class for
+#     these placeholders
+#   - DCE is likely not sound, needs to be implemented more carefully by
+#     understanding aliasing relationships
+#   - only top level module is rematerialized
+#   - we lose parameter-ness and requires_grad-ness
+#   - no version counter safety to guard against input mutation
+
+def deferred_init(f, *args, **kwargs):
+    fx_tracer = PythonKeyTracer()
+    fx_tracer.graph = Graph(fx_tracer)
+    fx_tracer.root = torch.nn.Module()
+    fx_tracer.tensor_attrs = {}
+    fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+    proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode="real")
+    with fake_tensor_mode, proxy_mode:
+        r = f(*args, **kwargs)
+        r._deferred = fx_tracer
+        return r
+
+def materialize_module(m):
+    # TODO: handle children
+
+    outputs = []
+
+    def mark_for_materialize(tensors):
+        for k, t in tensors.items():
+            if t is None:
+                continue
+            outputs.append(t.proxy.node)
+
+    mark_for_materialize(m._parameters)
+    mark_for_materialize(m._buffers)
+
+    m._deferred.graph.output(outputs)
+    m._deferred.graph.eliminate_dead_code()  # hmmm
+    recomp = GraphModule(m._deferred.root, m._deferred.graph)
+    results = recomp()
+    results_iter = iter(results)
+
+    def replace_results(tensors):
+        for k, t in tensors.items():
+            if t is None:
+                continue
+            tensors[k] = next(results_iter)
+
+    replace_results(m._parameters)
+    replace_results(m._buffers)
+
+    del m._deferred
+
+
+m = deferred_init(torch.nn.Linear, 3, 5)
+print(m.weight)
+materialize_module(m)
+print(m.weight)
+
+
 class Seq(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -164,6 +229,36 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             # under eager or under compile
             self.assertTrue(correct_params[name].grad is None)
             self.assertTrue(opt_params[name].grad is None)
+
+
+    def test_deferred_smoke(self):
+        # currently test_sgd and smoke both fail with the same error:
+        # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
+        # paste: https://www.internalfb.com/phabricator/paste/view/P682652292
+        def train_step(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            optimizer.step()
+            model.zero_grad()
+            return loss
+
+        opt_model = Seq()
+        opt_model.apply(init_weights)
+        opt_optimizer = torch.optim.Adam(opt_model.parameters(), capturable=True)
+        inputs = [torch.randn((128, 10))]
+        opt_train_step = torch.compile(
+            train_step, backend="train_step_eager", fullgraph=True
+        )
+
+        loss = []
+        for step in range(10):
+            opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+            loss.append(opt_loss)
+            if step > 0:
+                # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
+                self.assertTrue(loss[-2] > loss[-1])
+
 
     def test_smoke(self):
         # currently test_sgd and smoke both fail with the same error:
