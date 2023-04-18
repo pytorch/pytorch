@@ -159,8 +159,8 @@ def extract_test_fn_and_id() -> Optional[Tuple[Callable, str]]:
 @dataclass
 class TrackedInput:
     index: int
-    input_val: Any
-    input_type: str
+    val: Any
+    type_desc: str
 
 # Attempt to pull out tracked input information from the test function.
 # A TrackedInputIter is used to insert this information.
@@ -179,10 +179,10 @@ def get_tracked_input() -> Optional[TrackedInput]:
 # Tracked values are stored in a dictionary named 'tracked_inputs' stored on the test function
 # and keyed on the full test ID.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type, callback=lambda x: x):
+    def __init__(self, child_iter, input_type_desc, callback=lambda x: x):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
-        self.input_type = input_type
+        self.input_type_desc = input_type_desc
         # Callback is run on each iterated thing to get the thing to track.
         self.callback = callback
         self.test_fn, self.test_id = extract_test_fn_and_id()
@@ -195,7 +195,7 @@ class TrackedInputIter:
             input_idx, input_val = next(self.child_iter)
             self._set_tracked_input(
                 TrackedInput(
-                    index=input_idx, input_val=self.callback(input_val), input_type=self.input_type
+                    index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
                 )
             )
             return input_val
@@ -212,7 +212,8 @@ class TrackedInputIter:
 
     def _clear_tracked_input(self):
         if (self.test_fn is not None and self.test_id is not None and
-                hasattr(self.test_fn, "tracked_inputs")):
+                hasattr(self.test_fn, "tracked_inputs") and
+                self.test_id in self.test_fn.tracked_inputs):
             del self.test_fn.tracked_inputs[self.test_id]
         self.test_fn, self.test_id = None, None
 

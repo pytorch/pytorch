@@ -851,12 +851,13 @@ class ops(_TestParametrizer):
                             tracked_input = get_tracked_input()
                             if tracked_input is not None:
                                 raise Exception(
-                                    f"Error caused by {tracked_input.input_type} "
-                                    f"{tracked_input.index}: {tracked_input.input_val}") from e
+                                    f"Error caused by {tracked_input.type_desc} "
+                                    f"{tracked_input.index}: {tracked_input.val}") from e
                             raise e
 
                     # Initialize info for the last inputs seen. This is useful for tracking
-                    # down which inputs caused a test failure.
+                    # down which inputs caused a test failure. Note that TrackedInputIter is
+                    # responsible for populating this dict and cleaning it to reduce memory usage.
                     # Mapping format: test ID -> TrackedInput
                     test.tracked_inputs = dict()
 
