@@ -362,28 +362,19 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.smooth_l1_loss_backward)
+@register_decomposition(aten.smooth_l1_loss_backward.default)
 @pw_cast_for_opmath
 def smooth_l1_loss_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    target: Tensor,
-    reduction: int,
-    beta: float = 1.0,
+    grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, beta: float
 ):
-    diff = input - target
-    abs_diff = diff.abs()
-    smooth_l1_condition = abs_diff < beta
-
-    grad = torch.where(smooth_l1_condition, diff, abs_diff.sign() * beta)
-
-    if reduction == Reduction.MEAN.value:
-        grad = grad / input.numel()
-    elif reduction == Reduction.SUM.value:
-        grad = grad * grad_output
-    else:
-        grad = grad * grad_output.view_as(grad)
-    return grad
+    norm = 1.0 / self.numel() if reduction == Reduction.MEAN.value else 1.0
+    x = self - target
+    abs_x = torch.abs(x)
+    return torch.where(
+        abs_x < beta,
+        norm * grad_output * x / beta,
+        norm * grad_output * torch.sign(x),
+    )
 
 
 @register_decomposition(aten.huber_loss_backward.default)
