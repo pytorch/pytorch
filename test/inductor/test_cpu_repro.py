@@ -265,7 +265,7 @@ class CPUReproTests(TestCase):
             )
             max_pool2d_with_indices_default = (
                 torch.ops.aten.max_pool2d_with_indices.default(
-                    x, [3, 3], [2, 2], [1, 1]
+                    x, [2, 2], [2, 2], [1, 1]
                 )[0]
             )
             return max_pool2d_with_indices_default
@@ -274,7 +274,7 @@ class CPUReproTests(TestCase):
         for use_tensor_overload in use_tensor_overload_list:
             x = (
                 torch.clamp(
-                    torch.randn((1, 3, 112, 112), dtype=torch.float32) * 100, 0, 255
+                    torch.randn((3, 16, 8, 8), dtype=torch.float32) * 100, 0, 255
                 )
                 .to(torch.uint8)
                 .contiguous(memory_format=torch.channels_last)
