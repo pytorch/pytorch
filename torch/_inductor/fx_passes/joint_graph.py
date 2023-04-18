@@ -2,8 +2,6 @@ import functools
 import logging
 
 import torch
-import torch._guards
-from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from ..._subclasses import FakeTensorMode
 from .. import config
 from ..pattern_matcher import PatternMatcherPass
@@ -16,9 +14,7 @@ patterns = PatternMatcherPass()
 def lazy_init():
     from .fuse_attention import _sfdp_init
 
-    with torch._guards.tracing(
-        None
-    ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
+    with FakeTensorMode():
         _sfdp_init()
 
 

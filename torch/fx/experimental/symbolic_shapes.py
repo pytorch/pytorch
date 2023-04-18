@@ -1642,12 +1642,6 @@ class ShapeEnv:
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
-    def create_unbacked_symbool(self):
-        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        self.var_to_range[symbol] = ValueRanges(0, 1)
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
-
     def create_symbol(
         self,
         val: int,

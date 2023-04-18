@@ -2,7 +2,6 @@ import collections
 import contextlib
 import dataclasses
 import functools
-import inspect
 import itertools
 import logging
 import math
@@ -33,26 +32,7 @@ VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 try:
-    from triton.testing import do_bench as triton_do_bench
-
-    # triton PR https://github.com/openai/triton/pull/1513 change the
-    # quantile fields name from 'percentiles' to 'quantiles'
-    # and change the default value from (0.5, 0.2, 0.8) to None.
-    # This may break inductor since a caller expects a tuple may get a item.
-    #
-    # Add a wrapper to maintain the same behavior for inductor.
-    # Maybe we should have own implementation of this function?
-    quantile_field_name = (
-        "quantiles"
-        if inspect.signature(triton_do_bench).parameters.get("quantiles") is not None
-        else "percentiles"
-    )
-
-    def do_bench(*args, **kwargs):
-        if quantile_field_name not in kwargs:
-            kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-        return triton_do_bench(*args, **kwargs)[0]
-
+    from triton.testing import do_bench
 except ImportError:
 
     def do_bench(*args, **kwargs):
@@ -842,7 +822,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"

@@ -373,8 +373,7 @@ SugaredValuePtr ModuleValue::getitem(
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "
         << "ModuleDict indexing is only supported with string literals. "
-        << "For example, 'i = \"a\"; self.layers[i](x)' will fail because i is not a literal. "
-        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): out = v(inp)'";
+        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, ModuleDict, "

@@ -8,6 +8,7 @@ import warnings
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
+import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
@@ -664,6 +665,8 @@ def compile_fx(
         )
 
     assert not config._raise_error_for_testing
+    functorch.compile.config.use_functionalize = True
+    functorch.compile.config.use_fake_tensor = True
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
