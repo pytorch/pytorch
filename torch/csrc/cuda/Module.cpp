@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/cached_tensor_utils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
@@ -8,7 +9,6 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
-#include <ATen/cached_tensor_utils.h>
 
 #if AT_CUDNN_ENABLED()
 
