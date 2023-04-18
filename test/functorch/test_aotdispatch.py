@@ -2764,6 +2764,9 @@ aot_autograd_module_failures = set({
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
                                   # to a causal mask tensor, to see if Boolean is_causal should be set
                                   # for TrnasformerEncoder layers, MHA and sdp custom kernels
+    torch.nn.TransformerDecoder,  # DataDependentOutputException: aten.eq compares a mask input
+                                  # to a causal mask tensor, to see if Boolean is_causal should be set
+                                  # for TrnasformerDecoder layers, MHA and sdp custom kernels
     torch.nn.Transformer,  # DataDependentOutputException: aten.eq compares a mask input
                            # to a causal mask tensor, to see if Boolean is_causal should be set
                            # for TransformerEncoder layers, MHA and sdp custom kernels
@@ -2773,6 +2776,7 @@ aot_autograd_module_failures = set({
 symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.eq compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input to a mask producing a bool
+    torch.nn.TransformerDecoder,  # DataDependentOutputException: aten.eq compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
