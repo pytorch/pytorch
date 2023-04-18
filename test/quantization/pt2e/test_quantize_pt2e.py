@@ -246,6 +246,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         m = prepare_qat_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
 
+        # TODO: also verify that metadata is copied over to the new nodes
+
         # Verify: getitem output activation fake quantize
         output_node = list(m.graph.nodes)[-1]
         getitem_fq_node = output_node.args[0][0]
