@@ -374,17 +374,23 @@ struct WrapFunction_<
   }
 };
 
-// CastPolicy::fp32_set_opt_dtype DeviceType::CUDA
-template <class Redispatch, Redispatch* F, class Ret, class... Args>
+// CastPolicy::fp32_set_opt_dtype General_DeviceType
+template <
+    DeviceType device_type,
+    class Redispatch,
+    Redispatch* F,
+    class Ret,
+    class... Args>
 struct WrapFunction_<
     CastPolicy::fp32_set_opt_dtype,
-    DeviceType::CUDA,
+    device_type,
     Redispatch,
     F,
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        get_autocast_dispatch_key_from_device_type(device_type));
     if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -396,17 +402,23 @@ struct WrapFunction_<
   }
 };
 
-// CastPolicy::fp32_append_dtype DeviceType::CUDA
-template <class Redispatch, Redispatch* F, class Ret, class... Args>
+// CastPolicy::fp32_append_dtype General_DeviceType
+template <
+    DeviceType device_type,
+    class Redispatch,
+    Redispatch* F,
+    class Ret,
+    class... Args>
 struct WrapFunction_<
     CastPolicy::fp32_append_dtype,
-    DeviceType::CUDA,
+    device_type,
     Redispatch,
     F,
     Ret,
     guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        get_autocast_dispatch_key_from_device_type(device_type));
     at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
