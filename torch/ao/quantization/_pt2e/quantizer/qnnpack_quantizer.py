@@ -48,9 +48,6 @@ def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternT
             [torch.nn.AdaptiveAvgPool2d],
             [F.adaptive_avg_pool2d],
         ],
-        "flatten": [
-            [torch.flatten],
-        ],
     }
     return copy.deepcopy(supported_operators)
 
@@ -119,6 +116,8 @@ def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.activation is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.activation
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     assert quantization_spec.qscheme in [
@@ -144,6 +143,8 @@ def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig])
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.weight is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.weight
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     if quantization_spec.qscheme == torch.per_tensor_symmetric:
@@ -172,6 +173,8 @@ def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.bias is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.bias
     assert (
         quantization_spec.dtype == torch.float
@@ -328,91 +331,38 @@ class QNNPackQuantizer(Quantizer):
     def _annotate_linear(
         self, node: Node, quantization_config: Optional[QuantizationConfig]
     ) -> None:
-        self._annoate_linear3d(node, quantization_config)
-        self._annoate_linear2d(node, quantization_config)
-
-    def _annotate_linear3d(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
-    ) -> None:
-        output_view_node = node
-        if (
-            output_view_node.op != "call_function" or
-            output_view_node.target != torch.ops.aten.view.default
-        ):
-            return
-        addmm_node = output_view_node.args[0]
-        assert isinstance(addmm_node, Node)
-        if (
-            addmm_node.op != "call_function"
-            or addmm_node.target != torch.ops.aten.addmm.default
-        ):
-            return
-        input_view_node = addmm_node.args[1]
-        assert isinstance(input_view_node, Node)
-        if (
-            input_view_node.op != "call_function"
-            or input_view_node.target != torch.ops.aten.view.default
-        ):
-            return
-        t_node = addmm_node.args[2]
-        assert isinstance(t_node, Node)
-        if t_node.op != "call_function" or t_node.target != torch.ops.aten.t.default:
-            return
-        if _is_annotated([output_view_node, addmm_node, input_view_node, t_node]):
-            return
-
-        # bias and output act
-        addmm_node.meta["target_dtype_info"] = {
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "bias_index": 0,
-            "_annotated": True,
-        }
-        # input act
-        input_view_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "_annotated": True,
-        }
-        # weight
-        t_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "_annotated": True,
-        }
-        # output act
-        output_view_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
-
-    def _annotate_linear2d(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
-    ) -> None:
         addmm_node = node
         if (
             addmm_node.op != "call_function"
             or addmm_node.target != torch.ops.aten.addmm.default
         ):
             return
+        view_node = addmm_node.args[1]
+        assert isinstance(view_node, Node)
+        if (
+            view_node.op != "call_function"
+            or view_node.target != torch.ops.aten.view.default
+        ):
+            return
         t_node = addmm_node.args[2]
         assert isinstance(t_node, Node)
         if t_node.op != "call_function" or t_node.target != torch.ops.aten.t.default:
             return
-        if _is_annotated([addmm_node, t_node]):
+        if _is_annotated([addmm_node, view_node, t_node]):
             return
 
-        # bias, input and output act
-        # weight annotated in t_node
+        # bias and output act
         addmm_node.meta["target_dtype_info"] = {
             "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "bias_index": 0,
-            "weight_index": 2,
+            "_annotated": True,
+        }
+        # input act
+        view_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         # weight
