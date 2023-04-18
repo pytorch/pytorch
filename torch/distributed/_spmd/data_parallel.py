@@ -15,7 +15,7 @@ from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, 
 
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.op_schema import PlacementStrategy, StrategyList
-from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -254,7 +254,7 @@ def build_data_parallel_strategies(
     num_states: int,
     mesh: DeviceMesh,
     batch_dim: int = 0,
-) -> Dict[fx.Node, DataParallelStrategy]:
+) -> Dict[fx.Node, StrategyList]:
     """
     This function loop through the train step graph and build the
     data parallel strategy for each fx Node
@@ -732,11 +732,10 @@ def partition_data_parallel(
     #    DTensors base on the parallel style
     accessor = NamedMemberAccessor(model)
     for param_key, param in params_buffers.items():
-        if parallel_style == DataParallelStyle.REPLICATE:
-            placement = Replicate()
-        elif parallel_style == DataParallelStyle.FULLY_SHARD:
+        placement: Placement = Replicate()
+        if parallel_style == DataParallelStyle.FULLY_SHARD:
             placement = Shard(0)
-        else:
+        elif parallel_style != DataParallelStyle.REPLICATE:
             raise RuntimeError(f"parallel style {parallel_style} not supported yet")
 
         dtensor_param = distribute_tensor(param, mesh, [placement])
@@ -761,7 +760,7 @@ def partition_data_parallel(
                 else:
                     param_dtensor_states[state_key] = state_val
 
-            del optimizer.state[param]
+            optimizer.state.pop(param)
             optimizer.state[dtensor_param] = param_dtensor_states
 
     return partitioned_graph
