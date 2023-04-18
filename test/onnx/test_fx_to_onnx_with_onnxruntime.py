@@ -34,11 +34,7 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, diagnostics, exporter, fx as fx_onnx
-from torch.onnx._internal.fx.dynamo_exporter import (
-    DynamoExporter,
-    DynamoOptimizeExporter,
-)
+from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
 from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
 from torch.testing._internal import common_utils
 from torch.types import Number
@@ -47,14 +43,6 @@ _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
 _InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
 _OutputsType = Sequence[_NumericType]
-_MainExporterClass = DynamoExporter
-
-
-@_beartype.beartype
-def _exporter_class_name(exporter_cls: Type[exporter.Exporter]):
-    return (
-        "dynamo_export" if exporter_cls == _MainExporterClass else exporter_cls.__name__
-    )
 
 
 try:
@@ -188,28 +176,16 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    if test_suite.exporter_cls == _MainExporterClass:
-        export_output = torch.onnx.dynamo_export(
-            ref_model,
-            *ref_input_args,
-            **ref_input_kwargs,
-            export_options=torch.onnx.ExportOptions(
-                opset_version=opset_version,
-                op_level_debug=test_suite.op_level_debug,
-                dynamic_shapes=test_suite.dynamic_shapes,
-            ),
-        )
-    else:
-        export_output = test_suite.exporter_cls(
-            torch.onnx.ExportOptions(
-                opset_version=opset_version,
-                op_level_debug=test_suite.op_level_debug,
-                dynamic_shapes=test_suite.dynamic_shapes,
-            ),
-            model=ref_model,
-            model_args=ref_input_args,
-            model_kwargs=ref_input_kwargs,
-        ).export()
+    export_output = torch.onnx.dynamo_export(
+        ref_model,
+        *ref_input_args,
+        **ref_input_kwargs,
+        export_options=torch.onnx.ExportOptions(
+            opset_version=opset_version,
+            op_level_debug=test_suite.op_level_debug,
+            dynamic_shapes=test_suite.dynamic_shapes,
+        ),
+    )
 
     _compare_pytorch_onnx_with_ort(
         export_output,
@@ -242,14 +218,10 @@ def _parameterized_class_attrs_and_values():
         itertools.product(
             (True, False),
             (True, False),
-            (
-                DynamoExporter,
-                DynamoOptimizeExporter,
-            ),
         )
     )
     return {
-        "attrs": ["op_level_debug", "dynamic_shapes", "exporter_cls"],
+        "attrs": ["op_level_debug", "dynamic_shapes"],
         "input_values": input_values,
     }
 
@@ -262,10 +234,7 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
     """
     suffixes = []
     for k, v in input_dicts.items():
-        if k == "exporter_cls":
-            suffixes.append(_exporter_class_name(v))
-        else:
-            suffixes.append(f"{k}_{v}")
+        suffixes.append(f"{k}_{v}")
     return f"{cls.__name__}_{'_'.join(suffixes)}"
 
 
@@ -276,7 +245,6 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     op_level_debug: bool
     dynamic_shapes: bool
-    exporter_cls: Type[exporter.Exporter]
 
     def setUp(self):
         super().setUp()
@@ -293,7 +261,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             f"test_report_{self._testMethodName}"
             f"_op_level_debug_{self.op_level_debug}"
             f"_dynamic_axes_{self.dynamic_shapes}"
-            f"_{_exporter_class_name(self.exporter_cls)}"
             ".sarif",
             compress=False,
         )
@@ -316,13 +283,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
 
-    @pytorch_test_common.skip_fx_exporters(
-        {
-            DynamoExporter: (
-                "AssertionError: Dynamo input/output is not consistent with traced input/output. "
-                "Ref: https://github.com/pytorch/pytorch/issues/96379"
-            )
-        }
+    @pytorch_test_common.xfail(
+        "AssertionError: Dynamo input/output is not consistent with traced input/output. "
+        "Ref: https://github.com/pytorch/pytorch/issues/96379"
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -372,20 +335,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
     # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
     # @unittest.expectedFailure
-    @pytorch_test_common.skip_fx_exporters(
-        {
-            DynamoExporter: (
-                "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
-                "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
-                "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
-                "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
-                "instance of <protocol 'torch.Tensor'>."
-            ),
-            DynamoOptimizeExporter: (
-                "RuntimeError: The two modules have different number of arguments. "
-                "module: 2, reference_module: 1"
-            ),
-        }
+    @pytorch_test_common.xfail(
+        "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
+        "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
+        "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
+        "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
+        "instance of <protocol 'torch.Tensor'>."
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -408,11 +363,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (tensor_x,), b=5.0
         )
 
-    @pytorch_test_common.skip_fx_exporters(
-        {
-            DynamoOptimizeExporter: "Unhandled unused argument.",
-        }
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -449,9 +399,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (x_dict, y_tuple, z_list)
         )
 
-    @pytorch_test_common.skip_fx_exporters(
-        {DynamoOptimizeExporter: "Unsupported output structure."}
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -521,7 +468,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
-    @unittest.skip(
+    @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "
         "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
         " please report a bug to PyTorch. mutating a non-functional tensor with a "
@@ -588,14 +535,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.skip_fx_exporters(
-        {
-            DynamoExporter: (
-                "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
-                "while running Expand node. Name:'_0x55b501ebaf10_n2' "
-                "Status Message: invalid expand shape"
-            ),
-        }
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
+        "while running Expand node. Name:'_0x55b501ebaf10_n2' "
+        "Status Message: invalid expand shape"
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -616,16 +559,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.skip_fx_exporters(
-        {
-            DynamoExporter: (
-                "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
-            ),
-            DynamoOptimizeExporter: (
-                "RuntimeError: The two modules have different number of arguments. "
-                "module: 1, reference_module: 0"
-            ),
-        }
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
     )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
@@ -662,7 +597,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @unittest.skip("torch._dynamo.exc.TorchRuntimeError")
+    @pytorch_test_common.xfail("torch._dynamo.exc.TorchRuntimeError")
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -718,15 +653,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    @pytorch_test_common.skip_fx_exporters(
-        {
-            DynamoExporter: "TypeError: missing a required argument: 'end'",
-            DynamoOptimizeExporter: (
-                "RuntimeError: The two modules have different number of arguments. "
-                "module: 1, reference_module: 0"
-            ),
-        }
-    )
+    @pytorch_test_common.xfail("TypeError: missing a required argument: 'end'")
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -745,7 +672,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @unittest.skip(
+    @pytorch_test_common.xfail(
         "fx.graph: torch._subclasses.fake_tensor.DataDependentOutputException: "
         "aten._local_scalar_dense.default"
     )
@@ -764,7 +691,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @unittest.skip("RuntimeError: Unknown call_function target: aten.copy.default")
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.copy.default"
+    )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -785,8 +714,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.skip_fx_exporters(
-        {DynamoExporter: "Unknown call_function target: aten.lift_fresh_copy.default"}
+    @pytorch_test_common.xfail(
+        "Unknown call_function target: aten.lift_fresh_copy.default"
     )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
@@ -828,8 +757,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.skip_fx_exporters(
-        {DynamoExporter: "Shapes are assumed static by default by 'dynamo.export'."}
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "Shapes are assumed static by default by 'dynamo.export'."
     )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
