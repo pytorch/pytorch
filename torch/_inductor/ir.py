@@ -826,7 +826,7 @@ class Reduction(Loops):
             and config.split_reductions
         )
         sr_qualified = split_reduction
-        if dynamo_config.dynamic_shapes:
+        if sr_qualified and dynamo_config.dynamic_shapes:
             # TODO(voz): dedup with sizevar util introduced in other PR
             def _is_static(x):
                 return isinstance(x, (int, sympy.Integer))
