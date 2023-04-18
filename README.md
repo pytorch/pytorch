@@ -187,6 +187,8 @@ Other potentially useful environment variables may be found in `setup.py`.
 conda install cmake ninja
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
+# (optional) If using torch.compile with inductor/triton, install the matching version of triton
+make triton
 ```
 
 **On Linux**
