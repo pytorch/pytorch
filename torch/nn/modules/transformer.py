@@ -233,7 +233,7 @@ class TransformerEncoder(Module):
             mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
             is_causal: If specified, applies a causal mask as mask.
-                Default: ``False``.
+                Default: ``None``; try to detect a causal mask.
                 Warning:
                 ``is_causal`` provides a hint that ``mask`` is the
                 causal mask. Providing incorrect hints can result in
