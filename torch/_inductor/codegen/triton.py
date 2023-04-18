@@ -1456,8 +1456,8 @@ class TritonKernel(Kernel):
         xnumel = 4096
         rnumel = 768
 
-        After the signature, before the kernel code, if we decided to make these static. As its hardcoded, it becomes 
-        a better signal to triton on how to unroll and do some static indexing. So, it's not so much that downstream 
+        After the signature, before the kernel code, if we decided to make these static. As its hardcoded, it becomes
+        a better signal to triton on how to unroll and do some static indexing. So, it's not so much that downstream
         knows that its a static numel, as that you just plop a constant into the kernel.
         """
         for tree in self.range_trees:
