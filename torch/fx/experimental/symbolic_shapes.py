@@ -1494,6 +1494,10 @@ class ShapeEnv:
             env_id = f"{frame_id}.{per_frame_id}"
         self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
         self.log.info("create_env")
+        self.frozen = False
+
+    def freeze(self):
+        self.frozen = True
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -2364,6 +2368,8 @@ class ShapeEnv:
             concrete_val = self.size_hint(expr)
         else:
             concrete_val = sympy.sympify(hint)
+
+        assert not self.frozen, f"Ignored guard {expr} == {concrete_val}, this could result in accuracy problems"
 
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
             self._maybe_guard_eq(expr, bool(concrete_val))
