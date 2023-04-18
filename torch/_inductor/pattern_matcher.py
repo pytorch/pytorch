@@ -664,14 +664,13 @@ def training_graph(fn, args):
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
-    with torch._guards.tracing(None):
-        aot_function(
-            fn,
-            lambda g, i: make_boxed_func(g),
-            partition_fn=record_joint_graph,
-            decompositions=select_decomp_table(),
-            enable_log=False,
-        )(*args)
+    aot_function(
+        fn,
+        lambda g, i: make_boxed_func(g),
+        partition_fn=record_joint_graph,
+        decompositions=select_decomp_table(),
+        enable_log=False,
+    )(*args)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
