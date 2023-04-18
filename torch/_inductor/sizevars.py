@@ -225,6 +225,31 @@ class SizeVarAllocator:
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
+    # Note - [On Should Optimize]
+    #
+    # The should_optimize_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
+    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
+    # true, we add a guard and return True, otherwise, False.
+    #
+    # def maybe_guard_foo(args):
+    #   if size_hinted_check(args):
+    #       return False # No guard, no optim
+    #   guard(args) # Make a guard
+    #   return True # Safe to apply optimization
+    #
+    # The prior system incurred a guard, and green lit an optimization.
+    #
+    # The new system works in reverse - in the new system, if we know that the inputs are static, and evaluate the
+    # condition as true, we green light the optimization, and we do not incur a guard. If we cannot prove that, we
+    # return False.
+    #
+    # def maybe_guard_foo(args):
+    #   if all_static(args):
+    #       return True # Safe to apply optimization
+    #   else:
+    #       return False # No guard, no optim
+
+    # See Note - [On Should Optimize]
     def should_optimize_equals(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
@@ -235,6 +260,7 @@ class SizeVarAllocator:
             return int(left) - int(right) == 0
         return False
 
+    # See Note - [On Should Optimize]
     def should_optimize_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
@@ -245,6 +271,7 @@ class SizeVarAllocator:
             return True
         return False
 
+    # See Note - [On Should Optimize]
     def should_optimize_leq(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
@@ -255,6 +282,7 @@ class SizeVarAllocator:
             return True
         return False
 
+    # See Note - [On Should Optimize]
     def should_optimize_lt(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left is less than right.
@@ -263,6 +291,19 @@ class SizeVarAllocator:
             return int(left) < int(right)
         if is_expr_static(right) and right == sys.maxsize:
             return True
+        return False
+
+    # See Note - [On Should Optimize]
+    def should_optimize_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+        """
+        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
+        """
+        if sympy.gcd(numerator, denominator) == denominator:
+            # can prove it symbolically
+            return True
+        if is_expr_static(numerator) and is_expr_static(denominator):
+            if int(numerator) % int(denominator) == 0:
+                return True
         return False
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
@@ -291,18 +332,6 @@ class SizeVarAllocator:
     def guard_max(self, left: Expr, right: Expr) -> Expr:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
-
-    def should_optimize_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
-        """
-        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
-        """
-        if sympy.gcd(numerator, denominator) == denominator:
-            # can prove it symbolically
-            return True
-        if is_expr_static(numerator) and is_expr_static(denominator):
-            if int(numerator) % int(denominator) == 0:
-                return True
-        return False
 
     def guard_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
