@@ -148,31 +148,10 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
 
 def _sfdp_scale_factor_check(scale_factor_op):
     def fn(match):
-        # make sure the mul(div) for the scale factor is scalar mul(div).
-        # bmm->view->mul(div)
-        matmuls = filter_nodes(match.nodes, aten.bmm)
-        if len(matmuls) < 2:
-            return False
-        if (
-            len(matmuls[0].users) != 1
-            or list(matmuls[0].users.keys())[0].target != aten.view.default
-        ):
-            return False
-        view_node = list(matmuls[0].users.keys())[0]
-        if (
-            len(view_node.users) != 1
-            or list(view_node.users.keys())[0].target != scale_factor_op
-        ):
-            return False
-        scale_factor_node = list(view_node.users.keys())[0]
-        if len(scale_factor_node.args) != 2:
-            return False
+        scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
+        # Note: args[1] scale_factor_node of is always the scale_factor for the current patterns.
+        scale_factor = scale_factor_node.args[1]
         # make sure the scale_factor a float/int. SymInt?
-        scale_factor = (
-            scale_factor_node.args[1]
-            if view_node == scale_factor_node.args[0]
-            else scale_factor_node.args[0]
-        )
         if not isinstance(scale_factor, (float, int)):
             return False
         return True
