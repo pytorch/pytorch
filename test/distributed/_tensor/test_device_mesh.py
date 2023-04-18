@@ -190,7 +190,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 torch.chunk(tensor_to_split, self.world_size, dim=shard_dim)
             )
             for _ in range(self.world_size - len(tensor_splitted_list)):
-                tensor_splitted_list.append(torch.tensor([], device=self.device_type))
+                tensor_splitted_list.append(torch.tensor([]), device=self.device_type)
 
             padded_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_scatter,
@@ -293,7 +293,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 torch.chunk(tensor_to_split, self.world_size, dim=shard_dim)
             )
             for _ in range(self.world_size - len(tensor_splitted_list)):
-                tensor_splitted_list.append(torch.tensor([], device=self.device_type))
+                tensor_splitted_list.append(torch.tensor([]), device=self.device_type)
 
             padded_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_scatter,

@@ -71,21 +71,20 @@ class Shard(Placement):
             for idx, chunk_size in enumerate(chunk_sizes)
         ]
 
-        # Fill empty chunk with empty tensor
+        # Reuse tensor to fill empty chunk with empty tensor
         num_empty_tensors = num_chunks - len(tensor_list)
-        device = torch.device(
-            tensor.get_device() if torch.cuda.is_available() else "cpu"
-        )
-        empty_tensor = torch.tensor([], device=device)
+        tensor_size = list(tensor_list[0].size())
+        tensor_size = [size if idx != self.dim else 0 for idx,size in enumerate(tensor_size)]
+        tensor = tensor.new_zeros(tensor_size)
         for _ in range(num_empty_tensors):
-            tensor_list.append(empty_tensor)
+            tensor_list.append(tensor)
 
         if with_padding or contiguous:
             shard_list = []
             for shard, pad_size in zip(tensor_list, pad_sizes):
                 # Fill the empty tensor with zeroes with padding.
                 if with_padding and pad_size == full_chunk_size:
-                    shard = self._pad_tensor(shard, pad_size, tensor_list[0])
+                    shard = self._pad_tensor(shard, pad_size)
                 elif with_padding and pad_size > 0:
                     shard = self._pad_tensor(shard, pad_size)
                 shard = shard.contiguous() if contiguous else shard
@@ -98,28 +97,17 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         pad_size: int,
-        reference_tensor: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        if tensor.numel() == 0:
-            device = torch.device(
-                tensor.get_device() if torch.cuda.is_available() else "cpu"
-            )
-            tensor_size = list(reference_tensor.size())
-            # print(f"before tensor_size: {tensor_size}")
-            # tensor_size = [dim if dim >= self.dim else 0 for dim in tensor_size]  # type: ignore[attr-defined]
-            # print(f"after tensor_size: {tensor_size}")
-            return torch.zeros(tensor_size, device=device)
-        else:
-            pad = [0, 0] * (tensor.ndim - self.dim)
-            pad[-1] = pad_size
-            return torch.nn.functional.pad(tensor, pad)
+        pad = [0, 0] * (tensor.ndim - self.dim)
+        pad[-1] = pad_size
+        return torch.nn.functional.pad(tensor, pad)
 
     def _unpad_tensor(
         self,
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
-        tensor = tensor.narrow(
+        tensor =  tensor.narrow(
             self.dim,
             start=0,
             length=tensor.size(self.dim) - pad_size,
@@ -128,10 +116,7 @@ class Shard(Placement):
         # Explicitly return an empty tensor. Otherwise, even if the
         # tensor is empty, the size won't be 0.
         if tensor.numel() == 0:
-            device = torch.device(
-                tensor.get_device() if torch.cuda.is_available() else "cpu"
-            )
-            return torch.tensor([], device=device)
+            return tensor.new_zeros([0])
         else:
             return tensor
 
