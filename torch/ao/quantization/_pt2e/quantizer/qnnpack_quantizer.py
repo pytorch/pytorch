@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import operator
 from dataclasses import asdict
-from typing import Callable, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import torch
 import torch.nn.functional as F

@@ -1,7 +1,6 @@
 import torch
 from torch.fx import Node
 from typing import (
-    List,
     Callable,
 )
 
