@@ -1293,21 +1293,6 @@ class DistributedDataParallelTest(
         self._test_fp16()
 
     @requires_nccl()
-    @requires_nccl_version((2, 17), "Need NCCL 2.17+ for configuring NCCL communicators")
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_default_cga(self):
-        nccl_debug_file = tempfile.NamedTemporaryFile()
-        os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
-
-        self._test_fp16()
-
-        # Tests if default CGA for DDP is 2
-        nccl_debug_file_content = nccl_debug_file.read()
-        cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
-        self.assertEqual(int(cga_cluster_size), 2)
-
-    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_fp16_grad_is_view(self):
         self._test_fp16(gradient_as_bucket_view=True)

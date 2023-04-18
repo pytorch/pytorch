@@ -2134,7 +2134,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_property_readonly(
               "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
 
-#ifdef ENABLE_NCCL_RANK_CONFIG
+#ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
       processGroupNCCL,
       "NCCLConfig",
@@ -2184,7 +2184,7 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-#ifdef ENABLE_NCCL_RANK_CONFIG
+#ifdef NCCL_HAS_COMM_CTA_CGA
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)

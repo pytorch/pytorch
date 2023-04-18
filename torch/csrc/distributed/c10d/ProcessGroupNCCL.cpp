@@ -1156,7 +1156,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     int deviceIndex = devices[i].index();
 
     gpuGuard.set_index(deviceIndex);
-#ifdef ENABLE_NCCL_RANK_CONFIG
+#ifdef NCCL_HAS_COMM_NONBLOCKING
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID, options_->config);
 #else
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
