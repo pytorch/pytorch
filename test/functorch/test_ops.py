@@ -1366,11 +1366,13 @@ class TestOperators(TestCase):
         xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
+        xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
-        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
+        xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
+        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
@@ -1514,12 +1516,14 @@ class TestOperators(TestCase):
         # running_mean or running_var, which will be updated in place,
         # were not batched.
         xfail('nn.functional.instance_norm'),
+        xfail('nn.functional.logsigmoid'),  # Forward AD not implemented and no decomposition
         # NYI: Tensor.clone(memory_format) inside vmap is only supported with
         # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.multi_margin_loss'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.multilabel_margin_loss'),  # Forward AD not implemented and no decomposition
+        xfail('nn.functional.multilabel_soft_margin_loss'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.pdist'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.rrelu'),  # vmap: we do not yet support aten::rrelu_with_noise.
         xfail('nn.functional.soft_margin_loss'),  # Forward AD not implemented and no decomposition

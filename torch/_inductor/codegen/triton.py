@@ -1305,7 +1305,7 @@ class TritonKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
+                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
             )
             result.writeline(
                 f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"

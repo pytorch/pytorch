@@ -924,6 +924,12 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
 
+    # TODO: resolve error in default __repr__
+    def __repr__(self):
+        with in_kernel_invocation_manager(self.fake_mode):
+            self_repr = super().__repr__()
+        return f"FakeTensor({self_repr}, {self.fake_device})"
+
     @classmethod
     @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

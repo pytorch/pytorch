@@ -14,7 +14,7 @@ from torch.distributed._spmd.partial_lower import partial_lower
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -487,43 +487,32 @@ class IterGraph(fx.Graph):
             ), f"The actual target node is None, {target_node}."
             actual_target_node.append(actual_node)
 
-    def node_set_args(self, node: fx.Node, args: Tuple[Argument, ...]) -> None:
+    def node_update_arg(self, node: fx.Node, idx: int, arg: Argument) -> None:
         if self._freeze_cross_iter_movement:
-            node.args = args
+            node.update_arg(int, arg)
             return
 
-        setup_args = tree_map_only(
-            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), args
+        setup_arg = tree_map(
+            lambda _arg: self._lookup_node(_arg, self.setup_graph)
+            if isinstance(_arg, fx.Node)
+            else _arg,
+            arg,
         )
         setup_node = self._lookup_node(node, self.setup_graph)
-        assert setup_node is not None
-        setup_node.args = setup_args
-        cleanup_args = tree_map_only(
-            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), args
+        assert setup_node is not None, "setup_node is None"
+        setup_node.update_arg(idx, setup_arg)
+
+        node.update_arg(idx, arg)
+
+        cleanup_arg = tree_map(
+            lambda _arg: self._lookup_node(_arg, self.cleanup_graph)
+            if isinstance(_arg, fx.Node)
+            else _arg,
+            arg,
         )
         cleanup_node = self._lookup_node(node, self.cleanup_graph)
-        assert cleanup_node is not None
-        cleanup_node.args = cleanup_args
-        node.args = args
-
-    def node_set_kwargs(self, node: fx.Node, kwargs: Dict[str, Argument]) -> None:
-        if self._freeze_cross_iter_movement:
-            node.kwargs = kwargs
-            return
-
-        setup_kwargs = tree_map_only(
-            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), kwargs
-        )
-        setup_node = self._lookup_node(node, self.setup_graph)
-        assert setup_node is not None
-        setup_node.kwargs = setup_kwargs
-        cleanup_kwargs = tree_map_only(
-            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), kwargs
-        )
-        cleanup_node = self._lookup_node(node, self.cleanup_graph)
-        assert cleanup_node is not None
-        cleanup_node.kwargs = cleanup_kwargs
-        node.kwargs = kwargs
+        assert cleanup_node is not None, "cleanup_node is None"
+        cleanup_node.update_arg(idx, cleanup_arg)
 
     def node_replace_all_uses_with(
         self,
