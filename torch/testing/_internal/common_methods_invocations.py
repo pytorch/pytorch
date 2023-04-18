@@ -19201,7 +19201,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
             ),
-
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
@@ -19214,6 +19213,9 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type='cuda'
             ),
+            # https://github.com/pytorch/pytorch/issues/99404
+            # torch._subclasses.fake_tensor.UnsupportedFakeTensorException: meta converter nyi
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
