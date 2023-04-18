@@ -378,6 +378,7 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
         elif is_allowed(value):
+            # print(value)
             return TorchVariable(
                 value,
                 source=self.source,

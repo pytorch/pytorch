@@ -224,8 +224,17 @@ class AutogradFunctionVariable(VariableTracker):
         VariableTracker.apply(visit, (args, kwargs))
 
         if requires_grad and torch.is_grad_enabled():
-            # TODO(jansel): handle this in training mode
-            unimplemented("autograd.Function with requires_grad")
+            from .builder import VariableBuilder
+
+            def trampoline_autograd_fn(*args, **kwargs):
+                return self.fn_cls.apply(*args, **kwargs)
+
+            torch._dynamo.allow_in_graph(trampoline_autograd_fn)
+
+            rewritten_var = VariableBuilder(tx, self.source)(trampoline_autograd_fn)
+            # TODO(voz): Consider tx.replace_all?
+            assert isinstance(rewritten_var, variables.TorchVariable)
+            return rewritten_var.call_function(tx, args, kwargs)
 
         args = [AutogradFunctionContextVariable.create_for_inference(tx), *args]
         options = VariableTracker.propagate(self, args, kwargs.values())

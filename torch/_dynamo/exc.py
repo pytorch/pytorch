@@ -102,7 +102,12 @@ class IncorrectUsage(Exception):
     pass
 
 
+breaks = set()
+
+
 def unimplemented(msg: str):
+    breaks.add(msg)
+    # print(breaks)
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
 
