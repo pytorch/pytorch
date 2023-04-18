@@ -228,7 +228,25 @@ class SubgraphMatcher:
 
             return True
 
-        match_found = match_found and _match_args(pn.args, gn.args)
+        pn_args, gn_args = [], []
+        if (
+            len(pn.args) != len(gn.args) and
+            pn.op == "call_function" and
+            isinstance(pn.target, torch._ops.OpOverload)
+        ):
+            # If the arguments are different lengths, fill in the remaining
+            # arguments with their default values
+            for i, schema in enumerate(pn.target._schema.arguments):
+                if not schema.kwarg_only and (i < len(pn.args) or i < len(gn.args)):
+                    pn_arg = pn.args[i] if i < len(pn.args) else schema.default_value
+                    gn_arg = gn.args[i] if i < len(gn.args) else schema.default_value
+                    pn_args.append(pn_arg)
+                    gn_args.append(gn_arg)
+        else:
+            pn_args = list(pn.args)
+            gn_args = list(gn.args)
+
+        match_found = match_found and _match_args(pn_args, gn_args)
 
         pn_kwargs, gn_kwargs = [], []
         if pn.kwargs.keys() == gn.kwargs.keys():
