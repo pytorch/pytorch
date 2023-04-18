@@ -1018,6 +1018,54 @@ std::tuple<Tensor,optional<int64_t>> masked_fill_scalar_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> index_fill_batch_rule_helper(
+  int64_t batch_size,
+  int64_t self_logical_rank,
+  int64_t index_logical_rank,
+  Tensor & self_,
+  int64_t dim,
+  Tensor & index_,
+  const Scalar & value
+  ){
+  if (self_logical_rank != 0){
+    auto index_offset = at::arange(
+      batch_size,
+      at::TensorOptions().dtype(index_.scalar_type()).device(index_.device())
+    );
+    if (index_logical_rank == 0){
+      index_ = index_.unsqueeze(-1);
+    }
+    index_ = index_.add(index_offset.unsqueeze(-1), self_.size(dim + 1));
+    index_ = reshape_dim_into(0, 0, index_);
+    self_ = reshape_dim_into(0, dim, self_);
+    self_.index_fill_(dim, index_, value);
+    self_ = reshape_dim_outof(dim, batch_size, self_);
+    return std::make_tuple(self_, dim);
+  }
+
+  // If self_logical_rank == 0, the batch dim is certainly 0, and we must apply batched indices to each row.
+  if (index_logical_rank != 0){
+    index_ = reshape_dim_into(0, 0, index_);
+  }
+  self_.unsqueeze_(-1);
+  self_.index_fill_(dim + 1, index_, value);
+  self_.squeeze_(-1);
+
+  return std::make_tuple(self_, 0);
+}
+
+std::tuple<Tensor,optional<int64_t>> index_fill_batch_rule_helper(
+  int64_t batch_size,
+  int64_t self_logical_rank,
+  int64_t index_logical_rank,
+  Tensor & self_,
+  int64_t dim,
+  Tensor & index_,
+  const Tensor & value
+  ) {
+  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());
+}
+
 std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
     Tensor & self, optional<int64_t> self_bdim,
     int64_t dim,
@@ -1066,31 +1114,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
 
   self_ = self_bdim.has_value() ? self_ : self_.clone();
 
-  if (self_logical_rank != 0){
-    auto index_offset = at::arange(
-      batch_size,
-      at::TensorOptions().dtype(index_.scalar_type()).device(index_.device())
-    );
-    if (index_logical_rank == 0){
-      index_ = index_.unsqueeze(-1);
-    }
-    index_ = index_.add(index_offset.unsqueeze(-1), self_.size(dim + 1));
-    index_ = reshape_dim_into(0, 0, index_);
-    self_ = reshape_dim_into(0, dim, self_);
-    self_.index_fill_(dim, index_, value);
-    self_ = reshape_dim_outof(dim, batch_size, self_);
-    return std::make_tuple(self_, dim);
-  }
-
-  // If self_logical_rank == 0, the batch dim is certainly 0, and we must apply batched indices to each row.
-  if (index_logical_rank != 0){
-    index_ = reshape_dim_into(0, 0, index_);
-  }
-  self_.unsqueeze_(-1);
-  self_.index_fill_(dim + 1, index_, value);
-  self_.squeeze_(-1);
-
-  return std::make_tuple(self_, 0);
+  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
 }
 
 std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
@@ -1144,30 +1168,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
 
   self_ = self_bdim.has_value() ? self_ : self_.clone();
 
-  if (self_logical_rank != 0){
-    auto index_offset = at::arange(
-      batch_size,
-      at::TensorOptions().dtype(index_.scalar_type()).device(index_.device())
-    );
-    if (index_logical_rank == 0){
-      index_ = index_.unsqueeze(-1);
-    }
-    index_ = index_.add(index_offset.unsqueeze(-1), self_.size(dim + 1));
-    index_ = reshape_dim_into(0, 0, index_);
-    self_ = reshape_dim_into(0, dim, self_);
-    self_.index_fill_(dim, index_, value);
-    self_ = reshape_dim_outof(dim, batch_size, self_);
-    return std::make_tuple(self_, dim);
-  }
-
-  if (index_logical_rank != 0){
-    index_ = reshape_dim_into(0, 0, index_);
-  }
-  self_.unsqueeze_(-1);
-  self_.index_fill_(dim + 1, index_, value);
-  self_.squeeze_(-1);
-
-  return std::make_tuple(self_, 0);
+  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
 }
 
 void index_fill__int_scalar_batch_rule(
