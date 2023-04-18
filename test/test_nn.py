@@ -11822,14 +11822,15 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_dim_parameter(self, device, reduction):
-        loss = nn.CrossEntropyLoss(reduction=reduction)
+        loss_1 = nn.CrossEntropyLoss(reduction=reduction)
+        loss_2 = nn.CrossEntropyLoss(reduction=reduction, dim=2)
         input_1 = torch.randn(15, 10, 20, dtype=torch.float, device=device)
         input_2 = input_1.swapaxes(2, 1)
         target = torch.empty(15, 20, dtype=torch.long, device=device).random_(10)
 
-        loss_1 = loss(input_1, target)
-        loss_2 = loss(input_2, target, dim=2)
-        self.assertEqual(loss_1, loss_2, atol=1e-1, rtol=0)
+        out_1 = loss_1(input_1, target)
+        out_2 = loss_2(input_2, target)
+        self.assertEqual(out_1, out_2, atol=1e-1, rtol=0)
 
     def test_smoothl1loss_backward_zero_beta(self, device):
         input = torch.randn(300, 256, requires_grad=True, device=device)
