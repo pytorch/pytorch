@@ -15,7 +15,7 @@ def _is_share_obs_or_fq_op(op: Callable) -> bool:
         torch.ops.aten.view.default,
     ]
 
-def propagate_annotation(model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+def propagate_annotation(model: torch.fx.GraphModule) -> None:
     for n in model.graph.nodes:
         if n.op != "call_function" or not _is_share_obs_or_fq_op(n.target):
             continue

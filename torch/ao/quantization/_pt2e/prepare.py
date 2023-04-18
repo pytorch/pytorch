@@ -94,7 +94,6 @@ def prepare(
 ) -> GraphModule:
     quantizer.annotate(model)
     quantizer.validate(model)
-    print("model:", model)
     propagate_annotation(model)
 
     # Since we are mutating the graph as we go, we iterate over the original
