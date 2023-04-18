@@ -1280,8 +1280,6 @@ class TestOperators(TestCase):
         xfail('cfloat'),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('sparse.sampled_addmm', ''),
-        xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
