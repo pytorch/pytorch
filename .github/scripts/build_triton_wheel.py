@@ -61,7 +61,7 @@ def build_triton(
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
-        check_call(["git", "clone", "https://github.com/peterbell10/triton"], cwd=tmpdir)
+        check_call(["git", "clone", "https://github.com/openai/triton"], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:

@@ -31,7 +31,7 @@ from .codegen.triton import (
     TritonScheduling,
 )
 
-from .utils import run_benchmark, sympy_dot, sympy_product
+from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -572,7 +572,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out):
         algo = self.to_callable()
-        return run_benchmark(lambda: algo(*args, out=out))
+        return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self):
         raise NotImplementedError()
@@ -652,7 +652,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return run_benchmark(lambda: algo(*args))
+            return do_bench(lambda: algo(*args))
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -786,7 +786,7 @@ class AlgorithmSelectorCache(PersistentCache):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)

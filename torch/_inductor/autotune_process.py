@@ -11,7 +11,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import PyCodeCache
 
-from .utils import run_benchmark
+from .utils import do_bench
 from .virtualized import V
 
 DEBUG = False
@@ -188,7 +188,7 @@ class BenchmarkRequest:
                 num_warps=self.num_warps,
             )
 
-        out = run_benchmark(worker, fast_flush=False)
+        out = do_bench(worker)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if DEBUG:

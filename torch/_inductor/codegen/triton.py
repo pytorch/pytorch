@@ -195,6 +195,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
+    def int_minimum(a, b):
+        return f"tl.where({a} < {b}, {a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"tl.where({a} > {b}, {a}, {b})"
+
+    @staticmethod
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
 
@@ -1292,12 +1300,12 @@ class TritonKernel(Kernel):
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
             result.writeline("from torch._inductor.utils import get_num_bytes")
-            result.writeline("from triton.testing import run_benchmark")
+            result.writeline("from triton.testing import do_bench")
             result.writeline("")
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = run_benchmark(lambda: call(args), rep=40)"
+                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)"
             )
             result.writeline(
                 f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"

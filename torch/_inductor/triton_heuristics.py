@@ -23,7 +23,7 @@ from .utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
-    run_benchmark,
+    do_bench,
     get_num_bytes,
     has_triton,
     next_power_of_2,
@@ -161,7 +161,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return run_benchmark(kernel_call, rep=40)
+        return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
