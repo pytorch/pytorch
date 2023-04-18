@@ -538,6 +538,7 @@ class TestProfilerTree(TestCase):
                   aten::empty
                   aten::fill_
               nn.Module: MyModule_0
+                <built-in function getattr>
                 torch/nn/modules/module.py(...): _call_impl
                   <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                   test_profiler_tree.py(...): forward
@@ -551,6 +552,7 @@ class TestProfilerTree(TestCase):
                               aten::relu
                                 aten::clamp_min
                     nn.Module: Linear_0
+                      <built-in function getattr>
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                         torch/nn/modules/linear.py(...): forward
@@ -572,6 +574,7 @@ class TestProfilerTree(TestCase):
                                   aten::as_strided_
                               aten::add_
                     nn.Module: ReLU_1
+                      <built-in function getattr>
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                         torch/nn/modules/activation.py(...): forward
@@ -585,10 +588,12 @@ class TestProfilerTree(TestCase):
                   aten::empty
                   aten::fill_
               nn.Module: MyModule_0
+                <built-in function getattr>
                 torch/nn/modules/module.py(...): _call_impl
                   <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                   test_profiler_tree.py(...): forward
                     nn.Module: ReLU_0
+                      <built-in function getattr>
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                         torch/nn/modules/activation.py(...): forward
@@ -598,6 +603,7 @@ class TestProfilerTree(TestCase):
                               aten::relu
                                 aten::clamp_min
                     nn.Module: Linear_0
+                      <built-in function getattr>
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                         torch/nn/modules/linear.py(...): forward
@@ -619,6 +625,7 @@ class TestProfilerTree(TestCase):
                                   aten::as_strided_
                               aten::add_
                     nn.Module: ReLU_1
+                      <built-in function getattr>
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                         torch/nn/modules/activation.py(...): forward
