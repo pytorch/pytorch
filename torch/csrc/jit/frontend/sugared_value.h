@@ -271,10 +271,9 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
       TypePtr type_hint = nullptr) override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
       throw ErrorReport(loc)
-          << "Expected integer literal for index but got a variable or non-integer. "
+          << "Expected integer literal for index. "
           << "ModuleList/Sequential indexing is only supported with integer literals. "
-          << "For example, 'i = 4; self.layers[i](x)' will fail because i is not a literal. "
-          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): out = v(inp)'";
+          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): ...'";
     }
     auto index = toIValue(idx)->toInt();
     int64_t adj_index =

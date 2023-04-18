@@ -2571,7 +2571,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         test_inps_v2 = (torch.randn(2, 4, 5), torch.randn(6, 4, 7))
         with self.assertRaisesRegex(
             RuntimeError,
-            "Input #0's dimension #0 size is outside of specified dynamic range \[3, 6\]",
+            "Input #0's dimension #0 size is outside of specified dynamic range",
         ):
             gm(*test_inps_v2)
 

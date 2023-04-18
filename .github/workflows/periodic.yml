@@ -138,18 +138,6 @@ jobs:
       cuda-version: "11.8"
       test-matrix: ${{ needs.win-vs2019-cuda11_8-py3-build.outputs.test-matrix }}
 
-  ios-12-5-1-x86-64:
-    name: ios-12-5-1-x86-64
-    uses: ./.github/workflows/_ios-build-test.yml
-    with:
-      build-environment: ios-12-5-1-x86-64
-      ios-platform: SIMULATOR
-      ios-arch: x86_64
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
-
   ios-12-5-1-x86-64-coreml:
     name: ios-12-5-1-x86-64-coreml
     uses: ./.github/workflows/_ios-build-test.yml

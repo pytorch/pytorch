@@ -284,7 +284,6 @@ if torch._C.has_mkldnn:
             return False
         if any(
             n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
-            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
             for n in binary_nodes
         ):
             return False

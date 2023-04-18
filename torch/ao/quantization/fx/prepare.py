@@ -633,9 +633,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 # input etc.
                 arg_as_input_target_is_dynamic and arg is node.args[0]
             )
-        # if node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] == None
-        # or node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"] == None
-        needs_obs = needs_obs and (act_post_process_ctr is not None)
 
     else:
         assert qconfig is not None

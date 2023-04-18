@@ -56,8 +56,8 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
     iter.dtype(),
     "_amp_non_finite_check_and_unscale_cuda",
     [&iter, &found_inf, &inv_scale] {
-      auto* found_inf_ptr = found_inf.mutable_data_ptr<float>();
-      auto* inv_scale_ptr = inv_scale.const_data_ptr<float>();
+      auto* found_inf_ptr = found_inf.data_ptr<float>();
+      auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
       using opmath_t = at::opmath_type<scalar_t>;
 
@@ -151,8 +151,8 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     tensor_lists[0][0].scalar_type(),
     "_amp_foreach_non_finite_check_and_unscale_cuda",
     [&tensor_lists, &found_inf, &inv_scale] {
-      auto* found_inf_ptr = found_inf.mutable_data_ptr<float>();
-      auto* inv_scale_ptr = inv_scale.const_data_ptr<float>();
+      auto* found_inf_ptr = found_inf.data_ptr<float>();
+      auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
       using opmath_t = at::opmath_type<scalar_t>;
 
@@ -180,7 +180,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
 // The scale factor is maintained and updated on the GPU to avoid synchronization.
 __global__ void amp_update_scale_cuda_kernel(float* current_scale,
                                              int* growth_tracker,
-                                             const float* found_inf,
+                                             float* found_inf,
                                              double growth_factor,
                                              double backoff_factor,
                                              int growth_interval)
@@ -234,9 +234,9 @@ Tensor& _amp_update_scale_cuda_(Tensor& current_scale,
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
   amp_update_scale_cuda_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-    current_scale.mutable_data_ptr<float>(),
-    growth_tracker.mutable_data_ptr<int>(),
-    found_inf.const_data_ptr<float>(),
+    current_scale.data_ptr<float>(),
+    growth_tracker.data_ptr<int>(),
+    found_inf.data_ptr<float>(),
     growth_factor,
     backoff_factor,
     growth_interval);

@@ -179,7 +179,7 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
         return timings
@@ -282,7 +282,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)
+            ms = self.bench(launcher, *args, grid=grid)[0]
             num_in_out_ptrs = len(
                 [
                     arg_name
