@@ -936,6 +936,8 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_kwargs={"use_orig_params": True},
         )
 
+        # Enable this once use_orig_params supports rank0_only=Treu
+        """
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
             state_dict_settings=StateDictSettings(
@@ -950,6 +952,7 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
             fsdp_kwargs={"use_orig_params": True},
         )
+        """
 
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
@@ -1806,6 +1809,32 @@ class TestFSDPOptimState(FSDPTest):
 
         # TODO: add local/sharded/full state_dict and CPU offloading and rank0
         # interface test here, https://github.com/pytorch/pytorch/issues/97163
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_none_tensor_state(self):
+        def _run_test(use_orig_params):
+            model = FSDP(TestDummyModel().cuda(), use_orig_params=use_orig_params)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+            def step():
+                loss = model(model.get_input())
+                loss.backward(loss)
+                optim.step()
+
+            step()
+            original_osd = deepcopy(optim.state_dict())
+            for param_id, state in original_osd["state"].items():
+                # Add customized value
+                state["value1"] = 2.74
+                state["value2"] = None
+
+            osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+            osd_to_load = FSDP.optim_state_dict_to_load(model, optim, osd)
+            for param_id, state in osd_to_load["state"].items():
+                self.assertEqual(state["value1"], 2.74)
+                self.assertEqual(state["value2"], None)
+
+        self.run_subtests({"use_orig_params": [False, True]}, _run_test)
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
