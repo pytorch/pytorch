@@ -397,7 +397,7 @@ class TestMin(TestCase):
         i, j = dims()
         i.size = 3
         j.size = 4
-        (i < j)
+        (i < j)  # noqa: B015
 
     def test_c(self):
         _test_c()

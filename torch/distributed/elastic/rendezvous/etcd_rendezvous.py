@@ -69,7 +69,7 @@ CONST_WORKER_KEEPALIVE_TTL = 10
 # TTL for the ephemeral run_id-specific directory. All rendezvous state data
 # for a specific run_id (job instance) is contained within directory.
 # Its only role is to clean-up rendezvous data from old runs (for the case when
-# etcd server is persistent), and has no affect on correctnes, but should be
+# etcd server is persistent), and has no affect on correctness, but should be
 # larger than any timeouts that a worker process is expected to survive:
 CONST_RUNID_SUBROOT_TTL = 7200  # 2 hours
 
@@ -184,7 +184,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
             self.set_closed()
             return True
         except BaseException as e:
-            log.warning(f"Shutdown failed. Error occurred: {str(e)}")
+            log.warning("Shutdown failed. Error occurred: %s", str(e))
             return False
 
 
@@ -211,7 +211,7 @@ class EtcdRendezvous:
         last_call_timeout,
     ):
         self.client = client
-        log.info("Etcd machines: " + str(self.client.machines))
+        log.info("Etcd machines: %s", self.client.machines)
 
         self._prefix = prefix
         self._run_id = run_id
@@ -298,7 +298,7 @@ class EtcdRendezvous:
 
             except RendezvousClosedError:
                 log.info(
-                    f"Rendezvous for run_id={self._run_id} was observed to be closed"
+                    "Rendezvous for run_id=%s was observed to be closed", self._run_id
                 )
                 raise
 
@@ -310,7 +310,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                log.info("Rendezvous attempt failed, will retry. Reason: " + str(e))
+                log.info("Rendezvous attempt failed, will retry. Reason: %s", e)
                 time.sleep(1)
 
     def init_phase(self):
@@ -335,12 +335,12 @@ class EtcdRendezvous:
         try:
             active_version = self.try_create_rendezvous()
             state = json.loads(active_version.value)
-            log.info("New rendezvous state created: " + str(state))
+            log.info("New rendezvous state created: %s", state)
         except etcd.EtcdAlreadyExist:
             active_version, state = self.get_rdzv_state()
             # Note: it is possible for above query to fail (etcd.EtcdKeyNotFound),
             # but this is ok for us - just means we'll restart from beginning.
-            log.info("Observed existing rendezvous state: " + str(state))
+            log.info("Observed existing rendezvous state: %s", state)
 
         if state["status"] == "closed":
             raise RendezvousClosedError()
@@ -365,14 +365,13 @@ class EtcdRendezvous:
         active_version, this_rank = self.join_rendezvous(expected_version)
         state = json.loads(active_version.value)
         log.info(
-            "Joined rendezvous version {} as rank {}. Full state: {}".format(
-                state["version"], this_rank, state
-            )
+            "Joined rendezvous version %s as rank %s. Full state: %s",
+            state["version"], this_rank, state
         )
 
         # If this worker was first to reach num_min_workers requirement,
         # and rendezvous is still joinable (therefore it is elastic),
-        # then this worker will be repsonsible for waiting out the "last call"
+        # then this worker will be responsible for waiting out the "last call"
         # timeout and closing (i.e. transitioning to 'frozen') the rendezvous
         # afterwards.
         # As a safety against a potential failure of this worker (during the
@@ -380,10 +379,10 @@ class EtcdRendezvous:
         # when min_num_workers is reached.
 
         if this_rank == self._num_min_workers - 1 and state["status"] == "joinable":
-            log.info("Rank {} is responsible for join last call.".format(this_rank))
+            log.info("Rank %s is responsible for join last call.", this_rank)
             last_call_deadline = time.time() + self._last_call_timeout
             self.handle_join_last_call(expected_version, last_call_deadline)
-            log.info("Rank {} finished join last call.".format(this_rank))
+            log.info("Rank %s finished join last call.", this_rank)
 
         # Wait for rendezvous state to be frozen, which means a fixed set of peers
         log.info("Waiting for remaining peers.")
@@ -398,7 +397,7 @@ class EtcdRendezvous:
 
     def confirm_phase(self, expected_version, this_rank):
         """
-        Once the rendezvous state trainsitions from 'joinable' to 'frozen',
+        Once the rendezvous state transitions from 'joinable' to 'frozen',
         we have every participant confirm their membership and setup per-member
         keep-alive TTL keys, and then wait for all other participants to confirm,
         which would then successfully conclude this rendezvous.
@@ -412,9 +411,8 @@ class EtcdRendezvous:
         state = json.loads(active_version.value)
 
         log.info(
-            "Rendezvous version {} is complete. Final state: {}".format(
-                state["version"], state
-            )
+            "Rendezvous version %s is complete. Final state: %s",
+            state["version"], state
         )
 
         # Rendezvous version number; our rank in it; world size
@@ -433,9 +431,8 @@ class EtcdRendezvous:
         #   2. if keep alives are missing, destroy it and bail out.
         active_state = self.announce_self_waiting(expected_version)
         log.info(
-            "Added self to waiting list. Rendezvous full state: {}".format(
-                active_state.value
-            )
+            "Added self to waiting list. Rendezvous full state: %s",
+            active_state.value
         )
 
         self.wait_for_rendezvous_to_free(expected_version)
@@ -628,7 +625,7 @@ class EtcdRendezvous:
         active_version, state = self.get_rdzv_state()
         while True:
             if state["status"] == "final" and state["version"] == expected_version:
-                # Succcess. This rendezvous is final, and we accept it.
+                # Success. This rendezvous is final, and we accept it.
                 return active_version
 
             elif state["status"] == "frozen" and state["version"] == expected_version:
@@ -698,9 +695,10 @@ class EtcdRendezvous:
                 if key not in keep_alive_keys:
                     # This participant didn't renew their lease. We'll declare this
                     # rendezvous version as dead (but only if it hadn't changed)
-                    log.info("Keep-alive key {} is not renewed.".format(key))
+                    log.info("Keep-alive key %s is not renewed.", key)
                     log.info(
-                        "Rendevous version {} is incomplete. ".format(expected_version)
+                        "Rendezvous version %s is incomplete. ",
+                        expected_version
                     )
                     log.info("Attempting to destroy it.")
 
@@ -713,9 +711,8 @@ class EtcdRendezvous:
                     )
 
                     log.info(
-                        "Destroyed rendezvous version {} successfully.".format(
-                            expected_version
-                        )
+                        "Destroyed rendezvous version %s successfully.",
+                        expected_version
                     )
 
                     # We can return (and retry) immediately
@@ -752,7 +749,7 @@ class EtcdRendezvous:
 
         1. state becomes <frozen, expected_version>
         2. timeout happens (reaching deadline), in which case
-           we try the tranisiton to <frozen, expected_version>
+           we try the transition to <frozen, expected_version>
 
         Exit with exception otherwise.
         """
@@ -761,7 +758,7 @@ class EtcdRendezvous:
         while True:
             if state["status"] == "frozen" and state["version"] == expected_version:
                 # Worker set became frozen before last-call timeout. This is possible
-                # when num_max_workers is reached before the tiemout.
+                # when num_max_workers is reached before the timeout.
                 return
 
             if state["status"] != "joinable" or state["version"] != expected_version:

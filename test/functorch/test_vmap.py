@@ -45,6 +45,7 @@ from common_utils import (
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
     decorate,
+    DisableVmapFallback,
 )
 import types
 from collections import namedtuple
@@ -1057,6 +1058,16 @@ class TestVmapAPI(TestCase):
         expected = torch.mv(y, torch.ones(2)).view(3, 1, 1) + x
         self.assertEqual(out, expected)
 
+    def test_decomposition_under_python_dispatcher(self):
+        # This test will raise an error if the vmap fallback gets invoked.
+        # Here we test that decomps registered to FuncTorchBatchedDecomposition
+        # are respected by the Python Dispatcher.
+        t = torch.ones(3, 3) * 5
+        with DisableVmapFallback():
+            with torch._dispatch.python.enable_python_dispatcher():
+                o = torch.vmap(torch.square)(t)
+        self.assertEqual(o, torch.square(t))
+
     def _test_vmap_autocast(self, device):
 
         if torch.device(device).type == "cpu":
@@ -1157,6 +1168,21 @@ class TestVmapAPI(TestCase):
         out, out_dims = restore_vmap(f, (0, None), B, 'error')(x, y)
         self.assertEqual(out, f(None, y))
         self.assertEqual(out_dims, (None, None, None))
+
+    def test_data_attribute(self):
+        def foo(x):
+            y = x.data
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "accessing `data` under vmap transform"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+        def foo(x):
+            x.data = torch.ones(3, 3)
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "mutating directly with `.data` under vmap"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
 
 
 def slice_inputs(inputs, bdims, i):
@@ -3412,7 +3438,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
                 args = (sample_input.input,) + sample_input.args
-                if not any(map(lambda arg: isinstance(arg, torch.Tensor), args)):
+                if not any((isinstance(arg, torch.Tensor) for arg in args)):
                     # Atleast one tensor required for vmap.
                     continue
                 kwargs = sample_input.kwargs
@@ -3637,7 +3663,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.huber_loss'),
         # We can get this to work on CUDA through decomposition,
         # but fails on CPU due to max_pool1d_cpu not having a derivative
         xfail('nn.functional.max_pool1d'),
@@ -3669,7 +3694,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'amax'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.multi_margin_loss', ''),

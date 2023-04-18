@@ -69,7 +69,7 @@ def default_convert(data):
         return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, tuple):
         return [default_convert(d) for d in data]  # Backwards compatibility.
-    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, str):
+    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, (str, bytes)):
         try:
             return elem_type([default_convert(d) for d in data])
         except TypeError:
@@ -198,6 +198,7 @@ with contextlib.suppress(ImportError):
 default_collate_fn_map[float] = collate_float_fn
 default_collate_fn_map[int] = collate_int_fn
 default_collate_fn_map[str] = collate_str_fn
+default_collate_fn_map[bytes] = collate_str_fn
 
 
 def default_collate(batch):
