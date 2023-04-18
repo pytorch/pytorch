@@ -2,8 +2,11 @@ import copy
 import functools
 import logging
 import os
+import uuid
 import shutil
+import subprocess
 import textwrap
+from tmpfile import TemporaryFile
 from importlib import import_module
 
 import torch
@@ -17,6 +20,7 @@ from torch._dynamo.debug_utils import (
     generate_compiler_repro_string,
     helper_for_dump_minify,
     minifier_dir,
+    TEST_REPLACEABLE_COMMENT,
 )
 
 from .. import config
