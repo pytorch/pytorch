@@ -149,7 +149,7 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
 def _sfdp_scale_factor_check(scale_factor_op):
     def fn(match):
         scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
-        # Note: args[1] scale_factor_node of is always the scale_factor for the current patterns.
+        # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
         scale_factor = scale_factor_node.args[1]
         # make sure the scale_factor a float/int. SymInt?
         if not isinstance(scale_factor, (float, int)):

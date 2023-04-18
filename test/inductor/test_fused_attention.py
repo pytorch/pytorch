@@ -20,7 +20,7 @@ class TestSDPAPatternRewriter(TestCase):
         dot_prod_attention,
         args1=None,
         contains=True,
-        atol=1e-7,
+        atol=1e-5,
         has_fuse_pattern=True,
     ):
         if args1 is None:
@@ -52,14 +52,14 @@ class TestSDPAPatternRewriter(TestCase):
                 self.assertIn(
                     "aten._scaled_dot_product_efficient_attention", source_code
                 )
-            self.assertEqual(result1, result2, atol=atol, rtol=1e-5)
+            self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
             if training:
                 result1.sum().backward()
                 result2.sum().backward()
                 for arg1, arg2 in zip(args1, args2):
                     if isinstance(arg1, torch.Tensor):
-                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1e-5)
+                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
     def test_sdpa_rewriter_1(self):
         def dot_prod_attention(
@@ -189,13 +189,13 @@ class TestSDPAPatternRewriter(TestCase):
                 return y.softmax(dim=-1).matmul(value)
 
         tensor_shape = (2, 4, 4, 4)
-        args = [
-            torch.randn(tensor_shape, device="cuda"),
-            torch.randn(tensor_shape, device="cuda"),
-            torch.randn(tensor_shape, device="cuda"),
-            torch.randn((4, 1, 1), device="cuda"),
-        ]
         for is_inv_factor in [True, False]:
+            args = [
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn((4, 1, 1), device="cuda"),
+            ]
             model = Model(is_inv_factor).eval()
             # The training path has an accuracy gap compared with eager mode.
             self._check_common(
