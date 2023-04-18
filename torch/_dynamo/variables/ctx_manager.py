@@ -102,14 +102,10 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ],
             {},
         )
+        # Remove the checkpoint if there is no graph break
+        # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
         return x
-
-    def module_name(self):
-        return self.cm_obj.__module__
-
-    def fn_name(self):
-        return self.cm_obj.__class__.__name__
 
 
 class GradModeVariable(ContextWrappingVariable):

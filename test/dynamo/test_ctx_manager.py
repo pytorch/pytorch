@@ -571,6 +571,25 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         with torch.enable_grad():
             torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=6)
 
+    def test_nested_generic_context_manager(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                x = x + 1
+                if torch.is_grad_enabled():
+                    x = x * 2
+                with CutomizedCtxManager(False):
+                    if torch.is_grad_enabled():
+                        x = x - 3
+                    x = x * 1.5
+                x = torch.relu(x)
+            return x - 1
+
+        with torch.no_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=9)
+
+        with torch.enable_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=9)
+
     def test_generic_context_manager_with_graph_break(self):
         def fn(x):
             with CutomizedCtxManager(True):
@@ -591,6 +610,42 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 2)
+
+        with torch.enable_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 3)
+            self.assertEqual(cnts.op_count, 3)
+
+    def test_nested_generic_context_manager_with_graph_break(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                x = x + 1
+                if torch.is_grad_enabled():
+                    x = x * 2
+                with CutomizedCtxManager(False):
+                    if torch.is_grad_enabled():
+                        x = x - 3
+                    torch._dynamo.graph_break()
+                    x = x * 1.5
+                x = torch.relu(x)
+            return x - 1
+
+        x = torch.rand(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+
+        with torch.no_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
 
         with torch.enable_grad():
             ref = fn(x)

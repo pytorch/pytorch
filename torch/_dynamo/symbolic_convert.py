@@ -360,9 +360,14 @@ def break_graph_if_unsupported(*, push):
                     raise exc.SkipFrame(msg) from excp
 
                 if len(self.states_before_block) > 0:
+                    # We don't support graph break under GenericContextWrappingVariable,
+                    # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    self.restore_graphstate(self.states_before_block.pop())
-                    unimplemented("graph break under GenericContextWrappingVariable")
+                    state = self.states_before_block.pop()
+                    self.restore_graphstate(state)
+                    ctx = state.stack[-1]
+                    assert isinstance(ctx, GenericContextWrappingVariable)
+                    unimplemented(f"Graph break under {ctx}")
 
                 if not self.should_compile_partial_graph():
                     raise
@@ -943,12 +948,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
+        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"SETUP_WITH {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
-            state = self.copy_graphstate()
+            # Save the checkpoint to restore if there is
+            # graph break under the GenericContextWrappingVariable.
             self.states_before_block.append(state)
 
         self.output.guards.update(ctx.guards)
