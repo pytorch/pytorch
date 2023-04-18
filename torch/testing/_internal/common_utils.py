@@ -211,7 +211,8 @@ class TrackedInputIter:
         self.test_fn.tracked_inputs[self.test_id] = tracked_input
 
     def _clear_tracked_input(self):
-        if self.test_fn is not None and self.test_id is not None:
+        if (self.test_fn is not None and self.test_id is not None and
+                hasattr(self.test_fn, "tracked_inputs")):
             del self.test_fn.tracked_inputs[self.test_id]
         self.test_fn, self.test_id = None, None
 

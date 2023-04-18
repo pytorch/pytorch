@@ -845,6 +845,8 @@ class ops(_TestParametrizer):
                     def test_wrapper(*args, **kwargs):
                         try:
                             return test(*args, **kwargs)
+                        except unittest.SkipTest as e:
+                            raise e
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if tracked_input is not None:
