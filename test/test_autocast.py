@@ -191,18 +191,21 @@ class TestAutocastGPU(TestCase):
         data = torch.randn(2, 3).cuda()
         weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
 
-        torch._C._set_cudagraph_cached_tensors_enabled(True)
-        torch._C._add_cudagraph_cached_tensor(weight)
+        try:
+            torch._C._set_cudagraph_cached_tensors_enabled(True)
+            torch._C._add_cudagraph_cached_tensor(weight)
 
-        with WeightDTypeCastCounterMode(weight) as mode:
-            with torch.autocast(device_type='cuda'):
-                output = CustomLinear.apply(data, weight)
-                s = output.sum()
-            s.backward()
+            with WeightDTypeCastCounterMode(weight) as mode:
+                with torch.autocast(device_type='cuda'):
+                    output = CustomLinear.apply(data, weight)
+                    s = output.sum()
+                s.backward()
 
-        # we should not have cached the conversion of the weight
-        self.assertEqual(mode.dtype_cast_counter, 2)
-        torch._C._set_cudagraph_cached_tensors_enabled(False)
+            # we should not have cached the conversion of the weight
+            self.assertEqual(mode.dtype_cast_counter, 2)
+        
+        finally:
+            torch._C._set_cudagraph_cached_tensors_enabled(False)
 
 
 class TestTorchAutocast(TestCase):

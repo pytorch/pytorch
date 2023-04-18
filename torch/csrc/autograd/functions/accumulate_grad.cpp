@@ -11,7 +11,7 @@
 #include <utility>
 
 #ifndef C10_MOBILE
-#include <ATen/autocast_mode.h>
+#include <ATen/cached_tensor_utils.h>
 #endif
 
 namespace torch {
@@ -66,7 +66,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 #ifndef C10_MOBILE
 
 size_t adjusted_use_count(const at::Tensor& t) {
-  return t.use_count() - (at::autocast::is_cudagraph_cached_tensor(t) ? 1 : 0);
+  return t.use_count() - (at::caching::is_cached_tensor(t) ? 1 : 0);
 }
 
 #else
