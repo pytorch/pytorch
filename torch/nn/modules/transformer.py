@@ -86,7 +86,8 @@ class Transformer(Module):
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None,
-                src_is_causal: bool = False, tgt_is_causal: bool = False, memory_is_causal: bool = False) -> Tensor:
+                src_is_causal: Optional[bool] = None, tgt_is_causal: Optional[bool] = None,
+                memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -99,14 +100,14 @@ class Transformer(Module):
             tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
             src_is_causal: If specified, applies a causal mask as tgt mask.
-                Default: ``False``.
+                Default: ``None``; try to detect a causal mask.
                 Warning:
                 ``src_is_causal`` provides a hint that ``src_mask`` is
                 the causal mask. Providing incorrect hints can result in
                 incorrect execution, including forward and backward
                 compatibility.
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Default: ``False``.
+                Default: ``None``; try to detect a causal mask.
                 Warning:
                 ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
                 the causal mask. Providing incorrect hints can result in
@@ -164,6 +165,9 @@ class Transformer(Module):
 
         if src.size(-1) != self.d_model or tgt.size(-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
+
+        src_is_causal = _detect_is_causal_mask(src_mask, src_is_causal)
+        tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal)
 
         memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask,
                               is_causal=src_is_causal)
