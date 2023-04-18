@@ -158,7 +158,7 @@ __global__ void indexing_backward_kernel_stride_1(
         int64_t num_warp_passes = num_duplicates / C10_WARP_SIZE;
         for (int64_t i = 0; i < num_warp_passes; ++i) {
             grad_row = ((int64_t) indices[idx + i * C10_WARP_SIZE + laneIdx]) * stride + z * numel * stride;
-            gradient += static_cast<opmath_t>(grad_output[grad_row]);
+            gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
         }
         WARP_SYNC();
         for (int offset = 16; offset > 0; offset /= 2) {
@@ -168,10 +168,10 @@ __global__ void indexing_backward_kernel_stride_1(
         if (laneIdx == 0) {
           for (int64_t i = num_warp_passes * C10_WARP_SIZE; i < num_duplicates; ++i) {
             grad_row = ((int64_t) indices[idx + i]) * stride + z * numel * stride;
-            gradient += static_cast<opmath_t>(grad_output[grad_row]);
+            gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
           }
 
-          grad_weight[weight_row] = static_cast<scalar_t>(gradient * scale);
+          grad_weight[weight_row] = static_cast<scalar_t>(gradient);
         }
       }
     }
@@ -213,10 +213,10 @@ __global__ void indexing_backward_kernel_small_stride(
         opmath_t gradient = (opmath_t)0.0;
         for (int64_t i = 0; i < num_duplicates; ++i) {
           grad_row = ((int64_t) indices[idx + i]) * stride + z * numel * stride;
-          gradient += static_cast<opmath_t>(grad_output[grad_row + start_feature]);
+          gradient += static_cast<opmath_t>(grad_output[grad_row + start_feature] * scale);
         }
 
-        grad_weight[weight_row + start_feature] = static_cast<scalar_t>(gradient * scale);
+        grad_weight[weight_row + start_feature] = static_cast<scalar_t>(gradient);
       }
     }
   }
