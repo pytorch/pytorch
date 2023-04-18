@@ -38,7 +38,7 @@ class UtilTest(DTensorTestBase):
         ]
 
         self.assertEqual(local_size[0], chunk_sizes[my_rank])
-        # offset for empty shard on the current dimension is equal to
+        # Offset for empty shard on the current dimension is equal to
         # global tensor dim size on the current dimension.
         self.assertEqual(local_offset[0], sum(chunk_sizes[:my_rank]))
 

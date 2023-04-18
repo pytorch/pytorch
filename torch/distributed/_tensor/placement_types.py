@@ -84,9 +84,7 @@ class Shard(Placement):
             shard_list = []
             for shard, pad_size in zip(tensor_list, pad_sizes):
                 # Fill the empty tensor with zeroes with padding.
-                if with_padding and pad_size == full_chunk_size:
-                    shard = self._pad_tensor(shard, pad_size)
-                elif with_padding and pad_size > 0:
+                if with_padding and pad_size > 0:
                     shard = self._pad_tensor(shard, pad_size)
                 shard = shard.contiguous() if contiguous else shard
                 shard_list.append(shard)
@@ -135,7 +133,7 @@ class Shard(Placement):
             size_on_dim >= num_chunks
         ), f"Size to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
 
-        # compute the chunk size inline with ``torch.chunk``
+        # Compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
 
         # Compute chunk size for each chunk on the dimension.
@@ -177,7 +175,7 @@ class Shard(Placement):
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
         mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
 
-        # Only unpad if the rank is part of the mesh and the local_tensor was padded on the dimension.
+        # Only unpad if the local_tensor was padded on the dimension.
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
         if pad_size > 0:
             output = self._unpad_tensor(output, pad_size)
@@ -259,7 +257,7 @@ class Shard(Placement):
             gather_dim=self.dim,
         )
 
-        # unpad the tensor if the input tensor was padded
+        # Unpad the tensor if the input tensor was padded
         if is_padded:
             gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
             gathered_list = [
