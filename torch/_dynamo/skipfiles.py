@@ -30,27 +30,10 @@ import unittest
 import weakref
 
 import torch
+import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
 
-
-try:
-    import torch._prims
-
-    # isort: split
-    # TODO: Hack to unblock simultaneous landing changes. Fix after https://github.com/pytorch/pytorch/pull/81088 lands
-    import torch._prims.utils
-    import torch._prims.wrappers
-    import torch._refs
-    import torch._refs.nn
-    import torch._refs.nn.functional
-    import torch._refs.special
-
-    HAS_PRIMS_REFS = True
-except ImportError:
-    HAS_PRIMS_REFS = False
-
-from . import comptime, external_utils
-from .config_utils import config
+from . import comptime, config, external_utils
 
 """
 A note on skipfiles:
@@ -137,16 +120,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-
-if HAS_PRIMS_REFS:
-    FILENAME_ALLOWLIST |= {
-        torch._prims.__file__,
-        torch._prims.utils.__file__,
-        torch._prims.wrappers.__file__,
-        torch._refs.__file__,
-        torch._refs.special.__file__,
-        torch._refs.nn.functional.__file__,
-    }
+FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
 
 SKIP_DIRS_RE = None
