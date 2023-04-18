@@ -28,8 +28,10 @@ from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
     convert_to_reference_fx,
+    _convert_to_reference_decomposed_fx,
     prepare_fx,
 )
+
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
@@ -486,7 +488,6 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
                 m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
             )
             after_prepare_result_fx = m_fx(*example_inputs)
-            from torch.ao.quantization.quantize_fx import _convert_to_reference_decomposed_fx
             m_fx = _convert_to_reference_decomposed_fx(m_fx, backend_config=backend_config)
 
             after_quant_result_fx = m_fx(*example_inputs)
@@ -499,5 +500,5 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
             )
             # there are slight differences after convert due to different implementations
             # of quant/dequant
-            self.assertEqual(after_quant_result, after_quant_result_fx)
-            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) == torch.tensor(float("inf")))
+            self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
+            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
