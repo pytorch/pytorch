@@ -1091,10 +1091,11 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         log.error(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            "make_fallback(%s): a decomposition exists, we should switch to it."
             " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
             " or inductor_decompositions, and delete the corresponding `make_fallback` line."
-            " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself."
+            " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
+            kernel,
         )
         # Make sure the process exits and CI flags an error, raising
         # an exception could allow a graph-break and silently pass CI in some configs
