@@ -80,7 +80,7 @@ def save_model_with_external_data(
     model_location: str,
     initializer_location: str,
     torch_load_paths: Tuple[str, ...],
-    onnx_model: onnx.ModelProto,
+    onnx_model: "onnx.ModelProto",
 ) -> None:
     """Load PyTorch tensors from files and add to "onnx_model" as external initializers.
 

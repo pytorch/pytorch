@@ -6,14 +6,14 @@ import os
 import random
 import sys
 import unittest
-from typing import Optional
+from typing import Mapping, Optional, Type
 
 import numpy as np
 import packaging.version
 
 import torch
 from torch.autograd import function
-from torch.onnx._internal import diagnostics
+from torch.onnx._internal import diagnostics, exporter
 from torch.testing._internal import common_utils
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -216,6 +216,35 @@ def xfail(reason: str):
         A decorator for expecting test failure.
     """
     return unittest.expectedFailure
+
+
+def skip_fx_tracer(
+    fx_tracer_and_reason: Mapping[Optional[Type[exporter.FXGraphExtractor]], str]
+):
+    """Skip exporting test for selected FX tracers.
+
+    Args:
+        fx_tracer_and_reason: Mapping from FX tracer class to skip the test to the
+            reason for skipping.
+
+    Returns:
+        A decorator for skipping exporting test for FX tracer.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            for fx_tracer, reason in fx_tracer_and_reason.items():
+                if fx_tracer == self.fx_tracer:
+                    fx_tracer_name = fx_tracer.__name__
+                    raise unittest.SkipTest(
+                        f"Skip verify test for '{fx_tracer_name}'. {reason}"
+                    )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
 
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
