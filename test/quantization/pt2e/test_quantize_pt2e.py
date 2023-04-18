@@ -1,11 +1,18 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import operator
 from typing import List
 
 import torch
 import torch._dynamo as torchdynamo
 from torch.ao.ns.fx.utils import compute_sqnr
-from torch.ao.quantization import observer, QConfigMapping
+from torch.ao.quantization import (
+    FusedMovingAvgObsFakeQuantize,
+    observer,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    QConfigMapping,
+)
 from torch.ao.quantization._pt2e.quantizer import (
     OperatorConfig,
     QNNPackQuantizer,
@@ -239,31 +246,75 @@ class TestQuantizePT2E(QuantizationTestCase):
         m = prepare_qat_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
 
-        # Verify that the subgraph was replaced successfully with fake quantizes inserted
-        # Do this by matching against the fused QAT pattern with fake quantizes manually inserted
-        #check_pattern = _get_aten_graph_module(
-        #    _fused_qat_conv_bn_pattern,
-        #    _conv_bn_pattern_example_inputs,
-        #)
-        #obs0 = copy.deepcopy(m.activation_post_process_0)  # conv input activation
-        #obs1 = copy.deepcopy(m.activation_post_process_1)  # conv weight
-        #obs2 = copy.deepcopy(m.activation_post_process_2)  # bn - getitem output activation
-        #for node in check_pattern.graph.nodes:
-        #    named_modules = dict(check_pattern.named_modules(remove_duplicate=False))
-        #    graph = check_pattern.graph
-        #    if node.target == torch.ops.aten.convolution.default:
-        #        obs0_node = _insert_observer(node.args[0], obs0, check_pattern, named_modules, graph)
-        #        obs1_node = _insert_observer(node.args[1], obs1, check_pattern, named_modules, graph)
-        #        node.replace_input_with(node.args[0], obs0_node)
-        #        node.replace_input_with(node.args[1], obs1_node)
-        #    if node.target == operator.getitem:
-        #        output_node = list(node.users.keys())[0]
-        #        obs2_node = _insert_observer(node, obs2, check_pattern, named_modules, graph)
-        #        output_node.replace_input_with(node, obs2_node)
-        #check_pattern.graph.eliminate_dead_code()
-        #check_pattern.recompile()
-        #matcher = SubgraphMatcher(check_pattern.graph)
-        #self.assertEqual(len(matcher.match(m.graph)), 1)
+        # Verify: getitem output activation fake quantize
+        output_node = list(m.graph.nodes)[-1]
+        getitem_fq_node = output_node.args[0][0]
+        self.assertTrue(getitem_fq_node.target.startswith("activation_post_process_"))
+        getitem_fq_mod = getattr(m, getitem_fq_node.target)
+        self.assertEqual(type(getitem_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(type(getitem_fq_mod.activation_post_process), MovingAverageMinMaxObserver)
+        self.assertEqual(getitem_fq_mod.dtype, torch.qint8)
+        self.assertEqual(getitem_fq_mod.quant_min, -128)
+        self.assertEqual(getitem_fq_mod.quant_max, 127)
+
+        # Verify: getitem(bn, 0)
+        getitem_node = getitem_fq_node.args[0]
+        bn_node = getitem_node.args[0]
+        self.assertEqual(getitem_node.target, operator.getitem)
+        self.assertEqual(bn_node.target, torch.ops.aten._native_batch_norm_legit.default)
+
+        # Verify: conv / scale_factor.reshape + bias.reshape
+        add_bias_node = bn_node.args[0]
+        (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+        (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
+        self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
+        self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
+        self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
+        self.assertEqual(conv_node.target, torch.ops.aten.convolution.default)
+        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
+
+        # Verify: conv input activation fake quantize
+        conv_input_fq_node = conv_node.args[0]
+        conv_input_node = conv_input_fq_node.args[0]
+        self.assertTrue(conv_input_fq_node.target.startswith("activation_post_process_"))
+        conv_input_fq_mod = getattr(m, conv_input_fq_node.target)
+        self.assertEqual(type(conv_input_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(type(conv_input_fq_mod.activation_post_process), MovingAverageMinMaxObserver)
+        self.assertEqual(conv_input_fq_mod.dtype, torch.qint8)
+        self.assertEqual(conv_input_fq_mod.quant_min, -128)
+        self.assertEqual(conv_input_fq_mod.quant_max, 127)
+        self.assertTrue(conv_input_node.op, "placeholder")
+
+        # Verify: conv weight fake quantize
+        conv_weight_fq_node = conv_node.args[1]
+        self.assertTrue(conv_weight_fq_node.target.startswith("activation_post_process_"))
+        conv_weight_fq_mod = getattr(m, conv_weight_fq_node.target)
+        self.assertEqual(type(conv_weight_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(type(conv_weight_fq_mod.activation_post_process), MovingAveragePerChannelMinMaxObserver)
+        self.assertEqual(conv_weight_fq_mod.dtype, torch.qint8)
+        self.assertEqual(conv_weight_fq_mod.quant_min, -127)
+        self.assertEqual(conv_weight_fq_mod.quant_max, 127)
+
+        # Verify: conv(fq(input), fq(weight * scale_factor.reshape), zero_bias)
+        zero_bias_node = conv_node.args[2]
+        mul_weight_scale_factor_node = conv_weight_fq_node.args[0]
+        (conv_weight_fq_node, scale_factor_reshape_node) = mul_weight_scale_factor_node.args
+        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
+        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
+
+        # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)
+        scale_factor_node = scale_factor_reshape_node.args[0]
+        (bn_weight_node, sqrt_node) = scale_factor_node.args
+        bn_running_var_add_node = sqrt_node.args[0]
+        (bn_running_var_node, eps) = bn_running_var_add_node.args
+        self.assertEqual(scale_factor_node.target, torch.ops.aten.div.Tensor)
+        self.assertTrue("param_constant" in bn_weight_node.target)
+        self.assertEqual(sqrt_node.target, torch.ops.aten.sqrt.default)
+        self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
+        self.assertTrue("tensor_constant" in bn_running_var_node.target)
+        self.assertEqual(eps, 1e-5)
 
 
 class TestQuantizePT2EModels(QuantizationTestCase):
