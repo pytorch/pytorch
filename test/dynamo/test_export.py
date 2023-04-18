@@ -1713,7 +1713,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             pred = torch.tensor(x[0][0].item() < 0)
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UserError,
-                "Cannot inline nested function.*because it closes over variables",
+                "Cannot create subgraph for nested function.*because it closes over variables",
             ):
                 torch._dynamo.export(mod.forward, pred, x)
 
