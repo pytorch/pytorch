@@ -141,8 +141,8 @@ Fast Fourier Transform (torch.fft)
 -  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
 CPU Performance (Torch Inductor / MKLDNN)
-~~~~~~~~~~~~~~~~~~~~~~
-
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
 -  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 -  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
@@ -155,8 +155,8 @@ CPU Performance (Torch Inductor / MKLDNN)
 -  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  (emeritus) Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
 
-GPU Performance (Torch Inductor / Triton / CUDA )
-~~~~~~~~~~~~~
+GPU Performance (Torch Inductor / Triton / CUDA)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
