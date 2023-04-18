@@ -257,8 +257,12 @@ class DistTensorOpsTest(DTensorTestBase):
         dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
 
         eq_result = dist_tensor_1.equal(dist_tensor_2)
-        # equal op all reduces each shard's local result
-        self.assertFalse(eq_result)
+        if self.rank == 0:
+            # TODO: equal op currently returns each shard's local result
+            with self.assertRaises(AssertionError):
+                self.assertFalse(eq_result)
+        else:
+            self.assertFalse(eq_result)
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)

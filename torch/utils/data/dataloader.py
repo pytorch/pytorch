@@ -163,21 +163,18 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (Callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        multiprocessing_context (str or multiprocessing.context.BaseContext, optional): If
-            ``None``, the default `multiprocessing context`_ of your operating system will
-            be used. (default: ``None``)
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
-            ``base_seed`` for workers. (default: ``None``)
+            `base_seed` for workers. (default: ``None``)
         prefetch_factor (int, optional, keyword-only arg): Number of batches loaded
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers batches prefetched across all workers. (default value depends
             on the set value for num_workers. If value of num_workers=0 default is ``None``.
-            Otherwise, if value of ``num_workers > 0`` default is ``2``).
-        persistent_workers (bool, optional): If ``True``, the data loader will not shut down
+            Otherwise if value of num_workers>0 default is ``2``).
+        persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the device to :attr:`pin_memory` to if ``pin_memory`` is
+        pin_memory_device (str, optional): the device to pin memory to if ``pin_memory`` is
             ``True``.
 
 
@@ -206,9 +203,6 @@ class DataLoader(Generic[T_co]):
 
     .. warning:: See :ref:`reproducibility`, and :ref:`dataloader-workers-random-seed`, and
                  :ref:`data-loading-randomness` notes for random seed related questions.
-
-    .. _multiprocessing context:
-        https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
     """
     dataset: Dataset[T_co]
     batch_size: Optional[int]

@@ -23,7 +23,7 @@ from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -2377,23 +2377,31 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
 
-    fx_g = create_functionalized_graph(
-        joint_fn_to_trace,
-        joint_inputs,
-        meta=fw_metadata,
-        aot_config=aot_config,
-        trace_joint=True,
-    )
+    if config.use_functionalize:
+        fx_g = create_functionalized_graph(
+            joint_fn_to_trace,
+            joint_inputs,
+            meta=fw_metadata,
+            aot_config=aot_config,
+            trace_joint=True,
+        )
 
-    # There should be *NO* mutating ops in the graph at this point.
-    assert_functional_graph(fx_g.graph)
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
 
-    # Redudant with the check above, but worth having in case tracing introduced
-    # a fake tensor. Unlikely.
-    # See Note: [Fake Modules and AOTAutograd]
-    torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
-    fx_g.graph.eliminate_dead_code()
-    fx_g.recompile()
+        # Redudant with the check above, but worth having in case tracing introduced
+        # a fake tensor. Unlikely.
+        # See Note: [Fake Modules and AOTAutograd]
+        torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
+        fx_g.graph.eliminate_dead_code()
+        fx_g.recompile()
+    else:
+        # joint_forward_backward() now always runs with functionalization, and factoring it out
+        # to make that toggleable is a bit painful.
+        # aot autograd without functionalization is wrong anyway, so we error.
+        raise AssertionError(
+            "Graph partitioning without functionalization is not sound, we may introduce errors"
+        )
 
     if aot_config.enable_log:
         aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
@@ -2820,48 +2828,68 @@ def create_aot_dispatcher_function(
             **aot_config.decompositions,
         }
 
+    # NB: don't bother setting allow_fallback_kernels; this should not actually
+    # be configurable in fake tensor, we should automatically do the right
+    # thing
+    if config.debug_fake_cross_ref:
+        # This is a little messy but TorchDynamo directly changes `use_fake_tensor`
+        # so it's not enough for user to change the config manually
+        # TODO: have TorchDynamo read in `use_fake_tensor` from os environ /
+        # coordinate flags
+        config.use_fake_tensor = False
+
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
-    fake_mode = detect_fake_mode(flat_args)
-    if fake_mode is None:
-        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = FakeTensorMode(shape_env=shape_env)
+    for x in flat_args:
+        if isinstance(x, FakeTensor):
+            fake_mode = x.fake_mode
+            shape_env = fake_mode.shape_env
+            break
     else:
-        shape_env = fake_mode.shape_env
+        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
+        fake_mode = (
+            FakeTensorMode(shape_env=shape_env)
+            if config.use_fake_tensor
+            else nullcontext()
+        )
 
+    cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
+    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode, PhiloxStateTracker():
 
         def process_inputs(flat_args):
-            def convert(idx, x):
-                if shape_env is not None:
-                    from torch._dynamo.source import ConstantSource
-                    if isinstance(x, int):
-                        return shape_env.create_symintnode(
-                            shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
-                            hint=x
-                        )
-                if not isinstance(x, torch.Tensor):
-                    return x
-                if isinstance(x, FakeTensor):
-                    assert x.fake_mode is fake_mode
-                    return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
-                if (
-                    idx < aot_config.num_params_buffers
-                    and config.static_weight_shapes
-                ):
-                    return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+            if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
+                def convert(idx, x):
+                    if shape_env is not None:
+                        from torch._dynamo.source import ConstantSource
+                        if isinstance(x, int):
+                            return shape_env.create_symintnode(
+                                shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
+                                hint=x
+                            )
+                    if not isinstance(x, torch.Tensor):
+                        return x
+                    if isinstance(x, FakeTensor):
+                        assert x.fake_mode is fake_mode
+                        return x
+                    # TODO: Ensure that this codepath is never exercised from
+                    # Dynamo
+                    if (
+                        idx < aot_config.num_params_buffers
+                        and config.static_weight_shapes
+                    ):
+                        return fake_mode.from_tensor(x, static_shapes=True)
+                    return fake_mode.from_tensor(x, static_shapes=False)
 
-            return [convert(idx, x) for idx, x in enumerate(flat_args)]
+                return [convert(idx, x) for idx, x in enumerate(flat_args)]
+            else:
+                return flat_args
 
         fake_flat_args = process_inputs(flat_args)
 

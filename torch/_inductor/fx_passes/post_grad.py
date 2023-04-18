@@ -229,7 +229,7 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.maybe_guard_leq(size, first.get_size()[dim]):
+    if V.graph.sizevars.should_optimize_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [

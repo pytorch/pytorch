@@ -87,6 +87,18 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
+  ios-12-5-1-x86-64:
+    name: ios-12-5-1-x86-64
+    uses: ./.github/workflows/_ios-build-test.yml
+    with:
+      build-environment: ios-12-5-1-x86-64
+      ios-platform: SIMULATOR
+      ios-arch: x86_64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+        ]}
+
   macos-12-py3-arm64-build:
     name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-build.yml

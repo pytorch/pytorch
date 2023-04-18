@@ -358,7 +358,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.maybe_guard_equals(in_chan, x.get_size()[1])
+        and V.graph.sizevars.should_optimize_equals(in_chan, x.get_size()[1])
     ):
         if (
             is_ones(kernel_shape)

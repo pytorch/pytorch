@@ -513,7 +513,7 @@ def squeeze(x, dim=None):
     new_shape = [
         s
         for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
+        if not (d in dims and V.graph.sizevars.should_optimize_equals(s, 1))
     ]
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
@@ -1538,7 +1538,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = end + dim_size
     if start is None:
         start = 0
-    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+    if end is None or V.graph.sizevars.should_optimize_leq(x.get_size()[dim], end):
         end = dim_size
 
     src_size = list(x.get_size())
@@ -3898,28 +3898,28 @@ def _realize(x):
 try:
     import torch.distributed._functional_collectives
 
-    c10d_functional = torch.ops.c10d_functional
-
-    @register_lowering(c10d_functional.wait_tensor)
+    @register_lowering(aten.wait_tensor)
     def wait(input):
         return TensorBox.create(ir.Wait.create(input))
 
-    @register_lowering(c10d_functional.all_reduce)
+    @register_lowering(aten.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.all_gather_into_tensor)
+    @register_lowering(aten.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
-    @register_lowering(c10d_functional.reduce_scatter_tensor)
-    def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
+    @register_lowering(aten.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
         return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
         )
 
 except ImportError:

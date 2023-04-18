@@ -1088,7 +1088,7 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+    elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
