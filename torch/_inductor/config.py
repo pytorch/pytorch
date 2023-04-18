@@ -264,6 +264,13 @@ class triton:
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
 
+    # the max number of spills we allow for the configs we benchmark.
+    # Setting this to 0 means we skip a config if it spills even a single
+    # register.
+    # Settting it to a larger value allows a config spilling a small amount
+    # of registers being benchmarked.
+    spill_threshold = 0
+
 
 # create a directory containing lots of debug information
 class trace:

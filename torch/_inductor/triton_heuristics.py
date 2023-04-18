@@ -169,6 +169,14 @@ class CachingAutotuner(KernelInterface):
 
     def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
+        if launcher.n_spills > config.triton.spill_threshold:
+            log.debug(
+                "Skip config %s because of register spilling: %d",
+                launcher.config,
+                launcher.n_spills,
+            )
+            return float("inf")
+
         stream = get_cuda_stream(torch.cuda.current_device())
 
         def kernel_call():
@@ -214,7 +222,14 @@ class CachingAutotuner(KernelInterface):
         if log.isEnabledFor(logging.DEBUG):
             log.debug("Benchmark all input configs get:")
             for k, v in timings.items():
-                log.debug("%s: %f", k.config, v)
+                log.debug(
+                    "%s: %f, nreg %d, nspill %d, #shared-mem %d",
+                    k.config,
+                    v,
+                    k.n_regs,
+                    k.n_spills,
+                    k.shared,
+                )
 
         return timings
 
@@ -265,7 +280,17 @@ class CachingAutotuner(KernelInterface):
             with self.lock:
                 launcher = self._precompile_config(config, None)
             config2launcher[config] = launcher
-            return self.bench(launcher, *cloned_args, **kwargs)
+
+            out = self.bench(launcher, *cloned_args, **kwargs)
+            log.debug(
+                "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
+                launcher.config,
+                out,
+                launcher.n_regs,
+                launcher.n_spills,
+                launcher.shared,
+            )
+            return out
 
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
