@@ -177,13 +177,13 @@ void fbgemm_spmdm_report_error_(
       index_t idx = indices[i];
       TORCH_CHECK(
           0 <= idx && idx < N,
-          "Index value ",
-          idx,
-          " of input is out of bounds for range 0 to ",
-          N,
-          " (index ",
+          "Index ",
           i,
-          " of offsets).");
+          " of input takes value ",
+          idx,
+          " which is not in the valid range [0, ",
+          N,
+          "[");
     }
   }
   TORCH_CHECK(
