@@ -301,14 +301,14 @@ class CustomOp:
             frame = inspect.stack()[1]
             if self._fake_impl is not None:
                 raise RuntimeError(
-                    f"Attempting to register a FakeTensor rule for operator {qualname} "
+                    f"Attempting to register a FakeTensor rule for operator {self.qualname} "
                     f"that already has a FakeTensor rule registered from Python at "
                     f"{self._fake_impl.location}. This is not supported."
                 )
-            location = f"{frame.filename}:{frame.lineno}"
+            new_location = f"{frame.filename}:{frame.lineno}"
 
             # FakeTensor will look at _fake_impl
-            self._fake_impl = FuncAndLocation(f, location)
+            self._fake_impl = FuncAndLocation(f, new_location)
 
             qualname = self._qualname
 
@@ -324,7 +324,7 @@ class CustomOp:
                         f"such meta implementation and this error is the correct "
                         f"behavior. Otherwise, please remove the call to get_ctx() "
                         f"in the implementation registered with impl_fake "
-                        f"at {location}"
+                        f"at {new_location}"
                     )
 
                 with set_ctx_getter(error_on_ctx):
@@ -455,14 +455,14 @@ def validate_function_matches_schema(
 # Used to query the CustomOp associated with a specific C++ dispatcher operator.
 # An example usage is FakeTensor: FakeTensor checks if a specific operator
 # has an implementation registered via the CustomOp API.
-global_registry = weakref.WeakValueDictionary({})
+global_registry: weakref.WeakValueDictionary = weakref.WeakValueDictionary({})
 
 
 def get_none():
     return None
 
 
-global_ctx_getter = get_none
+global_ctx_getter: typing.Callable = get_none
 
 
 # NOTE [ctx inside the fake implementation]
@@ -477,7 +477,7 @@ def get_ctx() -> "FakeTensorImplCtx":
 
 
 @contextlib.contextmanager
-def set_ctx_getter(ctx_getter: typing.Callable) -> None:
+def set_ctx_getter(ctx_getter):
     global global_ctx_getter
     prev = global_ctx_getter
     try:
