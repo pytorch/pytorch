@@ -277,3 +277,36 @@ def is_numpy(obj):
         return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
     else:
         return False
+
+
+def allow_in_graph_einops():
+    # This should never be an ImportError so do it outside. But circular import if done at the top of the file.
+    from . import allow_in_graph
+
+    try:
+        import einops
+
+        try:
+            from einops._torch_specific import (  # requires einops>=0.6.1, torch >= 2.0
+                allow_ops_in_compiled_graph,
+            )
+
+            # einops >= 0.6.1
+            allow_ops_in_compiled_graph()
+        except ImportError:
+            # einops < 0.6.1
+            allow_in_graph(einops.rearrange)
+            allow_in_graph(einops.reduce)
+            if hasattr(einops, "repeat"):
+                allow_in_graph(einops.repeat)  # available since einops 0.2.0
+            if hasattr(einops, "einsum"):
+                allow_in_graph(einops.einsum)  # available since einops 0.5.0
+            if hasattr(einops, "pack"):
+                allow_in_graph(einops.pack)  # available since einops 0.6.0
+            if hasattr(einops, "unpack"):
+                allow_in_graph(einops.unpack)  # available since einops 0.6.0
+    except ImportError:
+        pass
+
+
+allow_in_graph_einops()
