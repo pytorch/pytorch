@@ -920,6 +920,20 @@ class CoverageTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
+    def test_sym_stride(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.stride(0)
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
     def test_scalar(self):
         class Model(nn.Module):
             def __init__(self):

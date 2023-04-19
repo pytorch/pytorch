@@ -89,14 +89,21 @@ class DSymInt:
         if node.target == aten.sym_size:
             dim: int = cast(int, node.args[1])
             return cls(
-                global_value=dtensor.size(dim),
-                local_value=dtensor.to_local().size(dim),
+                global_value=dtensor.size(cast(int, node.args[1])),
+                local_value=dtensor.to_local().size(cast(int, node.args[1])),
                 mesh=dtensor.device_mesh,
             )
         elif node.target == aten.sym_numel:
             return cls(
                 global_value=dtensor.numel(),
                 local_value=dtensor.to_local().numel(),
+                mesh=dtensor.device_mesh,
+            )
+        elif node.target == aten.sym_stride:
+            dim: int = cast(int, node.args[1])  # type: ignore[no-redef]
+            return cls(
+                global_value=dtensor.stride(dim),
+                local_value=dtensor.to_local().stride(dim),
                 mesh=dtensor.device_mesh,
             )
         else:
