@@ -384,7 +384,7 @@ class _ReaderView(io.IOBase):
         return self.base_stream.seekable()
 
     def readinto(self, b):
-        return self.base_stream.readinto(b)
+        return self.base_stream.readinto(b)  # type: ignore[attr-defined]
 
     def read(self, size=-1):
         return self.base_stream.read(size)
