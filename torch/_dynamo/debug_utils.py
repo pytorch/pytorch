@@ -338,6 +338,7 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    assert compiler_name in ["inductor", "inductor_accuracy"]
     sync_line = ""
     for arg in args:
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
