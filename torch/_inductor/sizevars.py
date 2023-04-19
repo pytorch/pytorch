@@ -14,9 +14,12 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-# Util for readability, could just replace w/ isinstance
+def is_expr_static_and_true(expr: Union[Expr, int]) -> bool:
+    return is_expr_static(expr) and expr
+
+
 def is_expr_static(expr: Union[Expr, int]) -> bool:
-    return isinstance(expr, (int, sympy.Integer))
+    return isinstance(expr, (int, sympy.Integer, sympy.logic.boolalg.Boolean))
 
 
 class SizeVarAllocator:
@@ -257,7 +260,8 @@ class SizeVarAllocator:
             return True
         expr = sympy.Eq(left, right)
         simplified = self.shape_env._maybe_evaluate_static(expr)
-        return is_expr_static(simplified)
+
+        return is_expr_static_and_true(simplified)
 
     # See Note - [On Statically Known]
     def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
@@ -277,7 +281,8 @@ class SizeVarAllocator:
         """
         expr = left <= right
         simplified = self.shape_env._maybe_evaluate_static(expr)
-        return is_expr_static(simplified)
+
+        return is_expr_static_and_true(simplified)
 
     # See Note - [On Statically Known]
     def statically_known_lt(self, left: Expr, right: Expr) -> bool:
@@ -286,7 +291,8 @@ class SizeVarAllocator:
         """
         expr = left < right
         simplified = self.shape_env._maybe_evaluate_static(expr)
-        return is_expr_static(simplified)
+
+        return is_expr_static_and_true(simplified)
 
     # See Note - [On Statically Known]
     def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
@@ -298,7 +304,8 @@ class SizeVarAllocator:
             return True
         expr = sympy.Eq(numerator % denominator, 0)
         simplified = self.shape_env._maybe_evaluate_static(expr)
-        return is_expr_static(simplified)
+
+        return is_expr_static_and_true(simplified)
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
