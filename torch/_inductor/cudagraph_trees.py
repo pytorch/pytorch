@@ -1014,7 +1014,7 @@ class CUDAGraphNode:
 
             output_new_storages_index[o.untyped_storage().data_ptr()] = i
             self.output_storage_alias.append(UnaliasedStorage)
-            self.unaliased_in_all_paths[i] = True
+            self.unaliased_in_all_paths[i] = False  # True XXXX - testing no caching
 
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
