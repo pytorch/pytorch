@@ -1,17 +1,18 @@
 # Owner(s): ["module: dynamo"]
 
-import torch._dynamo.test_case
 import io
-from torch.utils._traceback import report_compile_source_on_error
+
+import torch._dynamo.test_case
+
+from torch._dynamo.repro.after_aot import save_graph_repro
 
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._traceback import report_compile_source_on_error
 
-from torch._dynamo.repro.after_aot import (
-    save_graph_repro,
-)
 
 def strip_trailing_whitespace(r):
-    return '\n'.join([l.rstrip() for l in r.split('\n')])
+    return "\n".join([l.rstrip() for l in r.split("\n")])
+
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
     def tearDown(self):
@@ -21,12 +22,16 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
         return
         buf = io.StringIO()
         args = [torch.randn(4)]
+
         def f(x):
             return (x * x,)
+
         gm = make_fx(f)(*args)
         save_graph_repro(buf, gm, args, "inductor_accuracy", stable_output=True)
         r = strip_trailing_whitespace(buf.getvalue())
-        self.assertExpectedInline(r, """\
+        self.assertExpectedInline(
+            r,
+            """\
 import torch._inductor.overrides
 
 import torch
@@ -65,7 +70,8 @@ class AccuracyError(Exception):
     pass
 if not same_two_models(mod, compiled, args, only_fwd=True):
     raise AccuracyError("Bad accuracy detected")
-""")
+""",
+        )
         with report_compile_source_on_error():
             exec(r, {"__compile_source__": r})
 
