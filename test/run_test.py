@@ -55,6 +55,7 @@ except ImportError:
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 CPP_TEST_PREFIX = "cpp"
+CPP_TEST_PATH = "build/bin"
 
 
 # Note [ROCm parallel CI testing]
@@ -110,7 +111,7 @@ def discover_tests(
         pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)
     ]
 
-    cpp_tests_dir = f"{cwd.parent}/build/bin" if cpp_tests_dir is None else cpp_tests_dir
+    cpp_tests_dir = f"{cwd.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
     # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
     # are just binaries and could have any name, i.e. basic or atest
     all_cpp_files = [
@@ -173,6 +174,7 @@ TESTS = discover_tests(
         "onnx/test_models",
 
         # These are not C++ tests
+        f"{CPP_TEST_PREFIX}/c10_intrusive_ptr_benchmark",
         f"{CPP_TEST_PREFIX}/parallel_benchmark",
         f"{CPP_TEST_PREFIX}/protoc",
         f"{CPP_TEST_PREFIX}/protoc-3.13.0.0",
@@ -426,11 +428,19 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, disable_coverage=False):
+def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     if options.coverage and not disable_coverage:
-        executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
+        if not is_cpp_test:
+            executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
+        else:
+            # TODO: C++ with coverage is not yet supported
+            executable = []
     else:
-        executable = [sys.executable, "-bb"]
+        if not is_cpp_test:
+            executable = [sys.executable, "-bb"]
+        else:
+            executable = ["pytest"]
+
     return executable
 
 
@@ -443,9 +453,11 @@ def run_test(
     env=None,
 ) -> int:
     maybe_set_hip_visible_devies()
+
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module
     if isinstance(test_file, ShardedTest):
+        # C++ tests work with pytest sharding
         unittest_args.extend(
             [
                 f"--shard-id={test_module.shard - 1}",
@@ -456,24 +468,29 @@ def run_test(
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
+
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
             arg for arg in unittest_args if not arg.startswith("--run-parallel")
         ]
+
     if extra_unittest_args:
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
 
+    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
-        unittest_args.extend(get_pytest_args(options))
+        unittest_args.extend(get_pytest_args(options, is_cpp_test=is_cpp_test))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
+
     if IS_CI:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
+
     if test_file in PYTEST_SKIP_RETRIES:
         if not options.pytest:
             raise RuntimeError(
@@ -483,11 +500,19 @@ def run_test(
         unittest_args = [arg for arg in unittest_args if "--reruns" not in arg]
 
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(options)
+    executable = get_executable_command(options, is_cpp_test=is_cpp_test)
+    if not executable:
+        # If there is no eligible executable returning here, it means an unsupported
+        # case such as coverage for C++ test. So just returning ok makes sense
+        return 0
 
-    # Can't call `python -m unittest test_*` here because it doesn't run code
-    # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_file + ".py"] + unittest_args
+    if test_file.startswith(CPP_TEST_PREFIX):
+        # C++ tests are in CPP_TEST_PATH, not the regular test directory
+        argv = [os.path.join(pathlib.Path(test_directory).parent, CPP_TEST_PATH, test_file.replace(f"{CPP_TEST_PREFIX}/", ""))] + unittest_args
+    else:
+        # Can't call `python -m unittest test_*` here because it doesn't run code
+        # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
+        argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(
@@ -496,6 +521,7 @@ def run_test(
         suffix=".log",
     )
     os.close(log_fd)
+
     command = (launcher_cmd or []) + executable + argv
     should_file_rerun = (
         "--subprocess" not in command
@@ -505,6 +531,7 @@ def run_test(
     )
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+
     with open(log_path, "w") as f:
         ret_code = retry_shell(
             command,
@@ -516,8 +543,13 @@ def run_test(
             retries=1 if should_file_rerun else 0,
         )
 
+        # Pytest return code 5 means no test is collected. This is needed
+        # here as we use pytest directly when running C++ tests
+        ret_code = 0 if ret_code == 5 else ret_code
+
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
+
     return ret_code
 
 
@@ -837,7 +869,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def get_pytest_args(options):
+def get_pytest_args(options, is_cpp_test):
     if RERUN_DISABLED_TESTS:
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -851,12 +883,15 @@ def get_pytest_args(options):
         rerun_options = ["-x", "--reruns=2", "--sw"]
 
     pytest_args = [
-        "--use-pytest",
         "-vv",
         "-rfEX",
         "-p",
         "no:xdist",
     ]
+    if not is_cpp_test:
+        # C++ tests need to be run with pytest directly, not via python
+        pytest_args.append("--use-pytest")
+
     pytest_args.extend(rerun_options)
     return pytest_args
 
@@ -1153,7 +1188,6 @@ def must_serial(file: str) -> bool:
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
         or file in ONNX_SERIAL_LIST
-        or file in CPP_TESTS    # TODO: See if we can run C++ tests in parallel
     )
 
 
@@ -1381,9 +1415,6 @@ def main():
             "\n ".join(str(x) for x in selected_tests_serial)
         )
     )
-
-    print("===== DEBUG")
-    sys.exit(1)
 
     # See Note [ROCm parallel CI testing]
     pool = get_context("spawn").Pool(
