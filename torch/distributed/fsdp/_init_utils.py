@@ -26,7 +26,6 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
-    _CUDADeviceHandler,
     _FSDPState,
     _get_module_fsdp_state,
     _is_fsdp_flattened,

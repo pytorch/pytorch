@@ -32,7 +32,7 @@ from torch.distributed.fsdp._common_utils import (
     HandleTrainingState,
 )
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
-from ._common_utils import _CUDADeviceHandler, FSDPDeviceHandler
+from ._common_utils import FSDPDeviceHandler
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import _no_dispatch_record_stream, _same_storage_as_data_ptr
@@ -404,7 +404,7 @@ class FlatParamHandle:
         self,
         params: Sequence[Union[nn.Parameter, Tensor]],
         fully_sharded_module: nn.Module,
-        device: Union[torch.device, FSDPDeviceHandler],
+        device: torch.device,
         sharding_strategy: HandleShardingStrategy,
         offload_params: bool,
         mp_param_dtype: Optional[torch.dtype],
@@ -432,13 +432,8 @@ class FlatParamHandle:
             )
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
-        if isinstance(device, FSDPDeviceHandler):
-            self.device = device.device
-            self.device_handler = device
-        else:
-            assert device.type == "cuda", "Only CUDA is supported"
-            self.device = device
-            self.device_handler = _CUDADeviceHandler(device.index)
+        self.device = device
+        self.device_handler = FSDPDeviceHandler(device)
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()

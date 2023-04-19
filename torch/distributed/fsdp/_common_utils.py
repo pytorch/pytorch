@@ -4,7 +4,6 @@ This file includes private common utilities for FSDP.
 
 import traceback
 import warnings
-from abc import ABC, abstractmethod
 from enum import auto, Enum
 from typing import (
     Any,
@@ -38,15 +37,26 @@ from .api import (
 )
 
 
-class FSDPDeviceHandler(ABC):
+class FSDPDeviceHandler:
     """
     This class is used to abstract the device handling logic for FSDP.
     """
 
-    def __init__(self, type: str, index: int):
-        self._type = type
-        self._index = index
-        self._device = torch.device(type, index)
+    def __init__(self, device: torch.device, backend: Any = None):
+        if backend is None:
+            try:
+                self._backend = getattr(torch, device.type)
+            except AttributeError:
+                raise AttributeError(
+                    f"Device '{device}' does not have a corresponding backend registered as torch.{device.type}."
+                )
+        else:
+            self._backend = backend
+
+        if device.index is not None:
+            self._device = device
+        else:
+            self._device = torch.device(device.type, self._backend.current_device())
 
     @property
     def device(self) -> torch.device:
@@ -54,47 +64,19 @@ class FSDPDeviceHandler(ABC):
 
     @property
     def type(self) -> str:
-        return self._type
+        return self._device.type
 
     @property
     def index(self) -> int:
-        return self._index
+        return self._device.index
 
-    @abstractmethod
-    def is_available(self) -> bool:
-        ...
-
-    @abstractmethod
-    def set_device(self) -> None:
-        ...
-
-    @abstractmethod
-    def current_device(self) -> int:
-        ...
-
-    @abstractmethod
-    def device_count(self) -> int:
-        ...
-
-    @abstractmethod
-    def Stream(self):
-        ...
-
-    @abstractmethod
-    def Event(self):
-        ...
-
-    @abstractmethod
-    def synchronize(self) -> None:
-        ...
-
-    @abstractmethod
-    def current_stream(self):
-        ...
-
-    @abstractmethod
-    def stream(self, stream: torch.cuda.Stream):
-        ...
+    def __getattr__(self, __name: str) -> Any:
+        try:
+            return getattr(self._backend, __name)
+        except AttributeError:
+            raise AttributeError(
+                f"Backend '{self.device}' must implement semantics 'torch.{self.type}.{__name}'"
+            )
 
 
 class _UntochableDeviceHandler:
@@ -104,42 +86,6 @@ class _UntochableDeviceHandler:
 
     def __getattribute__(self, __name: str) -> Any:
         raise RuntimeError("Try using uninitialized FSDP device handler")
-
-
-class _CUDADeviceHandler(FSDPDeviceHandler):
-    """
-    FSDP device handler for cuda device.
-    """
-
-    def __init__(self, index: int):
-        super().__init__("cuda", index)
-
-    def is_available(self) -> bool:
-        return torch.cuda.is_available()
-
-    def set_device(self) -> None:
-        torch.cuda.set_device(self._index)
-
-    def current_device(self) -> int:
-        return torch.cuda.current_device()
-
-    def device_count(self) -> int:
-        return torch.cuda.device_count()
-
-    def Stream(self) -> torch.cuda.Stream:
-        return torch.cuda.Stream()
-
-    def Event(self) -> torch.cuda.Event:
-        return torch.cuda.Event()
-
-    def synchronize(self) -> None:
-        torch.cuda.synchronize()
-
-    def current_stream(self) -> torch.cuda.Stream:
-        return torch.cuda.current_stream()
-
-    def stream(self, stream: torch.cuda.Stream) -> torch.cuda.StreamContext:
-        return torch.cuda.stream(stream)
 
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
