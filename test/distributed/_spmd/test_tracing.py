@@ -961,6 +961,19 @@ class CoverageTest(DTensorTestBase):
 
         self._test_op_with_train_step(Model)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_slice(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x)[:, :1]
+
+        self._test_op_with_train_step(Model)
+
 
 if __name__ == "__main__":
     run_tests()
