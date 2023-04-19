@@ -85,8 +85,8 @@ class NNModuleVariable(VariableTracker):
         if isinstance(base, torch.nn.ModuleDict):
             result = {}
             for name, submod in base.items():
-                name = variables.ConstantVariable(name)
-                result[name] = tx.output.register_attr_or_module(
+                name_var = variables.ConstantVariable(name)
+                result[name_var] = tx.output.register_attr_or_module(
                     submod,
                     self.module_key,
                     name,
