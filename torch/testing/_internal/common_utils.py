@@ -4363,3 +4363,14 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! autograd not supported.")
         if op.name == "cat":
             self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
+
+class LazyBoolean:
+    def __init__(self, cb):
+        assert callable(cb)
+        self.cb = cb
+        self._value = None
+
+    def __bool__(self):
+        if self._value is None:
+            self._value = bool(self.cb())
+        return self._value

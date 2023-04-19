@@ -3,24 +3,12 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM, LazyBoolean
 import inspect
 import contextlib
 
 
 CUDA_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
-
-
-class LazyBoolean:
-    def __init__(self, cb):
-        assert callable(cb)
-        self.cb = cb
-        self._value = None
-
-    def __bool__(self):
-        if self._value is None:
-            self._value = bool(self.cb())
-        return self._value
 
 
 TEST_CUDA = torch.cuda.is_available()
