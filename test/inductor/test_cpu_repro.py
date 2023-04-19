@@ -163,6 +163,51 @@ class CPUReproTests(TestCase):
             compiled_out = opt_fn(x)
             assert same(real_out, compiled_out, equal_nan=True)
 
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_decomposed_dequant_relu_quant(self):
+        def fn(x, scale, zero_point, use_dequant, use_quant):
+            # For quantized_decomposed.dequantize_per_tensor
+            # Refer to torch/ao/quantization/fx/_decomposed.py
+            if use_dequant:
+                x = (x.to(torch.float32) - zero_point) * scale
+
+            x = torch.relu(x)
+
+            # For quantized_decomposed.quantize_per_tensor
+            # Refer to torch/ao/quantization/fx/_decomposed.py
+            if use_quant:
+                inv_scale = 1.0 / scale
+                x = torch.clamp(torch.round(x * inv_scale) + zero_point, 0, 255).to(
+                    torch.uint8
+                )
+            return x
+
+        use_dequant_list = [False, True]
+        use_quant_list = [False, True]
+        for use_dequant, use_quant in itertools.product(
+            use_dequant_list, use_quant_list
+        ):
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+            )
+            if use_dequant:
+                x = x.to(torch.uint8)
+            zero_point = 100
+            scale = 0.01
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point, use_dequant, use_quant)
+
+                real_out = fn(x, scale, zero_point, use_dequant, use_quant)
+                compiled_out = opt_fn(x, scale, zero_point, use_dequant, use_quant)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
     def test_inplace_add_alpha(self):
         def fn(x, y):
             aten.add_.Tensor(x, y, alpha=0.55)
