@@ -8,23 +8,40 @@ import inspect
 import contextlib
 
 
+CUDA_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
+
+
+class LazyBoolean:
+    def __init__(self, cb):
+        assert callable(cb)
+        self.cb = cb
+        self._value = None
+
+    def __bool__(self):
+        if self._value is None:
+            self._value = bool(self.cb())
+        return self._value
+
+
 TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
-TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
+TEST_CUDNN = LazyBoolean(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
+TEST_CUDNN_VERSION = LazyBoolean(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 
-SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
-SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
-SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+SM53OrLater = LazyBoolean(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
+SM60OrLater = LazyBoolean(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
+SM80OrLater = LazyBoolean(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
-    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
-    TEST_MAGMA = torch.cuda.has_magma
+    def test_has_magma():
+        torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+        return torch.cuda.has_magma
+    TEST_MAGMA = LazyBoolean(test_has_magma)
 
 if TEST_NUMBA:
     import numba.cuda
@@ -194,3 +211,7 @@ def _check_hipsparse_generic_available():
 
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
+
+# Importing this module should NOT eagerly initialize CUDA
+if not CUDA_INITIALIZED_ON_IMPORT:
+    assert not torch.cuda.is_initialized()
