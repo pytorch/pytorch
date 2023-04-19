@@ -460,23 +460,14 @@ static void nan_to_num_kernel(
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
-  if (at::isReducedFloatingType(iter.dtype())) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "kaiser_window_cpu", [&]() {
-      const float alpha = static_cast<float>((window_length - 1) / 2.0);
-      const float beta_ = static_cast<float>(beta);
-      cpu_kernel(iter, [=](scalar_t a){
-          return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<float>(a) - alpha) / alpha, static_cast<float>(2.0)))) / calc_i0(beta_);
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "kaiser_window_cpu", [&](){
+    using opmath_t = at::opmath_type<scalar_t>;
+    const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
+    const opmath_t beta_ = static_cast<opmath_t>(beta);
+    cpu_kernel(iter, [=](scalar_t a){
+        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "kaiser_window_cpu", [&](){
-      const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
-      const scalar_t beta_ = static_cast<scalar_t>(beta);
-      cpu_kernel(iter, [=](scalar_t a){
-          return calc_i0(beta_ * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(beta_);
-      });
-    });
-  }
+  });
 }
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
@@ -571,18 +562,19 @@ static void erfcx_kernel(TensorIteratorBase& iter){
 }
 
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.dtype(), "round_cpu", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         bool neg_flag = false;
-        scalar_t ten_pow_decimals;
+        opmath_t ten_pow_decimals;
         if (decimals < 0) {
           decimals = -decimals;
           neg_flag = true;
         }
-        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        ten_pow_decimals = static_cast<opmath_t>(std::pow(10, decimals));
         cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
-          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
-                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+          return neg_flag ? std::nearbyint(static_cast<opmath_t>(a) / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(static_cast<opmath_t>(a) * ten_pow_decimals) / ten_pow_decimals;
         });
       });
 }
