@@ -417,7 +417,7 @@ def _optimize_catch_errors(
 
 
 def get_compiler_fn(compiler_fn):
-    from .debug_utils import wrap_backend_debug
+    from .repro.after_dynamo import wrap_backend_debug
 
     if hasattr(compiler_fn, "compiler_name"):
         compiler_str = compiler_fn.compiler_name
@@ -443,7 +443,7 @@ def check_if_dynamo_supported():
     elif sys.version_info >= (3, 11):
         warnings.warn(
             "torch.compile support of Python 3.11 is experimental. "
-            "Program may generate incorrect results or segfault."
+            "Program may segfault."
         )
 
 
@@ -763,7 +763,7 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        specialize_int=True
+        summarize_dim_constraints=True, specialize_int=True
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,

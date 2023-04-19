@@ -1930,7 +1930,8 @@ def gather(x, dim, index, sparse_grad=False):
     # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
     assert index.get_dtype() == torch.int64
-    offset = len(x.get_size()) == 0
+    size = x.get_size()
+    offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
 
     x_loader = x.make_loader()
@@ -1939,7 +1940,7 @@ def gather(x, dim, index, sparse_grad=False):
     def fn(idx):
         idx = list(idx)
         if len(idx) != 0:
-            idx[dim] = ops.indirect_indexing(index_loader(idx))
+            idx[dim] = ops.indirect_indexing(index_loader(idx), size[dim])
         return x_loader(idx)
 
     return Pointwise.create(
@@ -1960,12 +1961,15 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     weight_loader = weight.make_loader()
     indices_loader = indices.make_loader()
     indices_ndim = len(indices.get_size())
-    new_size = [*indices.get_size(), *weight.get_size()[1:]]
+    weight_size = weight.get_size()
+    new_size = [*indices.get_size(), *weight_size[1:]]
 
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
-        weight_idx = [ops.indirect_indexing(var_index)] + [*idx[indices_ndim:]]
+        weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
+            *idx[indices_ndim:]
+        ]
         return weight_loader(weight_idx)
 
     return Pointwise.create(
@@ -2045,9 +2049,10 @@ def index(x, indices):
 
     def fn(idx):
         assert len(idx) == len(output_size)
+        assert len(indices_loaders) == len(indexed_size)
         new_index = [
-            ops.indirect_indexing(loader(idx[start_offset:end_offset]))
-            for loader in indices_loaders
+            ops.indirect_indexing(loader(idx[start_offset:end_offset]), size)
+            for loader, size in zip(indices_loaders, indexed_size)
         ]
         new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
         return x_loader(new_index)
@@ -2145,6 +2150,7 @@ def index_put_(self, indices, values, accumulate=False):
         *output_size,
         *x_size[start_offset + len(indices_sizes) :],
     ]
+    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
 
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
@@ -2152,8 +2158,8 @@ def index_put_(self, indices, values, accumulate=False):
     def output_indexer(index):
         assert len(index) == len(expected_vals_size)
         new_index = [
-            ops.indirect_indexing(loader(index[start_offset:end_offset]))
-            for loader in indices_loaders
+            ops.indirect_indexing(loader(index[start_offset:end_offset]), size)
+            for loader, size in zip(indices_loaders, indexed_size)
         ]
         new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
         return new_index
@@ -2272,7 +2278,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if isinstance(index, TensorBox) and len(index.get_size()) == 0:
         index = view(index, [1])
 
-    assert -len(self.get_size()) <= dim < len(self.get_size())
+    dim = _validate_dim(self, dim)
 
     self.realize()
     V.graph.realize_users_of(self.get_name())
@@ -2280,8 +2286,13 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
     def output_indexer(idx):
+        # self is captured from the end of the function, so it may have 0 dim
+        shape = self.get_size()
+        ndim = len(shape)
         indirect_idx = list(idx)
-        indirect_idx[dim] = ops.indirect_indexing(index_loader(idx))
+        indirect_idx[dim] = ops.indirect_indexing(
+            index_loader(idx), 1 if ndim == 0 else shape[dim]
+        )
         return indirect_idx
 
     def fn(idx):
@@ -2354,16 +2365,18 @@ def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2
         if scale:
             scales[i] = scale
 
-    def scale(x, scale):
+    def scale(x, scale, size):
         x = ops.index_expr(x, torch.float32)
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
-        return ops.indirect_indexing(x)
+        return ops.indirect_indexing(x, size)
 
     def fn(idx):
         x = idx[-n:]
         b = idx[:-n]
-        return x_loader([*b, *[scale(i, s) for i, s in zip(x, scales)]])
+        return x_loader(
+            [*b, *[scale(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+        )
 
     return Pointwise.create(
         device=x.get_device(),
@@ -2487,8 +2500,9 @@ def upsample_bicubic2d_default(
         t_y = ops.sub(real_y, in_y)
 
         def load_bounded(fy, fx):
-            iy = ops.indirect_indexing(clamp(fy, 0, iH - 1))
-            ix = ops.indirect_indexing(clamp(fx, 0, iW - 1))
+            # TODO(Lezcano) Here we may not need to set-up a device_size
+            iy = ops.indirect_indexing(clamp(fy, 0, iH - 1), iH)
+            ix = ops.indirect_indexing(clamp(fx, 0, iW - 1), iW)
             return x_loader([n, c, iy, ix])
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
@@ -2522,11 +2536,12 @@ def reflection_pad2d(x, padding):
     w = V.graph.sizevars.guard_static_shape(w)
 
     def reflect(x, size, offset):
+        size_num = size
         size = ops.constant(size - 1, torch.int32)
         x = ops.index_expr(x, torch.int32)
         x = ops.sub(x, ops.constant(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x)
+        return ops.indirect_indexing(x, size_num)
 
     def fn(idx):
         *b, x, y = idx
@@ -2551,13 +2566,14 @@ def reflection_pad2d_backward(grad_output, x, padding):
     h = V.graph.sizevars.guard_static_shape(h) - 1
     w = V.graph.sizevars.guard_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
+    *_, h_grad, w_grad = grad_output.get_size()
 
     def fn(idx):
         *b, x, y = idx
 
         def load_from_output(x, y):
-            x = ops.indirect_indexing(ops.index_expr(x, torch.int32))
-            y = ops.indirect_indexing(ops.index_expr(y, torch.int32))
+            x = ops.indirect_indexing(ops.index_expr(x, torch.int32), h_grad)
+            y = ops.indirect_indexing(ops.index_expr(y, torch.int32), w_grad)
             return grad_loader([*b, x, y])
 
         def index_range_condition(index_range):
@@ -2923,6 +2939,8 @@ def max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
 
+    indices_size = indices.get_size()
+
     def fn(idx):
         *prefix, h, w = idx
         index_test = ops.index_expr(h * width + w, torch.int32)
@@ -2952,12 +2970,14 @@ def max_pool2d_with_indices_backward(
                     ops.indirect_indexing(
                         ops.int_minimum(
                             ph, ops.sub(phend, ops.constant(1, torch.int32))
-                        )
+                        ),
+                        indices_size[-2],
                     ),
                     ops.indirect_indexing(
                         ops.int_minimum(
                             pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                        )
+                        ),
+                        indices_size[-1],
                     ),
                 ]
 
@@ -3394,12 +3414,14 @@ def avg_pool2d_backward(
                             ops.indirect_indexing(
                                 ops.int_minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
-                                )
+                                ),
+                                pooled_height,
                             ),
                             ops.indirect_indexing(
                                 ops.int_minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                                )
+                                ),
+                                pooled_width,
                             ),
                         ]
                     ),
