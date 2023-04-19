@@ -228,12 +228,11 @@ class PhiloxStateTracker:
 
 class CompilerBackendForPhilox:
     """
-    TorchInductor offset calculation differs from the PyTorch eager offset
-    calculation. This is because as of today, the triton implementation of rand
-    is very different from PyTorch rand. We should strive to have same rand
-    implementation for Triton and PyTorch eager in future. But, until then this
-    ctx manager can be used by TorchInductor to set a backend, and decomps can
-    read the backend to appropraiate compute offsets.
+    TorchInductor offset calculation differs from PyTorch eager offset
+    calculation for random ops (tl.rand vs torch.rand). In future, we should
+    strive for same impl for tl.rand and torch.rand. But until then,
+    TorchInductor can use this ctx manager to signal rng decomps about the
+    inductor backend, and appropriately compute offset.
     """
 
     backend: str
