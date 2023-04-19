@@ -969,6 +969,28 @@ def gen_variable_type_func(
     return result
 
 
+_foreach_ops_without_differentiability_info = {
+    # No reference backward available due to the lack of `{maximum, minimum}(tensor, scalar)`.
+    ("_foreach_maximum", "Scalar"),
+    ("_foreach_maximum", "ScalarList"),
+    ("_foreach_minimum", "Scalar"),
+    ("_foreach_minimum", "ScalarList"),
+    # No reference backward available as addcdiv/addcmul don't support Tensor as scaling factor.
+    ("_foreach_addcdiv", "Tensor"),
+    ("_foreach_addcmul", "Tensor"),
+    # FIXME(crcrpar): Let `_foreach_zero_` have backward.
+    ("_foreach_zero", ""),
+}
+
+_foreach_ops_with_different_arity = {
+    # These ops lack `alpha` of scaling factor to applied to the right hand side argument.
+    ("_foreach_add", "Scalar"),
+    ("_foreach_add", "ScalarList"),
+    ("_foreach_sub", "Scalar"),
+    ("_foreach_sub", "ScalarList"),
+}
+
+
 @with_native_function_with_differentiability_info_and_key
 def emit_body(
     fn: NativeFunctionWithDifferentiabilityInfo, key: str = "Default"
@@ -988,31 +1010,18 @@ def emit_body(
     is_inplace_foreach = name.startswith("_foreach") and inplace
     if is_inplace_foreach:
         inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
+        base_name_and_overload_name = (f.func.name.name.base, f.func.name.overload_name)
         if info is None:
-            # FIXME(crcrpar): Let `_foreach_zero_` have backward.
             assert (
-                (
-                    # No reference backward available due to the lack of `{maximum, minimum}(tensor, scalar)`.
-                    f.func.name.name.base in ("_foreach_maximum", "_foreach_minimum")
-                    and f.func.name.overload_name in ("Scalar", "ScalarList")
-                )
-                or (
-                    # No reference backward available as addcdiv/addcmul don't support Tensor as scaling factor.
-                    f.func.name.name.base in ("_foreach_addcdiv", "_foreach_addcmul")
-                    and f.func.name.overload_name == "Tensor"
-                )
-                or f.func.name.name.base == "_foreach_zero"
-            ), f"{f.func.name}"
+                base_name_and_overload_name
+                in _foreach_ops_without_differentiability_info
+            ), f"{'.'.join(base_name_and_overload_name)} should have a differentiability info"
         else:
             assert (
                 len(f.func.arguments.flat_non_out)
                 == len(info.func.func.arguments.flat_non_out)
-            ) or (
-                # These two lack `alpha` of scaling factor to applied to the right hand side argument.
-                f.func.name.name.base in ("_foreach_add", "_foreach_sub")
-                and f.func.name.overload_name in ("Scalar", "ScalarList")
-            ), (
-                f"{f.func.name.name.base}.{f.func.name.overload_name} has {len(f.func.arguments.flat_non_out)} args "
+            ) or (base_name_and_overload_name in _foreach_ops_with_different_arity), (
+                f"{'.'.join(base_name_and_overload_name)} has {len(f.func.arguments.flat_non_out)} args "
                 f"but the reference has {len(info.func.func.arguments.flat_non_out)}"
             )
             for foreach_arg, ref_arg in zip(
