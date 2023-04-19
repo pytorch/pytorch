@@ -13,6 +13,7 @@ jobs:
     runs-on: linux.2xlarge
     env:
       PR_NUMBER: ${{ github.event.number }}
+      EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
       THE_REST: "${{ github.event.pull_requests }}"
     steps:
       - name: "print stuff"
@@ -21,6 +22,9 @@ jobs:
       - name: "print more"
         run: |
           echo ${PR_NUMBER}
+      - name: "print EVENT_PR_NUMBER"
+        run: |
+          echo ${EVENT_PR_NUMBER}
       - name: "print and more"
         run: |
           echo ${THE_REST}
