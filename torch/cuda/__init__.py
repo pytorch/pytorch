@@ -245,6 +245,7 @@ def _lazy_init():
         # find there is nothing left to do.
         if is_initialized():
             return
+        assert 'TORCH_DEBUG_ASSERT_NO_CUDA_INIT' not in os.environ
         # It is important to prevent other threads from entering _lazy_init
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
