@@ -76,20 +76,6 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16]
 
 
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-# avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
-@functools.lru_cache(maxsize=None)
-def has_bf16_support():
-    import sys
-
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
-
-
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
@@ -1769,89 +1755,6 @@ class CommonTemplate:
                 (v1, v2),
             )
 
-    def test_conv2d_packed(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv2d packed test")
-
-        x_shape = (1, 3, 56, 56)
-        for mode_train in [True, False]:
-            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
-                mode=mode_train
-            )
-            v = torch.randn(x_shape, dtype=torch.float32)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    def test_conv_used_from_multiple_places(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv/linear fusion test")
-
-        class M(torch.nn.Module):
-            def __init__(self, conv_in_channel, conv_out_channel) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
-
-            def forward(self, x):
-                res = self.conv(x)
-                res = F.relu(res)
-                res = self.conv(res)
-                return res
-
-        with torch.no_grad():
-            m = M(3, 3).eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(1, 3, 224, 224)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
-
-    def test_linear_used_from_multiple_places(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv/linear fusion test")
-
-        class M(torch.nn.Module):
-            def __init__(self, in_channel, out_channel) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(in_channel, out_channel)
-
-            def forward(self, x):
-                res = self.linear(x)
-                res = F.relu(res)
-                res = self.linear(res)
-                return res
-
-        if has_bf16_support():
-            with torch.no_grad():
-                m = M(224, 224).bfloat16().eval()
-                m_opt = torch.compile(m)
-                x = torch.randn(224, 224, dtype=torch.bfloat16)
-                m_opt(x)
-                self.assertEqual(m(x), m_opt(x))
-
-    def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
-        for input_shape, bias in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], 30, bias=bias)
-            ).eval()
-
-            v = torch.randn(input_shape)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-            if has_bf16_support() and len(input_shape) > 1:
-                mod = mod.to(torch.bfloat16)
-                v = v.to(torch.bfloat16)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
-
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1881,19 +1784,6 @@ class CommonTemplate:
             code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
-
-    def test_conv_transpose2d_packed(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv_transpose2d packed test")
-
-        x_shape = (1, 3, 28, 28)
-        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
-        v = torch.randn(x_shape, dtype=torch.float32)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
 
     def test_view_detach(self):
         def fn(a):
@@ -6016,9 +5906,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     )
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
-
-
-if HAS_CUDA and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):

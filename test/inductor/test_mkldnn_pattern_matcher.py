@@ -66,20 +66,6 @@ binary_list = {
 }
 
 
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-# avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
-@functools.lru_cache(maxsize=None)
-def has_bf16_support():
-    import sys
-
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
-
-
 class TestPaternMatcher(TestCase):
     def test_conv2d_unary(self):
         class M(torch.nn.Module):
@@ -154,7 +140,7 @@ class TestPaternMatcher(TestCase):
 
         options = itertools.product(unary_list_bf16, [True, False])
         dtype = torch.bfloat16
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for unary_fn, bias in options:
                 mod = M(unary_fn, 10, 30, bias=bias).eval()
                 # only fuse for linear when the dtype is bf16
@@ -283,7 +269,7 @@ class TestPaternMatcher(TestCase):
         options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
         out_feature = 30
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
                 with torch.no_grad():
                     mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
