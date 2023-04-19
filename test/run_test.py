@@ -172,7 +172,8 @@ TESTS = discover_tests(
 
         # These are not C++ tests
         f"{CPP_TEST_PREFIX}/parallel_benchmark",
-        f"{CPP_TEST_PREFIX}/protoc-3",
+        f"{CPP_TEST_PREFIX}/protoc",
+        f"{CPP_TEST_PREFIX}/protoc-3.13.0.0",
         f"{CPP_TEST_PREFIX}/torch_shm_manager",
         f"{CPP_TEST_PREFIX}/tutorial_tensorexpr",
     ],
