@@ -54,6 +54,7 @@ except ImportError:
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+CPP_TEST_PREFIX = "cpp"
 
 
 # Note [ROCm parallel CI testing]
@@ -84,12 +85,15 @@ def strtobool(s):
 
 def discover_tests(
     base_dir: Optional[pathlib.Path] = None,
+    cpp_tests_dir: Optional[pathlib.Path] = None,
     blocklisted_patterns: Optional[List[str]] = None,
     blocklisted_tests: Optional[List[str]] = None,
     extra_tests: Optional[List[str]] = None,
 ) -> List[str]:
     """
-    Searches for all python files starting with test_ excluding one specified by patterns
+    Searches for all python files starting with test_ excluding one specified by patterns.
+    If cpp_tests_dir is provided, also scan for all C++ tests under that directory. They
+    are usually found in build/bin
     """
 
     def skip_test_p(name: str) -> bool:
@@ -105,7 +109,21 @@ def discover_tests(
     all_py_files = [
         pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)
     ]
+
+    cpp_tests_dir = f"{cwd.parent}/build/bin" if cpp_tests_dir is None else cpp_tests_dir
+    # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
+    # are just binaries and could have any name, i.e. basic or atest
+    all_cpp_files = [
+        pathlib.Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
+    ]
+
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
+    # Add the cpp prefix for C++ tests so that we can tell them apart
+    rc.extend([
+        f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
+        for fname in all_cpp_files
+    ])
+
     # Invert slashes on Windows
     if sys.platform == "win32":
         rc = [name.replace("\\", "/") for name in rc]
@@ -151,6 +169,12 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+
+        # These are not C++ tests
+        f"{CPP_TEST_PREFIX}/parallel_benchmark",
+        f"{CPP_TEST_PREFIX}/protoc-3",
+        f"{CPP_TEST_PREFIX}/torch_shm_manager",
+        f"{CPP_TEST_PREFIX}/tutorial_tensorexpr",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -360,6 +384,7 @@ JIT_EXECUTOR_TESTS = [
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -902,6 +927,12 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--cpp",
+        "--cpp",
+        action="store_true",
+        help=("If this flag is present, we will only run C++ tests"),
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -1100,6 +1131,7 @@ def must_serial(file: str) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
+        or file in CPP_TESTS    # TODO: /
     )
 
 
@@ -1130,6 +1162,13 @@ def get_selected_tests(options):
     # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
+
+    if options.cpp:
+        selected_tests = [tname for tname in selected_tests if tname in CPP_TESTS]
+    else:
+        # Exclude all C++ tests otherwise as they are still handled differently
+        # than Python test at the moment
+        options.exclude.extend(CPP_TESTS)
 
     if options.mps:
         selected_tests = ["test_mps", "test_metal"]
@@ -1312,6 +1351,9 @@ def main():
             "\n ".join(str(x) for x in selected_tests_serial)
         )
     )
+
+    print("===== DEBUG")
+    sys.exit(1)
 
     # See Note [ROCm parallel CI testing]
     pool = get_context("spawn").Pool(
