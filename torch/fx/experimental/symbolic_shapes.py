@@ -1653,9 +1653,14 @@ class DimConstraints:
 
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
-            solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
-            # because this is univariate, the solution is a dynamic (range) constraint
-            self._dynamic_results.add(self._dcp.doprint(solution))
+            try:
+                solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
+                # because this is univariate, the solution is a dynamic (range) constraint
+                self._dynamic_results.add(self._dcp.doprint(solution))
+            except NotImplementedError as e:
+                log.warning(f"Failed to reduce inequalities: %s", e)
+                for expr in exprs:
+                    self._dynamic_results.add(self._dcp.doprint(expr))
 
         # remaining symbolic equivalences become dynamic equality constraints
         for source, expr in self._symbolic_equivalences:
