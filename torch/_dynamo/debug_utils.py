@@ -647,7 +647,8 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     # Set the requires_grad field explicitly because clone_inputs only sets
     # requires_grad for leaf tensors.
     for narg, arg in zip(new_args, args):
-        narg.requires_grad_(arg.requires_grad)
+        if isinstance(arg, torch.Tensor):
+            narg.requires_grad_(arg.requires_grad)
     args = new_args
 
     if hasattr(gm, "zero_grad"):
