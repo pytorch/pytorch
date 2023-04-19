@@ -120,9 +120,6 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
-
-  # TODO: Move this to Docker
-  pip_install --user "pytest-cpp==2.3.0"
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
