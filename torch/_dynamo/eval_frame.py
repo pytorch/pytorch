@@ -45,7 +45,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, skipfiles, utils
-from .exc import ResetRequired
+from .exc import ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -696,6 +696,12 @@ def export(
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
     f = innermost_fn(f)
+
+    if functionalize and not aten_graph:
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
+        )
 
     graph = None
     out_guards = None
