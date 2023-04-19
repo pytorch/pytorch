@@ -8,7 +8,7 @@ import inspect
 import contextlib
 
 
-CUDA_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
+CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -201,5 +201,5 @@ TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
 
 # Importing this module should NOT eagerly initialize CUDA
-if not CUDA_INITIALIZED_ON_IMPORT:
+if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
     assert not torch.cuda.is_initialized()
