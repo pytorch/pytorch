@@ -655,6 +655,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str cpp_frames_s = "cpp_frames";
   py::str history_s = "history";
   py::str blocks_s = "blocks";
+  py::str is_expandable_s = "is_expandable";
 
   std::vector<CapturedTraceback*> to_gather_frames;
   std::vector<py::dict> to_gather_dest;
@@ -672,6 +673,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     segmentDict[stream_s] = int64_t(segmentInfo.stream);
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
     segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
+    segmentDict[is_expandable_s] = segmentInfo.is_expandable;
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -719,6 +721,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str free_completed_s = "free_completed";
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
+  py::str segment_map_s = "segment_map";
+  py::str segment_unmap_s = "segment_unmap";
+
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
@@ -741,6 +746,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return oom_s;
       case TraceEntry::SNAPSHOT:
         return snapshot_s;
+      case TraceEntry::SEGMENT_UNMAP:
+        return segment_unmap_s;
+      case TraceEntry::SEGMENT_MAP:
+        return segment_map_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -1080,77 +1089,27 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
-  m.def(
-      "_map_Storage_Refs",
-      [](const py::sequence& outputs,
-         const py::list& outputs_persistent_storage,
-         py::list output_refs,
-         py::list output_data_ptrs) {
-        TORCH_CHECK(outputs.size() == outputs_persistent_storage.size());
-
-        for (size_t i = 0, end = outputs.size(); i < end; ++i) {
-          if (!outputs_persistent_storage[i].is_none() ||
-              outputs[i].is_none()) {
-            output_refs.append(py::none());
-            output_data_ptrs.append(py::none());
-            continue;
-          }
-
-          auto t = outputs[i].cast<at::Tensor>();
-          c10::StorageImpl* storage = t.storage().unsafeGetStorageImpl();
-          auto weak = c10::raw::intrusive_ptr::make_weak(storage);
-          output_refs.append(reinterpret_cast<size_t>(weak));
-          output_data_ptrs.append(
-              reinterpret_cast<size_t>(storage->data_ptr().get()));
-        }
-      });
+  m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
+  });
 
   m.def(
-      "_construct_Tensors_From_Storage_and_Metadata",
-      [](const py::list& storages,
-         const py::list& metadatas,
-         py::list& outputs) {
-        TORCH_CHECK(storages.size() == metadatas.size());
-        for (size_t i = 0, end = storages.size(); i < end; ++i) {
-          const auto& maybe_metadata = metadatas[i];
+      "_construct_CUDA_Tensor_From_Storage_And_Metadata",
+      [](py::dict& metadata, c10::Storage s) {
+        auto dtype_arg = metadata["dtype"].ptr();
+        auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
 
-          if (maybe_metadata.is_none()) {
-            outputs.append(py::none());
-            continue;
-          }
+        constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
+        at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+            std::move(s), cuda_dks, meta);
 
-          const py::dict& metadata = maybe_metadata.cast<py::dict>();
-          c10::Storage s;
-          if (storages[i].is_none()) {
-            s = c10::Storage(
-                c10::Storage::use_byte_size_t(),
-                metadata["nbytes"].cast<int64_t>(),
-                at::DataPtr(
-                    reinterpret_cast<void*>(
-                        metadata["data_ptr"].cast<size_t>()),
-                    metadata["device"].cast<c10::Device>()));
-          } else if (py::isinstance<py::int_>(storages[i])) {
-            s = outputs[storages[i].cast<int64_t>()]
-                    .cast<at::Tensor>()
-                    .storage();
-          } else {
-            s = storages[i].cast<c10::Storage>();
-          }
-
-          auto dtype_arg = metadata["dtype"].ptr();
-          auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
-
-          constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
-          at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
-              std::move(s), cuda_dks, meta);
-
-          tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
-              metadata["size"].cast<std::vector<int64_t>>(),
-              metadata["stride"].cast<std::vector<int64_t>>());
-          tensor.unsafeGetTensorImpl()->set_storage_offset(
-              metadata["storage_offset"].cast<int64_t>());
-          outputs.append(std::move(tensor));
-        }
+        tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+            metadata["size"].cast<std::vector<int64_t>>(),
+            metadata["stride"].cast<std::vector<int64_t>>());
+        tensor.unsafeGetTensorImpl()->set_storage_offset(
+            metadata["storage_offset"].cast<int64_t>());
+        return tensor;
       });
 
   m.def(
