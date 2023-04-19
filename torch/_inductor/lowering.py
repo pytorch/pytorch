@@ -1,7 +1,6 @@
 import functools
 import itertools
 import logging
-import sys
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -1090,16 +1089,14 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     if get_decompositions([kernel]) and warn and IS_CI:
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
-        log.error(
-            "make_fallback(%s): a decomposition exists, we should switch to it."
+        # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
+        # likely to be triggered preferentially on one CI config over another.
+        raise AssertionError(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
             " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
             " or inductor_decompositions, and delete the corresponding `make_fallback` line."
             " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
-            kernel,
         )
-        # Make sure the process exits and CI flags an error, raising
-        # an exception could allow a graph-break and silently pass CI in some configs
-        sys.exit(1)
 
     add_needs_realized_inputs(kernel)
     if layout_constraint is not None:
