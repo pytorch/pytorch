@@ -301,7 +301,7 @@ class CustomOp:
             frame = inspect.stack()[1]
             if self._fake_impl is not None:
                 raise RuntimeError(
-                    f"Attempting to register a FakeTensor rule for operator {self.qualname} "
+                    f"Attempting to register a FakeTensor rule for operator {self._qualname} "
                     f"that already has a FakeTensor rule registered from Python at "
                     f"{self._fake_impl.location}. This is not supported."
                 )
