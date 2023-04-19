@@ -14,9 +14,9 @@ from tempfile import TemporaryFile
 import torch
 import torch.fx as fx
 from torch._prims_common import is_float_dtype
-from .backends.registry import lookup_backend, register_debug_backend
 
-from .config_utils import config
+from . import config
+from .backends.registry import lookup_backend, register_debug_backend
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
@@ -233,10 +233,10 @@ def generate_config_string():
 
     return textwrap.dedent(
         f"""\
-import torch._dynamo
+import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config = torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
+torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
 torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
 torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
         """
@@ -647,7 +647,8 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     # Set the requires_grad field explicitly because clone_inputs only sets
     # requires_grad for leaf tensors.
     for narg, arg in zip(new_args, args):
-        narg.requires_grad_(arg.requires_grad)
+        if isinstance(arg, torch.Tensor):
+            narg.requires_grad_(arg.requires_grad)
     args = new_args
 
     if hasattr(gm, "zero_grad"):
@@ -935,9 +936,6 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
-# Please see NOTE: [Real Tensors in Accuracy Evaluation]
-MINIFIER_SPAWNED = False
-
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
@@ -1011,7 +1009,6 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
-torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = lookup_backend("{minifier_backend}")
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
