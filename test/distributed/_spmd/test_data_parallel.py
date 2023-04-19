@@ -91,7 +91,7 @@ class TestDataParallel(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_replicate_sgd(self):
+    def test_replicate_sgd_simple(self):
         mod = SimpleMLP().cuda(self.rank)
         opt = torch.optim.SGD(mod.parameters(), lr=0.1)
         train_batch = (
