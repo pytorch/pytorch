@@ -1,8 +1,8 @@
 #pragma once
 
+#include <ATen/CachedTensorUtils.h>
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/cached_tensor_utils.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
