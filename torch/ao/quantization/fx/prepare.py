@@ -539,7 +539,7 @@ def _get_arg_target_dtype_as_output(
 def _get_arg_target_is_dynamic_as_output(
     arg: Node,
     named_modules: Dict[str, torch.nn.Module],
-) -> Optional[Union[torch.dtype, type]]:
+) -> bool:
     """ Get the target output activation dtype for
     the argument in the original graph, skipping inserted observers
     We are assuming that the observers are inserted correctly, and the dtype for
