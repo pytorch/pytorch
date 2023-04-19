@@ -74,9 +74,6 @@ def prepare_pt2e_quantizer(
         node_name_to_scope,
     )
 
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 def convert_pt2e(
