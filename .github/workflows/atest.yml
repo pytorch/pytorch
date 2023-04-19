@@ -18,6 +18,7 @@ jobs:
       EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
       THE_REST: "${{ github.event.pull_requests }}"
       GH_SHA: ${{ github.sha }}
+      GH_REF: ${{ github.ref_name }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -25,7 +26,10 @@ jobs:
       - name: "print stuff"
         run: |
           git tag --points-at ${GH_SHA}
-      - name: "print more"
+      - name: "print GH_REF"
+        run: |
+          echo ${GH_REF}
+      - name: "print PR_NUMBER"
         run: |
           echo ${PR_NUMBER}
       - name: "print GH_SHA"
@@ -34,6 +38,6 @@ jobs:
       - name: "print EVENT_PR_NUMBER"
         run: |
           echo ${EVENT_PR_NUMBER}
-      - name: "print and more"
+      - name: "print THE_REST"
         run: |
           echo ${THE_REST}
