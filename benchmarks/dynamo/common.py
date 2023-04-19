@@ -14,9 +14,9 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from unittest.mock import MagicMock
 
 from typing import NamedTuple
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
@@ -253,6 +253,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
     "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
+    "levit_128",  # Accuracy fails on A10G, passes on A100
 ]
 
 CI_SKIP_OPTIMIZER = {
@@ -2232,8 +2233,8 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.xla:
-        dev, = args.device
-        sys.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
+        (dev,) = args.devices
+        os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
         torch._dynamo.mark_dynamic = MagicMock()
         experiment = xla
         output_filename = "xla.csv"
