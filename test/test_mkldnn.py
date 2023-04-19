@@ -1439,7 +1439,7 @@ class TestMkldnn(TestCase):
             # a2 is contiguous tensor but it's strides is not default contiguous strides.
             a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
             self.assertTrue(a2.is_contiguous())
-            b = torch.randn(64, 33, 256).to(dtype = torch.bfloat16)
+            b = torch.randn(64, 33, 256).to(dtype=torch.bfloat16)
             y1 = torch.ops.aten.bmm(a1, b)
             y2 = torch.bmm(a2, b)
             self.assertEqual(y1, y2)
