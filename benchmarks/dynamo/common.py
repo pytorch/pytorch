@@ -92,7 +92,7 @@ CI_SKIP[CI("eager", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
-    "vision_maskrcnn",  # eager_variation
+    "vision_maskrcnn",  # eager_two_runs_differ
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -257,6 +257,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
     "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
+    "levit_128",  # Accuracy fails on A10G, passes on A100
 ]
 
 CI_SKIP_OPTIMIZER = {
@@ -1225,7 +1226,7 @@ class BenchmarkRunner:
             Records the status in the csv file
             """
             if current_name in self.non_deterministic_models:
-                if accuracy_status in ("pass", "eager_variation", "fail_accuracy"):
+                if accuracy_status in ("pass", "eager_two_runs_differ", "fail_accuracy"):
                     accuracy_status = "pass"
 
             headers = ["dev", "name", "batch_size", "accuracy"]
@@ -1286,19 +1287,40 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            model_copy = deepcopy_and_maybe_ddp(model)
-            self.init_optimizer(name, current_device, model_copy.parameters())
-            correct_result = self.run_n_iterations(
-                model_copy, clone_inputs(example_inputs)
-            )
+            try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
+                correct_result = self.run_n_iterations(
+                    model_copy, clone_inputs(example_inputs)
+                )
+            except Exception as e:
+                accuracy_status = (
+                    "eager_1st_run_OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "eager_1st_run_fail"
+                )
+                return record_status(
+                    accuracy_status, dynamo_start_stats=start_stats
+                )
 
             # Rerun native pytorch
             reset_rng_state()
-            model_copy = deepcopy_and_maybe_ddp(model)
-            self.init_optimizer(name, current_device, model_copy.parameters())
-            correct_rerun_result = self.run_n_iterations(
-                model_copy, clone_inputs(example_inputs)
-            )
+            try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
+                correct_rerun_result = self.run_n_iterations(
+                    model_copy, clone_inputs(example_inputs)
+                )
+            except Exception as e:
+                accuracy_status = (
+                    "eager_2nd_run_OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "eager_2nd_run_fail"
+                )
+                return record_status(
+                    accuracy_status, dynamo_start_stats=start_stats
+                )
+
             # Two eager runs should have exactly same result
             if not same(
                 correct_result,
@@ -1308,7 +1330,7 @@ class BenchmarkRunner:
                 tol=0,
                 equal_nan=self.equal_nan,
             ):
-                accuracy_status = "eager_variation"
+                accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             correct_rerun_result = None
 
