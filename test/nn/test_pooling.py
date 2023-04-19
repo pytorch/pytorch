@@ -279,7 +279,7 @@ class TestPoolingNN(NNTestCase):
         avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
         out = avg_pool(input)
         self.assertFalse(torch.isinf(out).any())
-        self.assertFalse(torch.isnan(out).any()) 
+        self.assertFalse(torch.isnan(out).any())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_adaptive_avg_pooling_nhwc_overflow(self):
@@ -288,7 +288,7 @@ class TestPoolingNN(NNTestCase):
         avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
         out = avg_pool(input)
         self.assertFalse(torch.isinf(out).any())
-        self.assertFalse(torch.isnan(out).any()) 
+        self.assertFalse(torch.isnan(out).any())
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
