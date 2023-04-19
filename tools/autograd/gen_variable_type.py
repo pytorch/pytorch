@@ -1364,10 +1364,12 @@ def emit_body(
                     var = f"{original_self_var}.value()"
                     assert not is_output
                 if inplace and is_output:
-                    if name == "result_" and is_inplace_foreach:
-                        var = "self[i]"
-                    else:
-                        var = "self" + ("[i]" if is_foreacharg_list_type else "")
+                    assert name == "result_"
+                    var = (
+                        "self[i]"
+                        if is_inplace_foreach or is_foreacharg_list_type
+                        else "self"
+                    )
                     is_inplace_view = f"{var}.is_view()"
                     expr = f"SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})"
                 else:
