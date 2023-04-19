@@ -142,7 +142,7 @@ TESTS = discover_tests(
         "fx",  # executed by test_fx.py
         "jit",  # executed by test_jit.py
         "mobile",
-        "onnx",
+        "onnx_caffe2",
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
@@ -169,6 +169,8 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "onnx/test_pytorch_onnx_onnxruntime_cuda",
+        "onnx/test_models",
 
         # These are not C++ tests
         f"{CPP_TEST_PREFIX}/parallel_benchmark",
@@ -317,6 +319,14 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
 ]
+# A subset of onnx tests that cannot run in parallel due to high memory usage.
+ONNX_SERIAL_LIST = [
+    "onnx/test_models",
+    "onnx/test_models_quantized_onnxruntime",
+    "onnx/test_models_onnxruntime",
+    "onnx/test_custom_ops",
+    "onnx/test_utility_funs",
+]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
@@ -385,6 +395,7 @@ JIT_EXECUTOR_TESTS = [
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
 
 TESTS_REQUIRING_LAPACK = [
@@ -941,6 +952,15 @@ def parse_args():
         "and autograd. They are defined by CORE_TEST_LIST.",
     )
     parser.add_argument(
+        "--onnx",
+        "--onnx",
+        action="store_true",
+        help=(
+            "Only run ONNX tests, or tests that validate PyTorch's ONNX export. "
+            "If this flag is not present, we will exclude ONNX tests."
+        ),
+    )
+    parser.add_argument(
         "-pt",
         "--pytest",
         action="store_true",
@@ -1132,7 +1152,8 @@ def must_serial(file: str) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
-        or file in CPP_TESTS    # TODO: /
+        or file in ONNX_SERIAL_LIST
+        or file in CPP_TESTS    # TODO: See if we can run C++ tests in parallel
     )
 
 
@@ -1176,6 +1197,14 @@ def get_selected_tests(options):
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
+
+    # Filter to only run onnx tests when --onnx option is specified
+    onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
+    if options.onnx:
+        selected_tests = onnx_tests
+    else:
+        # Exclude all onnx tests otherwise
+        options.exclude.extend(onnx_tests)
 
     # process reordering
     if options.bring_to_front:
