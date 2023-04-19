@@ -95,7 +95,6 @@ def mps_ops_grad_modifier(ops):
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
         # RuntimeError: "log_vml_cpu" not implemented for 'Half'
-        '__rpow__': [torch.float16],
         'pow': [torch.float16],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
