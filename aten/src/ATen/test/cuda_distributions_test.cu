@@ -118,10 +118,12 @@ TEST(DistributionsTest, TestPhiloxIncrementBigUniformTensor) {
 
   // calculate maximum number of threads that can be launched
   // and set the numel to be 8 times that
+  uint32_t max_threads_per_sm = 1536;
+  uint32_t number_of_sm = 12;
   const int block_size = 256;
   dim3 dim_block(block_size);
-  uint32_t blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
-  dim3 grid(static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * blocks_per_sm);
+  uint32_t blocks_per_sm = max_threads_per_sm / block_size;
+  dim3 grid(number_of_sm * blocks_per_sm);
   auto numel = block_size * grid.x * 8;
 
   // get numel randoms from uniform_(), philox offset is now incremented to 8 by this call

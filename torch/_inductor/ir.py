@@ -825,7 +825,19 @@ class Reduction(Loops):
             }
             and config.split_reductions
         )
-        if split_reduction and not dynamo_config.dynamic_shapes:
+        sr_qualified = split_reduction
+        if sr_qualified and dynamo_config.dynamic_shapes:
+            # TODO(voz): dedup with sizevar util introduced in other PR
+            def _is_static(x):
+                return isinstance(x, (int, sympy.Integer))
+
+            sr_qualified = (
+                all([_is_static(r) for r in ranges])
+                and all([_is_static(r) for r in reduction_ranges])
+                and _is_static(reduction_numel)
+            )
+
+        if sr_qualified:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -1505,7 +1517,7 @@ class SliceView(View):
         step = sympy.expand(step)
         assert step > 0
         try:
-            if start == 0 and end >= 2**63 and step == 1:
+            if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
         except TypeError:
             pass
@@ -4176,18 +4188,15 @@ class AllGatherIntoTensor(CollectiveKernel):
 
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
+    def __init__(self, layout, inputs, constant_args, reduce_op):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
-        # TODO support dim
-        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
         cls,
         x: "TensorBox",
         reduce_op: str,
-        scatter_dim: int,
         tag: str,
         ranks: List[int],
         group_size: int,
@@ -4197,7 +4206,7 @@ class ReduceScatterTensor(CollectiveKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_size = x.get_size()
-        new_size[scatter_dim] /= group_size
+        new_size[0] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
         return ReduceScatterTensor(
@@ -4205,7 +4214,6 @@ class ReduceScatterTensor(CollectiveKernel):
             inputs=[x],
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
-            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
