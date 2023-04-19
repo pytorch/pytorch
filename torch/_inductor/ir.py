@@ -825,7 +825,19 @@ class Reduction(Loops):
             }
             and config.split_reductions
         )
-        if split_reduction and not dynamo_config.dynamic_shapes:
+        sr_qualified = split_reduction
+        if sr_qualified and dynamo_config.dynamic_shapes:
+            # TODO(voz): dedup with sizevar util introduced in other PR
+            def _is_static(x):
+                return isinstance(x, (int, sympy.Integer))
+
+            sr_qualified = (
+                all([_is_static(r) for r in ranges])
+                and all([_is_static(r) for r in reduction_ranges])
+                and _is_static(reduction_numel)
+            )
+
+        if sr_qualified:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
