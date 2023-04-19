@@ -90,6 +90,7 @@ from ._optim_utils import (
     _optim_state_dict,
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
+    _scatter_orig_param_optim_state_dict,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
 from ._unshard_param_utils import (
@@ -1293,7 +1294,20 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     is_named_optimizer=is_named_optimizer,
                 )
             else:
-                raise NotImplementedError("TODO")
+                sharded_osd = _scatter_orig_param_optim_state_dict(
+                    optim_state_dict,
+                    model=model,
+                    optim=(optim if is_named_optimizer else None),
+                    group=group,
+                )
+                ret_state_dict = _rekey_sharded_optim_state_dict(
+                    sharded_osd,
+                    model=model,
+                    optim=optim,
+                    optim_input=optim_input,
+                    using_optim_input=using_optim_input,
+                    is_named_optimizer=is_named_optimizer,
+                )
         else:
             sharded_osd = _flatten_optim_state_dict(
                 optim_state_dict,

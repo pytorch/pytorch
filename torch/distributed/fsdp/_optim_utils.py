@@ -1768,3 +1768,87 @@ def _shard_orig_param_state(
             value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
         new_optim_state[state_name] = value
     return new_optim_state
+
+
+def _scatter_orig_param_optim_state_dict(
+    optim_state_dict: Dict[str, Any],
+    model: nn.Module,
+    optim: Optional[torch.optim.Optimizer] = None,
+    group: Optional[dist.ProcessGroup] = None,
+) -> Dict[str, Any]:
+    """
+    TODO
+    This function derived from ``_flatten_optim_state_dict``.
+
+
+    Returns:
+        Dict[str, Any]: The sharded optimizer state dict.
+    """
+    rank = dist.get_rank(group)
+    world_size = dist.get_world_size(group)
+    unflat_osd = optim_state_dict
+    if rank == 0 and ("state" not in unflat_osd or "param_groups" not in unflat_osd):
+        raise ValueError(
+            '`optim_state_dict` must have the keys "state" and '
+            '"param_groups" to be a valid optimizer state dict'
+        )
+
+    # Broadcast emtpy osd that the state keys and param groups reserved.
+    # TODO
+
+    param_to_fqns = _get_param_to_fqns(model)
+    fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
+
+    # Construct the "state" part
+    flat_osd_state: Dict[Union[_OptimStateKey, str], Any] = {}
+    unflat_osd_state = unflat_osd["state"]
+    all_state_keys = set(unflat_osd_state.keys())
+
+    # local_state_dict is used to construct states of empty parameters.
+    # This should only be used if is_named_optimizer=True.
+    local_state_dict: Dict[str, Any] = {}
+    local_state_clean_fqns: Dict[str, str] = {}
+    if optim is not None:
+        local_state_dict = optim.state_dict()["state"]
+        for fqn in local_state_dict.keys():
+            clean_fqn = clean_tensor_name(fqn)
+            local_state_clean_fqns[clean_fqn] = fqn
+
+    for fqns in param_to_fqns.values():
+        fqn = fqns[0]
+        if fqn not in unflat_osd_state:
+            continue
+        all_state_keys.difference_update(fqns)
+        if fqn in fqn_to_fsdp_param_info:
+            fsdp_param_info = fqn_to_fsdp_param_info[fqn]
+            flat_state = _shard_orig_param_state(  # TODO
+                fsdp_param_info,
+                fqn,
+                unflat_osd_state[fqn],
+            )
+            key = _OptimStateKey(tuple(fqns), True)
+            # Only include non-empty states since as expected by
+            # `torch.optim.Optimizer` s unless the optimizer is KeyedOptimizer
+            # or NamedOptimizer.
+            if flat_state:
+                flat_osd_state[key] = flat_state
+            elif optim is not None:  # NamedOptimizer or KeyedOptimizer case.
+                assert len(fqns) == 1
+                local_wrapped_fqn = local_state_clean_fqns.get(fqn, "")
+                if local_wrapped_fqn:
+                    flat_osd_state[key] = copy.deepcopy(
+                        local_state_dict[local_wrapped_fqn]
+                    )
+        else:  # do not flatten non-FSDP parameters' states
+            assert len(fqns) == 1
+            key = _OptimStateKey(tuple(fqns), False)
+            flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
+
+    # Handle user-defined state, states that are not associated with parameters.
+    for key in all_state_keys:
+        flat_osd_state[key] = copy.copy(unflat_osd_state[key])
+
+    # Construct the "param_groups" part -- copy as is since it will be
+    # rekeyed later according to the target rank's optimizer
+    flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
+    return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
