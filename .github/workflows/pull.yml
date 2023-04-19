@@ -417,3 +417,4 @@ jobs:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm89
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm89-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm89-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
