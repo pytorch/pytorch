@@ -137,7 +137,7 @@ __global__ void indexing_backward_kernel_stride_1(
         (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
     {
       // Determine the number of duplicates in advance
-      int64_t num_duplicates = 0;
+      int64_t num_duplicates = 1;
       while (((idx + num_duplicates) < numel) && (sorted_indices[idx + num_duplicates] == crnt_sorted_idx)) {
         num_duplicates++;
       }
@@ -195,7 +195,7 @@ __global__ void indexing_backward_kernel_small_stride(
         (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
     {
       // Determine the number of duplicates in advance
-      int64_t num_duplicates = 0;
+      int64_t num_duplicates = 1;
       while (((idx + num_duplicates) < numel) && (sorted_indices[idx + num_duplicates] == crnt_sorted_idx)) {
         num_duplicates++;
       }
