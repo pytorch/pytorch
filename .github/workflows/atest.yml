@@ -31,6 +31,10 @@ jobs:
         with:
           github-token: ${{ GITHUB_REF }}
 
+      - name: Get output from action
+        run: |
+          echo ${{ steps.upload-pytest-cache.outputs.pr-identifier }}
+
       - name: "print GH_REF"
         run: |
           echo ${GH_REF}
