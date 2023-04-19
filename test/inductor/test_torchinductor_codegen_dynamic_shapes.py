@@ -144,6 +144,7 @@ test_failures = {
     #
     # Failed to find for loop/triton kernel:
     #
+    "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda")),
