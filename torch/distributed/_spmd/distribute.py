@@ -257,6 +257,28 @@ def binop_sym_int_consumer_rule(node: fx.Node, args: Tuple[Any, ...]) -> DTensor
     )
 
 
+def slice_backwad_sym_int_consumer_rule(
+    node: fx.Node, args: Tuple[Any, ...]
+) -> DTensor:
+    grad_output, input_sizes, dim, start, end, step = args
+
+    local_sizes: List[int] = [
+        s.local_value if isinstance(s, DSymInt) else s for s in input_sizes
+    ]
+
+    input_tensor = torch.zeros(
+        local_sizes, device=grad_output.device, dtype=grad_output.dtype
+    )
+    return DTensor.from_local(
+        local_tensor=torch.slice_scatter(
+            input_tensor, grad_output.to_local(), dim, start, end, step
+        ),
+        device_mesh=grad_output.device_mesh,
+        placements=grad_output.placements,
+        run_check=False,
+    )
+
+
 def factory_with_sizes_rule(
     node: fx.Node,
     args: Tuple[Any, ...],
@@ -319,6 +341,7 @@ def default_factory_op_rule(
 VIEW_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
     aten._unsafe_view.default: binop_sym_int_consumer_rule,
     aten.expand.default: binop_sym_int_consumer_rule,
+    aten.slice_backward.default: slice_backwad_sym_int_consumer_rule,
     aten.view.default: binop_sym_int_consumer_rule,
 }
 
