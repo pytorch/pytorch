@@ -53,6 +53,8 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
       return ideep::tensor::data_type::u8;
     case ScalarType::BFloat16:
       return ideep::tensor::data_type::bf16;
+    case ScalarType::Half:
+      return ideep::tensor::data_type::f16;
     default:
       TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
   }
