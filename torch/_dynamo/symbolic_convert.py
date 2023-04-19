@@ -1812,7 +1812,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.current_instruction = create_instruction("NOP")
         self.next_instruction = None
         self.block_stack = []
-        self.states_before_block: List[OutputGraphState] = []
+        # states before SETUP_WITH for checkpointing and fallback
+        self.states_before_block: List[InstructionTranslatorGraphState] = []
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
         self.accept_prefix_inst = True
