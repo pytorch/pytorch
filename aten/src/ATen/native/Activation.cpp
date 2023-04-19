@@ -394,7 +394,8 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
+  // TODO: oneDNN's gelu fails to provide enough accuracy. Disable for now.
+  if (0 && use_mkldnn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_tensor(self);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
