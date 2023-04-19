@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/CachedTensorUtils.h>
-#include <ATen/autocast_mode.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
