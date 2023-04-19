@@ -612,6 +612,35 @@ class TestTransformers(NNTestCase):
             transformer_decoder(inputs, input_seq_len, memory)
 
 
+    def test_padding_and_src_mask_bool(self):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=2,
+            dim_feedforward=32,
+            dropout=0.1,
+            activation='relu',
+            batch_first=True,
+        )
+        encoder_norm = nn.LayerNorm(16)
+        encoder = nn.TransformerEncoder(
+            encoder_layer, 2, encoder_norm
+        )
+
+        inputs = torch.randn(2, 3, 16)
+
+        src_mask = torch.ones(3, 3, dtype=torch.bool).triu_(diagonal=1)
+        input_seq_len = torch.tensor([3, 2])
+        padding_mask = (
+            torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
+        )
+
+        encoder(
+            inputs,
+            mask=src_mask,
+            src_key_padding_mask=padding_mask,
+        )
+
+
     def test_encoder_is_causal(self):
 
         d_model = 3
