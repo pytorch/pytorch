@@ -202,8 +202,8 @@ class TestForeach(TestCase):
                     self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
                     if isinstance(rhs_arg, list) and isinstance(rhs_arg[0], torch.Tensor):
                         self.assertEqual([t.grad for t in rhs_arg], [t.grad for t in ref_rhs_arg])
-                    tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
-                    ref_tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
+                    tensors = [t.clone().detach().requires_grad_().clone() for t in tensors]
+                    ref_tensors = [t.clone().detach().requires_grad_().clone() for t in tensors]
                     inplace_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False, zero_size=zero_size)
                     assert_multiple_grad_fns(tensors, self)
 
@@ -282,8 +282,8 @@ class TestForeach(TestCase):
                     for op_list, ref_list in zip(rhs_arg, ref_rhs_arg):
                         if isinstance(op_list, list) and isinstance(op_list[0], torch.Tensor):
                             self.assertEqual([t.grad for t in op_list], [t.grad for t in ref_list])
-                    tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
-                    ref_tensors = [1 * t.clone().detach().requires_grad_() for t in tensors]
+                    tensors = [t.clone().detach().requires_grad_().clone() for t in tensors]
+                    ref_tensors = [t.clone().detach().requires_grad_().clone() for t in tensors]
                     inplace_op([tensors, *rhs_arg], is_cuda=False, is_fastpath=False, zero_size=zero_size)
                     assert_multiple_grad_fns(tensors, self)
                     inplace_ref([ref_tensors, *rhs_arg])
@@ -403,7 +403,7 @@ class TestForeach(TestCase):
     @parametrize("is_fastpath", (True, False))
     def test_unary_op(self, device, dtype, op, is_fastpath):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
-        samples = op.sample_inputs(device, dtype, requires_grad=True, noncontiguous=not is_fastpath)
+        samples = op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
         disable_fastpath = op.name == "_foreach_abs" and dtype in complex_types()
         for sample in samples:
             zero_size = sample.kwargs.pop('zero_size')
@@ -427,6 +427,7 @@ class TestForeach(TestCase):
                 tensors = [t.clone().detach().requires_grad_() for t in sample.input]
                 ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
                 out = wrapped_op.func(tensors)
+                # tensors have different shapes
                 torch.cat([t.view(-1) for t in out]).mean().backward()
                 torch.cat([ref.func(t).view(-1) for t in ref_tensors]).mean().backward()
                 self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
@@ -461,6 +462,7 @@ class TestForeach(TestCase):
                 inplace_input_tensors[0].grad = None
                 hook_buffer.clear()
 
+                # tensors have different shapes.
                 sum_of_cloned_tensors = torch.cat([t.view(-1) for t in inplace_inputs]).sum()
                 grad_output = torch.rand_like(sum_of_cloned_tensors)
                 torch.autograd.grad(
@@ -835,6 +837,7 @@ class TestForeach(TestCase):
                 inplace_ref((ref_tensors, *inputs[1:]), **ref_kwargs)
                 assert_multiple_grad_fns(tensors, self)
 
+                # tensors have different shapes.
                 torch.autograd.backward(torch.cat([t.clone().view(-1) for t in tensors]).sum(), inputs=tensors)
                 torch.autograd.backward(torch.cat([t.clone().view(-1) for t in ref_tensors]).sum(), inputs=ref_tensors)
                 self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
@@ -862,7 +865,7 @@ class TestForeach(TestCase):
     def test_inplace_foreach_leaf_check_and_grad_fn(self, device, dtype, op):
         inplace_op = op.inplace_variant
         if inplace_op is None:
-            return
+            self.skipTest("no in-place op available")
 
         sample = list(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True))[0]
         sample.input[0].requires_grad_(True)
