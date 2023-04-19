@@ -674,30 +674,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         arg_as_input_target_dtype = _get_arg_target_dtype_as_input_to_node(arg, node, named_modules)
         arg_as_input_target_is_dynamic = \
             _get_arg_target_is_dynamic_as_input_to_node(arg, node, named_modules)  # type: ignore[arg-type]
-        # needs_obs = \
-        #     (
-        #         # the following code block is for static quantization
-        #         (not arg_as_input_target_is_dynamic) and
-        #         # if the dtypes are different, we need an observer
-        #         (arg_as_output_target_dtype != arg_as_input_target_dtype) and
-        #         # except if the second dtype is float, a dequant will be inserted
-        #         # without an observer in convert
-        #         # TODO(future PR): change this so a placeholder is inserted for
-        #         # future dequants, to make the logic easier to understand
-        #         (arg_as_input_target_dtype not in _DO_NOT_OBS_DTYPE_LIST) and
-        #         # if arg output dtype is in _DO_NOT_OBS_DTYPE_LIST do not insert observer
-        #         (arg_as_output_target_dtype not in _DO_NOT_OBS_DTYPE_LIST) and
-        #         # we won't insert extra observer for input if the nodes configured with
-        #         # reuse_input_obs_or_fq
-        #         not reuse_input_obs_or_fq
-        #     ) or (
-        #         # need to add input observer for dynamic quantization
-        #         # only add observer for first input for now, we may need to extend
-        #         # qconfig_dict and backend_config to support more general configurations
-        #         # of dynamic quantization, e.g. dynamically quantizing second input, third
-        #         # input etc.
-        #         arg_as_input_target_is_dynamic
-        #     )
         needs_obs_or_fq = _needs_obs_or_fq(
             arg_as_output_target_dtype,
             arg_as_output_target_is_dynamic,
