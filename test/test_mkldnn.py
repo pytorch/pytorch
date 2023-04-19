@@ -1432,6 +1432,17 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_matmul_bf16(self):
+        if has_bf16_support():
+            a1 = torch.randn([64, 1, 33], dtype=torch.bfloat16)
+            # a2 is contiguous tensor but it's strides is not default contiguous strides.
+            a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
+            self.assertTrue(a2.is_contiguous())
+            b = torch.randn(64, 33, 256).to(dtype = torch.bfloat16)
+            y1 = torch.ops.aten.bmm(a1, b)
+            y2 = torch.bmm(a2, b)
+            self.assertEqual(y1, y2)
 
 if __name__ == '__main__':
     run_tests()
