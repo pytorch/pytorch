@@ -1010,6 +1010,7 @@ def emit_body(
     is_inplace_foreach = name.startswith("_foreach") and inplace
     if is_inplace_foreach:
         inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
+        refargname2inplace_foreacharg: Dict[str, Argument] = {}
         base_name_and_overload_name = (f.func.name.name.base, f.func.name.overload_name)
         if info is None:
             assert (
@@ -1030,6 +1031,7 @@ def emit_body(
                 foreach_arg_type = getattr(foreach_arg.type, "elem", foreach_arg.type)
                 assert foreach_arg_type == ref_arg.type
                 inplace_foreacharg2refarg[foreach_arg] = ref_arg
+                refargname2inplace_foreacharg[ref_arg.name] = foreach_arg
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -1241,11 +1243,11 @@ def emit_body(
             args = [arg.name for arg in args_with_derivatives]
             for i, arg in enumerate(args):
                 if is_inplace_foreach and info is not None:
-                    for foreach_arg, ref_arg in inplace_foreacharg2refarg.items():
-                        if arg == ref_arg.name:
-                            args[i] = foreach_arg.name + (
-                                "[i]" if isinstance(foreach_arg.type, ListType) else ""
-                            )
+                    if arg in refargname2inplace_foreacharg:
+                        foreach_arg = refargname2inplace_foreacharg[arg]
+                        args[i] = foreach_arg.name + (
+                            "[i]" if isinstance(foreach_arg.type, ListType) else ""
+                        )
                 else:
                     if arg == list_like_arg:
                         args[i] = arg + "[i]"
@@ -1344,13 +1346,10 @@ def emit_body(
             is_foreacharg_list_type: bool = False
             remove_underscore_before_replace: bool = False
             if is_inplace_foreach and info is not None:
-                for _foreacharg, refarg in inplace_foreacharg2refarg.items():
-                    if refarg.name == name or (
-                        refarg.name in name and "scalar_type" in name
-                    ):
-                        is_foreacharg_list_type = isinstance(_foreacharg.type, ListType)
-                        foreacharg = _foreacharg
-                        break
+                name_to_query = name.split("_scalar_type")[0]
+                if name_to_query in refargname2inplace_foreacharg:
+                    foreacharg = refargname2inplace_foreacharg[name_to_query]
+                    is_foreacharg_list_type = isinstance(foreacharg.type, ListType)
             type = arg.nctype.type
             expr = arg.expr
             stmts_prepend = None
