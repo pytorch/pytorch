@@ -5,7 +5,6 @@ import torch.utils.benchmark as benchmark
 from torch import nn
 from torch.ao.pruning import WeightNormPruner
 from itertools import product
-from torch.profiler import profile, record_function, ProfilerActivity
 from torch.ao.nn.sparse.cutlass_linear import CUTLASSLinear
 
 
@@ -114,8 +113,8 @@ if __name__ == "__main__":
             continue
 
         # with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU], record_shapes=True, with_stack=True) as prof:
-            # with record_function("CUTLASS"):
-                # sparse_linear(input_tensor)
+        #     with record_function("CUTLASS"):
+        #         sparse_linear(input_tensor)
 
         # prof.export_stacks(f"{m}_{k}_{n}_cutlass_profiler_stacks.txt", "self_cuda_time_total")
 

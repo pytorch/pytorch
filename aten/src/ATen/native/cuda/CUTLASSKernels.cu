@@ -182,6 +182,9 @@ std::tuple<Tensor, Tensor> cutlass_sgemm(
         auto mask = mask_or_meta;
 
         TORCH_CHECK(mask.layout() == Layout::Strided, "torch._cutlass_linear: Expected mask argument to be strided, but got layout ", mask.layout());
+        TORCH_CHECK(mask.dim() == 2, "torch._cutlass_linear: Expected mask argument to be 2D tensor, got ", mask.dim(), " dims");
+        const auto strides_mask = mask.strides();
+        TORCH_CHECK(strides_mask[1] == 1, "torch._cutlass_linear: Invalid strides for mask_or_meta argument: row stride = ", strides_mask[0], ", column stride = ", strides_mask[1]);
 
         auto meta_dtype = at::kChar;
         switch (sizeof(ElementInputE)) {
@@ -200,15 +203,12 @@ std::tuple<Tensor, Tensor> cutlass_sgemm(
         auto meta = mask.new_empty({length_m, meta_ncols}, at::TensorOptions().dtype(meta_dtype));
         auto error = mask.new_zeros({1}, at::TensorOptions().dtype(at::kInt));
 
-        // FIXME: verify that mask is in row major format, or pass
-        // both strides to the kernel below.
-
         two_four_create_meta_kernel<<<
             dim3((length_k + 63) / 64, (length_m + 15) / 16),
             dim3(16, 16),
             0,
             at::cuda::getCurrentCUDAStream()>>> (
-                length_m, length_k, mask.stride(0), (bool*)mask.data_ptr(),
+                length_m, length_k, strides_mask[0], (bool*)mask.data_ptr(),
                 meta.stride(0), (ElementInputE*)meta.data_ptr(),
                 (int*)error.data_ptr());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -303,11 +303,10 @@ std::tuple<Tensor, Tensor> cutlass_sgemm(
     // status = gemm_op.can_implement(arguments);
     // CUTLASS_STATUS_CHECK(status);
 
-    // FIXME: try to do the allocation using PyTorch here.
-    size_t workspace_size = Gemm::get_workspace_size(arguments);
-    cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
+    const auto workspace_size = Gemm::get_workspace_size(arguments);
+    auto workspace = tensor_a.new_empty({(int64_t)workspace_size}, at::TensorOptions().dtype(at::kByte));
 
-    status = gemm_op.initialize(arguments, workspace.get(), at::cuda::getCurrentCUDAStream());
+    status = gemm_op.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
     CUTLASS_STATUS_CHECK(status);
 
     status = gemm_op.run(at::cuda::getCurrentCUDAStream());
@@ -318,10 +317,13 @@ std::tuple<Tensor, Tensor> cutlass_sgemm(
     return std::make_tuple(tensor_d, meta_reordered);
 }
 
-// FIXME: Pull back in device and cuda version constraints.
 std::tuple<Tensor, Tensor> _cutlass_linear(
       const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
       const Tensor& mask_or_meta) {
+    const auto dprops = at::cuda::getCurrentDeviceProperties();
+    const auto is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+    TORCH_CHECK(is_sm8x, "torch._cutlass_linear: Supported only on GPUs with compute capability 8.x");
+
     TORCH_CHECK(tensor_a.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_a argument to be strided, but got layout ", tensor_a.layout());
     TORCH_CHECK(tensor_a.dim() == 2, "torch._cutlass_linear: Expected tensor_a argument to be 2D tensor, got ", tensor_a.dim(), " dims");
     const auto strides_a = tensor_a.strides();
