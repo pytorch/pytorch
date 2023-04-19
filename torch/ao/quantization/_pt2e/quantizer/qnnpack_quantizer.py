@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import operator
+from dataclasses import asdict
 from typing import Callable, Dict, List, Optional, Set
 
 import torch
@@ -24,8 +25,7 @@ from .quantizer import (
 
 __all__ = [
     "QNNPackQuantizer",
-    "get_default_symmetric_qnnpack_quantization_config",
-    "get_default_per_channel_symmetric_qnnpack_quantization_config",
+    "get_symmetric_quantization_config",
 ]
 
 
@@ -55,8 +55,8 @@ def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternT
 def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [
-        get_default_symmetric_qnnpack_quantization_config(),
-        get_default_per_channel_symmetric_qnnpack_quantization_config(),
+        get_symmetric_quantization_config(),
+        get_symmetric_quantization_config(is_per_channel=True),
     ]:
         ops = supported_symmetric_quantized_operators()
         for op_string, pattern_list in ops.items():
@@ -66,42 +66,22 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     return copy.deepcopy(supported_config_and_operators)
 
 
-def get_default_symmetric_qnnpack_quantization_config():
+def get_symmetric_quantization_config(is_per_channel=False):
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
-        quant_max=127,
-        qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
-    )
-    weight_quantization_spec = QuantizationSpec(
-        dtype=torch.int8,
-        quant_min=-127,
         quant_max=127,
         qscheme=torch.per_tensor_symmetric,
-        ch_axis=1,
         is_dynamic=False,
     )
-    bias_quantization_spec = QuantizationSpec(dtype=torch.float)
-    quantization_config = QuantizationConfig(
-        act_quantization_spec, weight_quantization_spec, bias_quantization_spec
-    )
-    return quantization_config
-
-
-def get_default_per_channel_symmetric_qnnpack_quantization_config():
-    act_quantization_spec = QuantizationSpec(
-        dtype=torch.int8,
-        quant_min=-128,
-        quant_max=127,
-        qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
+    qscheme = (
+        torch.per_channel_symmetric if is_per_channel else torch.per_tensor_symmetric
     )
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-127,
         quant_max=127,
-        qscheme=torch.per_channel_symmetric,
+        qscheme=qscheme,
         ch_axis=1,
         is_dynamic=False,
     )
@@ -126,10 +106,18 @@ _TORCH_DTYPE_TO_QDTYPE = {
 }
 
 
+def _get_obs_or_fq_module(
+    quantization_spec: QuantizationSpec, extra_kwargs, observer_type
+):
+    return observer_type.with_args(**asdict(quantization_spec), **extra_kwargs)
+
+
 def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.activation is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.activation
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     assert quantization_spec.qscheme in [
@@ -155,6 +143,8 @@ def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig])
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.weight is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.weight
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     if quantization_spec.qscheme == torch.per_tensor_symmetric:
@@ -183,6 +173,8 @@ def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.bias is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.bias
     assert (
         quantization_spec.dtype == torch.float
