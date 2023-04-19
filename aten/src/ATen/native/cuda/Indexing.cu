@@ -504,6 +504,8 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
+      printf("VAndrei DEBUG: numel = %ld; stride = %ld; accumulate = %d\n", num_indices, sliceSize, accumulate);
+
       if (sliceSize == 1) {
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
         expandedValue.scalar_type(), "indexing_backward", [&] {
