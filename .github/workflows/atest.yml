@@ -1,0 +1,26 @@
+name: A zain test
+
+on:
+  push:
+    tags:
+      - ciflow/trunk/*
+  workflow_dispatch:
+
+
+jobs:
+  check-events-here:
+    name: github-events
+    runs-on: linux.2xlarge
+    env:
+      PR_NUMBER: ${{ github.event.number }}
+      THE_REST: ${{ github.event }}
+    steps:
+      - name: "print stuff"
+        run: |
+          echo 'hi'
+      - name: "print more"
+        run: |
+          echo ${PR_NUMBER}
+      - name: "print and more"
+        run: |
+          echo ${THE_REST}
