@@ -1284,7 +1284,7 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
             if reduction_type == "sum":
                 vec_reduc_prefix += "omp_out += omp_in"
-            if reduction_type == "prod":
+            elif reduction_type == "prod":
                 vec_reduc_prefix += "omp_out *= omp_in"
             else:
                 vec_reduc_prefix += (
