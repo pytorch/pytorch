@@ -855,7 +855,7 @@ def guard_fail_hook(
     # eval_frame.c logic that moves newest frames to head, but for logging purposes
     # it's more useful to see the 'first' failure (if we never got a hit) since it's
     # likely not yet been logged as a failure reason in a case of repeating failures.
-    # assert stashed_first_fail_reason
+    assert stashed_first_fail_reason
     guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
     stashed_first_fail_reason = None
 
