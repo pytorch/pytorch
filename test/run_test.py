@@ -825,6 +825,7 @@ def get_pytest_args(options):
     pytest_args.extend(rerun_options)
     return pytest_args
 
+
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
