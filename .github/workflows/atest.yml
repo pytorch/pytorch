@@ -2,10 +2,10 @@ name: A zain test
 
 on:
   push:
-    branches:
-      - zainr/*
-    # tags:
-    #   - ciflow/trunk/*
+    # branches:
+    #   - zainr/*
+    tags:
+      - ciflow/trunk/*
   workflow_dispatch:
 
 
