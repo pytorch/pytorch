@@ -1505,7 +1505,7 @@ class SliceView(View):
         step = sympy.expand(step)
         assert step > 0
         try:
-            if start == 0 and end >= 2**63 - 1 and step == 1:
+            if start == 0 and end >= 2**63 and step == 1:
                 return x
         except TypeError:
             pass
