@@ -444,7 +444,6 @@ def timed(
 
     t_0 = time.perf_counter()
     if use_xla:
-        xm.mark_step()
         xm.wait_device_ops()
     synchronize()
     t_1 = time.perf_counter()
@@ -2233,6 +2232,8 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.xla:
+        dev, = args.device
+        sys.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
         torch._dynamo.mark_dynamic = MagicMock()
         experiment = xla
         output_filename = "xla.csv"
