@@ -18,7 +18,12 @@ from . import config, exc
 from .allowed_functions import is_allowed
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
-from .bytecode_transformation import is_generator, transform_code_object
+from .bytecode_transformation import (
+    check_inst_exn_tab_entries_valid,
+    is_generator,
+    propagate_inst_exn_table_entries,
+    transform_code_object,
+)
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -206,6 +211,9 @@ def exception_handler(e, code, frame=None):
         log.error(format_error_msg(e, code, record_filename, frame))
 
 
+FRAME_COUNTER = 0
+
+
 def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
@@ -219,6 +227,11 @@ def convert_frame_assert(
         frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
     ):
         increment_frame()
+        global FRAME_COUNTER
+        if "_id" not in frame_state:
+            frame_state["_id"] = FRAME_COUNTER
+            FRAME_COUNTER += 1
+
         code = frame.f_code
 
         if code in input_codes and (
@@ -378,6 +391,8 @@ def _compile(
         code_options.update(output.code_options)
 
         if config.dead_code_elimination:
+            propagate_inst_exn_table_entries(instructions)
+            check_inst_exn_tab_entries_valid(instructions)
             instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
 
     try:
