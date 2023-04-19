@@ -1,9 +1,7 @@
 import importlib
 import logging
 
-import torch
 from torch._dynamo import register_backend
-from .common import fake_tensor_unsupported
 
 log = logging.getLogger(__name__)
 
