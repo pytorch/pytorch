@@ -15,9 +15,8 @@ import torch.fx as fx
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
-    backend_aot_accuracy_fails,
+    backend_accuracy_fails,
     BuckTargetWriter,
-    COMPILER_REPRO_OPTIONS,
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
@@ -160,6 +159,22 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           DUMP REPROS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+INDUCTOR_IMPORT = """
+from torch._inductor.compile_fx import compile_fx_inner
+from torch._dynamo.debug_utils import same_two_models
+"""
+
+
+COMPILER_REPRO_OPTIONS = {
+    "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
+    "inductor_accuracy": (
+        INDUCTOR_IMPORT,
+        "compile_fx_inner",
+        "inductor_accuracy_fails",
+    ),
+}
 
 
 def generate_compiler_repro_string(gm, args, *, stable_output=False):
@@ -366,3 +381,52 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         # print(f"Isolated test failed - {file_name}")
         return True
     return False
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                       MINIFIER TOOLS
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+def inductor_fails(fx_g, args, check_str=None):
+    has_cuda = False
+    for arg in args:
+        if arg.is_cuda:
+            has_cuda = True
+            break
+
+    def sync():
+        if has_cuda:
+            # Ensures that segfaults are surfaced
+            torch.cuda.synchronize()
+
+    from torch._inductor.compile_fx import compile_fx_inner
+
+    try:
+        result = fx_g(*args)
+        assert isinstance(result, (tuple, list))
+        assert not any([isinstance(x, (tuple, list)) for x in result])
+    except Exception:
+        return False
+
+    sync()
+
+    try:
+        compile_mod = compile_fx_inner(fx_g, args)
+        compile_mod(args)
+        sync()
+    except Exception as e:
+        if check_str is not None and check_str not in repr(e):
+            return False
+        print(repr(e))
+        return True
+    return False
+
+
+def inductor_accuracy_fails(fx_g, args, check_str=None):
+    from torch._inductor.compile_fx import compile_fx_inner
+
+    return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
+
+
+backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
