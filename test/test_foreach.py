@@ -866,10 +866,10 @@ class TestForeach(TestCase):
 
         sample = list(op.sample_inputs(dtype=dtype, device=device, num_input_tensors=[2], same_size=True))[0]
         sample.input[0].requires_grad_(True)
-        with self.assertRaisesRegex(RuntimeError, "false INTERNAL ASSERT FAILED"):
+        with self.assertRaisesRegex(RuntimeError, "a leaf Variable that requires grad"):
             inplace_op(sample.input, *sample.args)
         sample.input[1].requires_grad_(True)
-        with self.assertRaisesRegex(RuntimeError, "false INTERNAL ASSERT FAILED"):
+        with self.assertRaisesRegex(RuntimeError, "a leaf Variable that requires grad"):
             inplace_op(sample.input, *sample.args)
 
         _tensors = [t.clone().detach().requires_grad_(i == 0) for i, t in enumerate(sample.input)]
