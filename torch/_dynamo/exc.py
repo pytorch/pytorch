@@ -4,7 +4,7 @@ from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
-from .config_utils import config
+from . import config
 
 from .utils import counters, format_bytecode
 
@@ -113,6 +113,10 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class IncorrectUsage(Exception):
+    pass
+
+
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
@@ -175,7 +179,7 @@ def augment_exc_message(exc, msg="\n"):
             "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    old_msg = "" if len(exc.args) == 0 else exc.args[0]
+    old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]
