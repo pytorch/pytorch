@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -496,6 +497,16 @@ class RendezvousTCPTest(TestCase):
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
+    # TODO: Use less hacky means of instantiating stores.
+    # Note, stores accumulate values per test.
+    stores = [
+            dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
+            dist.HashStore(),
+            dist.PrefixStore("prefix", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
+            create_tcp_store(),
+            dist.PrefixStore("prefix", create_tcp_store())
+    ]
+
     @property
     def world_size(self):
         return 2
@@ -504,32 +515,18 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    def _test_wait(self, store):
+    # Iterates over self.stores, keep 5 in sync with len(self.stores).
+    @parametrize("i", range(5))
+    def test_wait(self, i):
+        store = self.stores[i]
+        store.set_timeout(timedelta(seconds=2))
         if dist.get_rank() == 0:
             store.wait(["key1"])
             self.assertEqual(b"value1", store.get("key1"))
         if dist.get_rank() == 1:
             store.set("key1", "value1")
 
-    def test_filestore(self):
-        store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
-        self._test_wait(store)
-
-    def test_hashstore(self):
-        store = dist.HashStore()
-        self._test_wait(store)
-
-    def test_prefix_filestore(self):
-        store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
-        self._test_wait(dist.PrefixStore("prefix", store))
-
-    def test_tcpstore(self):
-        store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=0, world_size=self.world_size, is_master=True)
-        self._test_wait(store)
-
-    def test_prefix_tcpstore(self):
-        store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=0, world_size=self.world_size, is_master=True)
-        self._test_wait(dist.PrefixStore("prefix", store))
+instantiate_parametrized_tests(TestMultiThreadedWait)
 
 if __name__ == "__main__":
     assert (
