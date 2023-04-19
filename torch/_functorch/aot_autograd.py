@@ -1176,7 +1176,6 @@ def create_functionalized_graph(
     with enable_python_dispatcher():
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
 
-
     return fx_g
 
 
@@ -1325,20 +1324,34 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             flat_args = (seed, offset, *flat_args)
         compiled_fw = compiler(fw_module, flat_args)
 
+    # This boxed_call handling happens inside create_runtime_wrapper as well.
+    # However, create_runtime_wrapper does not expect the rng offsets in the
+    # output. So, we have to create another wrapper and take out the offset. As
+    # a result, we have to account for not boxed_call compilers as well.
+    if not hasattr(compiled_fw, "_boxed_call"):
+        compiled_fw = make_boxed_func(compiled_fw)
+
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
-    def rng_functionalization_wrapper(*args):
+    def rng_functionalization_wrapper(args):
+        # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-            out = compiled_fw(seed, offset, *args)
+            new_args = [seed, offset, *args]
+
+
+            out = compiled_fw(new_args)
+
             # Advance the rng state offset
             assert fw_metadata.num_outputs_rng_offset == 1
             new_rng_offset = out[-1]
             CUDARngStateHelper.set_new_offset(new_rng_offset)
+
+            # Remove the offset and return the remaining output
             return out[:-1]
         else:
-            return compiled_fw(*args)
+            return compiled_fw(args)
 
     compiled_fn = create_runtime_wrapper(
         rng_functionalization_wrapper,
