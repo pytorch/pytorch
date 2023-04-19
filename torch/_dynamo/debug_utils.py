@@ -347,6 +347,12 @@ def inductor_fails(fx_g, args, check_str=None):
     return False
 
 
+def inductor_accuracy_fails(fx_g, args, check_str=None):
+    from torch._inductor.compile_fx import compile_fx_inner
+
+    return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
+
+
 def get_minifier_repro_path():
     return os.path.join(minifier_dir(), "minifier_launcher.py")
 
@@ -511,3 +517,8 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
         return False
 
     return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
+
+
+# NB: This lives here because inductor_accuracy_fails relies on it; this
+# is only used by after_aot
+backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
