@@ -35,7 +35,7 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 class Logger;
 
 // Local accumulator type for a single bucket.
-struct BucketAccumulator {
+struct TORCH_API BucketAccumulator {
   std::vector<size_t> indices;
   size_t size = 0;
   size_t size_limit = 0;
@@ -180,7 +180,6 @@ class TORCH_API Reducer {
 
   void remove_autograd_hooks();
 
- protected:
   // Forward declaration.
   struct Bucket;
 
@@ -474,7 +473,6 @@ class TORCH_API Reducer {
   // track a grad is ready for communication or not.
   std::unordered_map<size_t, int> numGradHooksTriggeredMapPerIteration_;
 
- private:
   // reset counting for buckets before backward starts
   void reset_bucket_counting();
   // search unused parameters beore backward starts
