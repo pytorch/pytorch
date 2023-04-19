@@ -1658,7 +1658,7 @@ class DimConstraints:
                 # because this is univariate, the solution is a dynamic (range) constraint
                 self._dynamic_results.add(self._dcp.doprint(solution))
             except NotImplementedError as e:
-                log.warning(f"Failed to reduce inequalities: %s", e)
+                log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr))
 
