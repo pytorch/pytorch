@@ -377,6 +377,21 @@ def smooth_l1_loss_backward(
     )
 
 
+@register_decomposition(aten.smooth_l1_loss_backward.grad_input)
+@pw_cast_for_opmath
+def smooth_l1_loss_backward_out(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int,
+    beta: float,
+    grad_input: Tensor,
+):
+    result = smooth_l1_loss_backward(grad_output, self, target, reduction, beta)
+    _maybe_resize_out(grad_input, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
+
+
 @register_decomposition(aten.huber_loss_backward.default)
 @pw_cast_for_opmath
 def huber_loss_backward(
