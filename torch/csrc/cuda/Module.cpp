@@ -1102,6 +1102,10 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     at::caching::remove_cached_tensor(t);
   });
 
+  m.def("_is_cached_tensor", [](const at::Tensor& t) {
+    return at::caching::is_cached_tensor(t);
+  });
+
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
