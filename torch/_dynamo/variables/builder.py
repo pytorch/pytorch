@@ -793,7 +793,9 @@ class VariableBuilder:
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
-        self.tx.output.add_grapharg(GraphArg(source, value, False, fake_tensor_value))
+        grapharg = GraphArg(source, value, False, fake_tensor_value)
+        tensor_proxy.node.meta["grapharg"] = grapharg
+        self.tx.output.add_symbol_bindings(grapharg)
 
         if type(value) in config.traceable_tensor_subclasses:
             subclass_torch_function__func = value.__torch_function__.__func__
@@ -889,14 +891,12 @@ class VariableBuilder:
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
-                self.tx.output.add_grapharg(
-                    GraphArg(
-                        self.get_source(),
-                        wrapped_value,
-                        isinstance(wrapped_value, torch.Tensor),
-                        fake_tensor_value,
-                        is_tensor=False,
-                    )
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.get_source(),
+                    wrapped_value,
+                    isinstance(wrapped_value, torch.Tensor),
+                    fake_tensor_value,
+                    is_tensor=False,
                 )
             return unspec_var
 
@@ -1088,7 +1088,7 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
+    elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
@@ -1115,7 +1115,7 @@ class TrackedFake:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, TrackedFake):
-            return self.fake == other.fake and self.source.name() == other.source.name()
+            return self.fake is other.fake and self.source.name() == other.source.name()
         return False
 
 
@@ -1126,7 +1126,9 @@ def wrap_to_fake_tensor_and_record(
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(
+            e, is_tensor, guard_source=source.guard_source()
+        )
 
         name = source.name()
 
@@ -1134,18 +1136,18 @@ def wrap_to_fake_tensor_and_record(
         curr_sizes = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
-            # E.g., {} -> {“x”: [2, 4]}
+            # E.g., {} -> {"x": [2, 4]}
             curr_sizes = list(e.size())
         else:
             curr_sizes = tx.output.frame_state[name]
             if curr_sizes is not None:
                 if e.ndim != len(curr_sizes):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                    # E.g. {“x”: [2, 3, 4]} -> {“x”: None}
+                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
                     curr_sizes = None
                 else:
                     # If there is already an entry, and the dim matches, for every size in the frame state which
-                    # disagrees with the current static size, replace it with None. E.g., {“x”: [2, 3]} -> {“x”: [2, None]}
+                    # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
                     for i, dim in enumerate(curr_sizes):
                         if e.size()[i] != dim:
                             curr_sizes[i] = None
