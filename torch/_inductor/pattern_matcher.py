@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
 import torch
+import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
