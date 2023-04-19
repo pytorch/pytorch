@@ -477,7 +477,7 @@ def fractional_max_pool2d_with_indices(
     if output_size is None:
         assert output_ratio is not None
         if len(output_ratio) > 2:
-            raise ValueError("fractional_max_pool2d requires output_ratio must either be a single Int or tuple of Ints.")
+            raise ValueError("fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints.")
         _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
