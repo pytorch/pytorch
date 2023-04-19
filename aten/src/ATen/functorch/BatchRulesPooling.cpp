@@ -11,28 +11,46 @@
 
 namespace at { namespace functorch {
 
+template <typename Func>
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
-max_pool2d_with_indices_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
-    IntArrayRef kernel_size, IntArrayRef stride,
-    IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
+max_pool_with_indices_batch_rule_helper(
+  const Tensor& self, optional<int64_t> self_bdim,
+  IntArrayRef kernel_size, IntArrayRef stride,
+  IntArrayRef padding, IntArrayRef dilation, bool ceil_mode, int64_t n, Func pooling_fn) {
+
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
-  TORCH_INTERNAL_ASSERT(logical_rank == 3 || logical_rank == 4);
+  TORCH_INTERNAL_ASSERT(logical_rank == n + 1 || logical_rank == n + 2);
   // Tensor[B, C, H, W] -> just call max_pool2d
   if (logical_rank == 3) {
     auto self_ = moveBatchDimToFront(self, self_bdim);
-    auto result = at::max_pool2d_with_indices(
+    auto result = pooling_fn(
         self_, kernel_size, stride, padding, dilation, ceil_mode);
     return std::make_tuple(std::move(std::get<0>(result)), 0, std::move(std::get<1>(result)), 0);
   }
   // Tensor[B, N, C, H, W] -> Tensor[B * N, C, H, W]
   auto bdim_size = self.size(*self_bdim);
   auto self_ = reshape_dim_into(*self_bdim, 0, self);
-  auto result = at::max_pool2d_with_indices(
+  auto result = pooling_fn(
       self_, kernel_size, stride, padding, dilation, ceil_mode);
   return std::make_tuple(
       reshape_dim_outof(0, bdim_size, std::get<0>(result)), 0,
       reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0);
+}
+
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+max_pool3d_with_indices_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    IntArrayRef kernel_size, IntArrayRef stride,
+    IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
+    return max_pool_with_indices_batch_rule_helper(self, self_bdim, kernel_size, stride, padding, dilation, ceil_mode, 3, at::max_pool3d_with_indices);
+}
+
+std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+max_pool2d_with_indices_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    IntArrayRef kernel_size, IntArrayRef stride,
+    IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
+    return max_pool_with_indices_batch_rule_helper(self, self_bdim, kernel_size, stride, padding, dilation, ceil_mode, 2, at::max_pool2d_with_indices);
 }
 
 std::tuple<Tensor,optional<int64_t>>
@@ -82,7 +100,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // but fails on CPU due to max_pool1d_cpu not having a derivative.
   VMAP_SUPPORT(max_pool1d, max_pool1d_batch_rule);
   VMAP_SUPPORT(max_pool2d_with_indices, max_pool2d_with_indices_batch_rule);
+  VMAP_SUPPORT(max_pool3d_with_indices, max_pool3d_with_indices_batch_rule);
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, max_pool2d_with_indices_backward, 2);
+  ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(4, max_pool3d_with_indices_backward, 2);
 }
 
 }}
