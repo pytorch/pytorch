@@ -243,61 +243,6 @@ torch._functorch.config.load_config({repr(torch._functorch.config.save_config())
 TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
 
 
-def generate_compiler_repro_string(gm, args, *, stable_output=False):
-    model_str = textwrap.dedent(
-        f"""
-import torch
-from torch import tensor, device
-import torch.fx as fx
-from torch._dynamo.testing import rand_strided
-from math import inf
-from torch.fx.experimental.proxy_tensor import make_fx
-
-{generate_config_string(stable_output=stable_output)}
-
-{TEST_REPLACEABLE_COMMENT}
-{extra_imports}
-
-        """
-    )
-    if not stable_output:
-        model_str += f"# torch version: {torch.version.__version__}\n"
-        if hasattr(torch.version, "cuda"):
-            model_str += f"# torch cuda version: {torch.version.cuda}\n"
-        if hasattr(torch.version, "git_version"):
-            model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-        model_str += _cuda_system_info_comment()
-
-    model_str += NNModuleToString.convert(gm)
-
-    model_str += "args = []\n"
-
-    # get hint shape/stride when dynamic shape enabled
-    def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
-
-    for arg in args:
-        if isinstance(arg, int):
-            model_str += f"args.append({arg})\n"
-        elif isinstance(arg, torch.SymInt):
-            model_str += f"args.append({arg.node.hint})  # {arg}\n"
-        elif isinstance(arg, torch.Tensor):
-            model_str += (
-                "args.append(rand_strided"
-                + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
-                + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
-            )
-        else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
-
-    # TODO: fake may be better for performance here
-    tracing_mode = "real"
-    if config.dynamic_shapes:
-        tracing_mode = "symbolic"
-    model_str += f"mod = make_fx(Repro(), tracing_mode={repr(tracing_mode)})(*args)\n"
-    return model_str
-
-
 INDUCTOR_IMPORT = """
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._dynamo.debug_utils import same_two_models
