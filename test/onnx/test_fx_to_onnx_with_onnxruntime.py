@@ -48,16 +48,6 @@ _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
 _InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
 _OutputsType = Sequence[_NumericType]
-_MainFXTracerClass = dynamo_graph_extractor.DynamoExport
-
-
-@_beartype.beartype
-def _fx_tracer_class_name(fx_tracer_cls: Type[exporter.FXGraphExtractor]):
-    return (
-        "dynamo_export"
-        if fx_tracer_cls == _MainFXTracerClass
-        else fx_tracer_cls.__name__
-    )
 
 
 try:
@@ -191,16 +181,21 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
+
+    export_options = torch.onnx.ExportOptions(
+        opset_version=opset_version,
+        op_level_debug=test_suite.op_level_debug,
+        dynamic_shapes=test_suite.dynamic_shapes,
+    )
+    export_options = torch.onnx._internal.exporter._ResolvedExportOptions(
+        export_options
+    )
+    export_options.fx_tracer = test_suite.fx_tracer()
     export_output = torch.onnx.dynamo_export(
         ref_model,
         *ref_input_args,
         **ref_input_kwargs,
-        export_options=torch.onnx.ExportOptions(
-            opset_version=opset_version,
-            op_level_debug=test_suite.op_level_debug,
-            dynamic_shapes=test_suite.dynamic_shapes,
-            fx_tracer=test_suite.fx_tracer(),
-        ),
+        export_options=export_options,
     )
 
     _compare_pytorch_onnx_with_ort(
@@ -255,7 +250,7 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
     suffixes = []
     for k, v in input_dicts.items():
         if k == "fx_tracer":
-            suffixes.append(_fx_tracer_class_name(v))
+            suffixes.append(v.__name__)
         else:
             suffixes.append(f"{k}_{v}")
     return f"{cls.__name__}_{'_'.join(suffixes)}"
@@ -285,7 +280,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             f"test_report_{self._testMethodName}"
             f"_op_level_debug_{self.op_level_debug}"
             f"_dynamic_axes_{self.dynamic_shapes}"
-            f"_{_fx_tracer_class_name(self.fx_tracer)}"
+            f"_{self.fx_tracer.__name__}"
             ".sarif",
             compress=False,
         )
@@ -953,16 +948,21 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 fake_args = create_args()
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
-
+                options = torch.onnx.ExportOptions(
+                    opset_version=self.opset_version,
+                    dynamic_shapes=self.dynamic_shapes,
+                    op_level_debug=self.op_level_debug,
+                )
+                export_options = torch.onnx._internal.exporter._ResolvedExportOptions(
+                    options
+                )
+                export_options.fx_tracer = (
+                    fx_symbolic_graph_extractor.FXSymbolicTracer()
+                )
                 export_output = torch.onnx.dynamo_export(
                     fake_model,
                     *fake_args,
-                    export_options=torch.onnx.ExportOptions(
-                        opset_version=self.opset_version,
-                        dynamic_shapes=self.dynamic_shapes,
-                        op_level_debug=self.op_level_debug,
-                        fx_tracer=fx_symbolic_graph_extractor.FXSymbolicTracer(),
-                    ),
+                    export_options=export_options,
                 )
 
                 onnx_model = export_output.model_proto

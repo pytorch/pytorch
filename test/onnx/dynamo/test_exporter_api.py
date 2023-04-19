@@ -9,9 +9,9 @@ from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal.exporter import (
     _DEFAULT_OPSET_VERSION,
+    _ResolvedExportOptions,
     ExportOutputSerializer,
     ProtobufExportOutputSerializer,
-    ResolvedExportOptions,
 )
 from torch.onnx._internal.fx import io_adapter
 
@@ -27,11 +27,11 @@ class SampleModel(torch.nn.Module):
 
 class TestExportOptionsAPI(common_utils.TestCase):
     def test_opset_version_default(self):
-        options = ResolvedExportOptions(None)
+        options = _ResolvedExportOptions(None)
         self.assertEquals(options.opset_version, _DEFAULT_OPSET_VERSION)
 
     def test_opset_version_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(opset_version=3000))
+        options = _ResolvedExportOptions(ExportOptions(opset_version=3000))
         self.assertEquals(options.opset_version, 3000)
 
     def test_raise_on_invalid_argument_type(self):
@@ -43,26 +43,26 @@ class TestExportOptionsAPI(common_utils.TestCase):
         with self.assertRaises(expected_exception_type):
             ExportOptions(logger="DEBUG")  # type: ignore[arg-type]
         with self.assertRaises(expected_exception_type):
-            ResolvedExportOptions(options=12)  # type: ignore[arg-type]
+            _ResolvedExportOptions(options=12)  # type: ignore[arg-type]
 
     def test_dynamic_shapes_default(self):
-        options = ResolvedExportOptions(None)
+        options = _ResolvedExportOptions(None)
         self.assertFalse(options.dynamic_shapes)
 
     def test_dynamic_shapes_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(dynamic_shapes=None))
+        options = _ResolvedExportOptions(ExportOptions(dynamic_shapes=None))
         self.assertFalse(options.dynamic_shapes)
-        options = ResolvedExportOptions(ExportOptions(dynamic_shapes=True))
+        options = _ResolvedExportOptions(ExportOptions(dynamic_shapes=True))
         self.assertTrue(options.dynamic_shapes)
-        options = ResolvedExportOptions(ExportOptions(dynamic_shapes=False))
+        options = _ResolvedExportOptions(ExportOptions(dynamic_shapes=False))
         self.assertFalse(options.dynamic_shapes)
 
     def test_logger_default(self):
-        options = ResolvedExportOptions(None)
+        options = _ResolvedExportOptions(None)
         self.assertEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
 
     def test_logger_explicit(self):
-        options = ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
+        options = _ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
         self.assertEquals(options.logger, logging.getLogger())
         self.assertNotEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
 

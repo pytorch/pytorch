@@ -53,9 +53,6 @@ class ExportOptions:
     - ``True``: all input shapes are considered dynamic.
     - ``False``: all input shapes are considered static."""
 
-    fx_tracer: Optional["FXGraphExtractor"] = None
-    """Tracer to extract FX graph from torch.nn.Module model"""
-
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None
     """Dictionary with all ATen operators supported by the exporter."""
 
@@ -74,20 +71,34 @@ class ExportOptions:
         *,
         opset_version: Optional[int] = None,
         dynamic_shapes: Optional[bool] = None,
-        fx_tracer: Optional["FXGraphExtractor"] = None,
         decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
-        self.fx_tracer = fx_tracer
         self.decomposition_table = decomposition_table
         self.op_level_debug = op_level_debug
         self.logger = logger
 
 
-class ResolvedExportOptions:
+class _ResolvedExportOptions(ExportOptions):
+    """Consolidates `ExportOptions` with default values.
+
+    All unspecified options from `ExportOptions` are assigned a default value.
+    This is an internal class and its API may be changed at any time without notice.
+    """
+
+    # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
+    opset_version: int
+    dynamic_shapes: bool
+    decomposition_table: Dict[torch._ops.OpOverload, Callable]
+    op_level_debug: bool
+    logger: logging.Logger
+
+    # Private only attributes
+    fx_tracer: FXGraphExtractor
+
     @_beartype.beartype
     def __init__(self, options: Optional[ExportOptions]):
         if options is None:
@@ -110,9 +121,8 @@ class ResolvedExportOptions:
             function_dispatcher,
         )
 
-        self.fx_tracer = resolve(
-            options.fx_tracer, dynamo_graph_extractor.DynamoOptimize()
-        )
+        self.fx_tracer = dynamo_graph_extractor.DynamoOptimize()
+
         self.decomposition_table = resolve(
             options.decomposition_table,
             function_dispatcher._DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE,
@@ -335,7 +345,7 @@ class FXGraphExtractor(abc.ABC):
     @_beartype.beartype
     def export_fx_to_onnx(
         self,
-        options: ResolvedExportOptions,
+        options: _ResolvedExportOptions,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
@@ -436,7 +446,7 @@ class FXGraphExtractor(abc.ABC):
     @abc.abstractmethod
     def generate_fx(
         self,
-        options: ResolvedExportOptions,
+        options: _ResolvedExportOptions,
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
@@ -453,15 +463,15 @@ class Exporter:
     @_beartype.beartype
     def __init__(
         self,
-        options: Union[ExportOptions, ResolvedExportOptions],
+        options: Union[ExportOptions, _ResolvedExportOptions],
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
-        if isinstance(options, ExportOptions):
-            self.options = ResolvedExportOptions(options)
-        elif isinstance(options, ResolvedExportOptions):
+        if isinstance(options, _ResolvedExportOptions):
             self.options = options
+        elif isinstance(options, ExportOptions):
+            self.options = _ResolvedExportOptions(options)
         assert self.options is not None
 
         self.model = model
@@ -497,7 +507,7 @@ class UnsatisfiedDependencyError(RuntimeError):
 
 
 @_beartype.beartype
-def _assert_dependencies(export_options: ResolvedExportOptions):
+def _assert_dependencies(export_options: _ResolvedExportOptions):
     logger = export_options.logger
     opset_version = export_options.opset_version
 
@@ -573,7 +583,11 @@ def dynamo_export(
         ).save("my_model.onnx")
     """
 
-    resolved_export_options = ResolvedExportOptions(export_options)
+    resolved_export_options = (
+        export_options
+        if isinstance(export_options, _ResolvedExportOptions)
+        else _ResolvedExportOptions(export_options)
+    )
 
     _assert_dependencies(resolved_export_options)
 
