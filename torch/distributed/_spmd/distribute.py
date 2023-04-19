@@ -362,9 +362,12 @@ def _get_dtensor_dispatch_graph(
                 )
                 return None
             else:
-                logger.warn(
-                    f"Assuming using local_value from SymInt for {op_overload}"
-                    f"is mathematically correct. Full args are {args}."
+                assert isinstance(logger, logging.Logger)
+                logger.warning(
+                    "Assuming using local_value from SymInt for %s"
+                    "is mathematically correct. Full args are %s.",
+                    op_overload,
+                    args,
                 )
 
         if node.target == aten.view.default:
