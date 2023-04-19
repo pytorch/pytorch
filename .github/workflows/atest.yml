@@ -28,7 +28,7 @@ jobs:
       #     git tag --points-at ${GH_SHA}
       - name: "print GH_REF"
         run: |
-          echo ${PR_NUMBER}
+          echo ${GH_REF}
       - name: "print PR_NUMBER"
         run: |
           echo ${PR_NUMBER}
