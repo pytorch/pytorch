@@ -2703,9 +2703,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 5)
 
-        gm, _ = torch._dynamo.export(
-            f, torch.randn(4, 5), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
     @torch._dynamo.config.patch("specialize_int", False)

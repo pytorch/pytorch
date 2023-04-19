@@ -1642,9 +1642,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
 
-        gm_aten_mode, _ = torch._dynamo.export(
-            f, torch.randn(4, 5), aten_graph=True
-        )
+        gm_aten_mode, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
 
         inp = torch.randn(6, 7)
         self.assertEqual(gm_aten_mode(inp).shape, f(inp).shape)
@@ -1696,9 +1694,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return x[slice(None, None, None)]
 
-        gm, _ = torch._dynamo.export(
-            f, torch.randn(4, 5), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
 
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
@@ -1722,9 +1718,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch.randn(4, 4),
             torch.randn(4, 4),
         )
-        gm, _ = torch._dynamo.export(
-            model, *inp, aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(model, *inp, aten_graph=True)
 
         gm.print_readable()
 
@@ -2117,9 +2111,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             a = torch.scalar_tensor(x.shape[0] > 4)
             return x.sin().sum() + a.sum()
 
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(6, 4), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True)
         self.assertEqual(gm(torch.ones(3, 4)), f(torch.ones(3, 4)))
 
     @config.patch(dynamic_shapes=True)
@@ -2251,9 +2243,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         # In export, int & float in forward should always be specialized
         with config.patch(dynamic_shapes=True):
-            gm, _ = torch._dynamo.export(
-                mod, inp, aten_graph=True
-            )
+            gm, _ = torch._dynamo.export(mod, inp, aten_graph=True)
             count = 0
             for node in gm.graph.nodes:
                 if node.op == "placeholder":
@@ -2355,9 +2345,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Dynamic control flow is not supported at the moment",
         ):
-            gm, _ = torch._dynamo.export(
-                f, torch.randn(5, 6), aten_graph=True
-            )
+            gm, _ = torch._dynamo.export(f, torch.randn(5, 6), aten_graph=True)
 
     @config.patch(assume_static_by_default=True, dynamic_shapes=True)
     def test_propagate_assume_static_by_default(self):
@@ -2366,9 +2354,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return x.sin()
             return x.cos()
 
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(6, 4), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True)
 
         for node in gm.graph.nodes:
             val = node.meta.get("val", None)
@@ -2392,17 +2378,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.sum() + type(a).func().sum()
 
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Can't call type()"):
-            gm, _ = torch._dynamo.export(
-                f, torch.ones(6, 4), aten_graph=True
-            )
+            gm, _ = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True)
 
         def f_correct(x):
             a = A()
             return x.sum() + a.__class__.func().sum()
 
-        gm, _ = torch._dynamo.export(
-            f_correct, torch.ones(6, 4), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f_correct, torch.ones(6, 4), aten_graph=True)
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
@@ -2415,13 +2397,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x[: math.floor(x.shape[0] / 2)]
 
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Calling round()"):
-            gm, _ = torch._dynamo.export(
-                f, torch.ones(6, 4), aten_graph=True
-            )
+            gm, _ = torch._dynamo.export(f, torch.ones(6, 4), aten_graph=True)
 
-        gm, _ = torch._dynamo.export(
-            f_correct, torch.ones(6, 4), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f_correct, torch.ones(6, 4), aten_graph=True)
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
@@ -2489,9 +2467,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def f(x, y):
             return x.size(0) in y
 
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(2), torch.ones(3), aten_graph=True
-        )
+        gm, _ = torch._dynamo.export(f, torch.ones(2), torch.ones(3), aten_graph=True)
 
         true_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(5))
         false_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(2))
