@@ -108,10 +108,15 @@ def prepare(
             named_modules = dict(model.named_modules(remove_duplicate=False))
             _maybe_insert_observers_before_graph_output(node, model, named_modules, model.graph)
 
-    model = GraphModule(model, model.graph)
+    prepared_model = GraphModule(model, model.graph)
+    # preserve the metadata and type of the original model
+    # TODO: this can be an assert if fx sybmolic tracing also has this by default
+    if hasattr(model, "meta"):
+        prepared_model.meta.update(model.meta)
+    prepared_model.__class__ = type(model)
 
     _save_state(
-        model,
+        prepared_model,
         {},  # node_name_to_qconfig
         node_name_to_scope,
         PrepareCustomConfig(),
@@ -120,4 +125,4 @@ def prepare(
         is_qat,
         set()  # observed_node_names
     )
-    return model
+    return prepared_model
