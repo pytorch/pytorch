@@ -4,11 +4,9 @@ import sys
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp._common_utils import (
-    _get_fully_sharded_submodule_names,
-    _get_managed_param_names,
+from torch.distributed.fsdp._debug_utils import (
+    _get_sharded_module_tree_with_module_name_to_fqns,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import CompositeModel, UnitModule
@@ -38,27 +36,24 @@ class TestUtils(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
-    def test_get_fully_sharded_submodule_names(self):
+    def test_get_sharded_module_tree_with_module_name_to_fqns(self):
         model = CompositeModel(torch.device("cuda"))
         fully_shard(
             model,
             policy=ModuleWrapPolicy({UnitModule}),
         )
-        sharded_submodule_names = _get_fully_sharded_submodule_names(model)
+        (
+            sharded_tree_info,
+            sharded_module_name_to_fqns,
+        ) = _get_sharded_module_tree_with_module_name_to_fqns(model)
+        if self.rank == 0:
+            print(sharded_tree_info)
         self.assertEqual(
-            sharded_submodule_names, ["UnitModule", "UnitModule", "CompositeModel"]
+            list(sharded_module_name_to_fqns.keys()),
+            ["[CompositeModel]", "u1[UnitModule]", "u2[UnitModule]"],
         )
-
-    @skip_if_lt_x_gpu(2)
-    def test_get_managed_param_names(self):
-        model = CompositeModel(torch.device("cuda"))
-        fully_shard(
-            model,
-            policy=ModuleWrapPolicy({UnitModule}),
-        )
-        managed_param_names = _get_managed_param_names(model)
         self.assertEqual(
-            managed_param_names,
+            list(sharded_module_name_to_fqns.values()),
             [
                 ["l1.weight", "l1.bias", "l2.weight", "l2.bias"],
                 [
@@ -79,6 +74,45 @@ class TestUtils(FSDPTest):
                 ],
             ],
         )
+        # Test nested fully_shard
+        new_model = CompositeModel(torch.device("cuda"))
+        fully_shard(new_model.u1)
+        fully_shard(new_model)
+        (
+            sharded_tree_info,
+            sharded_module_name_to_fqns,
+        ) = _get_sharded_module_tree_with_module_name_to_fqns(new_model)
+        if self.rank == 0:
+            print(sharded_tree_info)
+            self.assertEqual(
+                list(sharded_module_name_to_fqns.keys()),
+                ["[CompositeModel]", "u1[UnitModule]"],
+            )
+            self.assertEqual(
+                list(sharded_module_name_to_fqns.values()),
+                [
+                    [
+                        "l1.weight",
+                        "l1.bias",
+                        "u2.l1.weight",
+                        "u2.l1.bias",
+                        "u2.seq.1.weight",
+                        "u2.seq.1.bias",
+                        "u2.l2.weight",
+                        "u2.l2.bias",
+                        "l2.weight",
+                        "l2.bias",
+                    ],
+                    [
+                        "u1.l1.weight",
+                        "u1.l1.bias",
+                        "u1.seq.1.weight",
+                        "u1.seq.1.bias",
+                        "u1.l2.weight",
+                        "u1.l2.bias",
+                    ],
+                ],
+            )
 
 
 if __name__ == "__main__":

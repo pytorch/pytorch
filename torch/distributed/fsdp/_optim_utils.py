@@ -1096,7 +1096,7 @@ def _get_param_id_to_param_from_optim_input(
 
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
-    def module_fn(module, prefix, flat_param_to_fqn):
+    def module_fn(module, prefix, tree_level, flat_param_to_fqn):
         for param_name, param in module.named_parameters(recurse=False):
             if type(param) is not FlatParameter:
                 continue
@@ -1529,7 +1529,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     to unique parameters.
     """
 
-    def module_fn(module, prefix, fqn_to_param_info):
+    def module_fn(module, prefix, tree_level, fqn_to_param_info):
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         if fsdp_state is None:
             return

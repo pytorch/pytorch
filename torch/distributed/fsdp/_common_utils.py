@@ -89,21 +89,6 @@ def _get_module_fsdp_state_if_fully_sharded_module(
     return None
 
 
-# Get all the sharded submodule names under the 'root_module' that is usually passed to 'fully_shard()'
-def _get_fully_sharded_submodule_names(module: nn.Module) -> List[str]:
-    state = _get_module_fsdp_state(module)
-    return state._fully_sharded_submodule_names if state is not None else []
-
-
-# Get all the param names that are managed by sharded submodules under the 'root_module' that is usually
-# passed to 'fully_shard()'
-def _get_managed_param_names(module: nn.Module) -> List[List[str]]:
-    state = _get_module_fsdp_state(module)
-    flat_param_to_fqns = _get_handles_to_fqns(module)
-    managed_param_names = list(flat_param_to_fqns.values())
-    return managed_param_names
-
-
 class TrainingState(Enum):
     """
     An enum that indicates the state of a ``FullyShardedDataParallel` instance.
@@ -201,47 +186,6 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
-def _get_handles_to_fqns(
-    model: torch.nn.Module,
-) -> Dict[nn.Parameter, List[str]]:
-    """
-    It is used for composable fully_shard() code path, constructs a mapping from
-    flat_param in the FlatParamHandle to a list of its FQNs. Each
-    ``FlatParameter`` maps to a list of its original parameter FQNs, which may
-    have length greater than one. All FQNs are prefixed starting from
-    ``model``.
-
-    Args:
-        model (torch.nn.Module): Root module (which may or may not be passed to
-                                 composable `fully_shard()`).
-    """
-
-    def module_fn(module, prefix, param_to_fqns):
-        state = _get_module_fsdp_state(module)
-        if state is None:
-            return
-        handles = state._fully_sharded_module_to_handles.get(module, [])
-        for handle in handles:
-            param = handle.flat_param
-            assert type(param) is flat_param_file.FlatParameter
-            global_fqns = [
-                clean_tensor_name(prefix + name) for name in param._fqns
-            ]  # prefixed from the top level `model` (i.e. including `prefix`)
-            param_to_fqns[param] = global_fqns
-
-    def return_fn(param_to_fqns):
-        return param_to_fqns
-
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
-    return _apply_to_modules(
-        model,
-        module_fn,
-        return_fn,
-        [key for key, _ in model.named_parameters()],
-        param_to_unflat_param_names,
-    )
-
-
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
@@ -262,7 +206,7 @@ def _get_param_to_fqns(
             includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, param_to_fqns):
+    def module_fn(module, prefix, tree_level, param_to_fqns):
         for param_name, param in module.named_parameters(recurse=False):
             local_fqns = (
                 param._fqns
@@ -330,13 +274,14 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
+    def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
+        module_fn(module, prefix, tree_level, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
             if submodule is None:
                 continue
             new_prefix = prefix + submodule_name + "."
+            new_tree_level = tree_level + 1
             if filter_fqns is not None:
                 for fqn in filter_fqns:
                     if fqn.startswith(new_prefix):
@@ -366,9 +311,9 @@ def _apply_to_modules(
                             f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
-            f(submodule, new_prefix, *args, **kwargs)
+            f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
-    f(root_module, "", *args, **kwargs)
+    f(root_module, "", 0, *args, **kwargs)
     return return_fn(*args, **kwargs)
 
 

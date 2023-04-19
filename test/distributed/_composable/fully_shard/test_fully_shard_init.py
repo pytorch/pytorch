@@ -7,7 +7,7 @@ from typing import Optional
 import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
-from torch import nn
+import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened, clean_tensor_name
