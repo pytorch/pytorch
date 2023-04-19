@@ -4381,6 +4381,7 @@ def make_lazy_class(cls):
 
         def inner_wrapper(name):
             use_operator = basename not in ("bool", "int")
+
             def wrapped(self, *args, **kwargs):
                 if self._cb is not None:
                     self._value = self._cb()
