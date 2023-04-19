@@ -2376,7 +2376,7 @@ class ShapeEnv:
             concrete_val = sympy.sympify(hint)
 
         if self.frozen:
-            log.warning(f"Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
             self._maybe_guard_eq(expr, bool(concrete_val))
