@@ -89,7 +89,7 @@ if RUN_CPU:
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
             True,
-        ),        
+        ),
         BaseTest(
             "test_conv2d_unary",
             "",
