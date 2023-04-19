@@ -521,9 +521,10 @@ inline bool check_head_dim_gt64_and_sm_ge86(sdp_params params, bool debug) {
   // Memory Efficient Attention is throwing a cuda illegal memory error
   // on sm86 or newer when head_dim is greater than 64.
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm86_or_newer =
-      ((dprops->major == 8) && (dprops->minor >= 6)) || (dprops->major > 8);
-  if (is_sm86_or_newer && params.query.sym_size(-1) > 64) {
+  bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
+  // Categorically disable sm90 as well. Will want to fix this once we have H100s available for testing.
+  bool is_sm86_or_newer = is_sm86_or_newer || (dprops->major > 8);
+  if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
     if (debug) {
       TORCH_WARN(
           "Memory Efficient Attention does not currently support head_dim greater than 64 on sm86 or newer");
