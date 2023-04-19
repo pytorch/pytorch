@@ -429,8 +429,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(rrelu_with_noise);
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
-
-
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_xlogy, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
