@@ -55,8 +55,8 @@ class TestFunctionalizationRngOps(TestCase):
             ref.sum().backward()
 
             torch.cuda.manual_seed(seed)
-            aot_fn = aot_function(fn, fw_compiler=functools.partial(count_philox_rand, freq=2), bw_compiler=nop, dynamic=True)
-            res = aot_fn(x)
+            opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True)
+            res = opt_fn(x)
             res.sum().backward()
 
             self.assertEqual(ref, res)

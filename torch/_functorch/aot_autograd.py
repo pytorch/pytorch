@@ -2501,13 +2501,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
+            adjusted_flat_args = flat_args
             if config.functionalize_rng_ops:
                 # Update example inputs for the fw_compiler
                 fake_mode = detect_fake_mode()
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-                flat_args = (seed, offset, *flat_args)
+                adjust_flat_args = (seed, offset, *flat_args)
             compiled_fw_func = aot_config.fw_compiler(
-                fw_module, flat_args
+                fw_module, adjusted_flat_args
             )
 
     class CompiledFunction(torch.autograd.Function):
