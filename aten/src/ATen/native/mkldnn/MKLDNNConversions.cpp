@@ -151,10 +151,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  if (self.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(self.scalar_type());
 
   auto w = itensor_from_mkldnn(self);
 
