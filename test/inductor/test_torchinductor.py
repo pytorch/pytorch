@@ -770,6 +770,7 @@ class CommonTemplate:
             return a.prod(0), a.prod(1), a.prod()
 
         self.common(fn, (torch.rand((10, 10)),))
+        self.common(fn, (torch.rand((1, 2050)),))
 
     def test_unroll_small_reduction(self):
         def fn(x):

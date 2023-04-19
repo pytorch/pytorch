@@ -1191,7 +1191,7 @@ class TritonKernel(Kernel):
                     ]
                 )
             else:
-                self.suffix.writeline(f"{result_var} = {final_reduction(masked_value)}")
+                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
