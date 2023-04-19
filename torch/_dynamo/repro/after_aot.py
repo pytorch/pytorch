@@ -339,7 +339,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         fd.write(
             textwrap.dedent(
                 f"""
-                from torch._dynamo.debug_utils import {fail_fn}
+                from torch._dynamo.repro.after_aot import {fail_fn}
                 """
             )
         )
