@@ -1777,15 +1777,18 @@ def _scatter_orig_param_optim_state_dict(
     group: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    TODO
-    This function derived from ``_flatten_optim_state_dict``.
-
+    Derived from ``_flatten_optim_state_dict``. Should be called synchronously by all ranks.
+    Broadcast no_tenosr_osd with _PosDimTensorInfo, and call ``_scatter_orig_param_state``
+    to shard and scatter FSDP parameters' states. Non-FSDP parameters' states are directly broadcasted.
 
     Returns:
         Dict[str, Any]: The sharded optimizer state dict.
     """
     rank = dist.get_rank(group)
     world_size = dist.get_world_size(group)
+    broadcast_device = (
+        torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    )
     unflat_osd = optim_state_dict
     if rank == 0 and ("state" not in unflat_osd or "param_groups" not in unflat_osd):
         raise ValueError(
@@ -1793,8 +1796,26 @@ def _scatter_orig_param_optim_state_dict(
             '"param_groups" to be a valid optimizer state dict'
         )
 
-    # Broadcast emtpy osd that the state keys and param groups reserved.
-    # TODO
+    # Broadcast no_tenosr_osd where positive-dimension tensors are _PosDimTensorInfo.
+    # Ensure all ranks to enter ``_scatter_orig_param_state`` and commuicate at the same time.
+    if rank == 0:
+        no_tensor_osd: Dict[str, Any] = {"state": {}}
+        for key, param_state in unflat_osd["state"].items():
+            no_tensor_osd["state"][key] = {}
+            for state_name, value in sorted_items(param_state):
+                is_pos_dim_tensor_state = torch.is_tensor(value) and value.dim() > 0
+                if not is_pos_dim_tensor_state:
+                    no_tensor_osd["state"][key][state_name] = value
+                    continue
+                info = _PosDimTensorInfo(value.shape, value.dtype)
+                no_tensor_osd["state"][key][state_name] = info
+        no_tensor_osd["param_groups"] = unflat_osd["param_groups"]
+    obj_list = [no_tensor_osd] if rank == 0 else [None]
+    dist.broadcast_object_list(obj_list, src=0, group=group)
+    no_tensor_osd = obj_list[0]  # type: ignore[assignment]
+    assert no_tensor_osd is not None
+    if rank != 0:
+        unflat_osd = no_tensor_osd
 
     param_to_fqns = _get_param_to_fqns(model)
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
@@ -1821,10 +1842,14 @@ def _scatter_orig_param_optim_state_dict(
         all_state_keys.difference_update(fqns)
         if fqn in fqn_to_fsdp_param_info:
             fsdp_param_info = fqn_to_fsdp_param_info[fqn]
-            flat_state = _shard_orig_param_state(  # TODO
+            flat_state = _scatter_orig_param_state(
                 fsdp_param_info,
                 fqn,
                 unflat_osd_state[fqn],
+                rank,
+                world_size,
+                group,
+                broadcast_device,
             )
             key = _OptimStateKey(tuple(fqns), True)
             # Only include non-empty states since as expected by
@@ -1842,7 +1867,29 @@ def _scatter_orig_param_optim_state_dict(
         else:  # do not flatten non-FSDP parameters' states
             assert len(fqns) == 1
             key = _OptimStateKey(tuple(fqns), False)
-            flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
+            # Broadcast the pos dim tensor
+            non_FSDP_optim_state: Dict[str, Any] = {}
+            for state_name, value in sorted_items(unflat_osd_state[fqn]):
+                # positive-dimension tensor value is a _PosDimTensorInfo
+                # on non-zero-rank, or indeed a tensor on rank0
+                is_pos_dim_tensor_state = (
+                    (torch.is_tensor(value) and value.dim() > 0)
+                    if rank == 0
+                    else isinstance(value, _PosDimTensorInfo)
+                )
+                if is_pos_dim_tensor_state:
+                    if rank == 0:
+                        broadcast_tensor = value.to(broadcast_device)
+                    else:
+                        broadcast_tensor = torch.zeros(
+                            value.shape,
+                            requires_grad=False,
+                            dtype=value.dtype,
+                            device=broadcast_device,
+                        )
+                    dist.broadcast(broadcast_tensor, src=0, group=group)
+                    non_FSDP_optim_state[state_name] = broadcast_tensor
+            flat_osd_state[key] = non_FSDP_optim_state
 
     # Handle user-defined state, states that are not associated with parameters.
     for key in all_state_keys:
@@ -1852,3 +1899,79 @@ def _scatter_orig_param_optim_state_dict(
     # rekeyed later according to the target rank's optimizer
     flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
     return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
+
+
+def _scatter_orig_param_state(
+    fsdp_param_info: FSDPParamInfo,
+    fqn: str,
+    optim_state: Dict[str, Any],
+    rank: int,
+    world_size: int,
+    group,
+    broadcast_device: torch.device,
+) -> Dict[str, Any]:
+    """
+    Derived from ``_shard_orig_param_state``. Should be called synchronously by all ranks.
+    Broadcast the _shard_param_infos to shard positive-dimension tensor and broadcast back.
+    This API should only be used when ``use_orig_params`` is True.
+    """
+    if rank != 0:
+        non_zero_rank_optim_state: Dict[str, Any] = {}
+
+    flat_param = fsdp_param_info.handle.flat_param
+    param_idx = fsdp_param_info.param_indices[fqn]
+    shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
+
+    for target_rank in range(1, world_size):
+        # Broadcast shard_param_info from non-zero-ranks
+        obj_list = [shard_param_info] if rank == target_rank else [None]
+        dist.broadcast_object_list(obj_list, src=target_rank, group=group)
+        target_shard_param_info = obj_list[0]  # type: ignore[assignment]
+        assert target_shard_param_info is not None
+        if not target_shard_param_info.in_shard:
+            continue
+        # Broadcast state back from rank0 to target rank if needed
+        intra_param_start_idx = target_shard_param_info.intra_param_start_idx
+        intra_param_end_idx = target_shard_param_info.intra_param_end_idx
+        for state_name, value in sorted_items(optim_state):
+            # positive-dimension tensor value is a _PosDimTensorInfo
+            # on non-zero-rank, or indeed a tensor on rank0
+            is_pos_dim_tensor_state = (
+                (torch.is_tensor(value) and value.dim() > 0)
+                if rank == 0
+                else isinstance(value, _PosDimTensorInfo)
+            )
+            if is_pos_dim_tensor_state:
+                if rank == 0:
+                    sharded_tensor = value.flatten()[
+                        intra_param_start_idx : intra_param_end_idx + 1
+                    ].to(broadcast_device)
+                else:
+                    sharded_tensor = torch.zeros(
+                        (intra_param_end_idx + 1 - intra_param_start_idx,),
+                        requires_grad=False,
+                        dtype=value.dtype,
+                        device=broadcast_device,
+                    )
+                dist.broadcast(sharded_tensor, src=0, group=group)
+                # Only keep the shard on the target rank and keep it on the broadcast
+                # device, which is typically GPU
+                if rank == target_rank:
+                    non_zero_rank_optim_state[state_name] = sharded_tensor
+                else:
+                    del sharded_tensor
+
+    # Lastly, shard on rank 0
+    if rank != 0:
+        return non_zero_rank_optim_state
+    if not shard_param_info.in_shard:
+        return {}
+    # Flatten and shard the state.
+    new_optim_state: Dict[str, Any] = {}
+    intra_param_start_idx = shard_param_info.intra_param_start_idx
+    intra_param_end_idx = shard_param_info.intra_param_end_idx
+    for state_name, value in optim_state.items():
+        if torch.is_tensor(value) and value.dim() > 0:
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
+        new_optim_state[state_name] = value
+    return new_optim_state
