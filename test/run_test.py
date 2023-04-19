@@ -553,8 +553,13 @@ def run_test(
         )
 
         # Pytest return code 5 means no test is collected. This is needed
-        # here as we use pytest directly when running C++ tests
-        ret_code = 0 if ret_code == 5 else ret_code
+        # here as we use pytest directly when running C++ tests. Return
+        # code 4 is ok too as this happens when the binary is not a C++
+        # test executable. All binary files under build/bin that are not
+        # C++ test at the time of this writing have been excluded, but we
+        # can accept code 4 too just in case a new non-test binary file
+        # comes up in the future.
+        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
