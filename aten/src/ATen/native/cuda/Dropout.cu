@@ -7,6 +7,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/native/cuda/DistributionTemplates.h>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
@@ -342,13 +343,11 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
   if (nelem==0) return std::tuple<Tensor,Tensor>(self.clone(), mask);
 
   Tensor ret = at::empty_like(self);
-  const int64_t block_size = 256;
-  unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
-  dim3 dim_block(block_size);
-  dim3 grid((nelem + block_size -1)/block_size);
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-//number of times random will be generated per thread, to offset philox counter in thc random state
-  int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
+  auto execution_policy = at::native::calc_execution_policy(nelem);
+  auto counter_offset = std::get<0>(execution_policy);
+  auto grid = std::get<1>(execution_policy);
+  auto dim_block = std::get<2>(execution_policy);
+
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
