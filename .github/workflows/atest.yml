@@ -20,15 +20,15 @@ jobs:
       GH_SHA: ${{ github.sha }}
       GH_REF: ${{ github.ref_name }}
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      # - name: Checkout PyTorch
+      #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
-      - name: "print stuff"
-        run: |
-          git tag --points-at ${GH_SHA}
+      # - name: "print stuff"
+      #   run: |
+      #     git tag --points-at ${GH_SHA}
       - name: "print GH_REF"
         run: |
-          echo ${GH_REF}
+          echo ${PR_NUMBER}
       - name: "print PR_NUMBER"
         run: |
           echo ${PR_NUMBER}
