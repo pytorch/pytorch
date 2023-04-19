@@ -3610,7 +3610,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         work.wait()
 
 @exception_handler
-def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
+def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None, device=None):
 
     """
     Synchronizes all processes.
@@ -3622,8 +3622,9 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids.
-                                      Valid only for NCCL backend.
+        device_ids ([int], optional): List of device/GPU ids. Valid only
+            for NCCL backend when argument device is None.
+        device (device or string): the device to barrier.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -3634,10 +3635,13 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         return
 
     opts = BarrierOptions()
+    if device:
+        opts.device = torch.device(device)
     if device_ids is not None:
-        if get_backend(group) != Backend.NCCL:
+        if get_backend(group) != Backend.NCCL and device is None:
             raise RuntimeError(
-                f"Function argument device_ids not supported for the selected backend {get_backend(group)}"
+                f"Function argument device_ids not supported for the selected backend {get_backend(group)} " +
+                "when argument device is None. Please add argument device to support device_id."
             )
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
