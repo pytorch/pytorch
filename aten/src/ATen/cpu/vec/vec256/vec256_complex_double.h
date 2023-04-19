@@ -120,13 +120,8 @@ public:
     auto val_2 = _mm256_mul_pd(values, values);     // a*a     b*b
     return _mm256_hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
-  __m256d abs_() const {
-    return _mm256_sqrt_pd(abs_2_());                // abs     abs
-  }
   Vectorized<c10::complex<double>> abs() const {
-    const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
-                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
-    return _mm256_and_pd(abs_(), real_mask);        // abs     0
+    return Sleef_hypotd4_u05(real_(), imag().values);
   }
   __m256d angle_() const {
     //angle = atan2(b/a)
@@ -140,14 +135,15 @@ public:
     return _mm256_and_pd(angle, real_mask);         // angle    0
   }
   Vectorized<c10::complex<double>> sgn() const {
-    auto abs = abs_();
+    auto abs_zero = abs().values;             // abs 0
+    auto abs = _mm256_movedup_pd(abs_zero);  // abs abs
+
     auto zero = _mm256_setzero_pd();
     auto mask = _mm256_cmp_pd(abs, zero, _CMP_EQ_OQ);
-    auto abs_val = Vectorized(abs);
 
-    auto div = values / abs_val.values;       // x / abs(x)
+    auto div = values / abs;
 
-    return blendv(div, zero, mask);
+    return _mm256_blendv_pd(div, zero, mask);
   }
   __m256d real_() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,

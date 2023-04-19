@@ -679,15 +679,8 @@ public:
     auto ret = hadd_ps(val_2, val_2);               // a*a+b*b a*a+b*b
     return ret;
   }
-  __m512 abs_() const {
-    return _mm512_sqrt_ps(abs_2_());                // abs     abs
-  }
   Vectorized<c10::complex<float>> abs() const {
-    const __m512 real_mask = _mm512_castsi512_ps(_mm512_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
-                                                                   0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
-                                                                   0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
-                                                                   0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));
-    return _mm512_and_ps(abs_(), real_mask);        // abs     0
+    return Sleef_hypotf16_u05(real_(), imag().values);
   }
   __m512 angle_() const {
     //angle = atan2(b/a)
@@ -703,12 +696,13 @@ public:
     return _mm512_and_ps(angle, real_mask);         // angle    0
   }
   Vectorized<c10::complex<float>> sgn() const {
-    auto abs = abs_();
+    auto abs_zero = abs().values;             // abs 0
+    auto abs = _mm512_moveldup_ps(abs_zero);  // abs abs
+
     auto zero = _mm512_setzero_ps();
     auto mask = _mm512_cmp_ps_mask(abs, zero, _CMP_EQ_OQ);
-    auto abs_val = Vectorized(abs);
 
-    auto div = values / abs_val.values;       // x / abs(x)
+    auto div = values / abs;
 
     return _mm512_mask_blend_ps(mask, div, zero);
   }

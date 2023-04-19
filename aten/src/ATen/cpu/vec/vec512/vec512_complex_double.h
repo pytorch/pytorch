@@ -173,15 +173,8 @@ public:
     auto val_2 = _mm512_mul_pd(values, values);     // a*a     b*b
     return hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
-  __m512d abs_() const {
-    return _mm512_sqrt_pd(abs_2_());                // abs     abs
-  }
   Vectorized<c10::complex<double>> abs() const {
-    const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
-                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
-                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
-                                                                    0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
-    return _mm512_and_pd(abs_(), real_mask);        // abs     0
+    return Sleef_hypotd8_u05(real_(), imag().values);
   }
   __m512d angle_() const {
     //angle = atan2(b/a)
@@ -197,16 +190,15 @@ public:
     return _mm512_and_pd(angle, real_mask);         // angle    0
   }
   Vectorized<c10::complex<double>> sgn() const {
-    auto abs = abs_();
+    auto abs_zero = abs().values;             // abs 0
+    auto abs = _mm512_movedup_pd(abs_zero);   // abs abs
+
     auto zero = _mm512_setzero_pd();
     auto mask = _mm512_cmp_pd_mask(abs, zero, _CMP_EQ_OQ);
-    auto mask_vec = _mm512_mask_set1_epi64(_mm512_castpd_si512(zero), mask,
-                                          0xFFFFFFFFFFFFFFFF);
-    auto abs_val = Vectorized(abs);
 
-    auto div = values / abs_val.values;       // x / abs(x)
+    auto div = values / abs;
 
-    return blendv(div, zero, _mm512_castsi512_pd(mask_vec));
+    return _mm512_mask_blend_pd(mask, div, zero);
   }
   __m512d real_() const {
     const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,

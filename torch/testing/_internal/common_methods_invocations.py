@@ -8884,10 +8884,6 @@ op_db: List[OpInfo] = [
                                     'test_inplace_gradgrad', dtypes=(torch.cdouble,)),
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), 'TestFwdGradients',
                                     'test_inplace_forward_mode_AD', dtypes=(torch.cdouble,)),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestSparseUnaryUfuncs",
                                     "test_inplace", dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
                        # Reference: https://github.com/pytorch/pytorch/issues/49224
@@ -18077,18 +18073,7 @@ python_ref_db = [
     #
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
-        torch_opinfo_name="abs",
-        skips=(
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-        )
-    ),
+        torch_opinfo_name="abs"),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
         torch_opinfo_name="acos",
