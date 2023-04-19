@@ -43,6 +43,7 @@ from .side_effects import SideEffects
 from .source import (
     ConstantSource,
     DeterministicAlgorithmsSource,
+    DefaultDeviceSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
@@ -228,6 +229,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.guards.add(
             DeterministicAlgorithmsSource().make_guard(
                 GuardBuilder.DETERMINISTIC_ALGORITHMS
+            )
+        )
+
+        self.guards.add(
+            DefaultDeviceSource().make_guard(
+                GuardBuilder.DEFAULT_DEVICE
             )
         )
 

@@ -3036,6 +3036,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
 
+    @requires_cuda()
+    def test_guard_default_device(self):
+        try:
+            torch.set_default_device('cuda')
+
+            counter = torch._dynamo.testing.CompileCounter()
+
+            @torch._dynamo.optimize(counter)
+            def f():
+                x = torch.randn(3)
+                return x * 2
+
+            self.assertEqual(f().device.type, 'cuda')
+            self.assertEqual(counter.frame_count, 1)
+
+            torch.set_default_device('cpu')
+
+            self.assertEqual(f().device.type, 'cpu')
+            self.assertEqual(counter.frame_count, 2)
+
+        finally:
+            torch.set_default_device(None)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

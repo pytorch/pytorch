@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 import torch
+import torch.utils._device
 
 from torch._guards import (
     DuplicateInputs,
@@ -66,6 +67,8 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
         ("__load_module", lambda name: importlib.import_module(name)),
+        ("utils_device", torch.utils._device),
+        ("device", torch.device),
     ]
 )
 
@@ -449,6 +452,12 @@ class GuardBuilder(GuardBuilderBase):
         else:
             code = "not ___are_deterministic_algorithms_enabled()"
         self._produce_guard_code(guard, [code])
+
+    def DEFAULT_DEVICE(self, guard: Guard):
+        """Guard on CURRENT_DEVICE per torch.utils._device"""
+        assert guard.source is GuardSource.GLOBAL
+        import torch.utils._device as m
+        self._produce_guard_code(guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"])
 
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
