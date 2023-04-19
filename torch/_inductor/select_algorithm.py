@@ -739,7 +739,7 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
-            choices[0].name,
+            name,
             repr([self.key_of(x) for x in input_nodes]),
             autotune,
         )
