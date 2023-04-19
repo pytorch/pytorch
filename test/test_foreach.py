@@ -452,20 +452,19 @@ class TestForeach(TestCase):
                 for i, t in enumerate(inplace_inputs):
                     t.grad_fn.register_hook(get_grad_fn_hook(i))
 
-                torch.autograd.grad(
+                _ = torch.autograd.grad(
                     inplace_inputs[0],
                     inputs=(inplace_input_tensors[0],),
                     grad_outputs=(torch.rand_like(inplace_inputs[0]),),
                     retain_graph=True,
                 )
                 self.assertEqual(hook_buffer, [0])
-                inplace_input_tensors[0].grad = None
                 hook_buffer.clear()
 
                 # tensors have different shapes.
                 sum_of_cloned_tensors = torch.cat([t.view(-1) for t in inplace_inputs]).sum()
                 grad_output = torch.rand_like(sum_of_cloned_tensors)
-                torch.autograd.grad(
+                grad_inputs = torch.autograd.grad(
                     sum_of_cloned_tensors,
                     inputs=tuple(inplace_input_tensors),
                     grad_outputs=(grad_output,),
@@ -476,12 +475,12 @@ class TestForeach(TestCase):
                 ref_inplace_input_tensors = [t.clone().detach().requires_grad_() for t in inplace_input_tensors]
                 ref_inplace_inputs = [t.clone() for t in ref_inplace_input_tensors]
                 ref_output = inplace_ref([ref_inplace_inputs])
-                torch.autograd.grad(
+                ref_grad_inputs = torch.autograd.grad(
                     torch.cat([t.view(-1) for t in ref_output]).sum(),
                     inputs=tuple(ref_inplace_input_tensors),
                     grad_outputs=(grad_output,),
                 )
-                self.assertEqual([t.grad for t in inplace_input_tensors], [t.grad for t in ref_inplace_input_tensors])
+                self.assertEqual(grad_inputs, ref_grad_inputs)
 
     @ops(foreach_reduce_op_db)
     @parametrize("is_fastpath", (True, False))
