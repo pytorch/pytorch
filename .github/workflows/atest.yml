@@ -15,6 +15,7 @@ jobs:
       PR_NUMBER: ${{ github.event.number }}
       EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
       THE_REST: "${{ github.event.pull_requests }}"
+      GH_SHA: ${{ github.sha }}
     steps:
       - name: "print stuff"
         run: |
@@ -22,6 +23,9 @@ jobs:
       - name: "print more"
         run: |
           echo ${PR_NUMBER}
+      - name: "print GH_SHA"
+        run: |
+          echo ${GH_SHA}
       - name: "print EVENT_PR_NUMBER"
         run: |
           echo ${EVENT_PR_NUMBER}
