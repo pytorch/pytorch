@@ -51,10 +51,31 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(int64_t total_elements) {
   const uint32_t unroll = curand4_engine_calls;
   dim3 dim_block(block_size);
   dim3 grid((numel + block_size - 1) / block_size);
-  uint32_t blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / block_size;
-  grid.x = std::min(
-      static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount) * blocks_per_sm,
-      grid.x);
+
+
+  // We changed the offset calculations to be independent of CUDA devices
+  // properties. Earlier the impl was
+  //
+  // max_threads_per_sm = static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor);
+  // number_of_sm = static_cast<uint32_t>(at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
+  //
+  // However, having the offset dependent on cuda device properties makes it
+  // harder/hacky to support functionalization of RNG ops. So we have chosen
+  // lower bounds for the two device properties by looking at the recent GPUs.
+  // Lower bounds ensure that we move the offsets more aggressively, ensuring
+  // that random numbers are not repeated. Note that philox sequence length is
+  // 2**64, so we can advance the offsets liberally.
+
+
+  // Number of SMs have been around 1536 and 2048. Choosing 1536 for safety.
+  uint32_t max_threads_per_sm = 1536;
+  // T4 has 40, V100 has 80 and A100 has 108 SMs. To get the lower bound, we
+  // assume MIG on a A100 GPU, i.e. 108/8, and round it a nicer even number 12.
+  uint32_t number_of_sm = 12;
+
+  uint32_t blocks_per_sm = max_threads_per_sm / block_size;
+  grid.x = std::min(number_of_sm * blocks_per_sm, grid.x);
+
   //number of times random will be generated per thread, to offset philox counter in thc random state
   uint64_t counter_offset = ((numel - 1) / (block_size * grid.x * unroll) + 1)
                                 * curand4_engine_calls;
