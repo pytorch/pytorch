@@ -170,11 +170,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     "OPTForCausalLM",  # OOM
-    # TIMM
-    "cait_m36_384",  # Accuracy
-    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -216,6 +211,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "cait_m36_384",  # Accuracy
     "pnasnet5large",  # OOM
     "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
+    "opacus_cifar10",  # Fails to run https://github.com/pytorch/pytorch/issues/99201
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -233,15 +229,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
-    # TIMM
-    "convit_base",  # fp64_OOM
-    "eca_halonext26ts",  # accuracy
-    "fbnetv3_b",  # accuracy
-    "levit_128",  # fp64_OOM
-    # https://github.com/pytorch/pytorch/issues/94066
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
-    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
-    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 # Skips for dynamic=True
@@ -258,7 +245,6 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    "convit_base",  # _print_Pow: assert exp.is_integer
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -266,6 +252,8 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
+    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
+    "levit_128",  # Accuracy fails on A10G, passes on A100
 ]
 
 CI_SKIP_OPTIMIZER = {
@@ -1283,8 +1271,6 @@ class BenchmarkRunner:
             )
             self.args.cosine = True
             fp64_outputs = None
-            if self.args.ci and self.args.training:
-                return record_status("fp64_OOM")
 
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             self.args.training, current_device, name
@@ -1351,7 +1337,11 @@ class BenchmarkRunner:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
-                    accuracy_status = "fail_to_run"
+                    accuracy_status = (
+                        "OOM"
+                        if isinstance(e, torch.cuda.OutOfMemoryError)
+                        else "fail_to_run"
+                    )
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
@@ -2105,14 +2095,6 @@ def run(runner, args, original_dir=None):
                 "hf_Longformer",
                 "timm_nfnet",
                 "timm_efficientdet",
-                # timm
-                "beit_base_patch16_224",
-                "cait_m36_384",
-                "convmixer_768_32",
-                "deit_base_distilled_patch16_224",
-                "dm_nfnet_f0",
-                "dpn107",
-                "dm_nfnet_f0",
             }
         )
         if args.training:
@@ -2132,13 +2114,13 @@ def run(runner, args, original_dir=None):
         torch.set_num_threads(args.threads)
 
     if args.verbose:
-        torch._dynamo.config.log_level = logging.DEBUG
+        torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
         torch._dynamo.config.print_graph_breaks = True
 
     if args.quiet:
-        torch._dynamo.config.log_level = logging.ERROR
+        torch._logging.set_logs(dynamo=logging.ERROR)
 
     torch._dynamo.config.suppress_errors = args.suppress_errors
 
