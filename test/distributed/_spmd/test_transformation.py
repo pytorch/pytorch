@@ -10,8 +10,11 @@ from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.distributed._spmd.graph_optimization import (
+    comm_fusion_with_concat,
     get_all_fused_optimizer_blocks,
+    iter_move_grads_and_optimizers,
     remove_copy_from_optimizer,
+    schedule_comm_wait,
     split_fused_optimizer,
 )
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
@@ -215,6 +218,33 @@ class TransformationTest(DTensorTestBase):
             gm.graph.eliminate_dead_code()
             gm.recompile()
             self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            return gm
+
+        @compile(gm_transformation=my_transformation)
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+        self._test_train_step(
+            train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_iter_move_blocks_and_optimizers(self):
+        batch_size = 100
+        layers = 5
+        dim = 4096
+        num_iters = 5
+
+        def my_transformation(gm):
+            gm = IterGraphModule(gm)
+            comm_fusion_with_concat(gm, 100)
+            schedule_comm_wait(gm)
+            remove_copy_from_optimizer(gm)
+            iter_move_grads_and_optimizers(gm, "all_reduce_default_1", "relu")
+            gm.setup(num_iters)
             return gm
 
         @compile(gm_transformation=my_transformation)
