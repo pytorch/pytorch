@@ -43,9 +43,13 @@ void set_cached_tensors_enabled(bool enabled) {
   cached_tensorimpls_enabled = enabled;
 }
 
+#ifndef C10_MOBILE
+
 size_t adjusted_use_count(const at::Tensor& t) {
   return t.use_count() - (is_cached_tensor(t) ? 1 : 0);
 }
+
+#endif
 
 }
 }
