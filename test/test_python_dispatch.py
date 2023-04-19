@@ -621,7 +621,7 @@ class TestCustomOp(TestCase):
         def foo(x, dim):
             ...
 
-        @foo.impl_meta()
+        @foo.impl_fake()
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -632,6 +632,13 @@ class TestCustomOp(TestCase):
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
         del foo
 
+    def test_meta_for_data_dependent_shape_operation(self):
+        from torch.testing._internal.custom_op_db import numpy_nonzero
+
+        x = torch.randn(10, device='meta')
+        with self.assertRaisesRegex(RuntimeError, 'data-dependent output shape'):
+            numpy_nonzero(x)
+
     def test_basic_make_fx(self):
         # More serious tests are in our CustomOp opinfo db,
         # this one is just a sanity check.
@@ -639,7 +646,7 @@ class TestCustomOp(TestCase):
         def foo(x):
             ...
 
-        @foo.impl_meta()
+        @foo.impl_fake()
         def foo_meta(x):
             return x.sum()
 
@@ -649,7 +656,7 @@ class TestCustomOp(TestCase):
         del foo
 
     def test_fake_registration_location(self):
-        loc = torch.library._fake_tensor_registry['_torch_testing::numpy_nonzero'].location
+        loc = torch.testing._internal.custom_op_db.numpy_nonzero._fake_impl.location
         matches = re.match(r'.*/custom_op_db.py:\d+', loc)
         self.assertIsNotNone(matches)
 

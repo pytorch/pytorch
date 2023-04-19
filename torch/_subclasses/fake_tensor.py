@@ -924,12 +924,6 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
 
-    # TODO: resolve error in default __repr__
-    def __repr__(self):
-        with in_kernel_invocation_manager(self.fake_mode):
-            self_repr = super().__repr__()
-        return f"FakeTensor({self_repr}, {self.fake_device})"
-
     @classmethod
     @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1024,31 +1018,6 @@ class FakeTensor(torch.Tensor):
         return common_device, has_scalar_only_inputs
 
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-
-class FakeTensorImplCtx:
-    """
-    Context object for writing FakeTensor rules for custom operators.
-    """
-
-    def __init__(self, _shape_env, _op):
-        self._shape_env = _shape_env
-        self._op = _op
-
-    def new_data_dependent_symint(self):
-        if (
-            self._shape_env is None
-            or not self._shape_env.allow_dynamic_output_shape_ops
-        ):
-            raise DynamicOutputShapeException(self._op)
-
-        result = self._shape_env.create_unbacked_symint()
-        return result
-
-    def constrain_range(self, symint, *, min, max=None):
-        return torch.fx.experimental.symbolic_shapes.constrain_range(
-            symint, min=min, max=max
-        )
 
 
 # We keep one instantiation of `fake_tensor_converter` active
@@ -1280,16 +1249,13 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        #
-        # If you're registering a rule for an aten operator, please prefer
-        # using `torch.library.Library.impl_fake` to using `register_op_impl`
-        # to dogfood our user-facing extensibility points.
-        if func.name() in torch.library._fake_tensor_registry:
-            fake_rule = torch.library._fake_tensor_registry[func.name()].func
-            ctx = FakeTensorImplCtx(self.shape_env, func)
-            with self:
-                result = fake_rule(ctx, *args, **kwargs)
-                return result
+        if func.name() in torch._custom_op.global_registry:
+            custom_op = torch._custom_op.global_registry[func.name()]()
+            if custom_op is not None and custom_op._fake_impl is not None:
+                ctx = torch._custom_op.FakeTensorImplCtx(self.shape_env, func)
+                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
+                    result = custom_op._fake_impl.func(*args, **kwargs)
+                    return result
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors

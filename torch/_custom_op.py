@@ -1,3 +1,6 @@
+import contextlib
+import dataclasses
+import functools
 import inspect
 import typing
 import weakref
@@ -20,7 +23,7 @@ This file contains the implementation for a Simple Custom Operator API (CustomOp
 Using CustomOp, you are able to define a custom operator and implement interactions
 between the CustomOp and various PyTorch subsystems, including all the subsystems
 that are necessary for a custom operator to work with torch.compile (i.e.,
-autograd, meta, functionalization).
+autograd, FakeTensor, functionalization).
 
 CustomOp is positioned as being safer and easier to use than
 torch.library/TORCH_LIBRARY, which require deep understanding of PyTorch internals.
@@ -29,7 +32,7 @@ comprehensive than autograd.Function, which only supports implementing gradient
 computation and vmap rules.
 """
 
-__all__ = ["custom_op", "CustomOp"]
+__all__ = ["custom_op", "CustomOp", "get_ctx", "FakeTensorImplCtx"]
 
 
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
@@ -161,11 +164,14 @@ class CustomOp:
         # Has the name of the op, e.g. "foo". We cache here for convenience.
         self._opname: str = str(operator_name)
         # this is _opname but with namespace. e.g. "custom::foo"
-        self._namespaced_opname: str = name
+        self._qualname: str = name
         self.__name__ = None  # mypy requires this
+        self._fake_impl: typing.Optional[FuncAndLocation] = None
+
+        global_registry[self._qualname] = weakref.ref(self)
 
     def __repr__(self):
-        return f'<CustomOp(op="{self._namespaced_opname}")>'
+        return f'<CustomOp(op="{self._qualname}")>'
 
     def __call__(self, *args, **kwargs):
         # Bypass torch.ops.* and directly do OperatorHandle::callBoxed.
@@ -226,55 +232,20 @@ class CustomOp:
 
         return inner
 
-    def impl_meta(self) -> typing.Callable:
-        r"""Register a meta implementation for this CustomOp object.
-
-        The meta implementation is a shape propagation rule that gets invoked
-        for device='meta' Tensors and FakeTensors (Tensors that do not have storage).
-
-        To register a data-dependent shape propagation rule, use the
-        not-yet-implemented method to register a rule for FakeTensor.
-
-        This API is used as a decorator (see examples).
-
-        Examples::
-            >>> import numpy as np
-            >>>
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def numpy_sin(x):
-            >>>     ...
-            >>>
-            >>> @custom_sum.impl_meta():
-            >>> def custom_sum(tensor, dim):
-            >>>     output_shape = list(tensor.shape)
-            >>>     del output_shape[dim]
-            >>>     return tensor.new_empty(output_shape)
-            >>>
-            >>> x = torch.randn(2, 3, device='meta')
-            >>> y = custom_sum(x, 1)
-            >>> assert y.shape == (2,)
-
-        """
-
-        def inner(f):
-            library.impl(self._lib, self._opname, "Meta")(f)
-            return f
-
-        return inner
-
     def impl_fake(self) -> typing.Callable:
-        r"""Register a FakeTensor implementation for this CustomOp object.
+        r"""Register a fake implementation for this operator.
 
-        The FakeTensor implementation is a shape propagation rule that gets invoked
-        for FakeTensors (Tensors that do not have storage).
+        A "fake implementation" specifies the behavior of this operator on
+        Tensors that carry no data. Given some input Tensors with certain properties
+        (sizes/strides/storage_offset/device), it specifies what the properties of
+        the output Tensors are.
 
-        All Tensor inputs to the FakeTensor implementation are FakeTensors
-        and all Tensor returns must be FakeTensors.
-
-        If the signature of your operator is (*args, **kwargs), then the
-        signature of the FakeTensor implementation must be (ctx, *args, **kwargs).
-        ctx is a context object that has helper functions for writing
-        FakeTensor implementations.
+        The fake implementation has the same signature as the operator.
+        It is run for both FakeTensors and meta tensors. To write a fake
+        implementation, assume that all Tensor inputs to the operator are
+        instead FakeTensors and that you are trying to return a FakeTensor
+        with the same properties (sizes/strides/storage_offset/device) that
+        would be returned if all Tensor inputs were instead regular Tensors.
 
         This API is used as a decorator (see examples).
 
@@ -304,6 +275,7 @@ class CustomOp:
             >>> @custom_nonzero.impl_fake():
             >>> def custom_nonzero_fake(x):
             >>>     # Number of nonzero-elements is data-dependent
+            >>>     ctx = torch._custom_op.get_ctx()
             >>>     nnz = ctx.new_data_dependent_symint()
             >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
             >>>     # range to at least 2. Note that the operator implementation
@@ -326,11 +298,46 @@ class CustomOp:
         """
 
         def inner(f):
-            calling_frame = 3
-            library.impl_fake(self._lib, self._opname, _stacklevel=calling_frame)(f)
+            frame = inspect.stack()[1]
+            if self._fake_impl is not None:
+                raise RuntimeError(
+                    f"Attempting to register a FakeTensor rule for operator {qualname} "
+                    f"that already has a FakeTensor rule registered from Python at "
+                    f"{self._fake_impl.location}. This is not supported."
+                )
+            location = f"{frame.filename}:{frame.lineno}"
+
+            # FakeTensor will look at _fake_impl
+            self._fake_impl = FuncAndLocation(f, location)
+
+            # Handle DispatchKey.Meta registration
+            @functools.wraps(f)
+            def f_with_ctx(*args, **kwargs):
+                def error_on_ctx():
+                    raise RuntimeError(
+                        f"Attempted to call get_ctx() for the meta implementation "
+                        f"for {self._qualname}."
+                        f"You have presumably called get_ctx() because the operator "
+                        f"has a data-dependent output shape; if so, there is no "
+                        f"such meta implementation and this error is the correct "
+                        f"behavior. Otherwise, please remove the call to get_ctx() "
+                        f"in the implementation registered with impl_fake "
+                        f"at {self._fake_impl.location}"
+                    )
+
+                with set_ctx_getter(error_on_ctx):
+                    return f(*args, **kwargs)
+
+            self._lib.impl(self._opname, f, "Meta")
             return f
 
         return inner
+
+
+@dataclasses.dataclass
+class FuncAndLocation:
+    func: typing.Callable
+    location: str
 
 
 def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):
@@ -439,4 +446,62 @@ def validate_function_matches_schema(
             f"custom_op: Expected the schema to match the signature of `func`. "
             f"Schema has kwonlyarg names {kwonlyarg_names} but function has "
             f"{arg_spec.kwonlyargs}."
+        )
+
+
+# Global dictionary holding weak references to all CustomOp objects
+# Used to query the CustomOp associated with a specific C++ dispatcher operator.
+# An example usage is FakeTensor: FakeTensor checks if a specific operator
+# has an implementation registered via the CustomOp API.
+global_registry: typing.Dict["qualname", "weakref.ref[CustomOp]"] = {}
+
+global_ctx_getter = None
+
+
+# NOTE [ctx inside the fake implementation]
+# If a user has an operator with data-dependent output shape, then when writing
+# a fake implementation they must query the current ctx and use methods on the
+# ctx to construct a new unbacked symint.
+#
+# This is done via us setting the global_ctx_getter function every time a fake
+# implementation is invoked.
+def get_ctx() -> "FakeTensorImplCtx":
+    return global_ctx_getter()
+
+
+@contextlib.contextmanager
+def set_ctx_getter(ctx_getter: typing.Callable) -> None:
+    global global_ctx_getter
+    prev = global_ctx_getter
+    try:
+        global_ctx_getter = ctx_getter
+        yield
+    finally:
+        global_ctx_getter = prev
+
+
+class FakeTensorImplCtx:
+    """
+    Context object for writing FakeTensor rules for custom operators.
+    """
+
+    def __init__(self, _shape_env, _op):
+        self._shape_env = _shape_env
+        self._op = _op
+
+    def new_data_dependent_symint(self) -> torch.SymInt:
+        if (
+            self._shape_env is None
+            or not self._shape_env.allow_dynamic_output_shape_ops
+        ):
+            raise torch._subclasses.fake_tensor.DynamicOutputShapeException(self._op)
+
+        result = self._shape_env.create_unbacked_symint()
+        return result
+
+    def constrain_range(
+        self, symint: torch.SymInt, *, min: int, max: typing.Optional[int] = None
+    ) -> None:
+        return torch.fx.experimental.symbolic_shapes.constrain_range(
+            symint, min=min, max=max
         )

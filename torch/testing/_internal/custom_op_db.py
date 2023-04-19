@@ -36,7 +36,7 @@ def numpy_cube_impl(x):
     return torch.tensor(x_np ** 3, device=x.device), dx
 
 @numpy_cube.impl_fake()
-def numpy_cube_fake(ctx, x):
+def numpy_cube_fake(x):
     return x.clone(), x.clone()
 
 @custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
@@ -49,7 +49,7 @@ def numpy_mul_impl(x, y):
     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
 
 @numpy_mul.impl_fake()
-def numpy_mul_fake(ctx, x, y):
+def numpy_mul_fake(x, y):
     return (x * y).contiguous()
 
 @custom_op('(Tensor x, int dim) -> (Tensor, Tensor, Tensor)', ns='_torch_testing')
@@ -71,7 +71,7 @@ def numpy_sort_impl(x, dim):
     )
 
 @numpy_sort.impl_fake()
-def numpy_sort_fake(ctx, x, dim):
+def numpy_sort_fake(x, dim):
     return torch.empty_like(x), torch.empty_like(x, dtype=torch.long), torch.empty_like(x, dtype=torch.long)
 
 @custom_op('(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor', ns='_torch_testing')
@@ -87,7 +87,7 @@ def numpy_take_impl(x, ind, ind_inv, dim):
     return torch.tensor(np.take_along_axis(x, ind, dim), device=device)
 
 @numpy_take.impl_fake()
-def numpy_take_fake(ctx, x, ind, ind_inv, dim):
+def numpy_take_fake(x, ind, ind_inv, dim):
     return torch.empty_like(x)
 
 @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
@@ -103,7 +103,8 @@ def numpy_nonzero_impl(x):
     return torch.tensor(res, device=x.device)
 
 @numpy_nonzero.impl_fake()
-def numpy_nonzero_fake(ctx, x):
+def numpy_nonzero_fake(x):
+    ctx = torch._custom_op.get_ctx()
     i0 = ctx.new_data_dependent_symint()
     ctx.constrain_range(i0, min=2)
     shape = [x.dim(), i0]
@@ -171,12 +172,13 @@ def numpy_nms_impl(boxes, scores, iou_threshold):
     return result
 
 @numpy_nms.impl_fake()
-def numpy_nms_fake(ctx, boxes, scores, iou_threshold):
+def numpy_nms_fake(boxes, scores, iou_threshold):
     assert boxes.device == scores.device
     N = boxes.shape[0]
     assert boxes.shape == (N, 4)
     assert scores.shape == (N,)
 
+    ctx = torch._custom_op.get_ctx()
     i0 = ctx.new_data_dependent_symint()
     ctx.constrain_range(i0, min=2)
     result = boxes.new_empty([i0, 4])
