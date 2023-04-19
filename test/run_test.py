@@ -883,7 +883,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def get_pytest_args(options, is_cpp_test):
+def get_pytest_args(options, is_cpp_test=False):
     if RERUN_DISABLED_TESTS:
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
