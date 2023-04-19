@@ -111,7 +111,9 @@ def discover_tests(
         pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)
     ]
 
-    cpp_tests_dir = f"{cwd.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
+    cpp_tests_dir = (
+        f"{cwd.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
+    )
     # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
     # are just binaries and could have any name, i.e. basic or atest
     all_cpp_files = [
@@ -120,10 +122,12 @@ def discover_tests(
 
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Add the cpp prefix for C++ tests so that we can tell them apart
-    rc.extend([
-        f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
-        for fname in all_cpp_files
-    ])
+    rc.extend(
+        [
+            f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
+            for fname in all_cpp_files
+        ]
+    )
 
     # Invert slashes on Windows
     if sys.platform == "win32":
@@ -172,7 +176,6 @@ TESTS = discover_tests(
         "distributions/test_utils",
         "onnx/test_pytorch_onnx_onnxruntime_cuda",
         "onnx/test_models",
-
         # These are not C++ tests
         f"{CPP_TEST_PREFIX}/c10_intrusive_ptr_benchmark",
         f"{CPP_TEST_PREFIX}/parallel_benchmark",
@@ -508,7 +511,13 @@ def run_test(
 
     if test_file.startswith(CPP_TEST_PREFIX):
         # C++ tests are in CPP_TEST_PATH, not the regular test directory
-        argv = [os.path.join(pathlib.Path(test_directory).parent, CPP_TEST_PATH, test_file.replace(f"{CPP_TEST_PREFIX}/", ""))] + unittest_args
+        argv = [
+            os.path.join(
+                pathlib.Path(test_directory).parent,
+                CPP_TEST_PATH,
+                test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
+            )
+        ] + unittest_args
     else:
         # Can't call `python -m unittest test_*` here because it doesn't run code
         # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
