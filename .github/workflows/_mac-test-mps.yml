@@ -120,6 +120,7 @@ jobs:
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
           # TODO: Remove this once we figure out why sympy disappears on MacOS
           ${CONDA_RUN} python3 -mpip install --ignore-installed --no-cache-dir "sympy==1.11.1"
+          ${CONDA_RUN} python3 -mpip list
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
