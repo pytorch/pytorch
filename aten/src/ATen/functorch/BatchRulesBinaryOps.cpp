@@ -429,17 +429,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(rrelu_with_noise);
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
-  POINTWISE_BOXED(special_bessel_j0);
-  POINTWISE_BOXED(special_spherical_bessel_j0);
-  POINTWISE_BOXED(special_bessel_j1);
-  POINTWISE_BOXED(special_modified_bessel_i0);
-  POINTWISE_BOXED(special_modified_bessel_i1);
-  POINTWISE_BOXED(special_scaled_modified_bessel_k0);
-  POINTWISE_BOXED(special_modified_bessel_k0);
-  POINTWISE_BOXED(special_scaled_modified_bessel_k1);
-  POINTWISE_BOXED(special_modified_bessel_k1);
-  POINTWISE_BOXED(special_bessel_y0);
-  POINTWISE_BOXED(special_bessel_y1);
 
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
