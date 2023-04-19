@@ -12,7 +12,7 @@ using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 // Some systems (just cudagraphs currently) will persist a static tensor output whose TensorImpl
 // does not change across iterations. For these tensors caching dtype conversions
 // is invalid. If we are not using these systems the enabled
-// flag will be false and we will avoid the hash lookup. Like `cached_casts` in, 
+// flag will be false and we will avoid the hash lookup. Like `cached_casts` in,
 // autocast_mode, we hash on the TensorImpl* and keep the pointer alive with a weakref value.
 bool cached_tensorimpls_enabled = false;
 ska::flat_hash_map<TensorImpl*, weakref_type> cached_tensorimpls;
@@ -43,6 +43,9 @@ void set_cached_tensors_enabled(bool enabled) {
   cached_tensorimpls_enabled = enabled;
 }
 
+size_t adjusted_use_count(const at::Tensor& t) {
+  return t.use_count() - (is_cached_tensor(t) ? 1 : 0);
+}
 
 }
 }
