@@ -192,8 +192,8 @@ class TestAutocastGPU(TestCase):
         weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
 
         try:
-            torch._C._set_cudagraph_cached_tensors_enabled(True)
-            torch._C._add_cudagraph_cached_tensor(weight)
+            torch._C._set_cached_tensors_enabled(True)
+            torch._C._add_cached_tensor(weight)
 
             with WeightDTypeCastCounterMode(weight) as mode:
                 with torch.autocast(device_type='cuda'):
@@ -205,7 +205,7 @@ class TestAutocastGPU(TestCase):
             self.assertEqual(mode.dtype_cast_counter, 2)
 
         finally:
-            torch._C._set_cudagraph_cached_tensors_enabled(False)
+            torch._C._set_cached_tensors_enabled(False)
 
 
 class TestTorchAutocast(TestCase):
