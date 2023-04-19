@@ -3807,7 +3807,7 @@ class StorageBox(MutableBox):
     @cache_on_self
     def check_non_scalar_tensor_num_reads(self):
         data = self.data
-        if isinstance(data, Pointwise):
+        if isinstance(data, Loops):
             read_writes = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
@@ -3817,11 +3817,7 @@ class StorageBox(MutableBox):
                 ),
                 data=data,
             ).get_read_writes()
-            num_of_scalar_tensor = 0
-            for read in read_writes.reads:
-                if read.index == 0:
-                    num_of_scalar_tensor += 1
-            return (len(read_writes.reads) - num_of_scalar_tensor) > 1
+            return sum(read.index != 0 for read in read_writes.reads) > 1
         else:
             # Skip the check for non Pointwise
             return True
