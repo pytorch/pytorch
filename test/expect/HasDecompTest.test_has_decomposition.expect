@@ -1163,7 +1163,6 @@ aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::smooth_l1_loss
 aten::smooth_l1_loss.out
-aten::smooth_l1_loss_backward
 aten::smooth_l1_loss_backward.grad_input
 aten::softmax.int_out
 aten::sort
