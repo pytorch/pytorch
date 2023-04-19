@@ -609,11 +609,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":"
-                      + std::to_string(train) + ":"
-                      + std::to_string(has_running_mean) + ":"
-                      + std::to_string(has_weight) + ":"
-                      + [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input.scalar_type());
+    string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
+        std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
+        [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + native_mps::getMPSTypeString(input.scalar_type());
     auto input_mps_dtype = native_mps::getMPSDataType(input.scalar_type());
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
