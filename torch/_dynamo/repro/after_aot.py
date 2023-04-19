@@ -60,19 +60,20 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
         except Exception as e:
-            if config.repro_level == 1:
-                dump_compiler_graph_state(
-                    fx.GraphModule(gm, orig_graph),
-                    example_inputs,
-                    compiler_name,
-                )
-            elif config.repro_level == 2:
-                dump_to_minify(
-                    fx.GraphModule(gm, orig_graph),
-                    example_inputs,
-                    compiler_name,
-                )
-            log.error("CompilerError")
+            if config.repro_after == "aot":
+                if config.repro_level == 1:
+                    dump_compiler_graph_state(
+                        fx.GraphModule(gm, orig_graph),
+                        example_inputs,
+                        compiler_name,
+                    )
+                elif config.repro_level == 2:
+                    dump_to_minify(
+                        fx.GraphModule(gm, orig_graph),
+                        example_inputs,
+                        compiler_name,
+                    )
+                log.error("CompilerError")
             raise
 
         def deferred_for_real_inputs(real_inputs):
