@@ -89,14 +89,14 @@ class TupleStrategy(StrategyType):
         self.childs = childs
 
     def __str__(self) -> str:
-        tuple_strategies_str = "TupleStrategy: \n"
+        tuple_strategies_str = "TupleStrategy: "
         child_strategies_str = "\n".join(
             [
                 f" tuple idx: {idx}, strategy: {str(strat)}"
                 for idx, strat in enumerate(self.childs)
             ]
         )
-        return f"{tuple_strategies_str} {child_strategies_str}"
+        return f"{tuple_strategies_str}\n{child_strategies_str}"
 
 
 @dataclass
