@@ -30,6 +30,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
+import torch._custom_op
 
 DimList = List
 
@@ -1026,6 +1027,8 @@ class FakeTensor(torch.Tensor):
     __torch_function__ = torch._C._disabled_torch_function_impl
 
 
+
+
 # We keep one instantiation of `fake_tensor_converter` active
 # for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
@@ -1257,7 +1260,7 @@ class FakeTensorMode(TorchDispatchMode):
         # Call them if they exist.
         if func.name() in torch._custom_op.global_registry:
             custom_op = torch._custom_op.global_registry[func.name()]
-            if custom_op._fake_impl is not None:
+            if custom_op is not None and custom_op._fake_impl is not None:
                 ctx = torch._custom_op.FakeTensorImplCtx(self.shape_env, func)
                 with torch._custom_op.set_ctx_getter(lambda: ctx), self:
                     result = custom_op._fake_impl.func(*args, **kwargs)
