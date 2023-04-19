@@ -117,9 +117,9 @@ jobs:
           ${CONDA_RUN} which python
           ${CONDA_RUN} python --version
 
-          # As wheels are cross-compiled they are reported as x86_64 ones
-          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+          # TODO: Remove this once we figure out why sympy disappears on MacOS
+          ${CONDA_RUN} python3 -mpip install --ignore-installed --no-cache-dir "sympy==1.11.1"
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
