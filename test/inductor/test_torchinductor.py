@@ -5462,7 +5462,7 @@ class CommonTemplate:
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
         if self.device == "cuda":
-            raise unittest.SkipTest("index dynamic shapes only supports cpu")
+            raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
 
         class Model(torch.nn.Module):
             def __init__(self):
