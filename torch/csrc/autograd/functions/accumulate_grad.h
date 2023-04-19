@@ -144,6 +144,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.
 
+        // No scenario where we expect this to be true currently
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
             !at::caching::is_cached_tensor(new_grad._indices()) &&
             !at::caching::is_cached_tensor(new_grad._values()) &&
