@@ -32,13 +32,16 @@ from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tupl
 import parameterized
 
 import torch
+from test_fx_to_onnx_with_onnxruntime import (
+    _run_test_with_fx_to_onnx_exporter_and_onnx_runtime,
+    TestFxToOnnxWithOnnxRuntime,
+)
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
     common_utils,
 )
 from torch.testing._internal.opinfo import core as opinfo_core
-from test_fx_to_onnx_with_onnxruntime import _run_test_with_fx_to_onnx_exporter_and_onnx_runtime, TestFxToOnnxWithOnnxRuntime
 
 # TODO(titaiwang): Change this when more versions are supported
 # The min onnx opset version to test for
@@ -325,7 +328,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    fixme("unflatten", reason="AssertionError: Expected 1 inputs, got 3"),
+    xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3"),
 )
 # fmt: on
 
@@ -445,7 +448,9 @@ class TestOnnxModelOutputConsistency(TestFxToOnnxWithOnnxRuntime):
                     rtol = None
                     atol = None
                 # Run the test
-                _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, model, inputs, rtol=rtol, atol=atol)
+                _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                    self, model, inputs, rtol=rtol, atol=atol
+                )
 
 
 for opset in TESTED_OPSETS:
