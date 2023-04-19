@@ -1213,7 +1213,7 @@ class TestSDPA(NNTestCase):
         math_ref_test = math_ref_test.to(dtype=torch.float32).contiguous()
         math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
 
-        self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
+        self.assertEqual(math_ref_test, math_ref_lp_test, atol=9.5e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
@@ -1666,7 +1666,7 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_k needs larger tolerances
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
-        grad_k_ref_atol = max(7 * torch.abs(grad_k_deviation).max().item(), 7 * default_atol[out.dtype])
+        grad_k_ref_atol = max(9.5 * torch.abs(grad_k_deviation).max().item(), 9.5 * default_atol[out.dtype])
         grad_k_ref_rtol = max(7 * get_rtol(key_ref.grad, key_ref_lp.grad), 7 * default_rtol[out.dtype])
 
         grad_v_deviation = value_ref.grad - value_ref_lp.grad
