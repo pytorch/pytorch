@@ -568,9 +568,9 @@ class TestTransformers(NNTestCase):
             mask=src_mask,
             src_key_padding_mask=padding_mask,
         )
-    
 
-  def test_encoder_is_causal(self):
+
+    def test_encoder_is_causal(self):
 
         d_model = 3
         layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
