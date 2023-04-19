@@ -198,6 +198,10 @@ class OptionalScalar(OptionalAttr):
         self.name = "optional_scalar"
 
 
+def need_convert_to_optional(value):
+    return not value and V.graph.cpp_wrapper
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c
@@ -3347,8 +3351,8 @@ class ConvolutionUnary(ExternKernelAlloc):
         optional_list = OptionalList()
         constant_args = constant_args + [
             attr,
-            scalars if scalars else optional_list,
-            algorithm if algorithm else optional_string,
+            optional_list if need_convert_to_optional(scalars) else scalars,
+            optional_string if need_convert_to_optional(algorithm) else algorithm,
         ]
         return ConvolutionUnary(
             layout=kernel_layout,
@@ -3436,10 +3440,12 @@ class ConvolutionBinary(ExternKernelAlloc):
         optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            binary_alpha if binary_alpha else optional_scalar,
-            unary_attr if unary_attr else optional_string,
-            unary_scalars if unary_scalars else optional_list,
-            unary_algorithm if unary_algorithm else optional_string,
+            optional_scalar if need_convert_to_optional(binary_alpha) else binary_alpha,
+            optional_string if need_convert_to_optional(unary_attr) else unary_attr,
+            optional_list if need_convert_to_optional(unary_scalars) else unary_scalars,
+            optional_string
+            if need_convert_to_optional(unary_algorithm)
+            else unary_algorithm,
         ]
         return ConvolutionBinary(
             layout=kernel_layout,
