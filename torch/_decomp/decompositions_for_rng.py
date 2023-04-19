@@ -31,6 +31,9 @@ def rand_offset_calculator(shape):
     for dim_size in shape:
         numel *= dim_size
 
+    if CompilerBackendForPhilox.name() == "inductor":
+        return numel
+
     block_size = 256
     unroll = 4
     curand4_engine_calls = 4
@@ -203,10 +206,49 @@ class PhiloxStateTracker:
     def get_current_relative_offset(cls):
         return cls.running_state.relative_offset
 
+    @staticmethod
+    def multiple_of_4(offset):
+        # torch cuda rng state offset must be a multiple of 4. For inductor, as
+        # we sum up all the numel, the result might not be a multiple of 4. This
+        # method achieves that.
+        return (offset + 3) // 4 * 4
+
     @classmethod
     def get_updated_fwd_offset(cls):
-        return cls.fwd_state.base_offset + cls.fwd_state.relative_offset
+        return cls.multiple_of_4(
+            cls.fwd_state.base_offset + cls.fwd_state.relative_offset
+        )
 
     @classmethod
     def get_updated_bwd_offset(cls):
-        return cls.bwd_state.base_offset + cls.bwd_state.relative_offset
+        return cls.multiple_of_4(
+            cls.bwd_state.base_offset + cls.bwd_state.relative_offset
+        )
+
+
+class CompilerBackendForPhilox:
+    """
+    TorchInductor offset calculation differs from the PyTorch eager offset
+    calculation. This is because as of today, the triton implementation of rand
+    is very different from PyTorch rand. We should strive to have same rand
+    implementation for Triton and PyTorch eager in future. But, until then this
+    ctx manager can be used by TorchInductor to set a backend, and decomps can
+    read the backend to appropraiate compute offsets.
+    """
+
+    backend: str
+    old_backend: str
+
+    def __init__(self, backend):
+        CompilerBackendForPhilox.backend = backend
+
+    def __enter__(self):
+        CompilerBackendForPhilox.old_backend = CompilerBackendForPhilox.name()
+        return self
+
+    def __exit__(self, exc_type, exc_cal, exc_tb):
+        CompilerBackendForPhilox.backend = CompilerBackendForPhilox.old_backend
+
+    @classmethod
+    def name(cls):
+        return getattr(cls, "backend", "eager")

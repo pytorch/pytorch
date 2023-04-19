@@ -14,6 +14,7 @@ import torch._dynamo.config as dynamo_config
 
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._decomp.decompositions_for_rng import CompilerBackendForPhilox
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
@@ -717,7 +718,7 @@ def compile_fx(
                 boxed_forward_device_index=forward_device,
             )
 
-    with overrides.patch_functions():
+    with overrides.patch_functions(), CompilerBackendForPhilox("inductor"):
         if decompositions is None:
             decompositions = select_decomp_table()
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
