@@ -2,12 +2,12 @@ import copy
 import functools
 import logging
 import os
-import uuid
 import shutil
 import subprocess
 import textwrap
-from tempfile import TemporaryFile
+import uuid
 from importlib import import_module
+from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
@@ -231,7 +231,7 @@ isolate_fails_code_str = None
 {generate_compiler_repro_string(gm, args)}
 
 from functools import partial
-from {__name__} import (
+from torch._dynamo.repro.after_aot import (
     isolate_fails,
     dump_compiler_graph_state,
 )
@@ -266,7 +266,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         fd.write(
             textwrap.dedent(
                 f"""
-                from {__name__} import {fail_fn}
+                from torch._dynamo.debug_utils import {fail_fn}
                 """
             )
         )
