@@ -948,6 +948,19 @@ class CoverageTest(DTensorTestBase):
 
         self._test_op_with_train_step(Model)
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_arithmetic_ops_on_symint(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x) + x.shape[0] * x.numel() - x.shape[0] // 2
+
+        self._test_op_with_train_step(Model)
+
 
 if __name__ == "__main__":
     run_tests()
