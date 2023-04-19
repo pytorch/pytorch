@@ -17,9 +17,12 @@ jobs:
       THE_REST: "${{ github.event.pull_requests }}"
       GH_SHA: ${{ github.sha }}
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
       - name: "print stuff"
         run: |
-          echo 'hi'
+          git tag --points-at ${GH_SHA}
       - name: "print more"
         run: |
           echo ${PR_NUMBER}
