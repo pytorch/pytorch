@@ -421,7 +421,7 @@ def _optimize_catch_errors(
 
 
 def get_compiler_fn(compiler_fn):
-    from .debug_utils import wrap_backend_debug
+    from .repro.after_dynamo import wrap_backend_debug
 
     if hasattr(compiler_fn, "compiler_name"):
         compiler_str = compiler_fn.compiler_name
