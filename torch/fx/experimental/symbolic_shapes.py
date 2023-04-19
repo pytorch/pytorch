@@ -1427,7 +1427,7 @@ class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
         return '%s: %s' % (self.extra['envid'], msg), kwargs
 
 
-ENV_ID = 0
+ENV_COUNTER = collections.Counter()
 
 
 class ShapeEnv:
@@ -1454,6 +1454,8 @@ class ShapeEnv:
         # When True, assume input sizes which have the same size are
         # symbolically equal.
         duck_shape=True,
+        # For debugging
+        frame_id=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -1484,9 +1486,13 @@ class ShapeEnv:
         self.assume_static_by_default = assume_static_by_default
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
-        global ENV_ID
-        self.log = ShapeEnvLoggerAdapter(log, {'envid': ENV_ID})
-        ENV_ID += 1
+        per_frame_id = ENV_COUNTER[frame_id]
+        ENV_COUNTER[frame_id] += 1
+        if frame_id is None:
+            env_id = per_frame_id
+        else:
+            env_id = f"{frame_id}.{per_frame_id}"
+        self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
         self.log.info("create_env")
 
     def _suppress_guards_tls(self):
@@ -1632,6 +1638,12 @@ class ShapeEnv:
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
+    def create_unbacked_symbool(self):
+        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges(0, 1)
+        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
+
     def create_symbol(
         self,
         val: int,
@@ -1731,6 +1743,8 @@ class ShapeEnv:
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         _simplified=False
     ) -> List[str]:
+        self.log.info("produce_guards")
+
         assert len(placeholders) == len(sources)
 
         # Expand optional inputs, or verify invariants are upheld
@@ -2334,14 +2348,14 @@ class ShapeEnv:
         Given an expression, evaluates it, adding guards if necessary
         """
         if len(orig_expr.free_symbols) == 0:
-            self.log.debug("evaluate_expr %s [trivial]", orig_expr)
+            self.log.debug("eval %s [trivial]", orig_expr)
             return orig_expr
 
         expr = orig_expr
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
-            self.log.debug("evaluate_expr %s == %s [statically known]", orig_expr, static_expr)
+            self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
@@ -2409,7 +2423,7 @@ class ShapeEnv:
                         ''.join(traceback.format_list(user_tb))
                     )
                 self.log.info(
-                    "evaluate_expr %s [guard added]%s (%s)%s",
+                    "eval %s [guard added]%s (%s)%s",
                     g,
                     maybe_user_loc,
                     format_frame(frame),
@@ -2417,7 +2431,7 @@ class ShapeEnv:
                     stack_info=is_debug,
                 )
         else:
-            self.log.debug("evaluate_expr %s [guard suppressed]", g)
+            self.log.debug("eval %s [guard suppressed]", g)
 
         return concrete_val
 
