@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import TEST_NUMBA, TEST_WITH_ROCM, LazyBoolean
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM
 import inspect
 import contextlib
 
@@ -15,12 +15,12 @@ TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
-TEST_CUDNN = LazyBoolean(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
-TEST_CUDNN_VERSION = LazyBoolean(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
+TEST_CUDNN = LazyVal(lambda: TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
+TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDNN else 0)
 
-SM53OrLater = LazyBoolean(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
-SM60OrLater = LazyBoolean(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
-SM80OrLater = LazyBoolean(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
+SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
+SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
+SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
@@ -29,7 +29,7 @@ if TEST_CUDA:
     def test_has_magma():
         torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
         return torch.cuda.has_magma
-    TEST_MAGMA = LazyBoolean(test_has_magma)
+    TEST_MAGMA = LazyVal(test_has_magma)
 
 if TEST_NUMBA:
     import numba.cuda

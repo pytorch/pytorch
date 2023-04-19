@@ -3,7 +3,7 @@ from subprocess import CalledProcessError
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import has_triton
 from torch.testing._internal.common_utils import (
-    LazyBoolean,
+    LazyVal,
     IS_FBCODE,
     TEST_WITH_ROCM,
 )
@@ -21,6 +21,6 @@ def test_cpu():
     ):
         return False
 
-HAS_CPU = LazyBoolean(test_cpu)
+HAS_CPU = LazyVal(test_cpu)
 
 HAS_CUDA = has_triton() and not TEST_WITH_ROCM
