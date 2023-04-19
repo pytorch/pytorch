@@ -614,6 +614,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "https://github.com/pytorch/pytorch/issues/99360"
+    )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
