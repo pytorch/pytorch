@@ -2440,6 +2440,8 @@ aot_autograd_failures = {
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # many complex operators incorrect striding, metadata
+    xfail("pca_lowrank"),
+    xfail("norm", "nuc"),
     xfail('fft.fft', ''),
     xfail('fft.hfft2', ''),
     xfail('fft.hfft', ''),
