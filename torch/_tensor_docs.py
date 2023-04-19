@@ -5937,13 +5937,29 @@ Example::
 add_docstr_all(
     "uniform_",
     r"""
-uniform_(from=0, to=1) -> Tensor
+uniform_(from, to, generator) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
     P(x) = \dfrac{1}{\text{to} - \text{from}}
+
+Args:
+    from (float): lower-bound of the range to sample from
+    to (float): upper-bound of the range to sample from
+    generator (torch.Generator, optional): a pseudorandom number generator for sampling
+
+Example::
+
+    >>> generator = torch.Generator()
+    >>> generator.manual_seed(42)
+    >>> tensor = torch.zeros(3, 3)
+    >>> tensor.uniform_(0, 1, generator)
+    >>> print(tensor)
+    tensor([[0.2673, 0.8725, 0.3353],
+            [0.4030, 0.7871, 0.4576],
+            [0.0719, 0.9715, 0.7147]])
 """,
 )
 
