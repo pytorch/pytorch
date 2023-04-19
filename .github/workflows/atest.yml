@@ -29,6 +29,7 @@ jobs:
       - name: "print GH_REF"
         run: |
           echo ${GH_REF}
+          echo ${GITHUB_REF}
       - name: "print PR_NUMBER"
         run: |
           echo ${PR_NUMBER}
