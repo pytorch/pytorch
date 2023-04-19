@@ -255,7 +255,7 @@ torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 def reset_cudagraph_trees():
     "Clear all cudagraph trees"
-    # see remove_all_cached_tensors below for why this is necessary
+    # see shutdown below for why this is necessary
     container_dict = get_obj(local, "tree_manager_containers")
     locks_dict = get_obj(local, "tree_manager_locks")
     for device, lock in locks_dict.items():
@@ -264,7 +264,7 @@ def reset_cudagraph_trees():
             if not container or not container.tree_manager:
                 continue
 
-            container.tree_manager.remove_all_cached_tensors()
+            container.tree_manager.shutdown()
 
     _set_cached_tensors_enabled(False)
     container_dict.clear()
@@ -1562,6 +1562,7 @@ class CUDAGraphTreeManager:
         self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+        assert self.graph is not None, "Running CUDAGraph after shutdown"
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -1638,11 +1639,11 @@ class CUDAGraphTreeManager:
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
 
-    def remove_all_cached_tensors(self):
+    def shutdown(self):
         """
         Remove all cached tensors in all nodes. Because cached tensors can hold gradients which in turn
         might reference a backward which invokes a CUDA Graph Node, we have to manually clear them on shutdown
-        to avoid a reference cycle.
+        to avoid a reference cycle. For the same reason we
         """
         nodes = []
         for roots in self.roots.values():
@@ -1653,6 +1654,10 @@ class CUDAGraphTreeManager:
             for children in node.children.values():
                 nodes.extend(children)
             node.remove_node_cached_tensors()
+            node.graph = None
+
+        self.graph = None
+        self.current_node = None
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         torch.cuda.synchronize()

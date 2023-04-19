@@ -131,9 +131,9 @@ struct TORCH_API AccumulateGrad : public Node {
           new_grad._values().is_contiguous() &&
           // Use count for indices and values should always be <=1 since the
           // SparseTensor should be the only one holding a reference to these.
-          at::caching::adjusted_use_count(new_grad._indices()) <= 1 &&
-          at::caching::adjusted_use_count(new_grad._values()) <= 1 &&
-          at::caching::adjusted_use_count(new_grad) <= num_expected_refs) {
+          new_grad._indices().use_count() <= 1 &&
+          new_grad._values().use_count() <= 1 &&
+          new_grad.use_count() <= num_expected_refs) {
         // Can't detach sparse tensor (since metadata changes are not allowed
         // after detach), so just create a new one for the grad which is a
         // shallow copy. We need a shallow copy so that modifying the original
@@ -143,6 +143,12 @@ struct TORCH_API AccumulateGrad : public Node {
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.
+
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !at::caching::is_cached_tensor(new_grad._indices()) &&
+            !at::caching::is_cached_tensor(new_grad._values()) &&
+            !at::caching::is_cached_tensor(new_grad));
+
         update_grad(at::_sparse_coo_tensor_unsafe(
             new_grad._indices(),
             new_grad._values(),
