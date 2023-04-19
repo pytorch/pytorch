@@ -2522,10 +2522,17 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 for i in range(4):
                     results.append(x[: x.size(0) - i, i : x.size(2), i:3])
                 return tuple(results)
-        gm, _ = torch._dynamo.export(
-            DynamicSliceExportMod(), torch.randn(5, 5, 5), aten_graph=True, tracing_mode="symbolic")
 
-        self.assertExpectedInline(gm.code.strip(), """\
+        gm, _ = torch._dynamo.export(
+            DynamicSliceExportMod(),
+            torch.randn(5, 5, 5),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     slice_tensor = torch.ops.aten.slice.Tensor(arg0, 2, 0, 3)
@@ -2543,7 +2550,8 @@ def forward(self, x):
     slice_tensor_7 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_2);  arg0 = sub_2 = None
     slice_tensor_8 = torch.ops.aten.slice.Tensor(slice_tensor_7, 1, 3, sym_size_1);  slice_tensor_7 = sym_size_1 = None
     slice_tensor_9 = torch.ops.aten.slice.Tensor(slice_tensor_8, 2, 3, 3);  slice_tensor_8 = None
-    return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""")
+    return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
+        )
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

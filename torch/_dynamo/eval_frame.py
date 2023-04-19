@@ -763,7 +763,8 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        specialize_int=True, assume_static_by_default=False,
+        specialize_int=True,
+        assume_static_by_default=False,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
