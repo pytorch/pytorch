@@ -195,6 +195,10 @@ pip install -r requirements.txt
 conda install mkl mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+
+# (optional) If using torch.compile with inductor/triton, install the matching version of triton
+# Run from the pytorch directory after cloning
+make triton
 ```
 
 **On MacOS**

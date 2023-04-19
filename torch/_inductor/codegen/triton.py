@@ -1460,7 +1460,9 @@ class TritonKernel(Kernel):
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                postfix = "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
+                postfix = (
+                    "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
+                )
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     code.writeline(
