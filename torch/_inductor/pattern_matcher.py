@@ -9,7 +9,6 @@ from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
-import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
