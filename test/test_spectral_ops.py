@@ -354,9 +354,6 @@ class TestFFT(TestCase):
     # nd-fft tests
     @onlyNativeDeviceTypes
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @toleranceOverride({
-        torch.cfloat : tol(2e-4, 1.3e-6),
-    })
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=(torch.cfloat, torch.cdouble))
     def test_reference_nd(self, device, dtype, op):

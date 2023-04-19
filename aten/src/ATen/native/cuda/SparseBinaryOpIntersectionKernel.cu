@@ -85,7 +85,7 @@ void binary_op_intersection_kernel(
   const auto* RESTRICT ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
   const auto* RESTRICT ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
   const auto* RESTRICT ptr_intersction_counts_bytes = reinterpret_cast<char*>(iter.data_ptr(5));
-  const auto* RESTRICT ptr_argsort = argsort.data_ptr<index_t>();
+  const auto* RESTRICT ptr_argsort = argsort.const_data_ptr<index_t>();
 
   auto offset_calc = make_offset_calculator<6>(iter);
   auto loop = [=] FUNCAPI (int i) {
