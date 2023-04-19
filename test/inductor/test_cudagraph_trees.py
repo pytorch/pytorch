@@ -606,12 +606,39 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with torch.cuda.amp.autocast():
                 run_once = out @ t2
 
-                out.zero_()
-                breakpoint()
+                out.detach().zero_()
 
                 run_twice = out @ t2
 
                 self.assertNotEqual(run_once, run_twice)
+
+        def test_accumulate_grad(self):
+            # cudagraph trees shouldnt interfere with accumulation logic
+
+            def compute_grad(grad_output, create_graph):
+                x = torch.randn(5, 5, requires_grad=True, device="cuda")
+
+                @torch.compile()
+                def foo(x):
+                    return x + 2
+
+                y = foo(x)
+                y.backward(grad_output, retain_graph=True)
+                x_grad = x.grad
+                x_grad_clone = x.grad.clone()
+                y.backward(grad_output, create_graph=create_graph)
+                return x_grad, x_grad_clone
+
+            for _ in range(3):
+                grad_output = torch.ones(5, 5, device="cuda")
+
+                # Accumulate in-place when create_graph is False
+                x_grad, x_grad_clone = compute_grad(grad_output, create_graph=False)
+                self.assertEqual(x_grad, x_grad_clone * 2)
+
+                # Accumulate out-of-place when create_graph is False
+                x_grad, x_grad_clone = compute_grad(grad_output, create_graph=True)
+                self.assertEqual(x_grad, x_grad_clone)
 
         def test_frozen_fn(self):
             @torch.compile()
