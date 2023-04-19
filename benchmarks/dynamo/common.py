@@ -1226,7 +1226,11 @@ class BenchmarkRunner:
             Records the status in the csv file
             """
             if current_name in self.non_deterministic_models:
-                if accuracy_status in ("pass", "eager_two_runs_differ", "fail_accuracy"):
+                if accuracy_status in (
+                    "pass",
+                    "eager_two_runs_differ",
+                    "fail_accuracy",
+                ):
                     accuracy_status = "pass"
 
             headers = ["dev", "name", "batch_size", "accuracy"]
@@ -1299,9 +1303,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
-                return record_status(
-                    accuracy_status, dynamo_start_stats=start_stats
-                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
             reset_rng_state()
@@ -1317,9 +1319,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_2nd_run_fail"
                 )
-                return record_status(
-                    accuracy_status, dynamo_start_stats=start_stats
-                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result
             if not same(
