@@ -126,7 +126,7 @@ class PhiloxStateTracker:
     track of both forward and backward offsets. At runtime, we only care about
     the total consumed forward and backward offsets. For dynamic shapes, these
     offsets are a function of input shapes. Therefore, the AOT generated graphs
-    have additiional outputs that compute total consumed forward and backward
+    have additional outputs that compute total consumed forward and backward
     offsets.
     """
 

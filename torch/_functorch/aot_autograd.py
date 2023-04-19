@@ -536,6 +536,13 @@ class ViewAndMutationMeta:
         self.num_mutated_inputs = self.num_mutated_data_inputs + self.num_mutated_metadata_only_inputs
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
+        # All of the above metadata is collected by tracing the fw function.
+        # However, extra outputs for rng offsets behave differently. Both fwd
+        # and bwd graphs have their own outputs for the total consumed offsets.
+        # Unlike mutated inputs, we don't have to worry about sending the right
+        # set of tensors between fwd and bwd. Fwd and bwd offsets are
+        # independent and simpler to handle. Therefore, we track them
+        # separately.
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
     def __eq__(self, other):
@@ -2173,7 +2180,6 @@ def create_runtime_wrapper(
         num_mutated_inps = runtime_metadata.num_mutated_inputs
         num_metadata_mutated_inps = runtime_metadata.num_mutated_metadata_inputs
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
-        num_rng_offset_outs = runtime_metadata.num_outputs_rng_offset
 
         if keep_input_mutations:
             assert (
@@ -2545,10 +2551,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_outputs_rng_offset = CompiledFunction.metadata.num_outputs_rng_offset
             # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
             num_forward_returns = num_mutated_inputs + num_outputs + num_intermediate_bases
-            # In case of functionalization of rng ops, we have one more output,
-            # however that output is consumed inside the forward itself, and it
-            # not returned as an output. We need this num_forward to correctly
-            # save tensors for backward.
+            # In case of functionalization of rng ops, the fw_module returns one
+            # additinal output for rng offset. This rng offset is used right
+            # away to advance the rng state, and is not passed on to the raw
+            # outputs. However, we need to know the exact boundary to identify
+            # which tensors to be saved for the bwd graph.  num_forward captures
+            # this information.
             num_forward = num_forward_returns + num_outputs_rng_offset
 
             assert num_forward_returns == len(
@@ -2580,9 +2588,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
-            if CompiledFunction.metadata.is_rng_op_functionalized:
-                assert num_forward_returns + 1 == num_forward
-                new_rng_offset = fw_outs[num_forward_returns]
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
@@ -2623,9 +2628,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
-
             if CompiledFunction.metadata.is_rng_op_functionalized:
                 # Advance total fwd offset
+                assert num_outputs_rng_offset == 1
+                new_rng_offset = fw_outs[num_forward_returns]
                 CUDARngStateHelper.set_new_offset(new_rng_offset)
             return tuple(raw_returns)
 
@@ -2728,9 +2734,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     disable_amp=disable_amp,
                 )
 
-
                 if CompiledFunction.metadata.is_rng_op_functionalized:
                     # Advance total bwd rng offset
+                    # The last output in the backward is new_rng_offset
                     assert CompiledFunction.metadata.num_outputs_rng_offset == 1
                     new_rng_offset = out[-1]
                     out = out[:-1]
