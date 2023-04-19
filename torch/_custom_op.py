@@ -168,7 +168,7 @@ class CustomOp:
         self.__name__ = None  # mypy requires this
         self._fake_impl: typing.Optional[FuncAndLocation] = None
 
-        global_registry[self._qualname] = weakref.ref(self)
+        global_registry[self._qualname] = self
 
     def __repr__(self):
         return f'<CustomOp(op="{self._qualname}")>'
@@ -310,25 +310,27 @@ class CustomOp:
             # FakeTensor will look at _fake_impl
             self._fake_impl = FuncAndLocation(f, location)
 
+            qualname = self._qualname
+
             # Handle DispatchKey.Meta registration
             @functools.wraps(f)
             def f_with_ctx(*args, **kwargs):
                 def error_on_ctx():
                     raise RuntimeError(
                         f"Attempted to call get_ctx() for the meta implementation "
-                        f"for {self._qualname}."
+                        f"for {qualname}."
                         f"You have presumably called get_ctx() because the operator "
                         f"has a data-dependent output shape; if so, there is no "
                         f"such meta implementation and this error is the correct "
                         f"behavior. Otherwise, please remove the call to get_ctx() "
                         f"in the implementation registered with impl_fake "
-                        f"at {self._fake_impl.location}"
+                        f"at {location}"
                     )
 
                 with set_ctx_getter(error_on_ctx):
                     return f(*args, **kwargs)
 
-            self._lib.impl(self._opname, f, "Meta")
+            self._lib.impl(self._opname, f_with_ctx, "Meta")
             return f
 
         return inner
@@ -453,9 +455,14 @@ def validate_function_matches_schema(
 # Used to query the CustomOp associated with a specific C++ dispatcher operator.
 # An example usage is FakeTensor: FakeTensor checks if a specific operator
 # has an implementation registered via the CustomOp API.
-global_registry: typing.Dict["qualname", "weakref.ref[CustomOp]"] = {}
+global_registry = weakref.WeakValueDictionary({})
 
-global_ctx_getter = None
+
+def get_none():
+    return None
+
+
+global_ctx_getter = get_none
 
 
 # NOTE [ctx inside the fake implementation]

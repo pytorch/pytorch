@@ -924,6 +924,12 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
 
+    # TODO: resolve error in default __repr__
+    def __repr__(self):
+        with in_kernel_invocation_manager(self.fake_mode):
+            self_repr = super().__repr__()
+        return f"FakeTensor({self_repr}, {self.fake_device})"
+
     @classmethod
     @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1250,8 +1256,8 @@ class FakeTensorMode(TorchDispatchMode):
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
         if func.name() in torch._custom_op.global_registry:
-            custom_op = torch._custom_op.global_registry[func.name()]()
-            if custom_op is not None and custom_op._fake_impl is not None:
+            custom_op = torch._custom_op.global_registry[func.name()]
+            if custom_op._fake_impl is not None:
                 ctx = torch._custom_op.FakeTensorImplCtx(self.shape_env, func)
                 with torch._custom_op.set_ctx_getter(lambda: ctx), self:
                     result = custom_op._fake_impl.func(*args, **kwargs)
