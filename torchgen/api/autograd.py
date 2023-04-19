@@ -366,7 +366,7 @@ def gen_foreach_derivativeinfo(
         return None, False
 
     # non out-place uses the existing Derivative.
-    if foreach_function.func.kind() != SchemaKind.functional:
+    if foreach_function.func.kind() == SchemaKind.inplace:
         return ref_diff_info, False
 
     map_refarg2foreacharg, map_name2arg = {}, {}
