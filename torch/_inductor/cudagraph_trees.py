@@ -354,14 +354,6 @@ class StorageWeakRefWrapper:
         inp: Union[Tensor, UntypedStorage],
         extra_ref_check: Optional[Callable[[], None]] = None,
     ):
-<<<<<<< HEAD
-=======
-        """
-        extra_ref_check is an additional check we need to run to check if the
-        weak ref has expired. in checking storage use count we assume extra_ref_check
-        will hold an additional reference to the storage.
-        """
->>>>>>> ec425155728... Cache output tensors on execution
         if isinstance(inp, Tensor):
             stor = inp.untyped_storage()
         else:
