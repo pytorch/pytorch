@@ -1346,6 +1346,8 @@ def emit_body(
             is_foreacharg_list_type: bool = False
             remove_underscore_before_replace: bool = False
             if is_inplace_foreach and info is not None:
+                # todo(crcrpar): See if we can add some check e.g. `assert foreacharg is not None`.
+                # for now the example assert would fail.
                 name_to_query = name.split("_scalar_type")[0]
                 if name_to_query in refargname2inplace_foreacharg:
                     foreacharg = refargname2inplace_foreacharg[name_to_query]
@@ -1405,6 +1407,8 @@ def emit_body(
             ):
                 expr = expr + ".vec()"
 
+            # todo(crcrpar): ideally do this replacement before refining `expr` in if-else above.
+            # Naively moving this processing to before if-else seems to cause some weirdos.
             if foreacharg is not None:
                 name_in_expr = (
                     f"{foreacharg.name}{'[i]' if is_foreacharg_list_type else ''}"
