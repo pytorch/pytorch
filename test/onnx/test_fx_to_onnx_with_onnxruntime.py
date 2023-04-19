@@ -337,13 +337,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
     # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
     # @unittest.expectedFailure
-    @pytorch_test_common.xfail(
-        "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
-        "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
-        "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
-        "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
-        "instance of <protocol 'torch.Tensor'>."
-    )
+    @pytorch_test_common.xfail("https://github.com/pytorch/pytorch/issues/99534")
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",

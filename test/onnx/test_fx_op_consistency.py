@@ -328,7 +328,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3"),
+    xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3 (https://github.com/pytorch/pytorch/issues/99534)"),
 )
 # fmt: on
 
