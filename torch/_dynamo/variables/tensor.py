@@ -9,6 +9,8 @@ import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
+from ..bytecode_transformation import create_call_function, Instruction
+
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -717,6 +719,55 @@ class NumpyTensorVariable(TensorVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented(f"numpy_ndarray.{name}()")
+
+    @staticmethod
+    def reconstruct_ndarray_before_return(codegen, output_graph) -> List[Instruction]:
+        """
+        Check if return value is torch_np.ndarray if so convert it to numpy.ndarray.
+        The equivalent Python code looks like this:
+        def f(x):
+            ___tmp_0 = __compiled_fn_0(x)
+            if isinstance(___tmp_0, torch_np.ndarray):
+                return ___tmp_0.tensor.numpy()
+            else:
+                return ___tmp_0
+        """
+        if not config.numpy_ndarray_as_tensor:
+            return []
+        from torch._dynamo.bytecode_transformation import create_instruction
+
+        # b.tensor.numpy()
+        var = output_graph.new_var()
+        from torch_np import ndarray
+
+        check = [
+            codegen.create_store(var),
+            codegen.create_load_global("isinstance", False, add=True),
+            codegen.create_load(var),
+            codegen.create_load_python_module(ndarray, False),
+            *create_call_function(2, False),
+        ]
+        true_branch = [
+            codegen.create_load(var),
+            codegen.create_load_attr("tensor"),
+            create_instruction(name="LOAD_METHOD", argval="numpy"),
+            create_instruction(
+                name="CALL_METHOD",
+                arg=0,
+            ),
+            create_instruction(name="RETURN_VALUE"),
+        ]
+        jump = create_instruction("POP_JUMP_IF_FALSE")
+        false_branch_load = codegen.create_load(var)
+        false_branch_load.is_jump_target = True
+        jump.arg = false_branch_load.offset
+        jump.target = false_branch_load
+        return [
+            *check,
+            jump,
+            *true_branch,
+            false_branch_load,
+        ]
 
 
 class UnspecializedPythonVariable(TensorVariable):
