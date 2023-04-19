@@ -171,7 +171,7 @@ __global__ void indexing_backward_kernel_stride_1(
             gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
           }
 
-          grad_weight[weight_row] = static_cast<scalar_t>(gradient);
+          grad_weight[weight_row] += static_cast<scalar_t>(gradient);
         }
       }
     }
@@ -187,11 +187,11 @@ __global__ void indexing_backward_kernel_small_stride(
   // Number of values processed by each thread (grain size)
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
     int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
-    int64_t start_feature = threadIdx.x + blockIdx.y * blockDim.x;
+    int64_t tidx = threadIdx.x;
     int64_t crnt_sorted_idx = sorted_indices[idx];
 
     if ((idx < numel) &&
-        (start_feature < stride) &&
+        (tidx < stride) &&
         (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
     {
       // Determine the number of duplicates in advance
@@ -207,16 +207,16 @@ __global__ void indexing_backward_kernel_small_stride(
 
       if (!accumulate) {
         grad_row = ((int64_t)indices[idx + num_duplicates - 1]) * stride + z * numel * stride;
-        grad_weight[weight_row + start_feature] =
-          static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row + start_feature]) * scale);
+        grad_weight[weight_row + tidx] =
+          static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale);
       } else {
         opmath_t gradient = (opmath_t)0.0;
         for (int64_t i = 0; i < num_duplicates; ++i) {
           grad_row = ((int64_t) indices[idx + i]) * stride + z * numel * stride;
-          gradient += static_cast<opmath_t>(grad_output[grad_row + start_feature]) * scale;
+          gradient += static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale;
         }
 
-        grad_weight[weight_row + start_feature] = static_cast<scalar_t>(gradient);
+        grad_weight[weight_row + tidx] += static_cast<scalar_t>(gradient);
       }
     }
   }
@@ -503,8 +503,6 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
-
-      printf("VAndrei DEBUG: numel = %ld; stride = %ld; accumulate = %d\n", num_indices, sliceSize, accumulate);
 
       if (sliceSize == 1) {
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
