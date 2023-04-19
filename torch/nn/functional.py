@@ -5194,6 +5194,7 @@ def multi_head_attention_forward(
             check_other=False,
         )
 
+
         if key_padding_mask is not None:
             # We have the attn_mask, and use that to merge kpm into it.
             # Turn off use of is_causal hint, as the merged mask is no
