@@ -253,6 +253,40 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
       TORCH_FN(run_batchnorm_context));
 }
 
+TORCH_LIBRARY(vulkan_quantized, m) {
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::add(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point) -> Tensor qc"));
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::sub(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point)-> Tensor qc"));
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::mul(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point)-> Tensor qc"));
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::div(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point)-> Tensor qc"));
+}
+
+TORCH_LIBRARY_IMPL(vulkan_quantized, Vulkan, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::add"), TORCH_FN(quantized_add));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::sub"), TORCH_FN(quantized_sub));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::mul"), TORCH_FN(quantized_mul));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::div"), TORCH_FN(quantized_div));
+}
+
 } // namespace
 } // namespace ops
 } // namespace vulkan
