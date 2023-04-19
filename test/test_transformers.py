@@ -1397,7 +1397,7 @@ class TestSDPA(NNTestCase):
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not (isSM86Device or isSM89Device), "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [96, 128])
+    @parametrize("head_dim", [72, 96, 128])
     def test_memory_efficient_sm86_plus_failure(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
@@ -1410,7 +1410,7 @@ class TestSDPA(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not (isSM86Device or isSM89Device), "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [96, 128])
+    @parametrize("head_dim", [72, 96, 128])
     def test_flash_backward_failure_sm86plus(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
