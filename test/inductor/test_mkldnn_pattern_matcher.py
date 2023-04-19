@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import itertools
 
 import torch
