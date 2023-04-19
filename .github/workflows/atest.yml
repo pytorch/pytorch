@@ -20,12 +20,17 @@ jobs:
       GH_SHA: ${{ github.sha }}
       GH_REF: ${{ github.ref_name }}
     steps:
-      # - name: Checkout PyTorch
-      #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
-      # - name: "print stuff"
-      #   run: |
-      #     git tag --points-at ${GH_SHA}
+      # invoke the upload-pytest-cache github action
+      
+      - name: Get workflow job id
+        id: upload-pytest-cache
+        uses: ./.github/actions/upload-pytest-cache
+        with:
+          github-token: ${{ GITHUB_REF }}
+
       - name: "print GH_REF"
         run: |
           echo ${GH_REF}
