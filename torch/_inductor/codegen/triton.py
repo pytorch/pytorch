@@ -1428,7 +1428,8 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            self.codegen_static_numels(code)
+            if not dynamo_config.dynamic_shapes:
+                self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -1444,42 +1445,23 @@ class TritonKernel(Kernel):
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
-
-        This code stomps on the passed-in values by writing an constant to the top of the kernel.
-
-        In a kernel like:
-        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, RBLOCK : tl.constexpr):
-
-        We would add
-        xnumel = 4096
-        rnumel = 768
-
-        After the signature, before the kernel code, if we decided to make these static. As its hardcoded, it becomes
-        a better signal to triton on how to unroll and do some static indexing. So, it's not so much that downstream
-        knows that its a static numel, as that you just plop a constant into the kernel.
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                postfix = (
-                    "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
-                )
-                simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
+                if isinstance(V.graph.sizevars.simplify(tree.numel), sympy.Integer):
                     code.writeline(
-                        f"{tree.prefix}numel = {int(simplified_tree_numel)} {postfix}"
+                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}"
+                    )
+                elif not dynamo_config.dynamic_shapes:
+                    code.writeline(
+                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
 
             if tree.prefix == "r" and self.persistent_reduction:
-                simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if dynamo_config.dynamic_shapes:
-                    if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                        val = int(simplified_tree_numel)
-                    else:
-                        continue
-                else:
-                    val = int(simplified_tree_numel)
-                val = next_power_of_2(val)
-                code.writeline(f"RBLOCK: tl.constexpr = {val}")
+                # we generate a static RBLOCK for persistent reduction
+                hint = V.graph.sizevars.size_hint(tree.numel)
+                hint = next_power_of_2(hint)
+                code.writeline(f"RBLOCK: tl.constexpr = {hint}")
 
     def indexing_size_str(self, i=None, x=None):
         sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
