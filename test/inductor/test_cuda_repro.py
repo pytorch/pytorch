@@ -306,11 +306,7 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.triton_heuristics import (
-            CachingAutotuner,
-            grid,
-            HeuristicType,
-        )
+        from torch._inductor.triton_heuristics import CachingAutotuner, grid
         from torch._inductor.utils import instance_descriptor
 
         def autotune(configs, meta):
@@ -322,7 +318,6 @@ class CudaReproTests(TestCase):
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],
-                    heuristic_type=HeuristicType.POINTWISE,
                 )
 
             return decorator
