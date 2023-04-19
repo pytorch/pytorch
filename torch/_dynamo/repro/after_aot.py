@@ -14,7 +14,7 @@ import torch.fx as fx
 
 from torch._dynamo.debug_utils import (
     AccuracyError,
-    backend_accuracy_fails,
+    backend_aot_accuracy_fails,
     BuckTargetWriter,
     COMPILER_REPRO_OPTIONS,
     generate_compiler_repro_string,
@@ -63,13 +63,13 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             if config.repro_level == 1:
                 dump_compiler_graph_state(
                     fx.GraphModule(gm, orig_graph),
-                    copy_tensor_attrs,
+                    example_inputs,
                     compiler_name,
                 )
             elif config.repro_level == 2:
                 dump_to_minify(
                     fx.GraphModule(gm, orig_graph),
-                    copy_tensor_attrs,
+                    example_inputs,
                     compiler_name,
                 )
             log.error("CompilerError")
@@ -152,15 +152,6 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
         return compiled_fn
 
     return debug_wrapper
-
-
-backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
-
-
-def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torch._inductor.compile_fx import compile_fx_inner
-
-    return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
