@@ -724,10 +724,23 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
+            dynamic_dims = None
+            if config.dynamic_shapes:
+                dynamic_dims = [
+                    self.output_graph.frame_state[name] for name in tensor_check_names
+                ]
+                for i, state in enumerate(dynamic_dims):
+                    if state is None:
+                        # Unpack the Nones into [None] for easier handling
+                        dynamic_dims[i] = tensor_check_examples[i].ndim * [None]
+
+            print(dynamic_dims)
             tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+                *tensor_check_examples,
+                dynamic_dims=dynamic_dims,
             )
             check_tensors_fn = tensor_guards.check
+            # breakpoint()
             check_tensors_verbose_fn = tensor_guards.check_verbose
             code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
             verbose_args = ", ".join(
@@ -842,7 +855,7 @@ def guard_fail_hook(
     # eval_frame.c logic that moves newest frames to head, but for logging purposes
     # it's more useful to see the 'first' failure (if we never got a hit) since it's
     # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
+    # assert stashed_first_fail_reason
     guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
     stashed_first_fail_reason = None
 

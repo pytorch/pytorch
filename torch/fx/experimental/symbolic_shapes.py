@@ -1925,6 +1925,9 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
+                maybe_static = self._maybe_evaluate_static(expr)
+                if isinstance(maybe_static, (int, sympy.Integer)):
+                    continue
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
                 # NB: Not necessary to report constraint violations here:
