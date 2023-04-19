@@ -523,7 +523,7 @@ inline bool check_head_dim_gt64_and_sm_ge86(sdp_params params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
   // Categorically disable sm90 as well. Will want to fix this once we have H100s available for testing.
-  bool is_sm86_or_newer = is_sm86_or_newer || (dprops->major > 8);
+  is_sm86_or_newer = is_sm86_or_newer || (dprops->major > 8);
   if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
     if (debug) {
       TORCH_WARN(
