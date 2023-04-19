@@ -203,7 +203,7 @@ class NCCLComm {
       config.blocking = 0;
       C10D_NCCL_CHECK_TIMEOUT(
         ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), comm->ncclComm_, c10::nullopt);
-    else {
+    } else {
       C10D_NCCL_CHECK(
         ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
     }
