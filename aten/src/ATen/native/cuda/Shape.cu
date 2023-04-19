@@ -95,7 +95,7 @@ struct TensorSizeStride {
 // to pass compile.
 template <typename T, typename IndexType, int n, int stride_size>
 struct CatArrInputTensorMetadata {
-  T* input[n];
+  const T* input[n];
   IndexType offset[n];
   IndexType dimSize[n];
   IndexType nElements[n];
@@ -118,7 +118,7 @@ __global__ void CatArrayBatchedCopy(
 
     if(tid >= nElements) return;
 
-    T* data = inputs.input[blockIdx.y];
+    const T* data = inputs.input[blockIdx.y];
     IndexType offset = inputs.offset[blockIdx.y];
     IndexType dimSize = inputs.dimSize[blockIdx.y];
     IndexType dataOffset = offset * dimStride;
@@ -144,7 +144,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
-  scalar_t *data = out.data_ptr<scalar_t>();
+  scalar_t *data = out.mutable_data_ptr<scalar_t>();
   CatArrInputTensorMetadata<scalar_t, unsigned int, batch_size, stride_size> catMetaData;
   TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> outputParam;
 
@@ -185,7 +185,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       if (inputs[i+batchCounter].get().numel() > 0) {
         dimSize = inputs[i+batchCounter].get().size(dimension);
       }
-      catMetaData.input[batchCounter] = inputs[i+batchCounter].get().data_ptr<scalar_t>();
+      catMetaData.input[batchCounter] = inputs[i+batchCounter].get().const_data_ptr<scalar_t>();
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
