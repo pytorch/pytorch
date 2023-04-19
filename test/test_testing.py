@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple, Generator
+from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
 
@@ -2287,19 +2287,19 @@ class TestOpInfoSampleFunctions(TestCase):
     def test_opinfo_sample_generators(self, device, dtype, op):
         # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
         # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
-        self.assertIsInstance(samples, Generator)
+        self.assertIsInstance(samples, Iterator)
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

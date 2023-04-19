@@ -136,9 +136,9 @@ def gcIfJetson(fn):
         fn(*args, **kwargs)
     return wrapper
 
-# Tries to extract the test function and full test ID of the current function under test
+# Tries to extract the current test function and full test ID
 # by crawling the stack. If unsuccessful, returns a pair of Nones.
-def extract_test_fn_and_id() -> Optional[Tuple[Callable, str]]:
+def extract_test_fn_and_id() -> Tuple[Optional[Callable], Optional[str]]:
     try:
         stack = inspect.stack()
         for frame_info in stack:
