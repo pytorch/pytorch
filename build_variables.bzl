@@ -1237,7 +1237,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Bucketization.cpp",
     "aten/src/ATen/native/CPUBlas.cpp",
     "aten/src/ATen/native/ChanelShuffle.cpp",
-    "aten/src/ATen/native/Collectives.cpp",
     "aten/src/ATen/native/Col2Im.cpp",
     "aten/src/ATen/native/PadNd.cpp",
     "aten/src/ATen/native/Convolution.cpp",
