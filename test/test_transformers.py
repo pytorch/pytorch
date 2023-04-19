@@ -1396,13 +1396,13 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not (isSM89Device or isSM89Device), "Does not support fused SDPA or not SM86+ hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not (isSM86Device or isSM89Device), "Does not support fused SDPA or not SM86+ hardware")
     @parametrize("head_dim", [96, 128])
     def test_memory_efficient_sm86_plus_failure(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        # See check_gpu_sm89_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
         size = (2, 2, 4, 128)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
@@ -1599,7 +1599,7 @@ class TestSDPA(NNTestCase):
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 96, 128])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -1630,8 +1630,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            # See check_gpu_sm89_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+            # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
             if (isSM86Device or isSM89Device) and (head_dim > 64 and head_dim <= 128):
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
                                                                                        dropout_p=dropout_p,
