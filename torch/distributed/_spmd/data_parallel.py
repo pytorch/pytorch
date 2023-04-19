@@ -472,7 +472,7 @@ def build_data_parallel_strategies(
                     # to support more general cases that allows optimizer states
                     # to have different shardings compare to the params
                     replica_strategy = _gen_replicate_strategy(mesh)
-                    shard_strategy = _gen_shard_strategy(mesh, batch_dim)
+                    shard_strategy = _gen_shard_strategy(mesh, shard_dim=0)
                     output_node_type = NodeType.PARAM
 
                     non_grad_types = [t for t in input_node_types if t != NodeType.GRAD]
@@ -493,7 +493,7 @@ def build_data_parallel_strategies(
                 elif NodeType.STATE in input_node_types:
                     # either param + state or state + state
                     replica_strategy = _gen_replicate_strategy(mesh)
-                    shard_strategy = _gen_shard_strategy(mesh, batch_dim)
+                    shard_strategy = _gen_shard_strategy(mesh, shard_dim=0)
                     output_node_type = (
                         NodeType.PARAM
                         if NodeType.PARAM in input_node_types
@@ -524,7 +524,7 @@ def mark_data_parallel_shardings(
     train_step_graph: GraphModule,
     num_parameters: int,
     num_states: int,
-    dp_strategy_map: Dict[fx.Node, DataParallelStrategy],
+    dp_strategy_map: Dict[fx.Node, StrategyList],
     parallel_mode: DataParallelStyle = DataParallelStyle.FULLY_SHARD,
 ) -> None:
     """
