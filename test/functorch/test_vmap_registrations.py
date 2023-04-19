@@ -30,6 +30,7 @@ xfail_functorch_batched = {
     "aten::log_softmax.int",
     "aten::logdet",
     "aten::masked_select_backward",
+    "aten::max_pool1d",
     "aten::movedim.intlist",
     "aten::one_hot",
     "aten::real",

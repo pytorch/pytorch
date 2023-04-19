@@ -78,6 +78,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM_ALL_BOXED(adaptive_max_pool3d);
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, adaptive_max_pool2d_backward, 2);
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(4, adaptive_max_pool3d_backward, 2);
+  // We can get max_pool1d to work on CUDA through decomposition,
+  // but fails on CPU due to max_pool1d_cpu not having a derivative.
   VMAP_SUPPORT(max_pool1d, max_pool1d_batch_rule);
   VMAP_SUPPORT(max_pool2d_with_indices, max_pool2d_with_indices_batch_rule);
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, max_pool2d_with_indices_backward, 2);
