@@ -1,11 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cuda/LaunchUtils.h>
@@ -55,7 +55,7 @@ namespace {
                           int osizeH, int osizeW,
                           int64_t istrideD, int64_t istrideH, int64_t istrideW)
   {
-    using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
+    using opmath_t = at::opmath_type<scalar_t>;
     // iterators on output pixels
     int oh, ow;
 
@@ -90,7 +90,7 @@ namespace {
         // Compute the average pooling over corresponding input pixels
         const scalar_t *ptr_input = input + istartH*istrideH + istartW*istrideW;
         scalar_t *ptr_output = output + oh*osizeW + ow;
-        accscalar_t sum = static_cast<accscalar_t>(0);
+        opmath_t sum = static_cast<opmath_t>(0);
         int ih, iw;
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
@@ -235,9 +235,9 @@ namespace {
                           index_t istrideB, index_t istrideC,
                           index_t istrideH, index_t istrideW)
   {
-    using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
+    using opmath_t = at::opmath_type<scalar_t>;
     extern __shared__ int smem[];
-    accscalar_t *out_cached = reinterpret_cast<accscalar_t*>(smem);
+    opmath_t *out_cached = reinterpret_cast<opmath_t*>(smem);
 
     // flattening cta for pre-computation & smem initialization;
     int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
@@ -246,7 +246,7 @@ namespace {
     // use shared memory to store temporary output value. This is simply to
     // reduce register usage.
     for (index_t i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
-      out_cached[i] = accscalar_t(0.0);
+      out_cached[i] = opmath_t(0.0);
     }
 
     __syncthreads();
@@ -309,7 +309,7 @@ namespace {
           // switch to could verify the correctness;
           // output[c] = out_cached[c] / (iendH-istartH) / (iendW-istartW);
           ptr_output[c] = out_cached[cached_index] * factor;
-          out_cached[cached_index] = accscalar_t(0.0);
+          out_cached[cached_index] = opmath_t(0.0);
           cached_index += blockDim.x;
         }
         // no need to __syncthreads() since out_cached is not shared.
@@ -532,8 +532,8 @@ namespace {
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-              using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(accscalar_t);
+              using opmath_t = at::opmath_type<scalar_t>;
+              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(opmath_t);
               AT_ASSERT(shmem_size <= sharedMemPerBlock);
               adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
                 input_.const_data_ptr<scalar_t>(),
