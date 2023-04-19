@@ -754,13 +754,20 @@ std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
     const std::string& method_name,
     const Tensor& t,
     const Tensor& mask) {
-  TORCH_CHECK(
-      mask.sizes().equals(t.sizes()),
-      method_name, "(): operands have incompatible sizes; self has size ",
-      t.sizes(),
-      " but mask has size ",
-      mask.sizes());
+  // This is a helper function for operations that implement "sparse_mask"-like
+  // functionality, namely, projection of values of one tensor onto the other.
+  // These operations mostly rely on COO intersection primitives that heavily
+  // exploit coalesced inputs to avoid any syncs and calls to sort. The problem
+  // is that these primitives might project first argument onto second one or
+  // the other way around depending on which arguments are coalesced and which are
+  // larger. This function prepares inputs for `sparse_mask` such that `t` is
+  // projected onto `mask` by sorting `t` if uncoalesced and artifically marking it
+  // as coalesced all while `mask` is set to uncoalesced.
+  // The result of this projectionk is going to be uncoalesced, so it is up to the
+  // user to set the corresponding flag correctly with respect to the operations'
+  // semantics.
 
+  // We already assume that t.sizes() == mask.sizes()
   TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
               method_name, "(): the number of sparse dimensions in `self` ",
               "should match that of the `mask`. ",
@@ -818,7 +825,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
     return t;
   }
 
-  if (!t.numel() || !mask.numel() || !mask._nnz()) {
+  if (!mask.numel() || !mask._nnz()) {
     return mask.clone().to(t.device(), t.scalar_type());
   }
 
@@ -851,12 +858,12 @@ Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask, bool accumula
 
   TORCH_CHECK(
       mask.sizes().equals(t.sizes()),
-      "sparse_mask(): operands have incompatible sizes; self has size ",
+      "_sparse_mask_projection(): operands have incompatible sizes; self has size ",
       t.sizes(),
       " but mask has size ",
       mask.sizes());
 
-  if (!t.numel() || !t._nnz() || !mask.numel() || !mask._nnz()) {
+  if (!t.numel() || !t._nnz() || !mask._nnz()) {
     auto res = t.clone();
     res._values().zero_();
     return res;
