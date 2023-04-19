@@ -3522,12 +3522,15 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         other = cls.realize_input(other)
         V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
+        optional_scalar = OptionalScalar()
+        optional_string = OptionalString()
+        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            binary_alpha if binary_alpha else 1.0,
-            unary_attr if unary_attr else "none",
-            unary_scalars if unary_scalars else [1],
-            unary_algorithm if unary_algorithm else "",
+            binary_alpha if binary_alpha else optional_scalar,
+            unary_attr if unary_attr else optional_string,
+            unary_scalars if unary_scalars else optional_list,
+            unary_algorithm if unary_algorithm else optional_string,
         ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
