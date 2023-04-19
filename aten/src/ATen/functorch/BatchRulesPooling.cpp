@@ -20,14 +20,14 @@ max_pool_with_indices_batch_rule_helper(
 
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   TORCH_INTERNAL_ASSERT(logical_rank == n + 1 || logical_rank == n + 2);
-  // Tensor[B, C, H, W] -> just call max_pool2d
-  if (logical_rank == 3) {
+  // Tensor[B, logical_rank...] -> just call max_poolnd
+  if (logical_rank == n + 1) {
     auto self_ = moveBatchDimToFront(self, self_bdim);
     auto result = pooling_fn(
         self_, kernel_size, stride, padding, dilation, ceil_mode);
     return std::make_tuple(std::move(std::get<0>(result)), 0, std::move(std::get<1>(result)), 0);
   }
-  // Tensor[B, N, C, H, W] -> Tensor[B * N, C, H, W]
+  // Tensor[B, N, logical_rank...] -> Tensor[B * N, logical_rank...]
   auto bdim_size = self.size(*self_bdim);
   auto self_ = reshape_dim_into(*self_bdim, 0, self);
   auto result = pooling_fn(
