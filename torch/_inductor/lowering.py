@@ -1091,6 +1091,12 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
         # likely to be triggered preferentially on one CI config over another.
+        if torch._dynamo.config.suppress_errors:
+            torch._dynamo.config.suppress_errors = False
+            log.warning(
+                "A make_fallback error occured in suppress_errors config,"
+                " and suppress_errors is being disabled to surface it."
+            )
         raise AssertionError(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it."
             " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
