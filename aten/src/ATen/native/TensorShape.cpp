@@ -2069,7 +2069,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
-            const auto tid_offset = thread_offsets.data_ptr<int64_t>()[tid];
+            const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
             const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
@@ -2251,7 +2251,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       ) -> std::tuple<Tensor, Tensor> {
         const auto src_intersection_counts = src_counts.mul(idx_counts > 0);
         const auto src_intersection_offsets = src_intersection_counts.cumsum(0);
-        const auto src_idx_len = src_intersection_offsets.data_ptr<int64_t>()[size - 1];
+        const auto src_idx_len = src_intersection_offsets.const_data_ptr<int64_t>()[size - 1];
         auto src_idx = at::empty({src_idx_len}, src.options());
 
         const auto* ptr_src = src.data_ptr<int64_t>();
@@ -2807,7 +2807,7 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     // reshape 0D or 1D tensor t into (t.numel(), 1)
     if (input.dim() <= 1) {
-      return input.reshape({input.numel(), 1});
+      return input.reshape_symint({input.sym_numel(), 1});
     }
     return input;
   };

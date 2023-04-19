@@ -46,8 +46,6 @@ class TestUtils(FSDPTest):
             sharded_tree_info,
             sharded_module_name_to_fqns,
         ) = _get_sharded_module_tree_with_module_name_to_fqns(model)
-        if self.rank == 0:
-            print(sharded_tree_info)
         self.assertEqual(
             list(sharded_module_name_to_fqns.keys()),
             ["[CompositeModel]", "u1[UnitModule]", "u2[UnitModule]"],
@@ -82,37 +80,35 @@ class TestUtils(FSDPTest):
             sharded_tree_info,
             sharded_module_name_to_fqns,
         ) = _get_sharded_module_tree_with_module_name_to_fqns(new_model)
-        if self.rank == 0:
-            print(sharded_tree_info)
-            self.assertEqual(
-                list(sharded_module_name_to_fqns.keys()),
-                ["[CompositeModel]", "u1[UnitModule]"],
-            )
-            self.assertEqual(
-                list(sharded_module_name_to_fqns.values()),
+        self.assertEqual(
+            list(sharded_module_name_to_fqns.keys()),
+            ["[CompositeModel]", "u1[UnitModule]"],
+        )
+        self.assertEqual(
+            list(sharded_module_name_to_fqns.values()),
+            [
                 [
-                    [
-                        "l1.weight",
-                        "l1.bias",
-                        "u2.l1.weight",
-                        "u2.l1.bias",
-                        "u2.seq.1.weight",
-                        "u2.seq.1.bias",
-                        "u2.l2.weight",
-                        "u2.l2.bias",
-                        "l2.weight",
-                        "l2.bias",
-                    ],
-                    [
-                        "u1.l1.weight",
-                        "u1.l1.bias",
-                        "u1.seq.1.weight",
-                        "u1.seq.1.bias",
-                        "u1.l2.weight",
-                        "u1.l2.bias",
-                    ],
+                    "l1.weight",
+                    "l1.bias",
+                    "u2.l1.weight",
+                    "u2.l1.bias",
+                    "u2.seq.1.weight",
+                    "u2.seq.1.bias",
+                    "u2.l2.weight",
+                    "u2.l2.bias",
+                    "l2.weight",
+                    "l2.bias",
                 ],
-            )
+                [
+                    "u1.l1.weight",
+                    "u1.l1.bias",
+                    "u1.seq.1.weight",
+                    "u1.seq.1.bias",
+                    "u1.l2.weight",
+                    "u1.l2.bias",
+                ],
+            ],
+        )
 
 
 if __name__ == "__main__":

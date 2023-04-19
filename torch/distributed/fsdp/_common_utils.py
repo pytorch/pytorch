@@ -60,8 +60,6 @@ class _FSDPState(_State):
         self._fully_sharded_module_to_handles: Dict[
             nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
-        # All the sharded submodule names under the 'root_module' that is passed to 'fully_shard()'
-        self._fully_sharded_submodule_names: List[str] = []
         self.compute_device: Optional[torch.device] = None
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals

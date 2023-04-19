@@ -2441,6 +2441,80 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    def test_cond_supported_pred_types(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            return x.sin()
+
+        def f_pred_traced_as_constant_var(x):
+            return cond(x.dim() > 2, true_fn, false_fn, [x])
+
+        def f_pred_traced_as_symnode_var(x):
+            return cond(x.shape[0] > 10, true_fn, false_fn, [x])
+
+        def f_pred_traced_as_tensor_var(x):
+            return cond(x.all(), true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        for f in [
+            f_pred_traced_as_constant_var,
+            f_pred_traced_as_symnode_var,
+            f_pred_traced_as_tensor_var,
+        ]:
+            gm, _ = torch._dynamo.export(f, *example_inputs)
+            self.assertEqual(gm(*example_inputs), f(*example_inputs))
+
+    def test_mixed_real_and_fake_inputs(self):
+        class _TestPattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(1)
+
+            def forward(self, input):
+                running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+                scale_factor = self.bn.weight / running_std
+                weight_shape = [1] * len(self.conv.weight.shape)
+                weight_shape[0] = -1
+                bias_shape = [1] * len(self.conv.weight.shape)
+                bias_shape[1] = -1
+                scaled_weight = self.conv.weight * scale_factor.reshape(weight_shape)
+                zero_bias = torch.zeros_like(self.conv.bias, dtype=input.dtype)
+                conv = self.conv._conv_forward(input, scaled_weight, zero_bias)
+                conv_orig = conv / scale_factor.reshape(bias_shape)
+                conv_orig = conv_orig + self.conv.bias.reshape(bias_shape)
+                conv = self.bn(conv_orig)
+                return conv
+
+        example_inputs = (torch.randn(1, 1, 3, 3),)
+        torch._dynamo.export(
+            _TestPattern(),
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="real",
+        )
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        capture_scalar_outputs=True,
+        assume_static_by_default=False,
+    )
+    def test_sym_contains(self):
+        def f(x, y):
+            return x.size(0) in y
+
+        gm, _ = torch._dynamo.export(
+            f, torch.ones(2), torch.ones(3), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        true_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(5))
+        false_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(2))
+        self.assertEqual(gm(*true_inp), f(*true_inp))
+        self.assertEqual(gm(*false_inp), f(*false_inp))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
