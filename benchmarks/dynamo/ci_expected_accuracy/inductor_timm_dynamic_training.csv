@@ -2,7 +2,6 @@ name,accuracy,graph_breaks
 adv_inception_v3,pass,9
 beit_base_patch16_224,pass,9
 botnet26t_256,pass,11
-cait_m36_384,pass,9
 coat_lite_mini,pass,9
 convit_base,fail_to_run,8
 convmixer_768_32,pass,6

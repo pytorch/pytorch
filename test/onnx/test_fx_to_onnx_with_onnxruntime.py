@@ -143,7 +143,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     test_suite: TestFxToOnnxWithOnnxRuntime,
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
-    input_kwargs: Mapping[str, _InputArgsType] = {},
+    input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
@@ -172,6 +172,10 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             is designed for dynamic axes testing. Defaults to None.
 
     """
+
+    # avoid mutable data structure
+    if input_kwargs is None:
+        input_kwargs = {}
 
     if has_mutation:
         ref_model = _try_clone_model(model)
