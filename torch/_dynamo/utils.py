@@ -842,6 +842,11 @@ def wrap_fake_exception(fn):
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
+    def is_already_fake(obj):
+        # hacky, but precise handling just for deferred init modules
+        return hasattr(obj, "_deferred")
+    if is_already_fake(obj):
+        return obj
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
 

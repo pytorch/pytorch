@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 from copy import deepcopy
 
 import torch
@@ -24,17 +25,23 @@ from torch.fx import Graph, GraphModule
 #   - we lose parameter-ness and requires_grad-ness
 #   - no version counter safety to guard against input mutation
 
-def deferred_init(f, *args, **kwargs):
+
+def get_deferred_modes():
     fx_tracer = PythonKeyTracer()
     fx_tracer.graph = Graph(fx_tracer)
     fx_tracer.root = torch.nn.Module()
     fx_tracer.tensor_attrs = {}
     fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
     proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode="real")
+    return fake_tensor_mode, proxy_mode, fx_tracer
+
+@contextlib.contextmanager
+def deferred_init(f, *args, **kwargs):
+    fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
     with fake_tensor_mode, proxy_mode:
         r = f(*args, **kwargs)
         r._deferred = fx_tracer
-        return r
+        yield r
 
 def materialize_module(m):
     # TODO: handle children
@@ -66,12 +73,6 @@ def materialize_module(m):
     replace_results(m._buffers)
 
     del m._deferred
-
-
-m = deferred_init(torch.nn.Linear, 3, 5)
-print(m.weight)
-materialize_module(m)
-print(m.weight)
 
 
 class Seq(torch.nn.Module):
@@ -243,9 +244,15 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             model.zero_grad()
             return loss
 
-        opt_model = Seq()
-        opt_model.apply(init_weights)
-        opt_optimizer = torch.optim.Adam(opt_model.parameters(), capturable=True)
+        fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
+
+        with fake_tensor_mode, proxy_mode:
+            deferred_model = Seq()
+            deferred_model.apply(init_weights)
+            deferred_model._deferred = fx_tracer
+            opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
+        
+        # materialize_module(m)
         inputs = [torch.randn((128, 10))]
         opt_train_step = torch.compile(
             train_step, backend="train_step_eager", fullgraph=True
@@ -253,7 +260,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
         loss = []
         for step in range(10):
-            opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+            opt_loss = opt_train_step(deferred_model, opt_optimizer, inputs)
             loss.append(opt_loss)
             if step > 0:
                 # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
