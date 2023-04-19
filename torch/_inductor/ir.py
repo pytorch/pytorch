@@ -178,6 +178,26 @@ def ir_node_to_tensor(x, guard_shape=True):
     return t
 
 
+class OptionalAttr:
+    def __repr__(self):
+        return self.name
+
+
+class OptionalString(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_string"
+
+
+class OptionalList(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_list"
+
+
+class OptionalScalar(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_scalar"
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c
@@ -3323,7 +3343,13 @@ class ConvolutionUnary(ExternKernelAlloc):
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        constant_args = constant_args + [attr, scalars if scalars else [-1], algorithm]
+        optional_string = OptionalString()
+        optional_list = OptionalList()
+        constant_args = constant_args + [
+            attr,
+            scalars if scalars else optional_list,
+            algorithm if algorithm else optional_string,
+        ]
         return ConvolutionUnary(
             layout=kernel_layout,
             inputs=inputs,
@@ -3405,12 +3431,15 @@ class ConvolutionBinary(ExternKernelAlloc):
         )
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
+        optional_scalar = OptionalScalar()
+        optional_string = OptionalString()
+        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            binary_alpha if binary_alpha else 1.0,
-            unary_attr if unary_attr else "none",
-            unary_scalars if unary_scalars else [-1],
-            unary_algorithm if unary_algorithm else "",
+            binary_alpha if binary_alpha else optional_scalar,
+            unary_attr if unary_attr else optional_string,
+            unary_scalars if unary_scalars else optional_list,
+            unary_algorithm if unary_algorithm else optional_string,
         ]
         return ConvolutionBinary(
             layout=kernel_layout,
