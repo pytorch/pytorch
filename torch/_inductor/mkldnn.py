@@ -295,9 +295,9 @@ def pack_module(gm: torch.fx.GraphModule):
                     continue
                 if dynamo_config.dynamic_shapes:
                     computation_node_input_size = None
-                    if (
+                    if not (
                         type(cur_module) in [torch.nn.Linear]
-                        and cur_module.weight.dtype == torch.float32
+                        and cur_module.weight.dtype == torch.bfloat16
                     ):
                         continue
                 else:
@@ -310,6 +310,9 @@ def pack_module(gm: torch.fx.GraphModule):
                             cur_module.weight.dtype == torch.float32
                             and (not torch._C.has_mkl)
                         ) or len(computation_node_input_size) < 2:
+                            continue
+                    else:
+                        if len(computation_node_input_size) != 4:
                             continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
