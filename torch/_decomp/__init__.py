@@ -205,6 +205,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.embedding_dense_backward,
             aten._euclidean_dist.default,
             aten.expand_as,
+            aten.exponential,
             aten.eye,
             aten.fill,
             aten.frac,
