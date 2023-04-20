@@ -526,7 +526,7 @@ def build_data_parallel_strategies(
         else:
             raise RuntimeError(f"op code {node.op} not supported")
 
-    return dp_strategy_map  # mypy: ignore[return-value]
+    return dp_strategy_map  # type: ignore[return-value]
 
 
 def mark_data_parallel_shardings(
@@ -598,7 +598,8 @@ def mark_data_parallel_shardings(
                 )
         elif node.op == "output":
             assert (
-                node_strategy.node_type == NodeType.NON_TENSOR
+                isinstance(node_strategy, DataParallelStrategy)
+                and node_strategy.node_type == NodeType.NON_TENSOR
             ), "output node should not be tensor"
             node.meta["sharding"] = None
         else:
@@ -787,7 +788,7 @@ def partition_data_parallel(
                 else:
                     param_dtensor_states[state_key] = state_val
 
-            optimizer.state.pop(param)
-            optimizer.state[dtensor_param] = param_dtensor_states  # mypy: ignore[index]
+            optimizer.state.pop(param)  # type: ignore[call-overload]
+            optimizer.state[dtensor_param] = param_dtensor_states  # type: ignore[index]
 
     return partitioned_graph
