@@ -2441,6 +2441,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    @config.patch(dynamic_shapes=True)
     def test_cond_supported_pred_types(self):
         def true_fn(x):
             return x.cos()
@@ -2448,20 +2449,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def false_fn(x):
             return x.sin()
 
-        def f_pred_traced_as_constant_var(x):
-            return cond(x.dim() > 2, true_fn, false_fn, [x])
-
         def f_pred_traced_as_symnode_var(x):
-            return cond(x.shape[0] > 10, true_fn, false_fn, [x])
+            return cond(x.shape[0] > 2 and x.shape[0] < 5, true_fn, false_fn, [x])
 
         def f_pred_traced_as_tensor_var(x):
             return cond(x.all(), true_fn, false_fn, [x])
 
-        example_inputs = (torch.rand(5),)
+        def f_pred_complex_expression_with_explicit_pre_type(x):
+            # It's important to make the pred type explicit here, otherwise
+            # it won't be traced correctly
+            pred: torch.SymBool = x.dim() > 1 and x.shape[1] > 5
+
+            return cond(
+                pred,
+                lambda x: x.cos(),
+                lambda x: x.sin(),
+                [x],
+            )
+
+        example_inputs = (torch.rand(5, 8),)
         for f in [
-            f_pred_traced_as_constant_var,
             f_pred_traced_as_symnode_var,
             f_pred_traced_as_tensor_var,
+            f_pred_complex_expression_with_explicit_pre_type,
         ]:
             gm, _ = torch._dynamo.export(f, *example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
@@ -2515,6 +2525,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gm(*true_inp), f(*true_inp))
         self.assertEqual(gm(*false_inp), f(*false_inp))
 
+    @config.patch(dynamic_shapes=True)
     def test_cond_raise_user_error_on_missing_args(self):
         def true_fn(x):
             return x.cos()
@@ -2540,13 +2551,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected pred to be traced as",
+            "Expected pred to be SymInt/SymBool or a tensor",
         ):
             torch._dynamo.export(f_unsupported_pred, *example_inputs)
 
     def test_cond_raise_user_error_on_non_list_operands(self):
         def f_non_list_operands(x):
-            return cond(True, lambda x: x.sin(), lambda x: x.cos(), x)
+            return cond(torch.tensor(True), lambda x: x.sin(), lambda x: x.cos(), x)
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
@@ -2558,7 +2569,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     def test_cond_raise_user_error_on_non_tensor_operands(self):
         def f_non_tensor_operands(x):
             a: float = 3.14
-            return cond(True, lambda x, a: x.sin(), lambda x, a: x.cos(), [x, a])
+            return cond(
+                torch.tensor(1234), lambda x, a: x.sin(), lambda x, a: x.cos(), [x, a]
+            )
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
@@ -2575,7 +2588,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         def f_branch_args_mismatch(x, y):
-            return cond(True, true_fn, false_fn, [x, y])
+            return cond(torch.tensor([[[[100]]]]), true_fn, false_fn, [x, y])
 
         example_inputs = (torch.rand(5), torch.rand(2))
         with self.assertRaisesRegex(
@@ -2584,9 +2597,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.export(f_branch_args_mismatch, *example_inputs)
 
+    @config.patch(dynamic_shapes=True)
     def test_cond_raise_user_error_on_branch_return_non_tensor(self):
         def f_branch_return_non_tensor(x):
-            return cond(True, lambda x: 3.14, lambda x: 3.14, [x])
+            return cond(x.shape[0] <= 5, lambda x: 3.14, lambda x: 3.14, [x])
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
@@ -2625,6 +2639,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_mismatch_return_length, *example_inputs, aten_graph=True
             )
 
+    @config.patch(dynamic_shapes=True)
     def test_cond_raise_user_error_on_mismatch_return_tensor_meta(self):
         def true_fn(x):
             return torch.tensor([[3], [2]])
