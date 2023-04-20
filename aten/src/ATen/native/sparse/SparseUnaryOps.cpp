@@ -70,7 +70,6 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -201,17 +200,6 @@ Tensor isinf_sparse_meta(const Tensor& self) {
   TORCH_CHECK_NOT_IMPLEMENTED(0, "nyi isinf for SparseMeta");
 }
 
-Tensor zeros_like_sparse(const Tensor& t) {
-  TORCH_INTERNAL_ASSERT(t.is_sparse());
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      t.sparse_dim(),
-      t.dense_dim(),
-      t.sizes(),
-      t._indices().clone(),
-      at::zeros({1}, t._values().options()).expand_as(t._values()),
-      t.options())._coalesced_(t.is_coalesced());
-}
-
 // Threshold_backward is not unary but it is the backward used for relu which is
 // unary
 Tensor threshold_backward_sparse(
@@ -220,7 +208,7 @@ Tensor threshold_backward_sparse(
     const Scalar& threshold) {
   const auto grad = [&]() {
     if (!grad_output._nnz() && grad_output._nnz() != self._nnz()) {
-      return zeros_like_sparse(self);
+      return at::sparse::zeros_with_indices_like(self);
     } else {
       return grad_output;
     }
@@ -244,7 +232,7 @@ Tensor& threshold_backward_sparse_out(
     Tensor& grad_input) {
   const auto grad = [&]() {
     if (!grad_output._nnz() && grad_output._nnz() != self._nnz()) {
-      return zeros_like_sparse(self);
+      return at::sparse::zeros_with_indices_like(self);
     } else {
       return grad_output;
     }
