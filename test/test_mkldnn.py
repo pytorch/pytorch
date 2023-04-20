@@ -415,6 +415,16 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
+    def test_conv_transposed2d_ic1_nhwc(self):
+        x = torch.ones([1, 1, 2, 2]).contiguous(memory_format=torch.channels_last)
+        model = torch.nn.ConvTranspose2d(in_channels=1, out_channels=2, kernel_size=[5, 5]).eval()
+        model.weight.data = torch.ones([1, 2, 5, 5]).contiguous(memory_format=torch.channels_last)
+        with torch.no_grad():
+            y = model(x)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = model(x)
+            self.assertEqual(y, y_ref)
+
     def test_conv2d_legacy_jit_model(self):
         """
         MKLDNN integration used to serialize models with 5d weight for grouped
@@ -1420,6 +1430,17 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_matmul_bf16(self):
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            a1 = torch.randn([64, 1, 33], dtype=torch.bfloat16)
+            # a2 is contiguous tensor but it's strides is not default contiguous strides.
+            a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
+            self.assertTrue(a2.is_contiguous())
+            b = torch.randn(64, 33, 256).to(dtype=torch.bfloat16)
+            y1 = torch.ops.aten.bmm(a1, b)
+            y2 = torch.bmm(a2, b)
+            self.assertEqual(y1, y2)
 
 if __name__ == '__main__':
     run_tests()
