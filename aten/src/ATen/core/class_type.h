@@ -78,7 +78,8 @@ struct TORCH_API ClassType : public NamedType {
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
       std::string doc_string = "",
-      std::vector<std::string> unresolved_class_attributes = {});
+      std::vector<std::string> unresolved_class_attributes = {},
+      ClassTypePtr base_class = nullptr);
 
   bool equals(const Type& rhs) const override {
     if (this == &rhs) {
@@ -380,6 +381,8 @@ struct TORCH_API ClassType : public NamedType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
+  ClassTypePtr base_class();
+
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
@@ -388,7 +391,8 @@ struct TORCH_API ClassType : public NamedType {
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
       std::string doc_string = "",
-      std::vector<std::string> unresolved_class_attributes = {});
+      std::vector<std::string> unresolved_class_attributes = {},
+      ClassTypePtr base_class = nullptr);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     (void)printer; // Suppress unused variable warning
@@ -437,6 +441,7 @@ struct TORCH_API ClassType : public NamedType {
 
   // For error reporting accesses to class level attributes.
   std::vector<std::string> unresolved_class_attributes_;
+  ClassTypePtr base_class_;
 };
 
 }

@@ -458,6 +458,7 @@ class TestClassType(JitTestCase):
             test()
 
     def test_class_inheritance(self):
+        # XXX
         @torch.jit.script
         class Base:
             def __init__(self):
@@ -466,11 +467,12 @@ class TestClassType(JitTestCase):
             def two(self, x):
                 return x + self.b
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "does not support inheritance", ""):
-            @torch.jit.script
-            class Derived(Base):
-                def two(self, x):
-                    return x + self.b + 2
+        # with self.assertRaisesRegexWithHighlight(RuntimeError, "does not support inheritance", ""):
+        @torch.jit.script
+        class Derived(Base):
+            def two(self, x):
+                sb = super().two(x)
+                return x + self.b + 2
 
 
     def test_class_inheritance_implicit(self):

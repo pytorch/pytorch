@@ -1472,11 +1472,25 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // that constant object held a shared_ptr to its CU. For these objects we
   // instatiate them with non-owning references to its CU
   Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
+
+    if (auto base_class_type = type_->base_class()) {
+      base_class_obj_ = ivalue::Object::create(
+          base_class_type,
+          base_class_type->numAttributes()
+      );
+    }
     slots_.resize(numSlots);
   }
 
   Object(StrongTypePtr type, size_t numSlots)
       : type_(WeakOrStrongTypePtr(std::move(type))) {
+
+    if (auto base_class_type = type_->base_class()) {
+      base_class_obj_ = ivalue::Object::create(
+          base_class_type,
+          base_class_type->numAttributes()
+      );
+    }
     slots_.resize(numSlots);
   }
 
@@ -1585,7 +1599,9 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  private:
   void resizeObject(size_t slot);
   WeakOrStrongTypePtr type_;
+  c10::optional<IValue> base_class_object_;
   std::vector<IValue> slots_;
+
 };
 
 // virtual ivalue PyObjectHolder that hold a py::object, we make this virtual

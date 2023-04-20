@@ -1314,13 +1314,19 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
                 "TorchScript classes must be new-style classes. "
                 "Please inherit from 'object'."
             )
-        if len(obj.mro()) > 2:
-            raise RuntimeError(
-                "TorchScript classes does not support inheritance yet. "
-                "Please directly inherit from 'object'."
-            )
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
+
+        mro = obj.mro()
+        mro_num = len(mro)
+        ret = None
+        if mro_num > 2:
+            for i in reversed(range(mro_num - 2)):
+                clz = mro[i]
+                base_clz = mro[i + 1]
+                print(f"XXX jit/_script.py:1327 clz:{clz} base_clz:{base_clz}")
+                ret = _compile_and_register_class(clz, _rcb, qualified_name, base_clz)
+            return ret
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     elif inspect.isfunction(obj) or inspect.ismethod(obj):

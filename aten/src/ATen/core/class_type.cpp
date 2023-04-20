@@ -468,13 +468,15 @@ ClassTypePtr ClassType::create(
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
     std::string doc_string,
-    std::vector<std::string> unresolved_class_attributes) {
+    std::vector<std::string> unresolved_class_attributes,
+    ClassTypePtr base_class) {
   return ClassTypePtr(new ClassType(
       std::move(qualifiedName),
       std::move(cu),
       is_module,
       std::move(doc_string),
-      std::move(unresolved_class_attributes)));
+      std::move(unresolved_class_attributes),
+      base_class));
 }
 
 ClassType::ClassType(
@@ -482,12 +484,14 @@ ClassType::ClassType(
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
     std::string doc_string,
-    std::vector<std::string> unresolved_class_attributes)
+    std::vector<std::string> unresolved_class_attributes,
+    ClassTypePtr base_class) 
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
       doc_string_(std::move(doc_string)),
-      unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
+      unresolved_class_attributes_(std::move(unresolved_class_attributes)),
+      base_class_(base_class) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
@@ -687,6 +691,10 @@ size_t ClassType::numConstants() const {
 
 at::ArrayRef<IValue> ClassType::constantValues() const {
   return constantValues_;
+}
+
+ClassTypePtr base_class() {
+  return base_class_;
 }
 
 } // namespace c10

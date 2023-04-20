@@ -55,13 +55,17 @@ def _configure_hooks(script_module):
     script_module._update_has_hooks = torch.nn.Module._update_has_hooks.__get__(script_module)
     script_module._update_has_hooks()
 
-def _compile_and_register_class(obj, rcb, qualified_name):
-    script_class = _get_script_class(obj)
+def _compile_and_register_class(obj, rcb, qualified_name, base_class = None):
+    base_script_class = None
+    if base_class is not None:
+        base_script_class = _get_script_class(base_class)
+        assert base_script_class, f"Base class {base_class} expected to be already compiled"
 
+    script_class = _get_script_class(obj)
     if not script_class:
         ast = get_jit_class_def(obj, obj.__name__)
         defaults = torch.jit.frontend.get_default_args_for_class(obj)
-        script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+        script_class = torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb, base_script_class)
         _add_script_class(obj, script_class)
 
     return script_class
