@@ -46,7 +46,7 @@ from torch.fx.experimental.proxy_tensor import (
     maybe_disable_fake_tensor_mode,
     proxy_slot,
 )
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 # patch aot_function so that we can pass the full (non-sharded) input to capture the graph
 # pyre-fixme
@@ -86,11 +86,12 @@ class DSymInt:
 
     @classmethod
     def from_node(cls, node: fx.Node, dtensor: DTensor) -> "DSymInt":
+        dim: int = 0
         if node.target == aten.sym_size:
-            dim: int = cast(int, node.args[1])
+            dim = cast(int, node.args[1])
             return cls(
-                global_value=dtensor.size(cast(int, node.args[1])),
-                local_value=dtensor.to_local().size(cast(int, node.args[1])),
+                global_value=dtensor.size(dim),
+                local_value=dtensor.to_local().size(dim),
                 mesh=dtensor.device_mesh,
             )
         elif node.target == aten.sym_numel:
@@ -100,7 +101,7 @@ class DSymInt:
                 mesh=dtensor.device_mesh,
             )
         elif node.target == aten.sym_stride:
-            dim: int = cast(int, node.args[1])  # type: ignore[no-redef]
+            dim = cast(int, node.args[1])
             return cls(
                 global_value=dtensor.stride(dim),
                 local_value=dtensor.to_local().stride(dim),
@@ -714,9 +715,7 @@ def _convert_to_distributed(
     """
     global logger
     logger = get_logger("spmd_exp")
-    operators = {
-        getattr(operator, name) for name in dir(operator) if not name.startswith("_")
-    }
+    operators = {getattr(operator, name) for name in operator.__all__}
     node_to_obj: Dict[fx.Node, Any] = {}
     # map local op node in traced_f to its corresponding subgraph of
     # DTensor ops.
@@ -781,19 +780,11 @@ def _convert_to_distributed(
                     dsymints[0].mesh == d.mesh for d in dsymints
                 ), "all DSymInts must have the same mesh. "
 
-                local_args = tree_map(
-                    lambda a: a.local_value if isinstance(a, DSymInt) else a, args
-                )
-                local_kwargs = tree_map(
-                    lambda a: a.local_value if isinstance(a, DSymInt) else a, kwargs
-                )
+                local_args = tree_map_only(DSymInt, lambda a: a.local_value, args)
+                local_kwargs = tree_map_only(DSymInt, lambda a: a.local_value, kwargs)
 
-                global_args = tree_map(
-                    lambda a: a.global_value if isinstance(a, DSymInt) else a, args
-                )
-                global_kwargs = tree_map(
-                    lambda a: a.global_value if isinstance(a, DSymInt) else a, kwargs
-                )
+                global_args = tree_map_only(DSymInt, lambda a: a.global_value, args)
+                global_kwargs = tree_map_only(DSymInt, lambda a: a.global_value, kwargs)
 
                 node.args = local_args
                 node.kwargs = local_kwargs
