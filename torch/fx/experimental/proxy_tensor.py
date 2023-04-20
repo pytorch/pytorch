@@ -698,12 +698,14 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
+            import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=True,
                     allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
+            import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 shape_env = ShapeEnv()
