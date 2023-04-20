@@ -2479,10 +2479,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         test_inp_v2 = (torch.ones(1, 2, 3),)
         self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
 
-    # FIXME For some reason, torch.cond regressed
-    # it specializes predicates now. we need to fix it.
-    @unittest.expectedFailure
-    @config.patch(dynamic_shapes=True)
+    @config.patch(dynamic_shapes=True, assume_static_by_default=False)
     def test_functionalize_cond(self):
         def foo(x):
             def true_true_fn(x):
