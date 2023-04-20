@@ -154,6 +154,16 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             )
             raise RuntimeError(msg)
 
+    if a.is_conj() != b.is_conj():
+        raise RuntimeError(
+            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+        )
+
+    if a.is_neg() != b.is_neg():
+        raise RuntimeError(
+            f"Neg mismatch! is_neg is set to {a.is_neg()} and {b.is_neg()}"
+        )
+
 
 def _check_strides_helper(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
@@ -1762,3 +1772,39 @@ def clone_preserve_strides(x):
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)
+
+class CUDARngStateHelper:
+    @staticmethod
+    def get_torch_state_as_tuple(fake_mode=None):
+        if not torch.cuda.is_available():
+            seed = torch.tensor(0)
+            offset = torch.tensor(0)
+            if fake_mode:
+                seed = fake_mode.from_tensor(seed)
+                offset = fake_mode.from_tensor(offset)
+            return seed, offset
+
+        rng_state = torch.cuda.get_rng_state()
+        if fake_mode:
+            rng_state = fake_mode.from_tensor(rng_state)
+        # Rng state is [64-bit seed, 64-bit offset]
+        seed = rng_state[0:8].view(dtype=torch.int64)[0]
+        offset = rng_state[8:].view(dtype=torch.int64)[0]
+        return seed, offset
+
+    @staticmethod
+    def set_torch_state_tensor(seed, offset):
+        # Rng state is [64-bit seed, 64-bit offset]
+        seed_portion = seed.reshape([1]).view(torch.uint8)
+        offset_portion = offset.reshape([1]).view(torch.uint8)
+        new_state = torch.cat([seed_portion, offset_portion])
+        torch.cuda.set_rng_state(new_state)
+
+    @staticmethod
+    def advance_torch_state(relative_offset):
+        rng_state = torch.cuda.get_rng_state()
+        # Rng state is [64-bit seed, 64-bit offset]
+        seed = rng_state[0:8].view(dtype=torch.int64)[0]
+        offset = rng_state[8:].view(dtype=torch.int64)[0]
+        new_offset = offset + relative_offset
+        CUDARngStateHelper.set_torch_state_tensor(seed, new_offset)
