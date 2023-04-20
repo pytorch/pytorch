@@ -936,8 +936,6 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_kwargs={"use_orig_params": True},
         )
 
-        # Enable this once use_orig_params supports rank0_only=Treu
-        """
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
             state_dict_settings=StateDictSettings(
@@ -952,7 +950,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
             fsdp_kwargs={"use_orig_params": True},
         )
-        """
 
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,

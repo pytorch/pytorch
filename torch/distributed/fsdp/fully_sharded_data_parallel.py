@@ -1249,37 +1249,44 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             # Flatten the optimizer state dict and construct a copy with the
             # positive-dimension tensors' shapes in place of the tensors themselves
             # since those tensors will be broadcast separately to avoid copying
-            if rank == 0:
+            if rank == 0 or use_orig_params:
+                if rank > 0:
+                    optim_state_dict = {}
                 flat_osd = _flatten_optim_state_dict(
                     optim_state_dict,
                     model=model,
                     shard_state=False,
                     use_orig_params=use_orig_params,
                     optim=(optim if is_named_optimizer else None),
+                    rank0_only=True,
                 )
-                processed_osd = _process_pos_dim_tensor_state(flat_osd, world_size)
+                if not use_orig_params:
+                    processed_osd = _process_pos_dim_tensor_state(flat_osd, world_size)
+            if not use_orig_params:
                 # Broadcast the optim state dict without positive-dimension tensor
                 # state and the FSDP parameter IDs from rank 0 to all ranks
-            processed_osd = _broadcast_processed_optim_state_dict(
-                processed_osd if rank == 0 else None,
-                rank,
-                group,
-            )
-            # Broadcast positive-dimension tensor state (both sharded tensors for
-            # FSDP parameters and unsharded tensors for non-FSDP parameters)
-            broadcast_device = (
-                torch.device("cuda")
-                if torch.cuda.is_available()
-                else torch.device("cpu")
-            )
-            sharded_osd = _broadcast_pos_dim_tensor_states(
-                processed_osd,
-                flat_osd if rank == 0 else None,
-                rank,
-                world_size,
-                group,
-                broadcast_device,
-            )
+                processed_osd = _broadcast_processed_optim_state_dict(
+                    processed_osd if rank == 0 else None,
+                    rank,
+                    group,
+                )
+                # Broadcast positive-dimension tensor state (both sharded tensors for
+                # FSDP parameters and unsharded tensors for non-FSDP parameters)
+                broadcast_device = (
+                    torch.device("cuda")
+                    if torch.cuda.is_available()
+                    else torch.device("cpu")
+                )
+                sharded_osd = _broadcast_pos_dim_tensor_states(
+                    processed_osd,
+                    flat_osd if rank == 0 else None,
+                    rank,
+                    world_size,
+                    group,
+                    broadcast_device,
+                )
+            else:
+                sharded_osd = flat_osd
             # Rekey the optimizer state dict to use parameter IDs according to this
             # rank's `optim`
             ret_state_dict = _rekey_sharded_optim_state_dict(
@@ -1297,6 +1304,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 shard_state=True,
                 use_orig_params=use_orig_params,
                 optim=(optim if is_named_optimizer else None),
+                rank0_only=False,
             )
             ret_state_dict = _rekey_sharded_optim_state_dict(
                 sharded_osd,
