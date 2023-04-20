@@ -224,10 +224,9 @@ def set_logs(
 
         >>> torch._logging.set_logs(dynamo=logging.DEBUG, graph_code=True)
 
-        # The following accomplishes the same thing as the above example, but
-        # uses the `module` keyword arg.
+        # The following enables the logs for a different module
 
-        >>> torch._logging.set_logs(modules={"dynamo":logging.DEBUG, "graph_code":True, "unregistered.module.name":logging.DEBUG})
+        >>> torch._logging.set_logs(modules={"unregistered.module.name": logging.DEBUG})
     """
     # ignore if env var is set
     if LOG_ENV_VAR in os.environ:
