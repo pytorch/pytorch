@@ -174,9 +174,9 @@ public:
     return hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m512d abs_() const {
-    auto real = _mm256_movedup_pd(values);        // real real
+    auto real = _mm512_movedup_pd(values);        // real real
     // movehdup_pd does not exist...
-    auto imag = _mm256_permute_pd(values, 0xff);  // imag imag
+    auto imag = _mm512_permute_pd(values, 0xff);  // imag imag
     return Sleef_hypotd8_u05(real, imag);         // abs  abs
   }
   Vectorized<c10::complex<double>> abs() const {
