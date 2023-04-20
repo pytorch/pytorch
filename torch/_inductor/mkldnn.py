@@ -295,6 +295,8 @@ def pack_module(gm: torch.fx.GraphModule):
                     continue
                 if dynamo_config.dynamic_shapes:
                     computation_node_input_size = None
+                    # Conv2d and ConvTranspose2d weight format are dependent on input size,
+                    # but ShapeProp may be failed to get the input size, so we skip them.
                     if not (
                         type(cur_module) in [torch.nn.Linear]
                         and cur_module.weight.dtype == torch.bfloat16
