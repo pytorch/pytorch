@@ -335,6 +335,48 @@ oneOutput cholesky_solve_batch_rule(
   return std::make_tuple(at::cholesky_solve(tensor_, other_, upper), 0);
 }
 
+oneOutput linalg_ldl_solve_batch_rule(
+    const Tensor& LD, optional<int64_t> LD_bdim,
+    const Tensor& pivots, optional<int64_t> pivots_bdim,
+    const Tensor& B, optional<int64_t> B_bdim,
+    bool hermitian) {
+  const auto LD_min_rank = 2;
+  const auto pivots_min_rank = 1;
+  const auto B_min_rank = 2;
+
+  expect_at_least_rank(LD, LD_bdim, LD_min_rank, "LD");
+  expect_at_least_rank(pivots, pivots_bdim, pivots_min_rank, "pivots");
+  expect_at_least_rank(B, B_bdim, B_min_rank, "B");
+
+  auto LD_ = moveBatchDimToFront(LD, LD_bdim);
+  auto pivots_ = moveBatchDimToFront(pivots, pivots_bdim);
+  auto B_ = moveBatchDimToFront(B, B_bdim);
+
+  // LD and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must match
+  // So if only one of them is being vmapped over, we must expand out that dimension.
+  if (LD_bdim.has_value() ^ pivots_bdim.has_value()) {
+    auto bdim_size = get_bdim_size2(LD, LD_bdim, pivots, pivots_bdim);
+    LD_ = ensure_has_bdim(LD_, LD_bdim.has_value(), bdim_size);
+    pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
+    pivots_bdim = 0;
+    LD_bdim = 0;
+  }
+
+  // Now, {LD, pivots} and B's first dimensions are allowed to broadcast.
+  // The rest of the logic handles that.
+  const auto LD_num_batch_dims = rankWithoutBatchDim(LD_, LD_bdim) - LD_min_rank;
+  const auto pivots_num_batch_dims = rankWithoutBatchDim(pivots_, pivots_bdim) - pivots_min_rank;
+  const auto B_num_batch_dims = rankWithoutBatchDim(B_, B_bdim) - B_min_rank;
+  const auto max_num_batch_dims = std::max(std::max(LD_num_batch_dims, pivots_num_batch_dims), B_num_batch_dims);
+
+  LD_ = maybePadToLogicalRank(LD_, LD_bdim, max_num_batch_dims + LD_min_rank);
+  pivots_ = maybePadToLogicalRank(pivots_, pivots_bdim, max_num_batch_dims + pivots_min_rank);
+  B_ = maybePadToLogicalRank(B_, B_bdim, max_num_batch_dims + B_min_rank);
+
+  const auto result = at::linalg_ldl_solve(LD_, pivots_, B_, hermitian);
+  return std::make_tuple(result, 0);
+}
+
 threeOutputs linalg_lu_factor_ex_batch_rule(
     const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot, bool check_errors) {
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor_ex: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
@@ -605,6 +647,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("linear", linear_decomp);
   VMAP_SUPPORT(linalg_lu_solve, linalg_lu_solve_batch_rule);
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
+  VMAP_SUPPORT(linalg_ldl_solve, linalg_ldl_solve_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
