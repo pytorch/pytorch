@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_WITH_ROCM,
+    get_report_path,
 )
 from torch.utils import cpp_extension
 
@@ -909,6 +910,14 @@ def get_pytest_args(options, is_cpp_test=False):
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.append("--use-pytest")
+    else:
+        # NB: Use --junit-xml to generate the C++ test report for now in
+        # pytest format. Note that this format is different than the one
+        # used by unittest via --junit-xml-reruns. But this is ok as we
+        # only need to deal with this later to support disable flaky and
+        # slow C++ tests
+        test_report_path = get_report_path(pytest=True)
+        pytest_args.extend(["--junit-xml", test_report_path])
 
     pytest_args.extend(rerun_options)
     return pytest_args
