@@ -905,7 +905,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.from_numpy(r1), torch.from_numpy(r2)
 
     @make_test
-    @requires_numpy
+    @requires_numpy_pytorch_interop
     def test_torch_from_numpy(x):
         a = x.numpy()
         b = torch.from_numpy(a)
@@ -954,7 +954,6 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
-@unittest.skipIf(torch.backends.mps.is_available(), "not applicable to mps")
 class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_func_default_tensor_args(self):
         """
