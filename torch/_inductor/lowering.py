@@ -3438,20 +3438,8 @@ def _validate_reduction_axis(x, axis):
 
 def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
-        if reduction_type == "min" and axis is not None:
-            return (
-                reduce_amin(x, axis, keepdims, dtype=dtype),
-                reduce_argmin(x, axis, keepdims),
-            )
-        if reduction_type == "max" and axis is not None:
-            return (
-                reduce_amax(x, axis, keepdims, dtype=dtype),
-                reduce_argmax(x, axis, keepdims),
-            )
         if dtype is not None:
             x = to_dtype(x, dtype)
-        if reduction_type == "any":
-            x = to_dtype(x, torch.bool)
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 
@@ -3496,9 +3484,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
-            reduction_type={"amax": "max", "amin": "min"}.get(
-                reduction_type, reduction_type
-            ),
+            reduction_type=reduction_type,
         )
         if isinstance(
             result.data.data, Reduction
@@ -3784,11 +3770,36 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-register_lowering(aten.max)(make_reduction("max"))
-register_lowering(aten.min)(make_reduction("min"))
-reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
-reduce_amin = register_lowering(aten.amin)(make_reduction("amin"))
-register_lowering(aten.any)(make_reduction("any", override_return_dtype=torch.bool))
+@register_lowering(aten.any)
+def reduce_any(x, dim=None, keepdim=False):
+    x = to_dtype(x, torch.bool)
+    return make_reduction("any")(x, axis=dim, keepdims=keepdim)
+
+
+@register_lowering(aten.max)
+def reduce_max(x, dim=None, keepdim=False):
+    if dim is not None:
+        return (
+            reduce_amax(x, dim=dim, keepdim=keepdim),
+            reduce_argmax(x, dim=dim, keepdim=keepdim),
+        )
+
+    return reduce_amax(x, dim=None, keepdim=keepdim)
+
+
+@register_lowering(aten.min)
+def reduce_min(x, dim=None, keepdim=False):
+    if dim is not None:
+        return (
+            reduce_amin(x, dim=dim, keepdim=keepdim),
+            reduce_argmin(x, dim=dim, keepdim=keepdim),
+        )
+
+    return reduce_amin(x, dim=None, keepdim=keepdim)
+
+
+reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
 reduce_argmax = register_lowering(aten.argmax)(
     make_reduction("argmax", override_return_dtype=torch.int64)
 )
