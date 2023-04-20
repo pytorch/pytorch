@@ -719,7 +719,7 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding, output_padding),
         dilation.vec(),
         groups,
-    use_channels_last,
+        use_channels_last,
         op_attr);
   } else {
     ideep::convolution_transpose_forward::compute_v3(
@@ -732,7 +732,7 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding, output_padding),
         dilation.vec(),
         groups,
-    use_channels_last,
+        use_channels_last,
         op_attr);
   }
   if (input.is_mkldnn()) {
