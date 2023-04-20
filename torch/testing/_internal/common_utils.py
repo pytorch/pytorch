@@ -3036,6 +3036,29 @@ class TestCase(expecttest.TestCase):
         else:
             return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
 
+    # Verifies that no unraisable exceptions are raised by callable.  Unlike regular
+    # exceptions, these do not actually propagate to the caller and are
+    # suppressed.  We must test for them specially.
+    def assertNoUnraisable(self, callable, *args, **kwargs):
+        raised = None
+
+        def record_unraisable(unraisable):
+            nonlocal raised
+            raised = unraisable
+
+        # Disable GC when running the callable to prevent spurious flakiness
+        # from unlucky GCs inside the callable
+        prev = gc.isenabled()
+        gc.disable()
+        try:
+            with unittest.mock.patch("sys.unraisablehook", record_unraisable):
+                callable(*args, **kwargs)
+        finally:
+            if prev:
+                gc.enable()
+
+        self.assertIsNone(raised)
+
     # TODO: Support context manager interface
     # NB: The kwargs forwarding to callable robs the 'subname' parameter.
     # If you need it, manually apply your callable in a lambda instead.
