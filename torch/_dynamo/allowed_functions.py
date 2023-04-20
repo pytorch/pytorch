@@ -11,6 +11,7 @@ import warnings
 from typing import Dict, Optional, Set
 
 import torch
+from torch._dynamo.exc import IncorrectUsage
 from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
@@ -277,3 +278,121 @@ def is_numpy(obj):
         return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
     else:
         return False
+
+
+def allow_in_graph(fn):
+    """
+    Customize which functions TorchDynamo will include in the generated
+    graph. Similar to `torch.fx.wrap()`.
+    ::
+
+        torch._dynamo.allow_in_graph(my_custom_function)
+
+        @torch._dynamo.optimize(...)
+        def fn(a):
+            x = torch.add(x, 1)
+            x = my_custom_function(x)
+            x = torch.add(x, 1)
+            return x
+
+        fn(...)
+
+    Will capture a single graph containing `my_custom_function()`.
+    """
+    if isinstance(fn, (list, tuple)):
+        return [allow_in_graph(x) for x in fn]
+    assert callable(fn), "allow_in_graph expects a callable"
+    _allowed_function_ids.add(id(fn))
+    _disallowed_function_ids.remove(id(fn))
+    return fn
+
+
+def _disallow_in_graph_helper(throw_if_not_allowed):
+    def inner(fn):
+        if isinstance(fn, (list, tuple)):
+            return [disallow_in_graph(x) for x in fn]
+        assert callable(fn), "disallow_in_graph expects a callable"
+        if throw_if_not_allowed and not is_allowed(fn):
+            raise IncorrectUsage(
+                "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
+                "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
+            )
+        _allowed_function_ids.remove(id(fn))
+        _disallowed_function_ids.add(id(fn))
+        return fn
+
+    return inner
+
+
+def disallow_in_graph(fn):
+    """
+    Customize which functions TorchDynamo will exclude in the generated
+    graph and force a graph break on.
+    ::
+
+        torch._dynamo.disallow_in_graph(torch.sub)
+
+        @torch._dynamo.optimize(...)
+        def fn(a):
+            x = torch.add(x, 1)
+            x = torch.sub(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        fn(...)
+
+    Will break the graph on `torch.sub`, and give two graphs each with a
+    single `torch.add()` op.
+    """
+    return _disallow_in_graph_helper(throw_if_not_allowed=True)(fn)
+
+
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def graph_break():
+    """Force a graph break"""
+    pass
+
+
+def forbid_in_graph(fn):
+    """
+    Customize which functions TorchDynamo will assert are not present while tracing.
+
+    If you want a graph break on this function instead, use disallow_in_graph.
+    TODO(voz): We now have allow_in_graph, disallow_in_graph, forbid_in_graph - some more robust
+    documentation would not be amiss.
+    """
+    if isinstance(fn, (list, tuple)):
+        return [forbid_in_graph(x) for x in fn]
+    assert callable(fn), "forbid_in_graph applies only to callables"
+    fn._dynamo_forbidden = True
+    return fn
+
+
+def _allow_in_graph_einops():
+    try:
+        import einops
+
+        try:
+            from einops._torch_specific import (  # requires einops>=0.6.1, torch >= 2.0
+                allow_ops_in_compiled_graph,
+            )
+
+            # einops >= 0.6.1
+            allow_ops_in_compiled_graph()
+        except ImportError:
+            # einops < 0.6.1
+            allow_in_graph(einops.rearrange)
+            allow_in_graph(einops.reduce)
+            if hasattr(einops, "repeat"):
+                allow_in_graph(einops.repeat)  # available since einops 0.2.0
+            if hasattr(einops, "einsum"):
+                allow_in_graph(einops.einsum)  # available since einops 0.5.0
+            if hasattr(einops, "pack"):
+                allow_in_graph(einops.pack)  # available since einops 0.6.0
+            if hasattr(einops, "unpack"):
+                allow_in_graph(einops.unpack)  # available since einops 0.6.0
+    except ImportError:
+        pass
+
+
+_allow_in_graph_einops()
