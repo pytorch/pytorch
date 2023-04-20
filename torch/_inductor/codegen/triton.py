@@ -1031,6 +1031,46 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    def gen_assert_indirect_indexing(self, buffer, original_index, mask):
+        if mask == "None":
+            return
+        body = self.current_node._body
+        indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
+        indirect_name = body.indirect_new
+        # Many indirect variables may be mapped to the same CSE'd variable
+        # For example when you do x[y, y] for x = randn(3, 8)
+        var_size = collections.defaultdict(set)
+        for ind, size in indirect_size.items():
+            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
+
+        indirect_vars = [
+            s for s in original_index.free_symbols if s.name.startswith("tmp")
+        ]
+        for var in indirect_vars:
+            sizes = list(var_size[var])
+            if all(isinstance(s, sympy.Integer) for s in sizes):
+                size = min(sizes)
+            else:
+                # Should this go here or in TritonPrinter?
+                def print_min(expr):
+                    if len(expr) == 1:
+                        return texpr(expr[0])
+                    else:
+                        return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
+
+                size = print_min(sizes)
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less # error-prone to use and/or/not, which is suported by triton
+            cond = f"((0 <= {var}) & ({var} < {size}))"
+            cond_print = f"0 <= {var} < {size}"
+            if not isinstance(original_index, sympy.Integer):
+                var_mask = f"({mask})" if "&" in mask else mask
+                var_mask = f" | ~{var_mask}"
+            else:
+                var_mask = ""
+            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond_print}")'
+            self.cse.generate(buffer, line, assignment=False)
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -1080,6 +1120,10 @@ class TritonKernel(Kernel):
         else:
             load_buffer = self.loads
 
+        # Assert that the loaded indices will not read garbage
+        if indirect_indexing and config.triton.assert_indirect_indexing:
+            self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
+
         result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
 
@@ -1094,7 +1138,13 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
+        indirect_indexing = self.is_indirect_indexing(index)
+        original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
+
+        if indirect_indexing and config.triton.assert_indirect_indexing:
+            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
+
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -1453,8 +1503,7 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            if not dynamo_config.dynamic_shapes:
-                self.codegen_static_numels(code)
+            self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -1470,23 +1519,42 @@ class TritonKernel(Kernel):
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
+
+        This code stomps on the passed-in values by writing an constant to the top of the kernel.
+
+        In a kernel like:
+        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, RBLOCK : tl.constexpr):
+
+        We would add
+        xnumel = 4096
+        rnumel = 768
+
+        After the signature, before the kernel code, if we decided to make these static. As its hardcoded, it becomes
+        a better signal to triton on how to unroll and do some static indexing. So, it's not so much that downstream
+        knows that its a static numel, as that you just plop a constant into the kernel.
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                if isinstance(V.graph.sizevars.simplify(tree.numel), sympy.Integer):
+                postfix = (
+                    "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
+                )
+                simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
+                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     code.writeline(
-                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}"
-                    )
-                elif not dynamo_config.dynamic_shapes:
-                    code.writeline(
-                        f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
+                        f"{tree.prefix}numel = {int(simplified_tree_numel)} {postfix}"
                     )
 
             if tree.prefix == "r" and self.persistent_reduction:
-                # we generate a static RBLOCK for persistent reduction
-                hint = V.graph.sizevars.size_hint(tree.numel)
-                hint = next_power_of_2(hint)
-                code.writeline(f"RBLOCK: tl.constexpr = {hint}")
+                simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
+                if dynamo_config.dynamic_shapes:
+                    if isinstance(simplified_tree_numel, (sympy.Integer, int)):
+                        val = int(simplified_tree_numel)
+                    else:
+                        continue
+                else:
+                    val = int(simplified_tree_numel)
+                val = next_power_of_2(val)
+                code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
     def indexing_size_str(self, i=None, x=None):
         sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
