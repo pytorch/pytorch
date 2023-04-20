@@ -26,6 +26,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
+    nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
 )
@@ -81,6 +82,20 @@ class NNModuleVariable(VariableTracker):
         # implement list/iter/tuple/etc calls
         base = tx.output.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
+        if isinstance(base, torch.nn.ModuleDict):
+            result = []
+            for name, submod in base.items():
+                name_var = variables.ConstantVariable(name)
+                tx.output.register_attr_or_module(
+                    submod,
+                    self.module_key,
+                    name,
+                    source=NNModuleSource(GetItemSource(self.source, name)),
+                    **options,
+                )
+                result.append(name_var)
+            return result
+
         assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
         ), typestr(base)
@@ -216,6 +231,15 @@ class NNModuleVariable(VariableTracker):
 
         return variables.GetAttrVariable(self, name, **options)
 
+    @contextmanager
+    def record_nn_module_stack(self, tx, mod):
+        fully_qualified_name = self.source.name()
+        try:
+            tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
+            yield
+        finally:
+            del tx.nn_module_stack[self.module_key]
+
     def call_function(
         self,
         tx,
@@ -225,16 +249,7 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
 
-        @contextmanager
-        def record_nn_module_stack():
-            fully_qualified_name = self.source.name()
-            try:
-                tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
-                yield
-            finally:
-                del tx.nn_module_stack[self.module_key]
-
-        with record_nn_module_stack():
+        with self.record_nn_module_stack(tx, mod):
             is_lazy = is_lazy_module(mod)
             if (
                 isinstance(mod, torch.nn.Sequential)
@@ -272,6 +287,14 @@ class NNModuleVariable(VariableTracker):
                 initialize_lazy_module(tx, mod, args, kwargs)
 
             if is_allowed(mod.__class__):
+                if nnmodule_has_hooks(
+                    mod, check_forward_hooks=True, check_backward_hooks=True
+                ):
+                    unimplemented(
+                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
+                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
+                    )
+
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
@@ -283,7 +306,6 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
-
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
@@ -325,33 +347,43 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "__call__":
-            # TODO(whc)  do we really need this special case?
+        def generic_call_method_helper(name):
+            # Helper function to put a `call_method` node in FX graph,
+            # with nn.Module as the first arg.
+            mod_proxy = tx.output.create_proxy(
+                "get_attr",
+                self.module_key,
+                tuple(),
+                {},
+            )
+            mod_proxy.node.meta["example_value"] = module
+
+            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    args=(mod_proxy, *proxy_args),
+                    kwargs=proxy_kwargs,
+                ),
+                **options,
+            )
+
+        if name == "_call_impl":
+            # Example: `self.layer.__call__(x)`
+            # This is used for explicit calling `__call__` in a forward function.
+            # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
-            # TODO(whc)
-            # This is the old special case moved to a new place.  (copy from call_function below)
-            # Old behavior: we'd route "forward" meth call to 'call_function', which inlined forward.
-            # New behavior: since call_function now hits '__call__', forward would fall through to 'wrap_proxy' below,
-            # instead of being inlined.  What should we do about this?
-            #   1) all methods get inlined now at the bottom of this call_method, instead of put into the graph as calls
-            #   2) we maintain this special case just for forward
-            assert self.source, (
-                "Must provide a valid source in order to inline, "
-                "since inlined function may have default args which must be guarded."
-            )
-            fn = module.forward.__func__
-            assert istype(fn, types.FunctionType)
-            options["source"] = AttrSource(
-                AttrSource(self.source, "forward"), "__func__"
-            )
-            args = [self] + args
-
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
-                args,
-                kwargs,
-            )
+            # Example: `self.layer.forward(x)`
+            # This is used for explicit calling `forward` in a forward function.
+            # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
+            with self.record_nn_module_stack(tx, module):
+                return generic_call_method_helper(name)
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
@@ -577,42 +609,7 @@ class NNModuleVariable(VariableTracker):
                 for x in itertools.chain(args, kwargs.values())
             )
         ):
-            # TODO(voz): Refactor this into a generic as_proxy() for nn module
-            # We use variations of this pattern in a few places now.
-            def make_attr(name):
-                node = tx.output.create_proxy(
-                    "get_attr",
-                    name,
-                    tuple(),
-                    {},
-                )
-                return node
-
-            # Bind in self
-            tx.output.register_attr_or_module(
-                module,
-                self.module_key,
-                self.module_key,
-                source=NNModuleSource(GetItemSource(self.source, self.module_key)),
-                **options,
-            )
-            proxy_for_mod = make_attr(self.module_key)
-            proxy_for_mod.node.meta["example_value"] = module
-
-            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    args=(proxy_for_mod, *proxy_args),
-                    kwargs=proxy_kwargs,
-                ),
-                **options,
-            )
+            return generic_call_method_helper(name)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -721,6 +718,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if method is torch.nn.Module.parameters:
                 assert not args or kwargs
+                if tx.output.side_effects.has_pending_mutation(self):
+                    unimplemented("Module.parameters() with pending mutation")
                 options["guards"].add(
                     self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
