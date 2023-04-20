@@ -3896,44 +3896,6 @@ def _realize(x):
     return clone(x)
 
 
-# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
-# scale and zero_point is scalar or scalar tensor
-@register_lowering(torch.ops.quantized_decomposed.quantize_per_tensor.default)
-def quantize_per_tensor_default(input, scale, zero_point, quant_min, quant_max, dtype):
-    def clamp(v):
-        return maximum(quant_min, minimum(quant_max, v))
-
-    output = clamp(add(round(div(input, scale)), zero_point))
-    output = to_dtype(output, dtype)
-    return output
-
-
-# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
-# scale and zero_point is scalar or scalar tensor
-@register_lowering(torch.ops.quantized_decomposed.dequantize_per_tensor.default)
-def dequantize_per_tensor_default(
-    input, scale, zero_point, quant_min, quant_max, dtype
-):
-    output = mul(sub(to_dtype(input, torch.float32), zero_point), scale)
-    return output
-
-
-@register_lowering(torch.ops.quantized_decomposed.quantize_per_tensor.tensor)
-def quantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
-    def clamp(v):
-        return maximum(quant_min, minimum(quant_max, v))
-
-    output = clamp(add(round(div(input, scale)), zero_point))
-    output = to_dtype(output, dtype)
-    return output
-
-
-@register_lowering(torch.ops.quantized_decomposed.dequantize_per_tensor.tensor)
-def dequantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
-    output = mul(sub(to_dtype(input, torch.float32), zero_point), scale)
-    return output
-
-
 try:
     import torch.distributed._functional_collectives
 
