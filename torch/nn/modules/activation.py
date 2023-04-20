@@ -924,7 +924,7 @@ class MultiheadAttention(Module):
     function, for speeding up Inference, MHA will use
     fastpath inference with support for Nested Tensors, iff:
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor.
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor).
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)

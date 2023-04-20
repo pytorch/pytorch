@@ -183,7 +183,7 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
 
 
 # Use a dtensor expand mode for now to preserve the old behavior
-# and avoid break existing code
+# and avoid breaking existing code
 dtensor_expand_mode = DTensorExpandMode()
 
 
@@ -458,7 +458,7 @@ def _compile(
         fake_mode = FakeTensorMode()
 
         def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
-            # since compilation happen in the first iteration and we
+            # since compilation happens in the first iteration and we
             # receives mini-batch input, convert them to full batch
             # fake tensor input first for data parallel sharding
             # propagations
@@ -568,6 +568,7 @@ def compile(
     def inner(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            last_train_step = kwargs.pop("last_train_step", False) if kwargs else False
             first_iter = False
             # Put the COMPILED_OBJECT_KEY in ``wrapper`` instead of ``func`` as
             # ``wrapper`` is the one that users will get.
@@ -591,7 +592,21 @@ def compile(
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
                     compiled_obj.gm = gm_transformation(compiled_obj.gm)
-                output = compiled_obj.gm(*flat_inps)[0]
+                if not last_train_step:
+                    output = compiled_obj.gm(*flat_inps)[0]
+                else:
+                    # This is the last train step. Call IterGraphModule.forward()
+                    # with the `last_iter` argument and catch the exception in
+                    # case the compiled_obj is not wrapped with IterGraphModule.
+                    try:
+                        output = compiled_obj.gm(*flat_inps, last_iter=last_train_step)[
+                            0
+                        ]
+                    except TypeError as e:
+                        if "last_iter" not in str(e):
+                            raise e
+                        output = compiled_obj.gm(*flat_inps)[0]
+
                 return output
 
         return wrapper
