@@ -306,9 +306,11 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
         F.hardtanh,
+        F.max_pool2d,
         F.relu,
         F.relu6,
         torch.nn.AdaptiveAvgPool2d,
+        torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
         torch.mean,
