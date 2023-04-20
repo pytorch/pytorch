@@ -2333,6 +2333,8 @@ def create_runtime_wrapper(
 
         if runtime_metadata.dynamic_outputs:
             for t, o in zip(ret_outs, runtime_metadata.output_info):
+                if o.dynamic_dims is None:
+                    continue
                 if hasattr(t, '_dynamo_dynamic_indices'):
                     t._dynamo_dynamic_indices |= o.dynamic_dims
                 else:
