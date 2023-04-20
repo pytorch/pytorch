@@ -56,8 +56,7 @@ def use_deterministic_algorithims(mode: bool, warn_only: bool):
 default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
 
-isSM86Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 6)
-isSM89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9)
+isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 9])
 
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
@@ -1396,7 +1395,7 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not (isSM86Device or isSM89Device),
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
                      "Does not support fused SDPA or not SM86+ hardware")
     @parametrize("head_dim", [72, 96, 128])
     def test_memory_efficient_sm86_plus_failure(self, head_dim: int):
@@ -1410,7 +1409,7 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not (isSM86Device or isSM89Device),
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
                      "Does not support fused SDPA or not SM86+ hardware")
     @parametrize("head_dim", [72, 96, 128])
     def test_flash_backward_failure_sm86plus(self, head_dim: int):
@@ -1639,7 +1638,7 @@ class TestSDPA(NNTestCase):
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
             # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if (isSM86Device or isSM89Device) and (head_dim > 64 and head_dim <= 128):
+            if isSM86or89Device and head_dim in range(65, 129):
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
                                                                                        dropout_p=dropout_p,
                                                                                        is_causal=is_causal, scale=scale))
