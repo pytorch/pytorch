@@ -803,7 +803,7 @@ class CachingAllocatorConfig {
   }
 
   static bool expandable_segments() {
-#ifndef PYTORCH_EXPANDABLE_SEGMENTS_SUPPORTED
+#ifndef EXPANDABLE_SEGMENTS_SUPPORTED
     if (instance().m_expandable_segments) {
       TORCH_WARN_ONCE("expandable_segments not supported on this platform")
     }

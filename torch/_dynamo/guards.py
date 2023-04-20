@@ -13,6 +13,8 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
+import sympy
+
 import torch
 
 from torch._guards import (
@@ -464,6 +466,8 @@ class GuardBuilder(GuardBuilderBase):
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
+            # Export keeps static.
+            ignore_static=(not self.check_fn_manager.output_graph.export),
         )
         output_graph.shape_env.freeze()
         for shape_guard in guards:
@@ -561,7 +565,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
@@ -725,8 +728,32 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
+            dynamic_dims = None
+            if config.dynamic_shapes:
+
+                def convert(size):
+                    converted = []
+                    for dim in size:
+                        if isinstance(dim, torch.SymInt):
+                            dim = dim.node.expr
+                        if isinstance(dim, (int, sympy.Integer)):
+                            converted.append(int(dim))
+                        else:
+                            converted.append(None)
+                    return converted
+
+                dynamic_dims = [
+                    convert(
+                        self.output_graph.tracing_context.fake_mode.from_tensor(
+                            t
+                        ).size()
+                    )
+                    for t in tensor_check_examples
+                ]
+
             tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+                *tensor_check_examples,
+                dynamic_dims=dynamic_dims,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose

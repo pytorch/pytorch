@@ -1058,7 +1058,6 @@ def main():
         'test/*',
         '_C/*.pyi',
         'cuda/*.pyi',
-        'fx/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
         'nn/*.pyi',

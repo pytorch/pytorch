@@ -123,7 +123,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<
            ProfilerState,
-           bool, /* report_input_shapes */
+           bool, /* record_input_shapes */
            bool, /* profile_memory */
            bool, /* with_stack */
            bool, /* with_flops */

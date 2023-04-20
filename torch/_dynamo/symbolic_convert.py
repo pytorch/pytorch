@@ -60,11 +60,7 @@ from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
-from .variables.ctx_manager import (
-    ContextWrappingVariable,
-    GenericContextWrappingVariable,
-    WithExitFunctionVariable,
-)
+from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
@@ -358,16 +354,6 @@ def break_graph_if_unsupported(*, push):
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
-
-                if len(self.states_before_block) > 0:
-                    # We don't support graph break under GenericContextWrappingVariable,
-                    # If there is, we roll back to the checkpoint and fall back.
-                    excp.remove_from_stats()
-                    state = self.states_before_block.pop()
-                    self.restore_graphstate(state)
-                    ctx = state.stack[-1]
-                    assert isinstance(ctx, GenericContextWrappingVariable)
-                    unimplemented(f"Graph break under {ctx}")
 
                 if not self.should_compile_partial_graph():
                     raise
@@ -948,16 +934,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
-        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"SETUP_WITH {ctx}")
-
-        if isinstance(ctx, GenericContextWrappingVariable):
-            # Save the checkpoint to restore if there is
-            # graph break under the GenericContextWrappingVariable.
-            self.states_before_block.append(state)
-
         self.output.guards.update(ctx.guards)
 
         if isinstance(self, InstructionTranslator):
@@ -1680,16 +1659,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         pass
 
     def BEFORE_WITH(self, inst):
-        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"BEFORE_WITH {ctx}")
-
-        if isinstance(ctx, GenericContextWrappingVariable):
-            # Save the checkpoint to restore if there is
-            # graph break under the GenericContextWrappingVariable.
-            self.states_before_block.append(state)
-
         self.output.guards.update(ctx.guards)
 
         exit = WithExitFunctionVariable(
@@ -1819,8 +1791,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.current_instruction = create_instruction("NOP")
         self.next_instruction = None
         self.block_stack = []
-        # states before SETUP_WITH for checkpointing and fallback
-        self.states_before_block: List[InstructionTranslatorGraphState] = []
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
         self.accept_prefix_inst = True

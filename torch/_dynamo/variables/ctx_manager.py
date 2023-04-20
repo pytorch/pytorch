@@ -64,50 +64,6 @@ class ContextWrappingVariable(VariableTracker):
             return WrappedUserFunctionVariable(args[0], self)
 
 
-class GenericContextWrappingVariable(ContextWrappingVariable):
-    def __init__(self, target_values, initial_values=None, **kwargs):
-        cm_obj = kwargs.pop("cm_obj", None)
-        assert cm_obj is not None
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-        self.cm_obj = cm_obj
-
-    def enter(self, tx):
-        options = VariableTracker.propagate(self)
-        options["source"] = (
-            None if self.source is None else AttrSource(self.source, "__enter__")
-        )
-        return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(tx, [], {})
-
-    def exit(self, tx, *args):
-        options = VariableTracker.propagate(self)
-        options["source"] = (
-            None if self.source is None else AttrSource(self.source, "__exit__")
-        )
-        x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(
-            tx,
-            [
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-            ],
-            {},
-        )
-        # Remove the checkpoint if there is no graph break
-        # under this GenericContextWrappingVariable.
-        tx.states_before_block.pop()
-        return x
-
-
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 

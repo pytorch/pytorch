@@ -289,19 +289,15 @@ def get_manager(
     return get_container(device_index).tree_manager
 
 
-def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
+def cudagraphify_impl(model, inputs, *args, **kwargs):
     fn = None
-    # remove unaligned idxs on initial compilation before unaligned inputs have
-    # been copied out
-    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
-    del inputs
 
-    def deferred_cudagraphify(inputs):
+    def deferred_cudagraphify(second_inputs):
         nonlocal fn
         if fn is not None:
-            return fn(inputs)
+            return fn(second_inputs)
 
-        fn, out = cudagraphify(model, inputs, static_input_idxs, *args, **kwargs)
+        fn, out = cudagraphify(model, inputs, *args, **kwargs)
         return out
 
     return deferred_cudagraphify
@@ -573,6 +569,11 @@ class UnaliasedStorage(OutputAliasInfo):
     pass
 
 
+class PersistentStaticStorage(OutputAliasInfo):
+    "Singleton to mark that the graph output storage will be in output_persistent_storage array"
+    pass
+
+
 class AliasesPriorGraphOutput(OutputAliasInfo):
     "Marks that the graph output aliases an output of a prior graph"
     __slots__ = ["index"]
@@ -732,12 +733,10 @@ class CUDAGraphNode:
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
         # which we will record the model with. For memory efficiency, it is important
         # to reclaim the input memory when the inputs are no longer live. To accomplish this,
-        # we reconstruct tensors at the correct data pointers of our inputs which are
-        # non owning and do not prevent deallocation. On subsequent executions, input values
-        # will be copied over to these tensors.
-        self.reconstructed_inputs: InputList[Tensor] = [
-            self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
-            for x in recording_inputs
+        # we record the metadata needed to reconstruct the inputs at their correct memory location,
+        # but do not keep them live during the cuda graph recording.
+        self.inputs_metadata: InputList[Dict[str, Any]] = [
+            self._tensor_metadata(x) for x in recording_inputs
         ]
 
         # DO THE RECORDING!!!
@@ -756,6 +755,8 @@ class CUDAGraphNode:
 
         # Output Storage Alias information, can be:
         # - A new, unaliased storage, or the output is None
+        # - An alias of a persistent static input, in which case a storage will be set in the corresponding index
+        # of output_persistent_storage
         # - An alias of an output of a prior graph
         # - An alias of an output already created in the reconstructed outputs
         self.output_storage_alias: OutputList[OutputAliasInfo] = []
@@ -772,10 +773,9 @@ class CUDAGraphNode:
         self.unaliased_in_all_paths: OutputList[bool] = []
         self.cached_tensor_outputs: OutputList[Optional[Tensor]] = []
 
-        # if an output aliases a static, persistent input then the corresponding Tensor will
-        # be set here. These are different than cached tensors, because they are tensors that
-        # are aliases of parameters that are always live.
-        self.static_output_tensors: OutputList[Optional[Tensor]] = []
+        # if an output aliases a static, persistent input then the Storage of the
+        # persistent output will be set here
+        self.output_persistent_storage: OutputList[Optional[UntypedStorage]] = []
 
         self.recording_outputs: OutputList[Optional[torch.Tensor]] = self._record(
             wrapped_function.model, recording_inputs
@@ -828,7 +828,7 @@ class CUDAGraphNode:
                 assert data_ptr == new_inputs[idx].data_ptr()
             else:
                 # non-static input, need to copy it into CUDA graph
-                dst = self.reconstructed_inputs[idx]
+                dst = self._reconstruct_from_tensor_metadata(self.inputs_metadata[idx])
                 src = new_inputs[idx]
                 self._copy_input(idx, dst, src)
 
@@ -864,14 +864,8 @@ class CUDAGraphNode:
                 outputs.append(cached_t)
                 continue
 
-            static_t = self.static_output_tensors[i]
-            if static_t is not None:
-                assert self.outputs_weakrefs[i] is None
-                outputs.append(static_t)
-                continue
-
             storage = self.prepare_alias_info_for_tensor_construction(
-                storage_info, metadata
+                i, storage_info, metadata
             )
 
             if isinstance(storage, UntypedStorage) or storage is None:
@@ -883,15 +877,19 @@ class CUDAGraphNode:
                 )
 
             outputs.append(out)
-            self.outputs_weakrefs[i].swap_weakref(out.untyped_storage()._weak_ref())
+            if storage_info is not PersistentStaticStorage:
+                self.outputs_weakrefs[i].swap_weakref(out.untyped_storage()._weak_ref())
 
         return outputs
 
     def prepare_alias_info_for_tensor_construction(
-        self, out_alias_info: OutputAliasInfo, metadata: Dict[str, Any]
+        self, out_index: int, out_alias_info: OutputAliasInfo, metadata: Dict[str, Any]
     ) -> List[Union[UntypedStorage, None, int]]:
         if metadata is None or out_alias_info is UnaliasedStorage:
             return None
+
+        if out_alias_info is PersistentStaticStorage:
+            return self.output_persistent_storage[out_index]
 
         if isinstance(out_alias_info, AliasesPriorGraphOutput):
             depth, existing_output_index = out_alias_info.index
@@ -905,12 +903,12 @@ class CUDAGraphNode:
         self,
     ) -> List[Union[UntypedStorage, None, int]]:
         output_storages = []
-        for output_storage_alias, metadata in zip(
-            self.output_storage_alias, self.outputs_metadata
+        for i, (output_storage_alias, metadata) in enumerate(
+            zip(self.output_storage_alias, self.outputs_metadata)
         ):
             output_storages.append(
                 self.prepare_alias_info_for_tensor_construction(
-                    output_storage_alias, metadata
+                    i, output_storage_alias, metadata
                 )
             )
 
@@ -985,20 +983,24 @@ class CUDAGraphNode:
         output_new_storages_index: Dict[StorageDataPtr, int] = {}
 
         self.unaliased_in_all_paths = [False for _ in range(len(outputs))]
-        self.static_output_tensors = [None for _ in range(len(outputs))]
 
         for i, o in enumerate(outputs):
             if o is None:
                 self.output_storage_alias.append(UnaliasedStorage)
+                self.output_persistent_storage.append(None)
                 continue
 
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
             )
             if ref and ref() is not None:
-                self.output_storage_alias.append(None)
-                self.static_output_tensors[i] = o
+                self.output_storage_alias.append(PersistentStaticStorage)
+                self.output_persistent_storage.append(
+                    torch.UntypedStorage._new_with_weak_ptr(ref())
+                )
                 continue
+
+            self.output_persistent_storage.append(None)
 
             path_ref = self._is_alias_of_live_recorded_tensor(o)
             if path_ref is not None:
@@ -1024,8 +1026,8 @@ class CUDAGraphNode:
             ), "Wrong number of stack traces passed in"
 
         assert not self.outputs_weakrefs
-        for out, static_output_tensor in zip(outputs, self.static_output_tensors):
-            if out is None or static_output_tensor is not None:
+        for out, persisted_storage in zip(outputs, self.output_persistent_storage):
+            if out is None or persisted_storage is not None:
                 self.outputs_weakrefs.append(None)
             else:
                 self.outputs_weakrefs.append(StorageWeakRefWrapper(out))
@@ -1202,7 +1204,7 @@ class CUDAGraphNode:
                     live_storage_weak_ptrs.add(stor_weak_ptr)
 
                     is_persistent_alias = (
-                        nodes[depth].static_output_tensors[output_idx] is not None
+                        nodes[depth].output_persistent_storage[output_idx] is not None
                     )
 
                     if is_persistent_alias:
@@ -1702,7 +1704,9 @@ class CUDAGraphTreeManager:
     ) -> Tuple[Callable, List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
-        self.ids_to_funcs[id] = WrappedFunction(model, static_input_idxs, id)
+        self.ids_to_funcs[id] = WrappedFunction(
+            model, remove_unaligned_input_idxs(inputs, static_input_idxs), id
+        )
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
 
