@@ -8,8 +8,6 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#include <iostream>
-
 namespace at::native {
 
 namespace {
@@ -134,7 +132,6 @@ void cpu_padding(
     const Tensor& output_,
     const Tensor& input_,
     PaddingParams& p) {
-  std::cout << "# cpu_reflection_padding" << std::endl;
 
   auto input = input_.contiguous();
   auto output = output_.contiguous();
@@ -237,7 +234,7 @@ void cpu_padding_channels_last(
     const Tensor& output_,
     const Tensor& input_,
     PaddingParams& p) {
-  std::cout << "# cpu_reflection_padding_channels_last" << std::endl;
+
   auto memory_format = p.ndim == 2
       ? at::MemoryFormat::ChannelsLast
       : at::MemoryFormat::ChannelsLast3d;
@@ -264,10 +261,6 @@ void cpu_padding_channels_last(
   int64_t offset_d = ndim == 3 ? p.offsets[ndim - 3] : 0;
   int64_t offset_h = ndim >= 2 ? p.offsets[ndim - 2] : 0;
   int64_t offset_w = p.offsets[ndim - 1];
-
-  //std::cout << "input.sizes(): " << input.sizes() << "; " << input.strides() << std::endl;
-  //std::cout << "output.sizes(): " << output.sizes() << "; " << output.strides() << std::endl;
-  //std::cout << "pad: " << pad_h << "," << pad_w << std::endl;
 
   if (ndim == 2) {
     // parallel on N,H,W, vectorize on C
@@ -319,7 +312,7 @@ void cpu_padding_backward(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
     PaddingParams& p) {
-  std::cout << "### cpu_reflection_padding_backward" << std::endl;
+
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
@@ -403,7 +396,7 @@ void cpu_padding_backward_channels_last(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
     PaddingParams& p) {
-  std::cout << "### cpu_reflection_padding_backward_channels_last" << std::endl;
+
   auto memory_format = p.ndim == 2
       ? at::MemoryFormat::ChannelsLast
       : at::MemoryFormat::ChannelsLast3d;
