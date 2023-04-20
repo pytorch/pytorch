@@ -85,7 +85,7 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
-        BaseTest("test_linear_packed"),
+        BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
@@ -119,7 +119,6 @@ if RUN_CUDA:
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
-        BaseTest("test_linear_packed"),
         # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
