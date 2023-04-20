@@ -81,9 +81,16 @@ StorageDataPtr = int
 NBytes = int
 
 if torch.has_cuda:
-    from torch._C import _cuda_CUDAAllocator_AllocatorState as AllocatorState
+    from torch._C import (
+        _cuda_CUDAAllocator_AllocatorState as AllocatorState,
+        _set_cached_tensors_enabled as _set_cached_tensors_enabled,
+    )
 else:
     AllocatorState = Any
+
+    def _set_cached_tensors_enabled(enabled):
+        pass
+
 
 from . import config
 
@@ -248,7 +255,7 @@ torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 def reset_cudagraph_trees():
     "Clear all cudagraph trees"
-    # see remove_all_cached_tensors below for why this is necessary
+    # see shutdown below for why this is necessary
     container_dict = get_obj(local, "tree_manager_containers")
     locks_dict = get_obj(local, "tree_manager_locks")
     for device, lock in locks_dict.items():
@@ -257,8 +264,9 @@ def reset_cudagraph_trees():
             if not container or not container.tree_manager:
                 continue
 
-            container.tree_manager.remove_all_cached_tensors()
+            container.tree_manager.shutdown()
 
+    _set_cached_tensors_enabled(False)
     container_dict.clear()
 
 
@@ -354,6 +362,11 @@ class StorageWeakRefWrapper:
         inp: Union[Tensor, UntypedStorage],
         extra_ref_check: Optional[Callable[[], None]] = None,
     ):
+        """
+        extra_ref_check is an additional check we need to run to check if the
+        weak ref has expired. in checking storage use count we assume extra_ref_check
+        will hold an additional reference to the storage.
+        """
         if isinstance(inp, Tensor):
             stor = inp.untyped_storage()
         else:
@@ -1071,6 +1084,7 @@ class CUDAGraphNode:
             assert storage_info is UnaliasedStorage
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)
+            torch._C._add_cached_tensor(out)
 
             self_ref = weakref.ref(self)
 
@@ -1247,7 +1261,11 @@ class CUDAGraphNode:
                 yield out
 
     def remove_node_cached_tensors(self):
+        for t in self.cached_tensor_outputs:
+            if t is not None:
+                torch._C._remove_cached_tensor(t)
         self.cached_tensor_outputs.clear()
+
         for i, unaliased in enumerate(self.unaliased_in_all_paths):
             if unaliased:
                 self.outputs_weakrefs[i].remove_extra_reference()
@@ -1481,6 +1499,7 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces: Dict[FunctionID, StackTraces] = {}
 
         self.warmed_up_functions: Set[FunctionID] = set()
+        torch._C._set_cached_tensors_enabled(True)
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
@@ -1550,6 +1569,7 @@ class CUDAGraphTreeManager:
         self.running_forwards_with_pending_backwards = False
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+        assert self.graph is not None, "Running CUDAGraph after shutdown"
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -1626,7 +1646,7 @@ class CUDAGraphTreeManager:
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
 
-    def remove_all_cached_tensors(self):
+    def shutdown(self):
         """
         Remove all cached tensors in all nodes. Because cached tensors can hold gradients which in turn
         might reference a backward which invokes a CUDA Graph Node, we have to manually clear them on shutdown
@@ -1641,6 +1661,11 @@ class CUDAGraphTreeManager:
             for children in node.children.values():
                 nodes.extend(children)
             node.remove_node_cached_tensors()
+            node.graph = None
+
+        self.graph = None
+        self.roots = None
+        self.current_node = None
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         torch.cuda.synchronize()
