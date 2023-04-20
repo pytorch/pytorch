@@ -936,9 +936,6 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
 
-# Please see NOTE: [Real Tensors in Accuracy Evaluation]
-MINIFIER_SPAWNED = False
-
 
 def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     """
@@ -1012,7 +1009,6 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 mod = Repro()
 
 # Setup debug minifier compiler
-torch._dynamo.debug_utils.MINIFIER_SPAWNED = True
 compiler_fn = lookup_backend("{minifier_backend}")
 {custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
