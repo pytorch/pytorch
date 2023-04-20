@@ -1539,6 +1539,160 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    def test_export_with_cond_branches_calling_methods(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            # ok
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def t(self, val):
+                return val + 1
+
+            def f(self, val):
+                return val - 1
+
+            def true_fn(self, val):
+                return self.linear(val) + self.t(val)
+
+            def false_fn(self, val):
+                return self.linear(val) - self.f(val)
+
+            def forward(self, pred, x):
+                return cond(pred, self.true_fn, self.false_fn, [x])
+
+        mod = Module()
+        x = torch.randn([3, 3])
+        pred = torch.tensor(x[0][0].item() < 0)
+        real_result = mod.forward(pred, x)
+        out_graph, _ = torch._dynamo.export(mod.forward, pred, x)
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    def test_export_with_cond_closure(self):
+        from functorch.experimental.control_flow import cond
+
+        class ModuleAccidentallyPassingError(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(val):
+                    return x * 2
+
+                def false_fn(val):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        class ModuleAccidentallyPassingFixed(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(x):
+                    return x * 2
+
+                def false_fn(x):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        class ModuleNoAccidentError(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(val):
+                    return x * 2
+
+                def false_fn(val):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x + 1])
+
+        class ModuleNoAccidentFixed(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(x):
+                    return x * 2
+
+                def false_fn(x):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x + 1])
+
+        class ModuleClosureReproError(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, pred, x):
+                y = x + x
+
+                def true_fn(val):
+                    return self.linear(val) * (x + y)
+
+                def false_fn(val):
+                    return val * (y - x)
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        class ModuleClosureReproFixed(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, pred, x):
+                y = x + x
+
+                def true_fn(x, y):
+                    return self.linear(x) * (x + y)
+
+                def false_fn(x, y):
+                    return x * (y - x)
+
+                return cond(pred, true_fn, false_fn, [x, y])
+
+        for Module in [
+            ModuleAccidentallyPassingError,
+            ModuleNoAccidentError,
+            ModuleClosureReproError,
+        ]:
+            mod = Module()
+            x = torch.randn([3, 3])
+            pred = torch.tensor(x[0][0].item() < 0)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                "Cannot create subgraph for nested function.*because it closes over variables",
+            ):
+                torch._dynamo.export(mod.forward, pred, x)
+
+        for Module in [
+            ModuleAccidentallyPassingFixed,
+            ModuleNoAccidentFixed,
+            ModuleClosureReproFixed,
+        ]:
+            mod = Module()
+            x = torch.randn([3, 3])
+            pred = torch.tensor(x[0][0].item() < 0)
+            real_result = mod.forward(pred, x)
+            out_graph, _ = torch._dynamo.export(mod.forward, pred, x)
+            dynamo_result = out_graph(pred, x)
+            self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
     @config.patch(dynamic_shapes=True)
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
@@ -2495,6 +2649,25 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             aten_graph=True,
             tracing_mode="real",
         )
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        capture_scalar_outputs=True,
+        assume_static_by_default=False,
+    )
+    def test_sym_contains(self):
+        def f(x, y):
+            return x.size(0) in y
+
+        gm, _ = torch._dynamo.export(
+            f, torch.ones(2), torch.ones(3), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        true_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(5))
+        false_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(2))
+        self.assertEqual(gm(*true_inp), f(*true_inp))
+        self.assertEqual(gm(*false_inp), f(*false_inp))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

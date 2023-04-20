@@ -1204,7 +1204,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
             optim.NAdam(None, lr=1e-2, momentum_decay=-0.2)
 
-    @skipIfTorchDynamo()
     def test_adagrad(self):
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: optim.Adagrad(
@@ -1262,7 +1261,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
-    @skipIfTorchDynamo()
     def test_adagrad_sparse(self):
         for foreach in (False, True):
             self._test_rosenbrock_sparse(
@@ -1276,7 +1274,6 @@ class TestOptim(TestCase):
                 ],
             )
 
-    @skipIfTorchDynamo()
     def test_adagrad_complex(self):
         for foreach in (False, True):
             self._test_complex_optimizer(
