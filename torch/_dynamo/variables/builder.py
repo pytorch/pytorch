@@ -2,9 +2,9 @@ import collections
 import contextlib
 import dataclasses
 import enum
-import logging
 import functools
 import inspect
+import logging
 import operator
 import re
 import types
@@ -1214,7 +1214,13 @@ def wrap_to_fake_tensor_and_record(
                     dynamic = DimDynamic.DUCK
                 dynamic_dims.append(dynamic)
 
-        log.debug("wrap_to_fake %s %s %s %s", source.name(), tuple(e.shape), dynamic_dims, constraint_dims)
+        log.debug(
+            "wrap_to_fake %s %s %s %s",
+            source.name(),
+            tuple(e.shape),
+            dynamic_dims,
+            constraint_dims,
+        )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
