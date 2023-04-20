@@ -262,12 +262,12 @@ def build_data_parallel_strategies(
     """
     activation_idx = num_params + num_states
     non_compute_ops = [
+        aten.clone.default,
+        aten.detach.default,
         aten.ones_like.default,
+        aten.reshape.default,
         aten.t.default,
         aten.view.default,
-        aten.reshape.default,
-        aten.detach.default,
-        aten.clone.default,
         torch.ops._spmd.tag_grad.default,
         operator.getitem,
     ]
@@ -589,7 +589,7 @@ def build_data_parallel_strategies(
         else:
             raise RuntimeError(f"op code {node.op} not supported")
 
-    return dp_strategy_map  # mypy: ignore[return-value]
+    return dp_strategy_map  # type: ignore[return-value]
 
 
 def mark_data_parallel_shardings(
@@ -667,7 +667,8 @@ def mark_data_parallel_shardings(
                 )
         elif node.op == "output":
             assert (
-                node_strategy.node_type == NodeType.NON_TENSOR
+                isinstance(node_strategy, DataParallelStrategy)
+                and node_strategy.node_type == NodeType.NON_TENSOR
             ), "output node should not be tensor"
             node.meta["sharding"] = None
         else:
@@ -842,11 +843,14 @@ def partition_data_parallel(
     flattened_states = pytree.tree_flatten(named_states)[0]
     num_states = len(flattened_states)
 
+<<<<<<< HEAD
+=======
     changed = graph.graph.eliminate_dead_code()
     if changed:
         graph.recompile()
     graph.print_readable()
 
+>>>>>>> 54368c5a32f... [spmd][WIP] add fused_adam tests for data parallel
     # 1. First build up data parallel strategies for the whole graph
     strategy_map = build_data_parallel_strategies(
         graph, num_params_buffers, num_states, mesh=mesh
@@ -908,7 +912,7 @@ def partition_data_parallel(
                 else:
                     param_dtensor_states[state_key] = state_val
 
-            optimizer.state.pop(param)
-            optimizer.state[dtensor_param] = param_dtensor_states  # mypy: ignore[index]
+            optimizer.state.pop(param)  # type: ignore[call-overload]
+            optimizer.state[dtensor_param] = param_dtensor_states  # type: ignore[index]
 
     return partitioned_graph
