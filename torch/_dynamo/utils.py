@@ -526,7 +526,7 @@ def clone_input(x):
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad)
-        if hasattr(x, '_dynamo_dynamic_indices'):
+        if hasattr(x, "_dynamo_dynamic_indices"):
             y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
 
@@ -557,7 +557,7 @@ def clone_input(x):
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
-        if hasattr(x, '_dynamo_dynamic_indices'):
+        if hasattr(x, "_dynamo_dynamic_indices"):
             result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return result
 
