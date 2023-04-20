@@ -65,7 +65,7 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
+from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy, wrap_to_fake_tensor_and_record
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     SymNodeVariable,
@@ -457,6 +457,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
+                wrap_to_fake_tensor_and_record(target, self.root_tx, source=source, is_tensor=True)
                 return wrap_fx_proxy(
                     self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
@@ -537,24 +538,28 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.nn_modules[name] = target
                 if isinstance(target, torch.nn.Module):
 
-                    def register_leaf_name(leaf_name):
+                    def register_leaf_name(leaf_name, tensor):
                         assert self.param_name_to_source is not None
                         new_source = ParamBufferSource(source, leaf_name)
                         new_name = f"{name}.{leaf_name}"
                         self.param_name_to_source[new_name] = new_source
+                        # Prime the fake tensor cache
+                        # log.info("record %s", source.name())
+                        r = wrap_to_fake_tensor_and_record(tensor, self.root_tx, source=new_source, is_tensor=True)
+                        assert self.fake_mode.from_tensor(tensor) is r
 
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for leaf_name, _ in target.named_parameters(
+                        for leaf_name, tensor in target.named_parameters(
                             remove_duplicate=False
                         ):
-                            register_leaf_name(leaf_name)
+                            register_leaf_name(leaf_name, tensor)
                     if hasattr(target, "_buffers"):
-                        for leaf_name, _ in target.named_buffers(
+                        for leaf_name, tensor in target.named_buffers(
                             remove_duplicate=False
                         ):
-                            register_leaf_name(leaf_name)
+                            register_leaf_name(leaf_name, tensor)
 
                 return wrap_name(name)
             name = f"{base}_{i}"
