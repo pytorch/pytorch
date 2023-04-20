@@ -1745,7 +1745,9 @@ class ShapeEnv:
         # DimList[DimConstraint]).  Whenever Optional is accepted, that
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
-        _simplified=False
+        _simplified=False,
+        # Indicates if we should produce guards for known static values.
+        ignore_static=True,
     ) -> List[str]:
         self.log.info("produce_guards")
 
@@ -1929,9 +1931,13 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                maybe_static = self._maybe_evaluate_static(expr)
-                if isinstance(maybe_static, (int, sympy.Integer)):
-                    continue
+
+                if ignore_static:
+                    maybe_static = self._maybe_evaluate_static(expr)
+                    if isinstance(maybe_static, (int, sympy.Integer)):
+                        self.log.info("Skipping guard %s", f"{source_ref(source)} == {maybe_static}")
+                        continue
+
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
                 # NB: Not necessary to report constraint violations here:

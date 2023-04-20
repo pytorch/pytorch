@@ -436,7 +436,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertExpectedInline(guard_failure.reason, """L['a'].size()[0] == 3""")
+        self.assertExpectedInline(
+            guard_failure.reason,
+            """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+        )
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -3921,7 +3924,10 @@ def fn():
 
         self.assertTrue(guard_failure is not None)
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] == 2""")
+            self.assertExpectedInline(
+                guard_failure[0],
+                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+            )
         else:
             self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
 
@@ -3954,7 +3960,7 @@ def fn():
             if torch._dynamo.config.assume_static_by_default:
                 self.assertExpectedInline(
                     guard_failure[0],
-                    """L['x'].size()[0] == 2""",
+                    """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
                 )
             else:
                 self.assertTrue(guard_failure is None)

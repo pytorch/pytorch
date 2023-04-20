@@ -13,6 +13,8 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
+import sympy
+
 import torch
 
 from torch._guards import (
@@ -464,6 +466,8 @@ class GuardBuilder(GuardBuilderBase):
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
+            # Export keeps static.
+            ignore_static=(not self.check_fn_manager.output_graph.export),
         )
         output_graph.shape_env.freeze()
         for shape_guard in guards:
@@ -561,7 +565,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
@@ -727,13 +730,13 @@ class CheckFunctionManager:
             )
             dynamic_dims = None
             if config.dynamic_shapes:
-                import sympy
 
                 def convert(size):
                     converted = []
                     for dim in size:
-                        if isinstance(dim, (int, sympy.Integer)):
-                            converted.append(dim)
+                        dim_expr = dim.node.expr
+                        if isinstance(dim_expr, (int, sympy.Integer)):
+                            converted.append(int(dim))
                         else:
                             converted.append(None)
                     return converted
@@ -752,7 +755,6 @@ class CheckFunctionManager:
                 dynamic_dims=dynamic_dims,
             )
             check_tensors_fn = tensor_guards.check
-            # breakpoint()
             check_tensors_verbose_fn = tensor_guards.check_verbose
             code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
             verbose_args = ", ".join(
@@ -838,6 +840,7 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
+    breakpoint()
     first = index == 0
     global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
