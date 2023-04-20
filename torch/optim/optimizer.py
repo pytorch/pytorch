@@ -15,6 +15,7 @@ from torch._utils import is_compiling
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+_foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
@@ -56,23 +57,20 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
 
 # For any optimizer with a faster implementation, we attempt to default to the
 # fastest + stablest whenever possible. For foreach, the requirements are to have
-# native tensors all on CUDA. For fused, there's currently the additional requirement
+# native params all on CUDA. For fused, there's currently the additional requirement
 # that the tensors' dtypes must be floating point. Neither alternative supports
 # torch.jit.script nor differentiable, so we fall back to the single tensor
 # implementation in those cases.
-def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
+def _default_to_fused_or_foreach(params: List[torch.Tensor],
                                  differentiable: bool,
                                  use_fused: bool = False) -> Tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
         return False, False
-    all_tensors = []
-    for tensorlist in tensorlists:
-        all_tensors.extend(tensorlist)
     fused = use_fused and all(
-        p is None or (type(p) == torch.Tensor and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and p.is_cuda and torch.is_floating_point(p)) for p in params
     )
     foreach = not fused and all(
-        p is None or (type(p) == torch.Tensor and p.is_cuda) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and p.is_cuda) for p in params
     )
     return fused, foreach
 
@@ -393,9 +391,8 @@ class Optimizer:
                              "that doesn't match the size of optimizer's group")
 
         # Update the state
-        id_map = {old_id: p for old_id, p in
-                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
-                      chain.from_iterable((g['params'] for g in groups)))}
+        id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups))))
 
         def cast(param, value, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
@@ -449,7 +446,7 @@ class Optimizer:
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        foreach = self.defaults.get('foreach', False)
+        foreach = self.defaults.get('foreach', False) or self.defaults.get('fused', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
@@ -471,7 +468,7 @@ class Optimizer:
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
             if foreach:
-                for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
 

@@ -43,6 +43,18 @@ class Category(enum.Enum):
     PARAMETER = enum.auto()
     OPTIMIZER_STATE = enum.auto()
 
+_CATEGORY_TO_COLORS = {
+    Category.PARAMETER: "darkgreen",
+    Category.OPTIMIZER_STATE: "goldenrod",
+    Category.INPUT: "black",
+    Category.TEMPORARY: "mediumpurple",
+    Category.ACTIVATION: "red",
+    Category.GRADIENT: "mediumblue",
+    Category.AUTOGRAD_DETAIL: "royalblue",
+    None: "grey",
+}
+
+_CATEGORY_TO_INDEX = {c: i for i, c in enumerate(_CATEGORY_TO_COLORS)}
 
 class Action(enum.Enum):
     PREEXISTING = enum.auto()
@@ -349,7 +361,7 @@ class SizeMap:
                     # the core PyTorch codebase.
                     if prior_size != new_size:
                         delta = f"{prior_size} vs. {new_size}"
-                        log.warning(f"Mismatch between allocation and free: {delta}")
+                        log.warning("Mismatch between allocation and free: %s", delta)
 
         self._values.update(allocations)
 
@@ -369,8 +381,7 @@ class SizeMap:
             if isinstance(i, _TensorMetadata):
                 yield i
             elif isinstance(i, list):
-                for t in i:
-                    yield t
+                yield from i
 
     def __getitem__(self, key: TensorKey):
         return self._values[key]
@@ -648,7 +659,6 @@ class MemoryProfile:
 
     @property
     def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID, int], ...]:
-        t0 = min(event.start_time_ns for event in self._op_tree.dfs())
         allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
@@ -656,10 +666,10 @@ class MemoryProfile:
                 key = TensorKey.from_allocation(alloc_fields)
                 if key is not None:
                     is_allocation = alloc_fields.alloc_size > 0
-                    allocation_times[(key, is_allocation)] = event.start_time_ns - t0
+                    allocation_times[(key, is_allocation)] = event.start_time_ns
 
         snapshot = self._category_snapshot()
-        last_version = {key: version for key, version in sorted(snapshot.keys())}
+        last_version = dict(sorted(snapshot.keys()))
 
         events: List[Tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))
@@ -674,7 +684,7 @@ class MemoryProfile:
                     events.append((t, Action.CREATE, (key, 0)))
 
                 elif edge.mutated:
-                    t = node._event.start_time_ns - t0
+                    t = node._event.start_time_ns
                     version = edge.input_version
                     assert version is not None
                     events.append((t, Action.INCREMENT_VERSION, (key, version)))
@@ -927,3 +937,81 @@ class MemoryProfile:
                         self._categories.setdefault_by_version(
                             key, version, Category.AUTOGRAD_DETAIL
                         )
+
+class MemoryProfileTimeline:
+    def __init__(self, memory_profile):
+        """The minimum representation of the memory profile timeline
+        includes the memory timeline and categories. The timeline
+        consists of [timestamp, action, (TensorKey, version), numbytes]
+        elements, to denote any actions (pre-existing, create, destroy,
+        or increment_version) that occurred to a specific Tensor for a
+        chunk of memory. The categories help map each (TensorKey,
+        version) pair into a category."""
+        self.timeline = memory_profile.timeline
+        self.categories = memory_profile._categories
+
+    def _coalesce_timeline(self, device_str):
+        """Convert the memory timeline and categories into a memory plot
+        consisting of timestamps and their respective sizes by category
+        for a given device.
+
+        Input: device
+        Output: [timestamps, sizes by category]
+        """
+        device = torch.device(device_str)
+        times: List[int] = []
+        sizes: List[List[float]] = []
+
+        def update(key, version, delta):
+            category = (
+                self.categories.get(key, version)
+                if isinstance(key, TensorKey)
+                else None
+            )
+            index = _CATEGORY_TO_INDEX[category] + 1
+            sizes[-1][index] += delta
+
+        t_min = -1
+        for t, action, (key, version), numbytes in self.timeline:
+            if key.device != device:
+                continue
+
+            # Save the smallest timestamp to populate pre-existing allocs.
+            if t_min == -1 or (t < t_min and t > 0):
+                t_min = t
+
+            # Handle timestep
+            if not times:
+                times.append(t)
+                sizes.append([0.0] + [0.0 for _ in _CATEGORY_TO_INDEX])
+
+            elif t != times[-1]:
+                times.append(t)
+                sizes.append(sizes[-1].copy())
+
+            # Handle memory and categories
+            if action in (Action.PREEXISTING, Action.CREATE):
+                update(key, version, numbytes)
+
+            elif action == Action.INCREMENT_VERSION:
+                update(key, version, -numbytes)
+                update(key, version + 1, numbytes)
+
+            elif action == Action.DESTROY:
+                update(key, version, -numbytes)
+
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
+        times = [t_min if t < 0 else t for t in times]
+        return times, sizes
+
+    def export_memory_timeline(self, path, device) -> None:
+        """Saves the memory timeline as [times, sizes by category]
+        as a JSON formatted file to the given path for the given
+        device."""
+        times, sizes = self._coalesce_timeline(device)
+        # TODO: Write a faster serialize (orjson not available in CI)
+        import json
+        with open(path, 'w') as f:
+            json.dump([times, sizes], f)

@@ -60,7 +60,7 @@ class Batch:
 
     @property
     def values(self):
-        """Retreives the underlying values for the batch"""
+        """Retrieves the underlying values for the batch"""
         return self._values
 
     def find_tensor_idx(self):

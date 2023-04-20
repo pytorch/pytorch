@@ -473,6 +473,7 @@ else:
             `torch.meshgrid` is commonly used to produce a grid for
             plotting.
             >>> # xdoctest: +REQUIRES(module:matplotlib)
+            >>> # xdoctest: +REQUIRES(env:DOCTEST_SHOW)
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
@@ -1093,6 +1094,8 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if isinstance(dims, int):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
+        if dims > min(a.dim(), b.dim()):
+            raise RuntimeError(f"tensordot expects dims < ndim_a or ndim_b, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
 

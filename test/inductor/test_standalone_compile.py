@@ -2,6 +2,7 @@
 import torch
 from torch import _dynamo as dynamo, _inductor as inductor
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.utils import gen_gm_and_inputs
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -95,6 +96,18 @@ class TestStandaloneInductor(TestCase):
         mod_opt = inductor.compile(gm, [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
+
+    def test_inductor_via_op_with_multiple_outputs(self):
+        x1 = torch.randn((2, 512, 128))
+        x2 = [128]
+        x3 = torch.randn((128))
+        x4 = torch.randn((128,))
+        x5 = 1e-6
+        mod, inp = gen_gm_and_inputs(
+            torch.ops.aten.native_layer_norm.default, (x1, x2, x3, x4, x5), {}
+        )
+        mod_opt = inductor.compile(mod, inp)
+        self.assertEqual(mod(*inp), mod_opt(*inp))
 
 
 if __name__ == "__main__":

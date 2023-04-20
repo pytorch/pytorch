@@ -288,3 +288,18 @@ def define_tools_targets(
             ":autograd",
         ],
     )
+
+    python_test(
+        name = "test_torchgen_executorch",
+        srcs = [
+            "test/test_executorch_gen.py",
+            "test/test_executorch_signatures.py",
+            "test/test_executorch_types.py",
+            "test/test_executorch_unboxing.py",
+        ],
+        contacts = contacts,
+        visibility = ["PUBLIC"],
+        deps = [
+            torchgen_deps,
+        ],
+    )

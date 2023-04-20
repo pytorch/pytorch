@@ -4,6 +4,7 @@ import copy
 import itertools
 import functools
 import unittest
+from contextlib import nullcontext
 
 try:
     import torchvision
@@ -425,6 +426,16 @@ class TestMkldnn(TestCase):
 
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
+
+    def test_conv_transposed2d_ic1_nhwc(self):
+        x = torch.ones([1, 1, 2, 2]).contiguous(memory_format=torch.channels_last)
+        model = torch.nn.ConvTranspose2d(in_channels=1, out_channels=2, kernel_size=[5, 5]).eval()
+        model.weight.data = torch.ones([1, 2, 5, 5]).contiguous(memory_format=torch.channels_last)
+        with torch.no_grad():
+            y = model(x)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = model(x)
+            self.assertEqual(y, y_ref)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -1391,7 +1402,7 @@ class TestMkldnn(TestCase):
 
                 model1 = copy.deepcopy(model)
                 model2 = copy.deepcopy(model)
-                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
+                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16), torch.no_grad() if not training else nullcontext():
                     with torch.backends.mkldnn.flags(enabled=False):
                         torch.manual_seed(seed)
                         output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
@@ -1431,6 +1442,17 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_matmul_bf16(self):
+        if has_bf16_support():
+            a1 = torch.randn([64, 1, 33], dtype=torch.bfloat16)
+            # a2 is contiguous tensor but it's strides is not default contiguous strides.
+            a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
+            self.assertTrue(a2.is_contiguous())
+            b = torch.randn(64, 33, 256).to(dtype=torch.bfloat16)
+            y1 = torch.ops.aten.bmm(a1, b)
+            y2 = torch.bmm(a2, b)
+            self.assertEqual(y1, y2)
 
 if __name__ == '__main__':
     run_tests()

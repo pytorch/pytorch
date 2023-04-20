@@ -178,9 +178,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    ("max", "reduction_no_dim"): {f16},
     ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_no_dim"): {f16},
     ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
     "nanquantile": {f32, f64},
@@ -224,7 +222,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
-    ("norm", "inf"): {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
@@ -293,7 +290,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
-    "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randint": {f16, f32, f64, i32, i64},
@@ -472,6 +468,7 @@ inductor_all_samples = {
     "mT",
     "mH",
     "rsub",
+    "triu",
 }
 
 
@@ -599,7 +596,6 @@ class TestInductorOpInfo(TestCase):
                     )
 
         except Exception as e:
-
             if test_expect is ExpectedTestResult.XFAILURE:
                 raise e
 

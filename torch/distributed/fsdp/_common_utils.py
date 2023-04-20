@@ -58,9 +58,9 @@ class _FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._fully_sharded_module_to_handles: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
+            nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
-        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.compute_device: Optional[torch.device] = None
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
@@ -123,7 +123,7 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     if _is_composable(state):
         assert (
             module in state._fully_sharded_module_to_handles
-        ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
+        ), f"Expects a fully sharded module but got {module} on rank {state.rank}"
         return state._fully_sharded_module_to_handles[module][:]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
@@ -204,7 +204,7 @@ def _get_param_to_fqns(
             includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, param_to_fqns):
+    def module_fn(module, prefix, tree_level, param_to_fqns):
         for param_name, param in module.named_parameters(recurse=False):
             local_fqns = (
                 param._fqns
@@ -225,8 +225,8 @@ def _get_param_to_fqns(
                     # calls `named_child` to traverse the module recursively and
                     # calls `named_parameters` with `recurse=False`, parameters
                     # will be traversed more than once.
-                    # This hack is specificed designed for DMP + FSDP. We
-                    # overwite the flat_parameters traversal result to only obtain
+                    # This hack is specified designed for DMP + FSDP. We
+                    # overwrite the flat_parameters traversal result to only obtain
                     # the last one, which happens to be the correct one.
                     #
                     # TODO: Remove this hack once DMP + FSDP is not supported.
@@ -272,13 +272,14 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
+    def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
+        module_fn(module, prefix, tree_level, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
             if submodule is None:
                 continue
             new_prefix = prefix + submodule_name + "."
+            new_tree_level = tree_level + 1
             if filter_fqns is not None:
                 for fqn in filter_fqns:
                     if fqn.startswith(new_prefix):
@@ -286,7 +287,7 @@ def _apply_to_modules(
                 else:
                     # DMP's named_parameter() will mess up the traversal with
                     # ``named_children`` + `named_parameter(recurse=False)``.
-                    # This hack is a must to make the travsersal work.
+                    # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
@@ -299,9 +300,18 @@ def _apply_to_modules(
                             f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
-            f(submodule, new_prefix, *args, **kwargs)
+                    elif submodule_name == "module":
+                        warnings.warn(
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when DDP wraps the outer "
+                            " modules while FSDP wraps the inner ones."
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
+                        )
+                        new_prefix = prefix
+            f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
-    f(root_module, "", *args, **kwargs)
+    f(root_module, "", 0, *args, **kwargs)
     return return_fn(*args, **kwargs)
 
 

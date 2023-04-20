@@ -105,8 +105,10 @@ class AdamW(Optimizer):
 
             # State initialization
             if len(state) == 0:
+                # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+                # This is because kernel launches are costly on CUDA and XLA.
                 state["step"] = (
-                    torch.zeros((1,), dtype=torch.float, device=p.device)
+                    torch.zeros((), dtype=torch.float, device=p.device)
                     if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )
@@ -300,9 +302,7 @@ def adamw(
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
     # bake-in time before making it the default, even if it is typically faster.
     if fused is None and foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
     if fused is None:
         fused = False
     if foreach is None:
@@ -603,16 +603,15 @@ def _fused_adamw(
             device_max_exp_avg_sqs,
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
-        if grad_scale is not None and found_inf is not None:
+        device_grad_scale, device_found_inf = None, None
+        if grad_scale is not None:
             if device not in grad_scale_dict:
                 grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
+            device_grad_scale = grad_scale_dict[device]
+        if found_inf is not None:
             if found_inf not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
             device_found_inf = found_inf_dict[device]
-        else:
-            device_grad_scale = None
-            device_found_inf = None
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adamw_(
             device_params,

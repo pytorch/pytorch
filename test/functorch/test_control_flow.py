@@ -65,6 +65,9 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_true, torch.sin(x))
         self.assertEqual(result_false, torch.cos(x))
 
+        graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
+        self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
+
     def test_cond_nested_traced(self):
         def true_nested(y):
             return y * y
@@ -100,6 +103,9 @@ class TestControlFlowTraced(TestCase):
 
         self.assertEqual(result_false_true, torch.cos(x))
 
+        graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
+        self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
+
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -126,6 +132,9 @@ class TestControlFlowTraced(TestCase):
                 all_ops_in_true_branch.append(node.target)
 
         self.assertFalse(any([op._schema.is_mutable for op in all_ops_in_true_branch]))
+
+        graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
+        self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
     def test_cond_retrace_functionalized(self):
         def true_fn(x):
@@ -170,6 +179,9 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
         gm_true_true_branch = graph_module.true_graph_0.true_graph_0
+
+        graph_module1 = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
+        self.assertEqual(graph_module1(*example_inputs), f(*example_inputs))
 
         all_ops = []
         for node in gm_true_true_branch.graph.nodes:
@@ -609,6 +621,9 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
 
         gm = make_fx(torch.func.functionalize(f))(*example_inputs)
+        self.assertEqual(gm(*example_inputs), f(*example_inputs))
+
+        gm = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
         for node in gm.body_graph_0.graph.nodes:

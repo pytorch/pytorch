@@ -176,7 +176,7 @@ class Agent:
                 )
             )
 
-        # wait until all obervers have finished this episode
+        # wait until all observers have finished this episode
         for fut in futs:
             fut.wait()
 

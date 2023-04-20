@@ -17,7 +17,7 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 if __name__ == '__main__':
@@ -263,7 +263,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_mapping(self):
         def fn():
-            return dict({"foo" : 1, "bar" : 2, "baz" : 3})
+            return {"foo" : 1, "bar" : 2, "baz" : 3}
 
         self.checkScript(fn, ())
 
@@ -275,7 +275,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_dict_comprehension(self):
         def fn():
-            return dict({i: chr(i + 65) for i in range(4)})
+            return {i: chr(i + 65) for i in range(4)}
 
         self.checkScript(fn, ())
 
@@ -287,7 +287,7 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_empty_dict_comprehension(self):
         def fn():
-            return dict({})
+            return {}
 
         self.checkScript(fn, ())
 
@@ -2083,6 +2083,62 @@ class TestNamedTuple(JitTestCase):
 
         for name in ['a', 'b', 'c']:
             self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
+    def test_namedtuple_inside_forwardref(self):
+        class FeatureVector(NamedTuple):
+            float_features: 'float'
+            sequence_features: 'List[float]'
+            time_since_first: 'float'
+
+        @torch.jit.script
+        def foo(x) -> float:
+            fv = FeatureVector(3.0, [3.0], 3.0)
+            rv = fv.float_features
+            for val in fv.sequence_features:
+                rv += val
+            rv *= fv.time_since_first
+            return rv
+
+        self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    def test_namedtuple_input_forwardref(self):
+        class MyNamedTuple(NamedTuple):
+            a : 'int'
+            b : 'float'
+            c : 'torch.Tensor'
+
+        make_global(MyNamedTuple)
+
+        nt = MyNamedTuple(4, 2.5, torch.rand((2, 2)))
+
+        def fn(obj: MyNamedTuple):
+            return ((obj.c + obj.b) ** obj.a).sin()
+
+        expected = fn(nt)
+        fn_s = torch.jit.script(fn)
+        actual = fn_s(nt)
+        self.assertEqual(expected, actual)
+
+    # see #95858
+    @unittest.expectedFailure
+    def test_namedtuple_resolution_forwardref(self):
+        class TheType(NamedTuple):
+            t: 'int'
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super().__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
+
 
 class TestScriptDict(JitTestCase):
     """

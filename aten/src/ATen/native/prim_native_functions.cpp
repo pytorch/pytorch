@@ -37,5 +37,10 @@ Tensor foobar(const Tensor& self, bool arg1, bool arg2, bool arg3) {
   return self;
 }
 
+// Aux function used to test functorch fallback warning
+Tensor _test_functorch_fallback(const Tensor& self, const Tensor& other) {
+  return self.clone();
+}
+
 } // namespace meta
 } // namespace at
