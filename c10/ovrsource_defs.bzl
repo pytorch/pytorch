@@ -35,6 +35,7 @@ def define_c10_ovrsource(name, is_mobile):
             "ovr_config//compiler:cl": [
                 "/w",
             ],
+            "ovr_config//compiler:clang": ["-fexceptions"],
             "ovr_config//toolchain/clang:win": [
                 "-Wno-error",
                 "-Wno-shadow",
@@ -159,7 +160,7 @@ def define_ovrsource_targets():
     oxx_static_library(
         name = "c10_ovrsource",
         compatible_with = cpu_supported_platforms,
-        exported_deps = select({
+        public_deps = select({
             "DEFAULT": [":c10_full_ovrsource"],
             "ovr_config//os:android": [":c10_mobile_ovrsource"],
             "ovr_config//os:iphoneos": [":c10_mobile_ovrsource"],

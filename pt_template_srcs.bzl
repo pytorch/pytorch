@@ -3,7 +3,6 @@
 # being built
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load(":build_variables.bzl", "aten_native_source_list")
 load(
     ":ufunc_defs.bzl",
@@ -111,7 +110,7 @@ def get_gen_oplist_outs():
     }
 
 def get_generate_code_bin_outs():
-    outs = {
+    return {
         "autograd/generated/ADInplaceOrViewTypeEverything.cpp": ["autograd/generated/ADInplaceOrViewTypeEverything.cpp"],
         "autograd/generated/ADInplaceOrViewType_0.cpp": ["autograd/generated/ADInplaceOrViewType_0.cpp"],
         "autograd/generated/ADInplaceOrViewType_1.cpp": ["autograd/generated/ADInplaceOrViewType_1.cpp"],
@@ -130,31 +129,26 @@ def get_generate_code_bin_outs():
         "autograd/generated/VariableType_2.cpp": ["autograd/generated/VariableType_2.cpp"],
         "autograd/generated/VariableType_3.cpp": ["autograd/generated/VariableType_3.cpp"],
         "autograd/generated/VariableType_4.cpp": ["autograd/generated/VariableType_4.cpp"],
+        "autograd/generated/python_enum_tag.cpp": ["autograd/generated/python_enum_tag.cpp"],
+        "autograd/generated/python_fft_functions.cpp": ["autograd/generated/python_fft_functions.cpp"],
+        "autograd/generated/python_functions.h": ["autograd/generated/python_functions.h"],
+        "autograd/generated/python_functions_0.cpp": ["autograd/generated/python_functions_0.cpp"],
+        "autograd/generated/python_functions_1.cpp": ["autograd/generated/python_functions_1.cpp"],
+        "autograd/generated/python_functions_2.cpp": ["autograd/generated/python_functions_2.cpp"],
+        "autograd/generated/python_functions_3.cpp": ["autograd/generated/python_functions_3.cpp"],
+        "autograd/generated/python_functions_4.cpp": ["autograd/generated/python_functions_4.cpp"],
+        "autograd/generated/python_linalg_functions.cpp": ["autograd/generated/python_linalg_functions.cpp"],
+        "autograd/generated/python_nested_functions.cpp": ["autograd/generated/python_nested_functions.cpp"],
+        "autograd/generated/python_nn_functions.cpp": ["autograd/generated/python_nn_functions.cpp"],
+        "autograd/generated/python_return_types.cpp": ["autograd/generated/python_return_types.cpp"],
+        "autograd/generated/python_sparse_functions.cpp": ["autograd/generated/python_sparse_functions.cpp"],
+        "autograd/generated/python_special_functions.cpp": ["autograd/generated/python_special_functions.cpp"],
+        "autograd/generated/python_torch_functions_0.cpp": ["autograd/generated/python_torch_functions_0.cpp"],
+        "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
+        "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
+        "autograd/generated/python_variable_methods.cpp": ["autograd/generated/python_variable_methods.cpp"],
         "autograd/generated/variable_factories.h": ["autograd/generated/variable_factories.h"],
     }
-
-    if is_arvr_mode():
-        outs.update({
-            "autograd/generated/python_enum_tag.cpp": ["autograd/generated/python_enum_tag.cpp"],
-            "autograd/generated/python_fft_functions.cpp": ["autograd/generated/python_fft_functions.cpp"],
-            "autograd/generated/python_functions.h": ["autograd/generated/python_functions.h"],
-            "autograd/generated/python_functions_0.cpp": ["autograd/generated/python_functions_0.cpp"],
-            "autograd/generated/python_functions_1.cpp": ["autograd/generated/python_functions_1.cpp"],
-            "autograd/generated/python_functions_2.cpp": ["autograd/generated/python_functions_2.cpp"],
-            "autograd/generated/python_functions_3.cpp": ["autograd/generated/python_functions_3.cpp"],
-            "autograd/generated/python_functions_4.cpp": ["autograd/generated/python_functions_4.cpp"],
-            "autograd/generated/python_linalg_functions.cpp": ["autograd/generated/python_linalg_functions.cpp"],
-            "autograd/generated/python_nested_functions.cpp": ["autograd/generated/python_nested_functions.cpp"],
-            "autograd/generated/python_nn_functions.cpp": ["autograd/generated/python_nn_functions.cpp"],
-            "autograd/generated/python_return_types.cpp": ["autograd/generated/python_return_types.cpp"],
-            "autograd/generated/python_sparse_functions.cpp": ["autograd/generated/python_sparse_functions.cpp"],
-            "autograd/generated/python_special_functions.cpp": ["autograd/generated/python_special_functions.cpp"],
-            "autograd/generated/python_torch_functions_0.cpp": ["autograd/generated/python_torch_functions_0.cpp"],
-            "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
-            "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
-            "autograd/generated/python_variable_methods.cpp": ["autograd/generated/python_variable_methods.cpp"],
-        })
-    return outs
 
 def get_template_registration_files_outs(is_oss = False):
     outs = {}

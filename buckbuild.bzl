@@ -122,7 +122,7 @@ def get_glsl_paths():
 
     if len(paths) % 2 != 0:
         fail(
-            "gen_vulkan_spv.additional_glsl_paths must contain an even number of elements"
+            "gen_vulkan_spv.additional_glsl_paths must contain an even number of elements",
         )
 
     return " ".join(
@@ -136,7 +136,7 @@ def get_glsl_paths():
                 len(paths),
                 2,
             )
-        ]
+        ],
     )
 
 # @lint-ignore BUCKRESTRICTEDSYNTAX
@@ -175,8 +175,8 @@ THIRD_PARTY_LIBS = {
     "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
-    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
     "sleef_arm": ["//third-party/sleef:sleef_arm", "//third_party:sleef_arm"],
+    "typing-extensions": ["//third-party/typing-extensions:typing-extensions", "//third_party:typing-extensions"],
 }
 
 def third_party(name):
@@ -675,9 +675,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
         default_outs = ["."],
         bash = "mkdir -p tools && " +
                "$(exe {}tools:generate_code_bin) ".format(ROOT_PATH) + " ".join(
-            # Mobile build only needs libtorch - skip python bindings for now, except
-            # for ovrsource, which needs Python bindings.
-            (["--subset libtorch"] if not is_arvr_mode() else []) + [
+            [
                 "--native-functions-path $(location {}:aten_src_path)/aten/src/ATen/native/native_functions.yaml".format(ROOT),
                 "--tags-path $(location {}:aten_src_path)/aten/src/ATen/native/tags.yaml".format(ROOT),
                 "--install_dir $OUT",
@@ -685,9 +683,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
         ),
         cmd_exe = "@powershell -Command New-Item -Path tools -ItemType Directory -Force; " +
                   "$(exe {}tools:generate_code_bin) ".format(ROOT_PATH) + " ".join(
-            # Mobile build only needs libtorch - skip python bindings for now, except
-            # for ovrsource, which needs Python bindings.
-            (["--subset libtorch"] if not is_arvr_mode() else []) + [
+            [
                 "--native-functions-path $(location {}:aten_src_path)/aten/src/ATen/native/native_functions.yaml".format(ROOT),
                 "--tags-path $(location {}:aten_src_path)/aten/src/ATen/native/tags.yaml".format(ROOT),
                 "--install_dir $OUT",
@@ -1948,7 +1944,7 @@ def define_buck_targets(
             ] + select({
                 "DEFAULT": [],
                 "ovr_config//runtime:fbcode-arm64": [
-                  third_party("sleef_arm"),
+                    third_party("sleef_arm"),
                 ],
             }),
             compiler_flags = get_aten_compiler_flags(),
