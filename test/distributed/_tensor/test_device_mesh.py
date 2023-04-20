@@ -207,10 +207,17 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                     scattered_tensor, pad_sizes[my_rank]
                 )
 
-            self.assertEqual(
-                scattered_tensor.size(), tensor_splitted_list[my_rank].size()
-            )
-            self.assertEqual(scattered_tensor, tensor_splitted_list[my_rank])
+            if scattered_tensor.numel() == 0:
+                # We need to check numel() instead of size if a tensor is ([]) after unpadding,
+                # since the size could be ([0, 8]) after unpadding.
+                self.assertEqual(
+                    scattered_tensor.numel(), tensor_splitted_list[my_rank].numel()
+                )
+            else:
+                self.assertEqual(
+                    scattered_tensor.size(), tensor_splitted_list[my_rank].size()
+                )
+                self.assertEqual(scattered_tensor, tensor_splitted_list[my_rank])
 
     @with_comms
     def test_all_gather_1d(self):
@@ -318,13 +325,20 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                     scattered_tensor, pad_sizes[my_rank]
                 )
 
-            self.assertEqual(
-                scattered_tensor.size(), tensor_splitted_list[my_rank].size()
-            )
-            self.assertEqual(
-                scattered_tensor,
-                torch.ones_like(tensor_splitted_list[my_rank]) * res_num,
-            )
+            if scattered_tensor.numel() == 0:
+                # We need to check numel() instead of size if a tensor is ([]) after unpadding,
+                # since the size could be ([0, 8]) after unpadding.
+                self.assertEqual(
+                    scattered_tensor.numel(), tensor_splitted_list[my_rank].numel()
+                )
+            else:
+                self.assertEqual(
+                    scattered_tensor.size(), tensor_splitted_list[my_rank].size()
+                )
+                self.assertEqual(
+                    scattered_tensor,
+                    torch.ones_like(tensor_splitted_list[my_rank]) * res_num,
+                )
 
     @with_comms
     def test_all_gather_nd(self):

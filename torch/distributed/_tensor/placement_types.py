@@ -66,9 +66,7 @@ class Shard(Placement):
             for idx in range(num_chunks)
         ]
         # Compute pad size on each chunk
-        pad_sizes = [
-            full_chunk_size - chunk_size for idx, chunk_size in enumerate(chunk_sizes)
-        ]
+        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
 
         # Reuse tensor to fill empty chunk with empty tensor
         num_empty_tensors = num_chunks - len(tensor_list)
@@ -106,18 +104,11 @@ class Shard(Placement):
         tensor: torch.Tensor,
         pad_size: int,
     ) -> torch.Tensor:
-        tensor = tensor.narrow(
+        return tensor.narrow(
             self.dim,
             start=0,
             length=tensor.size(self.dim) - pad_size,
         )
-
-        # Explicitly return an empty tensor. Otherwise, even if the
-        # tensor is empty, the size won't be 0.
-        if tensor.numel() == 0:
-            return tensor.new_zeros([0])
-        else:
-            return tensor
 
     def _local_shard_size_on_dim(
         self,
@@ -198,7 +189,7 @@ class Shard(Placement):
         assert (
             my_coordinate is not None
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
-        pad_idx = 0
+
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
@@ -244,7 +235,7 @@ class Shard(Placement):
             for idx in range(num_chunks)
         ]
         pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
-        is_padded = not all(pad_size == 0 for pad_size in pad_sizes)
+        is_padded = size[self.dim] % num_chunks != 0
 
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
         if pad_size > 0:
