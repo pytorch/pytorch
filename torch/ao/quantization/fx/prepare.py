@@ -685,7 +685,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             arg_as_input_target_dtype,
             arg_as_input_target_is_dynamic,
             reuse_input_obs_or_fq,
-            is_zeroth_arg=arg is node.args[0],
+            is_zeroth_arg=len(node.args) > 0 and arg is node.args[0],
         )
 
     else:
