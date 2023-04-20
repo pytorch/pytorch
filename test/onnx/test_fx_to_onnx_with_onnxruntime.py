@@ -468,13 +468,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
-    @pytorch_test_common.xfail(
-        "RuntimeError: false INTERNAL ASSERT FAILED at "
-        "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
-        " please report a bug to PyTorch. mutating a non-functional tensor with a "
-        "functional tensor is not allowed. Please ensure that all of your inputs are "
-        "wrapped inside of a functionalize() call."
-    )
+    @skip_if_no_torchvision
+    def test_resnet18(self):
+        model = torchvision.models.resnet18(pretrained=False)
+        dummy_input = torch.randn(1, 3, 224, 224)
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self,
+            model,
+            (dummy_input,),
+        )
+
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
