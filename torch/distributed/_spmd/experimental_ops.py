@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
@@ -170,15 +170,117 @@ def _prop__fused_adam(op_schema: OpSchema):
         return OutputSharding(output_spec=(op_schema.args_schema[0],) * NT)  # type: ignore[arg-type]
 
 
+@register_prop_rule(aten.nll_loss_forward.default)  # pyre-ignore
+def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
+    self, target = op_schema.args_schema[:2]
+    assert isinstance(self, DTensorSpec)
+    assert isinstance(target, DTensorSpec)
+    if self.placements != target.placements:
+        # Self and target must match in placements, which should be shard along
+        # batch dimension in data parallell use cases. Force redistribute.
+
+        # need to create a new self instead return (target, target) as target
+        # and self might not match in shape.
+        new_self = DTensorSpec(
+            mesh=self.mesh,
+            placements=target.placements,
+            tensor_meta=self.tensor_meta,
+        )
+        return OutputSharding(
+            output_spec=None,
+            schema_suggestions=[
+                OpSchema(
+                    func_schema=op_schema.func_schema,
+                    args_schema=(new_self, target) + op_schema.args_schema[2:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                    is_inplace=op_schema.is_inplace,
+                    is_out_variant=op_schema.is_out_variant,
+                )
+            ],
+        )
+    else:
+        return OutputSharding(
+            output_spec=(
+                # by default, nll_loss_forward conducts a reduction and returns
+                # a scalar tensor, and hence the _Partial placements.
+                DTensorSpec(mesh=self.mesh, placements=[_Partial()]),
+                # the 2nd output total_weight is always a scalar tensor
+                DTensorSpec(mesh=self.mesh, placements=[Replicate()]),
+            )
+        )
+
+
+@register_prop_rule(aten.nll_loss_backward.default)  # pyre-ignore
+def _prop_nll_loss_backward(op_schema: OpSchema) -> OutputSharding:
+    grad_output, self = op_schema.args_schema[:2]
+    assert isinstance(grad_output, DTensorSpec)
+    assert isinstance(self, DTensorSpec)
+    return OutputSharding(output_spec=self)
+
+
+@register_prop_rule(aten.stack.default)
+def _prop_stack(op_schema: OpSchema) -> OutputSharding:
+    tensors = op_schema.args_schema[0]
+    dim = 0 if len(op_schema.args_schema) == 1 else cast(int, op_schema.args_schema[1])
+    assert (
+        isinstance(tensors, list) and len(tensors) > 0
+    ), "expect at least one tensor to stack"
+    assert all(
+        isinstance(t, DTensorSpec) for t in tensors
+    ), f"expect a list of DTensorSpecs, but got {tensors}"
+    assert all(
+        t.shape == tensors[0].shape for t in tensors
+    ), f"expect all tensors to have the same shape, but got {tensors}."
+    # TODO: provide schema_suggestions when placements do not match
+    assert all(
+        t.placements == tensors[0].placements for t in tensors
+    ), f"expect all tensors to have the same placements, but got {tensors}."
+    assert all(
+        not p.is_shard(dim) for p in tensors[0].placements
+    ), "DTensor does not support stack on sharded dimension."
+
+    return OutputSharding(
+        output_spec=DTensorSpec(mesh=tensors[0].mesh, placements=tensors[0].placements)
+    )
+
+
+@register_prop_rule(aten.select.int)
+def _prop_select(op_schema: OpSchema) -> OutputSharding:
+    tensor, dim = op_schema.args_schema[:2]
+    assert isinstance(tensor, DTensorSpec)
+    assert isinstance(dim, int)
+    placements: Sequence[Placement] = tensor.placements
+    assert all(
+        not p.is_shard(dim) for p in placements
+    ), "DTensor does not support select on sharded dimension."
+
+    # select will remove one dimension, decrement dim of Shard placements by 1
+    # if they are larger than dim.
+    new_placements: List[Placement] = []
+    for p in placements:
+        # Using isinstance instead of is_shard so that mypy won't complain
+        # about accessing dim attribute.
+        if isinstance(p, Shard) and p.dim > dim:
+            new_placements.append(Shard(p.dim - 1))
+        else:
+            new_placements.append(p)
+
+    return OutputSharding(
+        output_spec=DTensorSpec(mesh=tensor.mesh, placements=new_placements)
+    )
+
+
 @register_prop_rule(aten.native_layer_norm.default)  # pyre-ignore
 def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     input, normalized_shape, weight, bias, eps = op_schema.args_schema
     assert isinstance(input, DTensorSpec)
-    assert isinstance(weight, DTensorSpec)
-    assert isinstance(bias, DTensorSpec)
     assert isinstance(normalized_shape, (tuple, list))
-    assert all(isinstance(p, Replicate) for p in weight.placements)
-    assert all(isinstance(p, Replicate) for p in bias.placements)
+    if weight is not None:
+        assert isinstance(weight, DTensorSpec)
+        assert all(isinstance(p, Replicate) for p in weight.placements)
+    if bias is not None:
+        assert isinstance(bias, DTensorSpec)
+        assert all(isinstance(p, Replicate) for p in bias.placements)
     # only the left-most (non-normalized) dimensions of the input can be sharded
     batch_ndim = len(input.shape) - len(normalized_shape)
     assert all(
@@ -186,7 +288,7 @@ def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
         for p in input.placements
     )
     stats_spec = DTensorSpec(
-        mesh=weight.mesh,
+        mesh=input.mesh,
         placements=input.placements,
     )
     return OutputSharding(output_spec=(input, stats_spec, stats_spec))
@@ -205,22 +307,33 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
         grad_input_mask,
     ) = op_schema.args_schema
     assert isinstance(grad, DTensorSpec)
-    assert isinstance(weight, DTensorSpec)
-    assert isinstance(bias, DTensorSpec)
     assert isinstance(grad_input_mask, (list, tuple))
-    assert all(isinstance(s, Replicate) for s in weight.placements)
-    assert all(isinstance(s, Replicate) for s in bias.placements)
-    # ensure sharding on dim 0, which will trigger the "Partial" output on weight and bias grads
+    if weight is not None:
+        assert isinstance(weight, DTensorSpec)
+        assert all(isinstance(s, Replicate) for s in weight.placements)
+    if bias is not None:
+        assert isinstance(bias, DTensorSpec)
+        assert all(isinstance(s, Replicate) for s in bias.placements)
+    # ensure sharding on dim 0, which will trigger the "Partial" output on
+    # weight and bias grads
     assert any(
         isinstance(s, Shard) and s.dim == 0 for s in grad.placements
     ), f"Got {grad.placements}"
-    weight_grad = DTensorSpec(
-        mesh=weight.mesh,
-        placements=[_Partial()] * weight.mesh.ndim,
+    weight_grad = (
+        DTensorSpec(
+            mesh=weight.mesh,
+            placements=[_Partial()] * weight.mesh.ndim,
+        )
+        if weight
+        else None
     )
-    bias_grad = DTensorSpec(
-        mesh=bias.mesh,
-        placements=[_Partial()] * bias.mesh.ndim,
+    bias_grad = (
+        DTensorSpec(
+            mesh=bias.mesh,
+            placements=[_Partial()] * bias.mesh.ndim,
+        )
+        if bias
+        else None
     )
     return OutputSharding(
         # NOTE: type errors below are legit. This is because DTensor currently

@@ -124,7 +124,7 @@ TESTS = discover_tests(
         "fx",  # executed by test_fx.py
         "jit",  # executed by test_jit.py
         "mobile",
-        "onnx",
+        "onnx_caffe2",
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
@@ -151,6 +151,8 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "onnx/test_pytorch_onnx_onnxruntime_cuda",
+        "onnx/test_models",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -237,6 +239,7 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ]
 
+# The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
@@ -253,12 +256,15 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
+# Test files that should always be run serially with other test files,
+# but it's okay if the tests inside them are run in parallel with each other.
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
     "test_cuda",
+    "test_cuda_expandable_segments",
     "test_jit_cuda_fuser",  # OOM on test_issue_1785, also profiling?
     "test_indexing",
     "test_fx_backends",
@@ -268,6 +274,7 @@ CI_SERIAL_LIST = [
     "test_tensor_creation_ops",
     "test_sparse_csr",
     "test_dispatch",
+    "test_python_dispatch",  # torch.library creation and deletion must be serialized
     "test_spectral_ops",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
@@ -289,6 +296,14 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+]
+# A subset of onnx tests that cannot run in parallel due to high memory usage.
+ONNX_SERIAL_LIST = [
+    "onnx/test_models",
+    "onnx/test_models_quantized_onnxruntime",
+    "onnx/test_models_onnxruntime",
+    "onnx/test_custom_ops",
+    "onnx/test_utility_funs",
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -358,6 +373,7 @@ JIT_EXECUTOR_TESTS = [
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -703,7 +719,7 @@ def run_doctests(test_module, test_directory, options):
             import onnxruntime  # NOQA
             import onnxscript  # NOQA
         except ImportError:
-            exclude_module_list.append("torch.onnx._internal.fx.*")
+            exclude_module_list.append("torch.onnx.*")
             enabled["onnx"] = False
         else:
             enabled["onnx"] = True
@@ -832,6 +848,7 @@ CUSTOM_HANDLERS = {
     "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": run_test_with_subprocess,
     "distributed/test_c10d_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_test_with_subprocess,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
@@ -904,6 +921,15 @@ def parse_args():
         action="store_true",
         help="Only run core tests, or tests that validate PyTorch's ops, modules,"
         "and autograd. They are defined by CORE_TEST_LIST.",
+    )
+    parser.add_argument(
+        "--onnx",
+        "--onnx",
+        action="store_true",
+        help=(
+            "Only run ONNX tests, or tests that validate PyTorch's ONNX export. "
+            "If this flag is not present, we will exclude ONNX tests."
+        ),
     )
     parser.add_argument(
         "-pt",
@@ -1097,6 +1123,7 @@ def must_serial(file: str) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
+        or file in ONNX_SERIAL_LIST
     )
 
 
@@ -1133,6 +1160,14 @@ def get_selected_tests(options):
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
+
+    # Filter to only run onnx tests when --onnx option is specified
+    onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
+    if options.onnx:
+        selected_tests = onnx_tests
+    else:
+        # Exclude all onnx tests otherwise
+        options.exclude.extend(onnx_tests)
 
     # process reordering
     if options.bring_to_front:
@@ -1316,14 +1351,17 @@ def main():
     )
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    def success_callback(err_message):
+    def handle_error_messages(err_message):
         if err_message is None:
-            return True
+            return False
         failure_messages.append(err_message)
         print_to_stderr(err_message)
-        if not options.continue_through_error:
+        return True
+
+    def parallel_test_completion_callback(err_message):
+        test_failed = handle_error_messages(err_message)
+        if test_failed and not options.continue_through_error:
             pool.terminate()
-        return False
 
     try:
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
@@ -1334,7 +1372,7 @@ def main():
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
-                callback=success_callback,
+                callback=parallel_test_completion_callback,
             )
         pool.close()
         pool.join()
@@ -1354,12 +1392,9 @@ def main():
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
-            if err_message is None:
-                continue
-            failure_messages.append(err_message)
-            if not options_clone.continue_through_error:
+            test_failed = handle_error_messages(err_message)
+            if test_failed and not options.continue_through_error:
                 raise RuntimeError(err_message)
-            print_to_stderr(err_message)
     finally:
         pool.terminate()
         pool.join()

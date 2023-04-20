@@ -1,5 +1,6 @@
 import builtins
 import collections
+import enum
 import importlib
 import itertools
 import logging
@@ -178,7 +179,7 @@ class GuardBuilder(GuardBuilderBase):
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
-                    log.warning(f"invalid var name: {guard}")
+                    log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
         return name
@@ -464,6 +465,7 @@ class GuardBuilder(GuardBuilderBase):
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
+        output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
@@ -545,7 +547,9 @@ class GuardBuilder(GuardBuilderBase):
             # compiled with that same
             # tensor + more onerous user directives.
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
+            static, reason = tensor_always_has_static_shape(
+                value, is_tensor=True, guard_source=guard.source
+            )
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
@@ -597,7 +601,11 @@ class GuardBuilder(GuardBuilderBase):
             weakref.ref(type(guarded_object)) if guarded_object is not None else None
         )
         obj_ref = None
-        if hasattr(guarded_object.__class__, "__weakref__"):
+        # Not necessary to have weakref for Enum type, but there is a bug that
+        # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
+            guarded_object, enum.Enum
+        ):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
