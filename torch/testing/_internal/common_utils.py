@@ -112,13 +112,19 @@ DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
+def maybe_load_json(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r') as fp:
+            data = json.load(fp)
+            return data
+    print(f"Attempted to load {filename} but it does not exist.")
+    return {}
+
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
 if os.getenv("SLOW_TESTS_FILE", ""):
-    with open(os.getenv("SLOW_TESTS_FILE"), 'r') as fp:
-        slow_tests_dict = json.load(fp)
+    slow_tests_dict = maybe_load_json(os.getenv("SLOW_TESTS_FILE", ""))
 if os.getenv("DISABLED_TESTS_FILE", ""):
-    with open(os.getenv("DISABLED_TESTS_FILE"), 'r') as fp:
-        disabled_tests_dict = json.load(fp)
+    disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 

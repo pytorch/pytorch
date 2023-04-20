@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import warnings
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -1050,8 +1051,26 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
+@functools.lru_cache(None)
+def _warn_complex_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    )
+
+
+# There are some types (CPU) which we accept as input but not as
+# output.
+def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
+    "Do not support reading or writing to this tensor"
+    if t.is_complex():
+        _warn_complex_not_supported()
+        return True
+    return False
+
+
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
-    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+    "Do not support writing tensor but can read from it"
+    if unsupported_input_tensor(t):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1071,12 +1090,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             if is_output:
                 if unsupported_output_tensor(meta):
                     return True
+            else:
+                if unsupported_input_tensor(meta):
+                    return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, is_output=(False or not allow_cpu_inputs)):
+        if check_skip_condition(arg, is_output=False):
             return True
 
     return check_skip_condition(node, is_output=True)
@@ -1300,7 +1322,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 FALLBACK_ALLOW_LIST = {
     "torchvision::roi_align",
 }
-FALLBACK_DENY_LIST = {"aten.exponential"}  # fails accuracy on test_torch.py
+FALLBACK_DENY_LIST = {"aten::exponential"}  # fails accuracy on test_torch.py
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
