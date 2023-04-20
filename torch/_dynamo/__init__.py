@@ -207,6 +207,10 @@ def mark_static(t, index=None):
             mark_static(t, i)
 
 
+# Note: it's preferable to not make `import torch` eagerly import other libs.
+# However, we want to provide a grace period to make borderline versions of einops
+# compatible with torch.compile.
+# TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
     try:
         import einops
@@ -215,9 +219,8 @@ def _allow_in_graph_einops():
             from einops._torch_specific import (  # requires einops>=0.6.1, torch >= 2.0
                 allow_ops_in_compiled_graph,
             )
-
-            # einops >= 0.6.1
-            allow_ops_in_compiled_graph()
+            # einops >= 0.6.1 will call the op registration logic as it is imported.
+            pass
         except ImportError:
             # einops < 0.6.1
             allow_in_graph(einops.rearrange)

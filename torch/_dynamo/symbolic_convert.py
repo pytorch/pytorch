@@ -43,7 +43,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, unimplemented, Unsupported
+from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -2116,15 +2116,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
-            log.warning(
-                "%s %s %s %s %s",
-                func.get_filename(),
-                func.get_function(),
-                args,
-                kwargs,
-                e,
+            # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
+            raise ArgsMismatchError(
+                "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
+                    reason=str(e),
+                    func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
+                    args=[arg.python_type() for arg in args],
+                    kwargs=kwargs,
+                ),
             )
-            unimplemented("arg mismatch inlining")
 
         for v in itertools.chain(sub_locals.values(), closure_cells.values()):
             if not isinstance(v, VariableTracker):
