@@ -150,6 +150,40 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             test_tensor = torch.empty(4, 4, dtype=tt, device=device)
             self.assertTrue(test_tensor.type() == dt)
 
+        # check whether the attributes and methods of the corresponding custom backend are generated correctly
+        torch.utils.rename_privateuse1_backend('foo')
+        torch.utils.generate_methods_for_privateuse1_backend()
+        with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
+            torch.utils.generate_methods_for_privateuse1_backend()
+
+        x = torch.empty(4, 4)
+        self.assertFalse(x.is_foo)
+        x = x.foo()
+        self.assertTrue(x.is_foo)
+        self.assertTrue(hasattr(torch.nn.Module, 'foo'))
+
+        # check whether the attributes and methods for storage of the corresponding custom backend are generated correctly
+        torch.utils.generate_methods_for_privateuse1_backend(for_tensor=False, for_module=False, for_storage=True)
+
+        x = torch.empty(4, 4)
+        # check TypedStorage
+        z1 = x.storage()
+        self.assertFalse(z1.is_foo)
+        z1 = z1.foo()
+        self.assertFalse(self.module.custom_add_called())
+        self.assertTrue(z1.is_foo)
+        with self.assertRaisesRegex(RuntimeError, "Invalid device"):
+            z1.foo(torch.device("cpu"))
+        z1 = z1.cpu()
+
+        y = torch.empty(4, 4)
+        # check UntypedStorage
+        z2 = y.untyped_storage()
+        self.assertFalse(z2.is_foo)
+        z2 = z2.foo()
+        self.assertFalse(self.module.custom_add_called())
+        self.assertTrue(z2.is_foo)
+
     def test_open_device_random(self):
         torch.utils.rename_privateuse1_backend('foo')
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
@@ -162,6 +196,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         with torch.random.fork_rng(device_type="foo"):
             pass
+
 
 if __name__ == "__main__":
     common.run_tests()
