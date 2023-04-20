@@ -217,8 +217,9 @@ def _allow_in_graph_einops():
 
         try:
             from einops._torch_specific import (  # requires einops>=0.6.1, torch >= 2.0
-                allow_ops_in_compiled_graph,
+                _ops_were_registered_in_torchdynamo,
             )
+
             # einops >= 0.6.1 will call the op registration logic as it is imported.
             pass
         except ImportError:
