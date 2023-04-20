@@ -3246,13 +3246,10 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 
     // clang-format off
     are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
-    // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
-    // figured out how to detect those via macro preprocessors yet, so we use <=
-    // comparisons for the relevant fields.
-    is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
-    is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
+    are_equal<sizeof(autograd_meta_),      8,  FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(extra_meta_),         8,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),        16,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
@@ -3266,16 +3263,6 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
   }
 #endif
 };
-
-// We use a class to encapsulate size-checking logic with
-// templates to capture sizes and flags. We call this within
-// a static assert to prove there is no run-time behaviour.
-// Since the methods we call return either true or fail their
-// own static_asserts, we should never see the error messages
-// below. We have to provide it though for c++ <17.
-static_assert(
-    C10_TensorImpl_Size_Check_Dummy_Class<>::check_sizes(),
-    "You should not see this message.");
 
 // Clean up after ourselves
 #undef C10_NVCC

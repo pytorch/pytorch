@@ -1274,4 +1274,9 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 
 } // namespace impl
 
+// We use a class to encapsulate size-checking logic with
+// templates to capture sizes and flags. We call this within
+// a static assert to prove there is no run-time behaviour.
+static_assert(C10_TensorImpl_Size_Check_Dummy_Class<>::check_sizes());
+
 } // namespace c10
