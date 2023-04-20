@@ -18,8 +18,10 @@ def to_channels_last(x):
 
 
 def bench_conv(with_stack=True):
-    x = torch.rand(256, 3, 224, 224).cuda()
-    weight = torch.rand(64, 3, 7, 7).cuda()
+    in_channels = 8 # 2.054x
+    in_channels = 3 # 1.416x
+    x = torch.rand(256, in_channels, 224, 224).cuda()
+    weight = torch.rand(64, in_channels, 7, 7).cuda()
 
     x_chan = to_channels_last(x)
     weight_chan = to_channels_last(weight)
@@ -60,12 +62,13 @@ def bench_conv(with_stack=True):
     print(f"conv baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
 
 def bench_conv_backward():
-    out_channel, in_channel = 64, 3  # 1.139x
-    out_channel, in_channel = 128, 6 # 0.966x
-    out_channel, in_channel = 32, 3 # 0.955x
-    out_channel, in_channel = 32, 6 # 1.059x
-    grad_out = torch.rand(16, out_channel, 112, 112).cuda()
-    x = torch.rand(16, in_channel, 224, 224).cuda()
+    batch_size, out_channel, in_channel = 16, 64, 3  # 1.139x
+    batch_size, out_channel, in_channel = 16, 128, 6 # 0.966x
+    batch_size, out_channel, in_channel = 16, 32, 3 # 0.955x
+    batch_size, out_channel, in_channel = 16, 32, 6 # 1.059x
+    batch_size, out_channel, in_channel = 64, 64, 6 # 1.017x
+    grad_out = torch.rand(batch_size, out_channel, 112, 112).cuda()
+    x = torch.rand(batch_size, in_channel, 224, 224).cuda()
     weight = torch.rand(out_channel, in_channel, 7, 7).cuda()
 
     grad_out_chan = to_channels_last(grad_out)
@@ -90,8 +93,8 @@ def bench_conv_backward():
 
     def test_fn():
         return torch.ops.aten.convolution_backward.default(
-            # grad_out_chan, x_chan, weight_chan, **kwargs,
-            grad_out_chan, x_chan, weight, **kwargs,
+            grad_out_chan, x_chan, weight_chan, **kwargs,
+            # grad_out_chan, x_chan, weight, **kwargs,
         )
 
     baseline_ms = do_bench(baseline_fn, rep=40)
@@ -99,8 +102,8 @@ def bench_conv_backward():
     print(f"conv backward baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
 
 def main():
-    bench_conv()
-    # bench_conv_backward()
+    # bench_conv()
+    bench_conv_backward()
 
 
 if __name__ == "__main__":
