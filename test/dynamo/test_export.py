@@ -18,7 +18,6 @@ from torch._export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
-    is_concrete_int,
 )
 from torch.testing._internal import common_utils
 
@@ -109,12 +108,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                if config.assume_static_by_default:
-                    # The guard produced here must be narrow, because
-                    # we are running with assume_static_by_default
-                    self.assertTrue("L['x'].size()[0] == 6" in guard.code_list)
-                else:
-                    self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -2077,13 +2071,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
         constraints = [dynamic_dim(y, 0)]
-        if config.assume_static_by_default:
-            # The assume_static flag causes this to raise, as
-            # we are now esentially comparing with a constant
-            with self.assertRaises(ConstraintViolationError):
-                torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
-        else:
-            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
+        torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_no_raise(self):
@@ -2149,13 +2137,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
-        if config.assume_static_by_default:
-            # The assume_static flag causes this to raise, as
-            # we are now esentially comparing with a constant
-            with self.assertRaises(ConstraintViolationError):
-                torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
-        else:
-            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
@@ -2374,28 +2356,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             gm, _ = torch._dynamo.export(
                 f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
             )
-
-    @config.patch(assume_static_by_default=True, dynamic_shapes=True)
-    def test_propagate_assume_static_by_default(self):
-        def f(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
-        )
-
-        for node in gm.graph.nodes:
-            val = node.meta.get("val", None)
-            if val is not None:
-                shapes = val.shape
-                # there should no symbols
-                for shape in shapes:
-                    self.assertTrue(is_concrete_int(shape))
-
-        # this should be captured as static, as export won't generate any symbols.
-        self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
 
     def test_access_class_method_from_user_class(self):
         class A:

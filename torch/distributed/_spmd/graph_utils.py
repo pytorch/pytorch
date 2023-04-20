@@ -2,14 +2,14 @@ import logging
 import os
 import tempfile
 from enum import Enum
-from typing import Dict, List, Set
+from typing import Callable, cast, Dict, Iterable, List, Set
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-logger: logging.Logger = logging.getLogger("IterGraphModule")
+logger: logging.Logger = logging.getLogger("graph_utils")
 
 
 class OP(str, Enum):
@@ -48,6 +48,19 @@ def get_output(graph: fx.Graph) -> fx.Node:
         if node.op == OP.OUTPUT:
             return node
     raise RuntimeError(f"Cannot find the output node in {graph}")
+
+
+def find_node(
+    graph: fx.Graph, predicate: Callable, reverse_order: bool = False
+) -> List[fx.Node]:
+    """
+    Take a predicate and return all the nodes in the `graph` where the predicate
+    holds.
+    """
+    nodes = cast(Iterable[fx.Node], graph.nodes)
+    if reverse_order:
+        nodes = cast(Iterable[fx.Node], iter(reversed(nodes)))  # type: ignore[call-overload]
+    return [node for node in nodes if predicate(node)]
 
 
 def is_leaf_subgraph(graph: fx.Graph, subgraph: List[fx.Node]) -> bool:
@@ -93,7 +106,10 @@ def clone_subgraph(
             for original_input_node, cloned_input_node in zip(
                 original_input, cloned_input
             ):
-                if original_input_node in all_nodes:
+                if (
+                    isinstance(original_input_node, fx.Node)
+                    and original_input_node in all_nodes
+                ):
                     assert original_input_node in mapping
                     mapped_cloned_input.append(mapping[original_input_node])
                 else:
