@@ -782,6 +782,7 @@ class TorchHigherOrderOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -895,7 +896,7 @@ class TorchHigherOrderOperator(VariableTracker):
                     f"Usage: cond(pred, true_fn, false_fn, operands)",
                 )
             # predicate
-            if type(args[0]) not in (TensorVariable, SymNodeVariable):
+            if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
                 raise UserError(
                     UserErrorType.DYNAMIC_CONTROL_FLOW,
                     f"Expected pred to be SymInt/SymBool or a tensor with single "
