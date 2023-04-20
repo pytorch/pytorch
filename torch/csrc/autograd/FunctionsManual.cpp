@@ -5748,6 +5748,9 @@ Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (const Tensor& t : materialized) {
+      if (t.sizes() == IntArrayRef({0})) {
+        continue;
+      }
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)
