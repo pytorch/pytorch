@@ -437,7 +437,6 @@ class TestMkldnn(TestCase):
                 y_ref = model(x)
             self.assertEqual(y, y_ref)
 
-
     def test_conv2d_legacy_jit_model(self):
         """
         MKLDNN integration used to serialize models with 5d weight for grouped
