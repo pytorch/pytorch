@@ -2407,14 +2407,19 @@ def run(runner, args, original_dir=None):
             # NB: This must be done late enough so that we don't do more
             # conversions on the inputs
             # NB: Assumes only the first batch-y like dimension is the batch
+            marked = False
+
             def detect_and_mark_batch(t):
+                nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
                         torch._dynamo.mark_dynamic(t, i)
+                        marked = True
                         break
 
             if args.dynamic_batch_only:
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
+                assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
             if args.log_operator_inputs:
                 log_operator_inputs(
