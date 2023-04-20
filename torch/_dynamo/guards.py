@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 import torch
+import torch.utils._device
 
 from torch._guards import (
     DuplicateInputs,
@@ -66,6 +67,8 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
         ("__load_module", lambda name: importlib.import_module(name)),
+        ("utils_device", torch.utils._device),
+        ("device", torch.device),
     ]
 )
 
@@ -450,6 +453,15 @@ class GuardBuilder(GuardBuilderBase):
             code = "not ___are_deterministic_algorithms_enabled()"
         self._produce_guard_code(guard, [code])
 
+    def DEFAULT_DEVICE(self, guard: Guard):
+        """Guard on CURRENT_DEVICE per torch.utils._device"""
+        assert guard.source is GuardSource.GLOBAL
+        import torch.utils._device as m
+
+        self._produce_guard_code(
+            guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
+        )
+
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from tracked_fakes.  This must happen after
@@ -465,6 +477,7 @@ class GuardBuilder(GuardBuilderBase):
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
+        output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
@@ -546,7 +559,9 @@ class GuardBuilder(GuardBuilderBase):
             # compiled with that same
             # tensor + more onerous user directives.
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
+            static, reason = tensor_always_has_static_shape(
+                value, is_tensor=True, guard_source=guard.source
+            )
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
