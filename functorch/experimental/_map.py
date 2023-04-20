@@ -91,6 +91,28 @@ def map_fake_tensor_mode(f, xs, *args):
     outs = [f(x, *args) for x in xs]
     return outs[0].new_empty([xs.shape[0], *outs[0].shape])
 
+@map.py_impl(DispatchKey.Functionalize)
+def map_func(f, xs, *args):
+    unwrapped_xs = _unwrap_all_tensors_from_functional(xs, reapply_views=torch._C._functionalization_reapply_views_tls())
+    unwrapped_args = _unwrap_all_tensors_from_functional(args, reapply_views=torch._C._functionalization_reapply_views_tls())
+
+    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
+
+    inputs = (unwrapped_xs,) + unwrapped_args
+
+    if _has_potential_branch_input_mutation(f, inputs):
+        raise UnsupportedAliasMutationException(
+            "torch.map is mutating the input!"
+        )
+
+    if _has_potential_branch_input_alias(f, inputs):
+        raise UnsupportedAliasMutationException(
+            "torch.map is aliasing the input!"
+        )
+
+    map_return = map(functional_map_fn, unwrapped_xs, *unwrapped_args)
+    return _wrap_all_tensors_to_functional(map_return, level=0)
+
 @map.py_impl(torch._C._functorch.TransformType.Functionalize)
 def map_functionalize(interpreter, f, xs, *args):
     """

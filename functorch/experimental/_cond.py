@@ -35,7 +35,6 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 cond = HigherOrderOperator("cond")
 
-
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
@@ -148,7 +147,6 @@ def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     return true_outs
 
 
-
 def _has_potential_branch_input_mutation(branch, inputs):
     """
     Dispatch-trace the branch with inputs and check if
@@ -164,18 +162,27 @@ def _has_potential_branch_input_mutation(branch, inputs):
     except Exception as e:
         raise e
 
-    input_nodes = set()
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            input_nodes.add(node)
-        if node.op == "call_function":
-            target = node.target
-            if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
-                for arg in node.args:
-                    if arg in input_nodes:
-                        return True
+    def _detect_input_mutation(gm):
+        input_nodes = set()
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                input_nodes.add(node)
+            if node.op == "call_function":
+                target = node.target
+                if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+                    for arg in node.args:
+                        if arg in input_nodes:
+                            return True
 
-    return False
+        for _, module in gm.named_children():
+            if isinstance(module, torch.fx.GraphModule):
+                if _detect_input_mutation(module):
+                    return True
+
+        return False
+
+    return _detect_input_mutation(gm)
+
 
 def _has_potential_branch_input_alias(branch, inputs):
     """
@@ -193,18 +200,41 @@ def _has_potential_branch_input_alias(branch, inputs):
     except Exception as e:
         raise e
 
-    input_storages = set()
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
-        if node.op == "output":
-            for out in node.args:
-                out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                if out_storage in input_storages:
-                    return True
+    def _detect_input_alias(gm):
+        input_storages = set()
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
+            if node.op == "output":
+                for out in node.args:
+                    out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
+                    if out_storage in input_storages:
+                        return True
 
-    return False
+        for _, module in gm.named_children():
+            if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
+                return True
 
+        return False
+
+    return _detect_input_alias(gm)
+
+
+@cond.py_impl(DispatchKey.Functionalize)
+def cond_func(pred, true_fn, false_fn, inputs):
+    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=torch._C._functionalization_reapply_views_tls())
+    unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=torch._C._functionalization_reapply_views_tls())
+    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
+    for branch in [true_fn, false_fn]:
+        if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
+            raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                    "might be modifying the input!")
+
+        if _has_potential_branch_input_alias(branch, unwrapped_inputs):
+            raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                    "might be aliasing the input!")
+
+    return _wrap_all_tensors_to_functional(cond(unwrapped_pred, true_fn, false_fn, unwrapped_inputs), level=0)
 
 
 @cond.py_impl(torch._C._functorch.TransformType.Functionalize)
