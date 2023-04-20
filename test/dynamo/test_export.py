@@ -2549,7 +2549,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected pred to be SymInt/SymBool or a tensor",
+            "Expected pred to be bool/int or a tensor",
         ):
             torch._dynamo.export(
                 f_unsupported_pred,
