@@ -37,10 +37,7 @@ inductor_decompositions = get_decompositions(
         aten.unsafe_split,
     ]
 )
-decompositions = {
-    **core_aten_decompositions(),
-    **inductor_decompositions,
-}
+decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 
 def register_decomposition(ops):
