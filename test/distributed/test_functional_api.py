@@ -16,10 +16,11 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
+    skip_if_lt_x_gpu
 )
 from torch.testing._internal.common_utils import (
     run_tests,
-    TestCase
+    TestCase,
 )
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -240,6 +241,18 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
+
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_into_tensor_coalesced_cuda(self):
+        tensors = [torch.ones([4], device="cuda:0"), torch.ones([4], device="cuda:0") + 1]
+        mesh = dt.DeviceMesh("cuda", torch.arange(4))
+
+        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
+        self.assertEqual(2, len(res))
+        self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
+        self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
+
 
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
