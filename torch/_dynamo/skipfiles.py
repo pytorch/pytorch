@@ -30,24 +30,8 @@ import unittest
 import weakref
 
 import torch
+import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
-
-
-try:
-    import torch._prims
-
-    # isort: split
-    # TODO: Hack to unblock simultaneous landing changes. Fix after https://github.com/pytorch/pytorch/pull/81088 lands
-    import torch._prims.utils
-    import torch._prims.wrappers
-    import torch._refs
-    import torch._refs.nn
-    import torch._refs.nn.functional
-    import torch._refs.special
-
-    HAS_PRIMS_REFS = True
-except ImportError:
-    HAS_PRIMS_REFS = False
 
 from . import comptime, config, external_utils
 
@@ -136,16 +120,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-
-if HAS_PRIMS_REFS:
-    FILENAME_ALLOWLIST |= {
-        torch._prims.__file__,
-        torch._prims.utils.__file__,
-        torch._prims.wrappers.__file__,
-        torch._refs.__file__,
-        torch._refs.special.__file__,
-        torch._refs.nn.functional.__file__,
-    }
+FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
 
 SKIP_DIRS_RE = None
@@ -170,10 +145,7 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    try:
-        module_spec = importlib.util.find_spec(import_name)
-    except Exception:
-        return
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -199,7 +171,10 @@ def check(filename, allow_torch=False):
 
 # skip common third party libs
 for _name in (
+    "einops",
+    "einops_exts",
     "functorch",
+    "fx2trt_oss",
     "intel_extension_for_pytorch",
     "networkx",
     "numpy",
@@ -213,11 +188,9 @@ for _name in (
     "tensorflow",
     "tensorrt",
     "torch2trt",
-    "torchrec.distributed",
     "tqdm",
     "tree",
     "tvm",
-    "fx2trt_oss",
     "xarray",
 ):
     add(_name)

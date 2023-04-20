@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import copy
 import dataclasses
 import dis
 import functools
@@ -31,7 +32,7 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
-from .bytecode_analysis import JUMP_OPNAMES, livevars_analysis
+from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -59,7 +60,11 @@ from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
-from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
+from .variables.ctx_manager import (
+    ContextWrappingVariable,
+    GenericContextWrappingVariable,
+    WithExitFunctionVariable,
+)
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
@@ -101,7 +106,6 @@ def _step_logger():
 
 @dataclasses.dataclass
 class BlockStackEntry:
-    id: int
     target: Instruction
     stack_index: Optional[int] = None
     with_context: ContextWrappingVariable = None
@@ -355,6 +359,16 @@ def break_graph_if_unsupported(*, push):
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
+                if len(self.states_before_block) > 0:
+                    # We don't support graph break under GenericContextWrappingVariable,
+                    # If there is, we roll back to the checkpoint and fall back.
+                    excp.remove_from_stats()
+                    state = self.states_before_block.pop()
+                    self.restore_graphstate(state)
+                    ctx = state.stack[-1]
+                    assert isinstance(ctx, GenericContextWrappingVariable)
+                    unimplemented(f"Graph break under {ctx}")
+
                 if not self.should_compile_partial_graph():
                     raise
 
@@ -371,7 +385,9 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     log.warning(
-                        f"Graph break: {excp} from user code at {user_stack_formatted}"
+                        "Graph break: %s from user code at %s",
+                        excp,
+                        user_stack_formatted,
                     )
 
                 excp.remove_from_stats()
@@ -401,7 +417,12 @@ def break_graph_if_unsupported(*, push):
                     create_call_function(inst.arg, False)
                 )
             else:
-                self.output.add_output_instructions([inst])
+                # copy instruction, but without exception table data
+                assert inst.target is None
+                inst_copy = copy.copy(inst)
+                inst_copy.exn_tab_entry = None
+                self.output.add_output_instructions([inst_copy])
+
             self.output.add_output_instructions(cleanup)
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
@@ -553,20 +574,60 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.next_instruction = None
         if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
-            log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
+            log.debug("TRACE starts_line %s:%s", self.f_code.co_filename, self.lineno)
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
-        log.debug(f"TRACE {inst.opname} {inst.argval} {self.stack}")
+        log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+
+        # 3.11 no longer uses a block stack, but we still keep track of one
+        # so that we know which contexts are currently active.
+        # For our purposes, all exception table entries with the same target
+        # are considered to be part of the same "block".
+        if sys.version_info >= (3, 11):
+            entry = inst.exn_tab_entry
+            if not (
+                # still in the same block
+                self.block_stack
+                and entry
+                and self.block_stack[-1].target is entry.target
+            ):
+                if not entry:
+                    # no longer in any block
+                    # It is possible for NOPs to be between two instructions
+                    # in the same block, but the NOPs are not covered by an
+                    # exception table entry. In this case, assume that we
+                    # are still in the same block.
+                    if self.block_stack and inst.opname != "NOP":
+                        # If we really escape from a block and the current
+                        # instruction is not in another block, then there
+                        # should be no other nested blocks that we are in.
+                        assert len(self.block_stack) == 1
+                        self.block_stack.pop()
+                elif (
+                    # current instruction is in the previous block
+                    len(self.block_stack) > 1
+                    and self.block_stack[-2].target is entry.target
+                ):
+                    # exit the current block
+                    self.block_stack.pop()
+                else:
+                    # current instruction is in a new block
+                    # push block to stack - note, BEFORE_WITH blocks won't
+                    # be pushed here since BEFORE_WITH pushes the block, and
+                    # the current instruction would be counted as being in that block.
+                    self.block_stack.append(
+                        BlockStackEntry(entry.target, len(self.stack))
+                    )
 
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            with TracingContext.current_loc(
+            TracingContext.set_current_loc(
                 self.f_code.co_filename, self.lineno, self.f_code.co_name
-            ):
-                getattr(self, inst.opname)(inst)
+            )
+            getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -782,11 +843,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if package is not None:
             if spec is not None and package != spec.parent:
                 log.warning(
-                    "__package__ != __spec__.parent "
-                    f"({package!r} != {spec.parent!r})",
-                    ImportWarning,
+                    "__package__ != __spec__.parent (%r != %r)",
+                    package,
+                    spec.parent,
                     stacklevel=3,
-                )  # type: ignore[call-arg]
+                )
             return package
         elif spec is not None:
             return spec.parent
@@ -865,7 +926,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable(value=val))
 
     def jump(self, inst):
-        self.instruction_pointer = self.indexof[id(inst.target)]
+        self.instruction_pointer = self.indexof[inst.target]
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -877,28 +938,33 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(0, inst.target))
+        self.block_stack.append(BlockStackEntry(inst.target))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(0, inst.target))
+        self.block_stack.append(BlockStackEntry(inst.target))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
+        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"SETUP_WITH {ctx}")
+
+        if isinstance(ctx, GenericContextWrappingVariable):
+            # Save the checkpoint to restore if there is
+            # graph break under the GenericContextWrappingVariable.
+            self.states_before_block.append(state)
+
         self.output.guards.update(ctx.guards)
 
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(
-                BlockStackEntry(0, inst.target, len(self.stack), ctx)
-            )
+            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
         else:
             # can't restore this while inlining
-            self.block_stack.append(BlockStackEntry(0, inst.target))
+            self.block_stack.append(BlockStackEntry(inst.target))
         self.push(
             WithExitFunctionVariable(
                 ctx,
@@ -909,7 +975,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ctx.enter(self))
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(0, inst.target))
+        self.block_stack.append(BlockStackEntry(inst.target))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1128,10 +1194,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.compile_subgraph(
             self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
         )
-        self.output.add_output_instructions([inst])
+        self.output.add_output_instructions([copy.copy(inst)])
         self.popn(2)
         self.output.add_output_instructions(
             self.create_call_resume_at(self.next_instruction)
+        )
+
+    def DELETE_ATTR(self, inst):
+        obj = self.pop()
+        self.output.guards.update(
+            BuiltinVariable(delattr)
+            .call_function(self, [obj, ConstantVariable(inst.argval)], {})
+            .guards
         )
 
     def create_call_resume_at(self, offset):
@@ -1587,13 +1661,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             kwargs = {}
         self.call_function(fn, args, kwargs)
         self.kw_names = None
-        # 3.11 removed POP_BLOCK, so we manually pop the block stack here
-        if (
-            isinstance(fn, WithExitFunctionVariable)
-            and len(self.block_stack) > 0
-            and id(fn) == self.block_stack[-1].id
-        ):
-            self.block_stack.pop()
 
     def COPY(self, inst):
         self.push(self.stack[-inst.arg])
@@ -1613,9 +1680,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         pass
 
     def BEFORE_WITH(self, inst):
+        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"BEFORE_WITH {ctx}")
+
+        if isinstance(ctx, GenericContextWrappingVariable):
+            # Save the checkpoint to restore if there is
+            # graph break under the GenericContextWrappingVariable.
+            self.states_before_block.append(state)
+
         self.output.guards.update(ctx.guards)
 
         exit = WithExitFunctionVariable(
@@ -1623,15 +1697,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inst.target,
             **VariableTracker.propagate(ctx),
         )
-        # 3.11 no longer uses a block stack, but we still keep track of one
-        # so that we know which contexts are currently active.
+        # see create_call_resume_at for block stack details
+        assert self.next_instruction
+        assert self.next_instruction.exn_tab_entry
+        target = self.next_instruction.exn_tab_entry.target
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(
-                BlockStackEntry(id(exit), inst.target, len(self.stack), ctx)
-            )
+            self.block_stack.append(BlockStackEntry(target, len(self.stack), ctx))
         else:
-            # can't restore this while inlining
-            self.block_stack.append(BlockStackEntry(id(exit), inst.target))
+            self.block_stack.append(BlockStackEntry(target))
 
         self.push(exit)
         self.push(ctx.enter(self))
@@ -1746,6 +1819,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.current_instruction = create_instruction("NOP")
         self.next_instruction = None
         self.block_stack = []
+        # states before SETUP_WITH for checkpointing and fallback
+        self.states_before_block: List[InstructionTranslatorGraphState] = []
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
         self.accept_prefix_inst = True
@@ -1753,7 +1828,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
-        self.indexof: Dict[int, int] = {id(i): n for n, i in enumerate(instructions)}
+        self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
         self.f_locals: Dict[
             str, Any
         ] = f_locals  # needed for recording accessed locals for replay
@@ -1804,10 +1879,18 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         export_constraints,
         mutated_closure_cell_contents: Set[str],
+        frame_state,
     ):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
         super().__init__(
             output=OutputGraph(
-                f_globals, code_options, compiler_fn, self, export, export_constraints
+                f_globals,
+                code_options,
+                compiler_fn,
+                self,
+                export,
+                export_constraints,
+                frame_state,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -1886,7 +1969,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
     def match_nested_cell(self, name, cell):
@@ -1946,6 +2028,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.f_code,
             self.lineno,
             inst.offset,
+            tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
@@ -1975,7 +2058,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         log.debug("RETURN_VALUE triggered compile")
         self.output.compile_subgraph(
-            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+            self,
+            reason=GraphCompileReason(
+                "return_value", [self.frame_summary()], graph_break=False
+            ),
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
@@ -2011,6 +2097,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented(
+                f"call torch._dynamo.disable() wrapped function {func.get_function()}"
+            )
+
     @staticmethod
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
@@ -2024,7 +2117,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             log.warning(
-                f"{func.get_filename()} {func.get_function()} {args} {kwargs} {e}"
+                "%s %s %s %s %s",
+                func.get_filename(),
+                func.get_function(),
+                args,
+                kwargs,
+                e,
             )
             unimplemented("arg mismatch inlining")
 
@@ -2041,7 +2139,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
-        log.debug(f"INLINING {code}{suffix}")
+        log.debug("INLINING %s%s", code, suffix)
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2060,7 +2158,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug(msg)
             raise Unsupported(msg) from e
         except Exception as e:
-            log.debug(f"FAILED INLINING {code}")
+            log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
@@ -2069,7 +2167,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
-        log.debug(f"DONE INLINING {code}")
+        log.debug("DONE INLINING %s", code)
 
         if is_generator(code):
             assert isinstance(tracer, InliningGeneratorInstructionTranslator)

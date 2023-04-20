@@ -114,7 +114,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         _has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
     if skip_replacement or not _is_conversion_supported(activation_post_process):
-        # didn't find correponding quantize op and info for the activation_post_process
+        # didn't find corresponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
@@ -302,7 +302,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     elif dtype == torch.float16:
         raise NotImplementedError("decomposed to float16 op not implemented yet")
 
-    # should not reach since we have checks in the begining to make sure the
+    # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
 
 def _replace_observer_with_quantize_dequantize_node(
@@ -330,7 +330,7 @@ def _replace_observer_with_quantize_dequantize_node(
         _has_none_qconfig(n, node_name_to_qconfig) for n in
         list(node.args) + list(node.users.keys())])
     if skip_replacement or not _is_conversion_supported(activation_post_process):
-        # didn't find correponding quantize op and info for the activation_post_process
+        # didn't find corresponding quantize op and info for the activation_post_process
         # so we just remove the observer
         with graph.inserting_before(node):
             node.replace_all_uses_with(node.args[0])
@@ -425,7 +425,7 @@ def _replace_observer_with_quantize_dequantize_node(
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
 
-    # should not reach since we have checks in the begining to make sure the
+    # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
 
 # this is a temporary hack for custom module, we may want to implement
@@ -662,7 +662,7 @@ def convert_weighted_module(
     if isinstance(
             original_module,
             qat_module_classes):
-        # Converting qat module to a float module, we need to attch
+        # Converting qat module to a float module, we need to attach
         # weight fake_quant to the module, weight fake_quant is assumed to be run during
         # QAT so we don't need to run it again here
         weight_post_process = original_module.weight_fake_quant
@@ -692,7 +692,7 @@ def convert_weighted_module(
 
     fused_module = None
     float_module = original_module
-    # extract the inidividual float_module and fused module
+    # extract the individual float_module and fused module
     if isinstance(original_module, torch.ao.nn.intrinsic._FusedModule):
         fused_module = float_module
         float_module = fused_module[0]  # type: ignore[index]
@@ -989,7 +989,7 @@ def convert(
             cur_placeholder_node_idx = placeholder_node_seen_cnt
             placeholder_node_seen_cnt += 1
             if cur_placeholder_node_idx in input_quantized_idxs:
-                # Inputs are assumed to be quantized if the user specifid the
+                # Inputs are assumed to be quantized if the user specified the
                 # input_quantized_idxs override.
                 # we need to dequantize the inputs since all operators took
                 # floating point inputs in reference quantized models
