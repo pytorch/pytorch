@@ -76,9 +76,7 @@ jobs:
           # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
           for DAEMON in "com.apple.XProtect.daemon.scan" "com.apple.XprotectFramework.PluginService" "com.apple.XprotectFramework.scan"; do
             sudo launchctl stop "${DAEMON}"
-            echo $?
             sudo launchctl disable "system/${DAEMON}"
-            echo $?
           done
 
       - name: Checkout PyTorch
