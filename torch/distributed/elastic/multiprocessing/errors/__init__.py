@@ -118,7 +118,7 @@ class ProcessFailure:
                         self.error_file_data
                     )
             except Exception:
-                log.exception(f"Failed to parse reply file: {self.error_file}")
+                log.exception("Failed to parse reply file: %s", self.error_file)
                 raise
         else:
             self._set_no_reply_file()
@@ -351,9 +351,10 @@ def record(
                 else:
                     log.info(
                         (
-                            f"local_rank {rank} FAILED with no error file."
-                            f" Decorate your entrypoint fn with @record for traceback info."
-                            f" See: https://pytorch.org/docs/stable/elastic/errors.html"
+                            "local_rank %s FAILED with no error file."
+                            " Decorate your entrypoint fn with @record for traceback info."
+                            " See: https://pytorch.org/docs/stable/elastic/errors.html",
+                            rank
                         )
                     )
                 raise
