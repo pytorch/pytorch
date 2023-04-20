@@ -1,6 +1,6 @@
 import itertools
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import torch
 import torch.distributed as dist
