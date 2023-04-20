@@ -55,7 +55,8 @@ C10_ALWAYS_INLINE void AddMomentsVec(
   m0 = n;
 }
 
-template <typename T>
+template <typename T,
+          typename std::enable_if<!is_reduced_floating_point<T>::value, int>::type = 0>
 inline void UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,

@@ -703,7 +703,7 @@ meta_function_device_skips = defaultdict(dict)
 meta_function_device_expected_failures['cpu'] = {
     torch.native_batch_norm: {bf16},
     torch._native_batch_norm_legit: {bf16},
-    torch.native_layer_norm: {bf16},
+    torch.native_layer_norm: {bf16, f16},
 }
 
 meta_function_device_expected_failures['cuda'] = {
@@ -909,7 +909,7 @@ meta_dispatch_device_expected_failures['cpu'] = {
     aten.native_batch_norm.default: {bf16},
     aten._native_batch_norm_legit.default: {bf16},
     aten._native_batch_norm_legit.no_stats: {bf16},
-    aten.native_layer_norm.default: {bf16},
+    aten.native_layer_norm.default: {bf16, f16},
 }
 
 meta_dispatch_device_expected_failures['cuda'] = {
