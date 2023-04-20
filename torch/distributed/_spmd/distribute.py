@@ -27,6 +27,7 @@ from torch.distributed._spmd.comm_tensor import _get_tracer
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
+from torch._guards import detect_fake_mode
 
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.dispatch import (
@@ -913,7 +914,9 @@ def distribute(
     flat_kwargs, _ = tree_flatten(kwargs)
     input_set: Set[Any] = set(flat_args + flat_kwargs)
 
-    fake_mode: FakeTensorMode = FakeTensorMode()
+    fake_mode: FakeTensorMode = detect_fake_mode(input_set)
+    if fake_mode is None:
+        fake_mode = FakeTensorMode()
 
     # will update this to the original forward inputs
     original_inputs: List[Optional[Sequence[Any]]] = [None]
