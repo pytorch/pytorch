@@ -393,28 +393,3 @@ jobs:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm86-build.outputs.test-matrix }}
-
-  linux-bionic-cuda11_8-py3_10-gcc7-sm89-build:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-sm89
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm89
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
-      cuda-arch-list: '8.9'
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.gcp.l4" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.gcp.l4" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.gcp.l4" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.gcp.l4" },
-        ]}
-
-  linux-bionic-cuda11_8-py3_10-gcc7-sm89-test:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-sm89
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-sm89-build
-    with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm89
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm89-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm89-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
