@@ -111,6 +111,8 @@ class Linear(Module):
             init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
+        if input.numel() == 0:
+            raise ValueError("input tensor cannot be empty.")
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
