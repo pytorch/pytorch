@@ -106,9 +106,10 @@ class TransformationTest(DTensorTestBase):
             foreach=(not use_fused_optimizer),
             fused=use_fused_optimizer,
         )
-        for _ in range(num_iters):
+        for i in range(num_iters):
             batch = torch.randn(batch_size, dim).cuda()
-            out = train_step(model, optim, batch)
+            kwargs = {} if i < num_iters - 1 else {"last_train_step": True}
+            out = train_step(model, optim, batch, **kwargs)
             ddp_out = _ddp_train_step(ddp_model, ddp_optim, batch)
         self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
 
@@ -120,7 +121,7 @@ class TransformationTest(DTensorTestBase):
         dim = 100
         num_iters = 5
 
-        @compile(gm_transformation=GraphModuleTransformation(num_iters=num_iters))
+        @compile(gm_transformation=GraphModuleTransformation())
         def train_step(model, optim, batch):
             model(batch).sum().backward()
             optim.step()
@@ -140,7 +141,7 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters, enable_inductor=True, dump_graphs=True
+                enable_inductor=True, dump_graphs=True
             )
         )
         def train_step(model, optim, batch):
@@ -162,7 +163,6 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters,
                 enable_graph_optimization=True,
                 dump_graphs=False,
             )
@@ -184,7 +184,6 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters,
                 enable_graph_optimization=True,
                 dump_graphs=False,
             )
@@ -218,6 +217,7 @@ class TransformationTest(DTensorTestBase):
             gm.graph.eliminate_dead_code()
             gm.recompile()
             self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            gm.finalize_setup()
             return gm
 
         @compile(gm_transformation=my_transformation)
@@ -244,7 +244,7 @@ class TransformationTest(DTensorTestBase):
             schedule_comm_wait(gm)
             remove_copy_from_optimizer(gm)
             iter_move_grads_and_optimizers(gm, "all_reduce_default_1", "relu")
-            gm.setup(num_iters)
+            gm.finalize_setup()
             return gm
 
         @compile(gm_transformation=my_transformation)
