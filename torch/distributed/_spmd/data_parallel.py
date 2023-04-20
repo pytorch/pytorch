@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
 from enum import Enum
 
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -14,7 +13,11 @@ import torch.utils._pytree as pytree
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import PlacementStrategy, StrategyList
+from torch.distributed._tensor.op_schema import (
+    OpStrategy,
+    PlacementStrategy,
+    StrategyType,
+)
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
 from torch.fx import GraphModule
@@ -70,15 +73,11 @@ class NodeType(Enum):
     NON_TENSOR = 4  # NON_TENSOR is to tag non tensor node (i.e. graph output)
 
 
-@dataclass
-class DataParallelStrategy(StrategyList):
+class DataParallelStrategy(OpStrategy):
     """
-    DataParallelStrategy is a special case of StrategyList that only records
+    DataParallelStrategy is a special case of OpStrategy that only records
     the "data parallel style" placement strategy for each fx Node.
     """
-
-    node_type: NodeType
-    reduction_over_batch: bool
 
     def __init__(
         self,
@@ -254,7 +253,7 @@ def build_data_parallel_strategies(
     num_states: int,
     mesh: DeviceMesh,
     batch_dim: int = 0,
-) -> Dict[fx.Node, StrategyList]:
+) -> Dict[fx.Node, StrategyType]:
     """
     This function loop through the train step graph and build the
     data parallel strategy for each fx Node
@@ -302,7 +301,7 @@ def build_data_parallel_strategies(
     for node in train_step_graph.graph.nodes:
         if node.op == "placeholder":
             if "val" not in node.meta:
-                # NOTE: There're certain cases where the placeholder nodes does
+                # NOTE: There're certain cases where the placeholder nodes do
                 # not have real tensor values:
                 # 1. optimizer states can be None sometimes, i.e. SGD with
                 #    no momentum, optimizer states populate `momentum` state
@@ -318,7 +317,7 @@ def build_data_parallel_strategies(
                 dp_strategy_map[node] = DataParallelStrategy(NodeType.NON_TENSOR, [])
 
             elif placeholder_idx < num_params:
-                # during compilation there's a assumption that the first num_params
+                # during compilation there's an assumption that the first num_params
                 # placeholders should be parameters
                 shard_strategy = _gen_shard_strategy(mesh, 0)
                 replica_strategy = _gen_replicate_strategy(mesh)
@@ -329,10 +328,18 @@ def build_data_parallel_strategies(
             elif placeholder_idx < activation_idx:
                 # optimizer states follow the same strategy as
                 # the corresponding parameters
-                shard_strategy = _gen_shard_strategy(mesh, 0)
+                placemenet_strategies: List[PlacementStrategy] = []
+
                 replica_strategy = _gen_replicate_strategy(mesh)
+                placemenet_strategies.append(replica_strategy)
+
+                if node.meta["val"].ndim > 0:
+                    # if the state is a scalar, we don't want to shard it
+                    # i.e. param state step is usually a scalar tensor
+                    shard_strategy = _gen_shard_strategy(mesh, 0)
+                    placemenet_strategies.append(shard_strategy)
                 dp_strategy_map[node] = DataParallelStrategy(
-                    NodeType.STATE, [replica_strategy, shard_strategy]
+                    NodeType.STATE, placemenet_strategies
                 )
             else:
                 activation_batch_dim_size = node.meta["val"].shape[batch_dim]
@@ -358,14 +365,17 @@ def build_data_parallel_strategies(
             # param + state -> out: param
 
             if node.target in non_compute_ops:
+                # At this point, we should have removed all the `tag_grad` nodes in the graph
+                assert node.target != torch.ops._spmd.tag_grad.default
+
                 input_nodes = node.all_input_nodes
                 assert (
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
-                arg_node_type = dp_strategy_map[input_nodes[0]].node_type
-                input_full_reduction = dp_strategy_map[
-                    input_nodes[0]
-                ].reduction_over_batch
+                arg_node_strategy = dp_strategy_map[input_nodes[0]]
+                assert isinstance(arg_node_strategy, DataParallelStrategy)
+                arg_node_type = arg_node_strategy.node_type
+                input_full_reduction = arg_node_strategy.reduction_over_batch
 
                 if arg_node_type == NodeType.PARAM:
                     replica_strategy = _gen_replicate_strategy(mesh)
@@ -402,14 +412,15 @@ def build_data_parallel_strategies(
 
             # for computatation nodes, we need to check all the inputs
             input_args = node.all_input_nodes
-            input_node_types = [dp_strategy_map[arg].node_type for arg in input_args]
             input_specs = []
             if node in dp_strategy_map:
                 # found a param_grad node that already have output pre-filled spec
                 # fill in the expected input specs for the pre-filled strategy
-                node_type = dp_strategy_map[node].node_type
+                node_strategy = dp_strategy_map[node]
+                assert isinstance(node_strategy, DataParallelStrategy)
+                node_type = node_strategy.node_type
                 assert node_type == NodeType.GRAD
-                produce_param_grad_strat = dp_strategy_map[node].strategies
+                produce_param_grad_strat = node_strategy.strategies
                 has_activation = False
                 for arg in input_args:
                     arg_node_type = dp_strategy_map[arg].node_type
@@ -426,12 +437,18 @@ def build_data_parallel_strategies(
                     assert len(produce_param_grad_strat) == 1
                     produce_param_grad_strat[0].input_specs = input_specs
             else:
+                input_node_types = [
+                    dp_strategy_map[arg].node_type
+                    for arg in input_args
+                    if isinstance(dp_strategy_map[arg], DataParallelStrategy)
+                ]
                 if NodeType.ACT in input_node_types:
                     # param + activation, build up acceptable strategy
                     # param must be replicated, activation must be sharded
                     for arg in input_args:
-                        arg_strategies = dp_strategy_map[arg]
-                        node_type = arg_strategies.node_type
+                        arg_strategy = dp_strategy_map[arg]
+                        assert isinstance(arg_strategy, DataParallelStrategy)
+                        node_type = arg_strategy.node_type
                         if node_type == NodeType.ACT:
                             # activation must stay sharded
                             act_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
@@ -509,14 +526,14 @@ def build_data_parallel_strategies(
         else:
             raise RuntimeError(f"op code {node.op} not supported")
 
-    return dp_strategy_map
+    return dp_strategy_map  # mypy: ignore[return-value]
 
 
 def mark_data_parallel_shardings(
     train_step_graph: GraphModule,
     num_parameters: int,
     num_states: int,
-    dp_strategy_map: Dict[fx.Node, StrategyList],
+    dp_strategy_map: Dict[fx.Node, StrategyType],
     parallel_mode: DataParallelStyle = DataParallelStyle.FULLY_SHARD,
 ) -> None:
     """
@@ -525,9 +542,11 @@ def mark_data_parallel_shardings(
     activation_idx = num_parameters + num_states
     placeholder_idx = 0
     for node in train_step_graph.graph.nodes:
-        node_type = dp_strategy_map[node].node_type
+        node_strategy = dp_strategy_map[node]
         if node.op == "placeholder":
-            node_strategies = dp_strategy_map[node].strategies
+            assert isinstance(node_strategy, DataParallelStrategy)
+            node_type = node_strategy.node_type
+            node_strategies = node_strategy.strategies
             if node_type == NodeType.NON_TENSOR:
                 # set node sharding to None
                 node_sharding = None
@@ -538,9 +557,15 @@ def mark_data_parallel_shardings(
                     node_sharding = node_strategies[0]
                 elif parallel_mode == DataParallelStyle.FULLY_SHARD:
                     # set to shard for fully shard style
-                    node_sharding = node_strategies[1]
+                    if len(node_strategies) == 1:
+                        # only one strategy, use that instead
+                        # i.e. optimizer state steps can only be replicate
+                        node_sharding = node_strategies[0]
+                    else:
+                        # use the full sharding strategy
+                        node_sharding = node_strategies[1]
                 elif parallel_mode == DataParallelStyle.DEFAULT:
-                    # todo: add support for default mode
+                    # TODO: add support for default mode
                     # default mode would generate either replicate or shard
                     raise NotImplementedError("default mode not implemented")
             else:
@@ -552,7 +577,7 @@ def mark_data_parallel_shardings(
 
             placeholder_idx += 1
         elif node.op == "call_function":
-            node_strategies = dp_strategy_map[node].strategies
+            node_strategies = node_strategy.strategies
             assert (
                 len(node_strategies) <= 2
             ), "data parallel should have at most 2 strategies"
@@ -572,7 +597,9 @@ def mark_data_parallel_shardings(
                     f"node {node} strategy length {len(node_strategies)} is not expected!"
                 )
         elif node.op == "output":
-            assert node_type == NodeType.NON_TENSOR, "output node should not be tensor"
+            assert (
+                node_strategy.node_type == NodeType.NON_TENSOR
+            ), "output node should not be tensor"
             node.meta["sharding"] = None
         else:
             raise RuntimeError(f"op code {node.op} not supported")
@@ -761,6 +788,6 @@ def partition_data_parallel(
                     param_dtensor_states[state_key] = state_val
 
             optimizer.state.pop(param)
-            optimizer.state[dtensor_param] = param_dtensor_states
+            optimizer.state[dtensor_param] = param_dtensor_states  # mypy: ignore[index]
 
     return partitioned_graph

@@ -665,6 +665,36 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
+    def test_save_load_large_string_attribute(self):
+        """
+        Check if the model with string > 4GB can be loaded.
+        """
+        import psutil
+        if psutil.virtual_memory().available < 60 * 1024 * 1024 * 1024:
+            # Profiled the test execution, and got this number to be safe to run the test
+            self.skipTest("Doesn't have enough memory to run test_save_load_large_string_attribute")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.x = "x" * (2 ** 32 + 1)
+
+            def forward(self, i) -> int:
+                return len(self.x) + i.numel()
+
+        inp = torch.ones(0)
+        ts = torch.jit.script(Model())
+        ts_output = ts(inp)
+
+        b = io.BytesIO(ts.save_to_buffer())
+        del ts
+
+        loaded_ts = torch.jit.load(b)
+        del b
+        loaded_output = loaded_ts(inp)
+        self.assertEqual(ts_output, loaded_output)
+
+
 def script_module_to_buffer(script_module):
     module_buffer = io.BytesIO(
         script_module._save_to_buffer_for_lite_interpreter(_use_flatbuffer=True)

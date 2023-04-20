@@ -13,7 +13,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Un
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer
+from sympy import Expr, Integer, simplify
 
 import torch._dynamo.config as dynamo_config
 import torch._logging
@@ -201,7 +201,9 @@ class ModularIndexing(sympy.Function):
         if divisor != 1:
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
-                return ModularIndexing(base / gcd, divisor / gcd, modulus)
+                return ModularIndexing(
+                    simplify(base / gcd), simplify(divisor / gcd), modulus
+                )
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -823,7 +825,19 @@ class Reduction(Loops):
             }
             and config.split_reductions
         )
-        if split_reduction and not dynamo_config.dynamic_shapes:
+        sr_qualified = split_reduction
+        if sr_qualified and dynamo_config.dynamic_shapes:
+            # TODO(voz): dedup with sizevar util introduced in other PR
+            def _is_static(x):
+                return isinstance(x, (int, sympy.Integer))
+
+            sr_qualified = (
+                all([_is_static(r) for r in ranges])
+                and all([_is_static(r) for r in reduction_ranges])
+                and _is_static(reduction_numel)
+            )
+
+        if sr_qualified:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -1503,7 +1517,7 @@ class SliceView(View):
         step = sympy.expand(step)
         assert step > 0
         try:
-            if start == 0 and end >= 2**63 and step == 1:
+            if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
         except TypeError:
             pass
@@ -2604,7 +2618,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, int)):
+        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -3844,6 +3858,8 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
+        self.indirect_max_sizes = []
+        self.indirect_new = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
@@ -3879,16 +3895,18 @@ class LoopBody:
         self.submodules[name] = block
         return name
 
-    def add_indirect(self):
+    def add_indirect(self, size):
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
         self.indirect_vars.append(var)
+        self.indirect_max_sizes.append(size)
         return var
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
+        self.indirect_new[old] = new
         self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def get_index(self, name):
@@ -3967,16 +3985,18 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy):
+            def indirect_indexing(index_proxy, size):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
                 """
 
                 def set_indirect(new_var):
-                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
+                    self.body.replace_indirect(
+                        var, V.ops.indirect_indexing(new_var, size)
+                    )
 
-                var = self.body.add_indirect()
+                var = self.body.add_indirect(size)
                 tracer.create_proxy(
                     "call_module",
                     self.body.add_submodule(set_indirect, f"set_{var}"),
