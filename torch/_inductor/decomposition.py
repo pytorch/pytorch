@@ -41,8 +41,14 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning(f"duplicate decomp: {ops}")
+            log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten._unsafe_view.default)
+def _unsafe_view(self, size):
+    # this makes pattern matching easier
+    return self.view(size)
 
 
 @register_decomposition([aten.clamp])
@@ -171,13 +177,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+            )
         else:
             if input is not None:
                 input = torch.randn_like(input)
             ori_time = do_bench(
                 lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+            )
 
         mat1_pad = torch.randn_like(mat1)
         mat2_pad = torch.randn_like(mat2)
@@ -198,7 +204,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
                 lambda: pad_mm(
@@ -211,7 +217,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
         else:
             pad_time = do_bench(
                 lambda: pad_bmm(
@@ -224,7 +230,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
@@ -371,6 +377,13 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
@@ -418,6 +431,16 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
+@register_decomposition([aten.native_dropout])
+def native_dropout(input: Tensor, p: float, train: bool):
+    if not train or p == 0:
+        return (input, torch.ones_like(input, dtype=torch.bool))
+    if p == 1:
+        return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+    # intentionally don't decompose to improve pattern matching
+    return NotImplemented
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
@@ -425,7 +448,6 @@ turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
     [
-        aten.native_dropout,
         aten.cauchy,
         aten.cauchy_,
         aten.exponential,

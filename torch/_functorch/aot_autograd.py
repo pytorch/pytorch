@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
+from unittest.mock import patch
 
 from functorch import make_fx
 
@@ -18,14 +19,17 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import dynamo_timed, format_graph_code
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
+from torch._guards import detect_fake_mode
+from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
-from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
+from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions, PhiloxTotalOffsets
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
@@ -58,6 +62,8 @@ OutputType = Enum(
         # Instructs the runtime code to regenerate the current output from
         # a base tensor, user_outputs[base_idx]
         "alias_of_intermediate_base_is_user_output",
+        # See Note [Intermediate Bases Optimization]
+        "unsafe_view_alias",
     )
 )
 
@@ -96,15 +102,18 @@ KNOWN_TYPES = tuple(
 
 @contextmanager
 def preserve_rng_state():
-    rng_state = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng_state)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng_state)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
+
 
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
@@ -467,7 +476,7 @@ class ViewAndMutationMeta:
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
-            if m.output_type != OutputType.non_alias
+            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias]
         ]
 
         self.mutated_inp_indices = mutated_inp_indices
@@ -481,7 +490,7 @@ class ViewAndMutationMeta:
         self.aliased_out_indices = aliased_out_indices
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
-            [x for x in self.output_info if x.output_type == OutputType.non_alias]
+            [x for x in self.output_info if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]]
         )
         self.num_outputs_aliased_to_inputs = len(
             [
@@ -537,6 +546,17 @@ class ViewAndMutationMeta:
                 len(self.traced_tangents) == len(other.traced_tangents) and
                 all(x.shape == y.shape and x.dtype == y.dtype for x, y, in zip(self.traced_tangents, other.traced_tangents)))
 
+
+# This side data structures stores the functionalization of RNG related metadata
+# to be used at runtime. In future, we can repurpose this class to RuntimeMeta
+# if more metadata usecases popup
+@dataclass
+class RNGMeta:
+    # Stores if the config.functionalize_rng_ops was True at compile time
+    is_compiled_with_functional_rng_ops: bool
+
+    # Stores PhiloxTotalOffsets to be used at runtime
+    philox_total_offsets: PhiloxTotalOffsets
 
 # This class exists because:
 # - the autograd.Function.forward() in aot autograd returns outputs that might alias inputs
@@ -735,6 +755,13 @@ def run_functionalized_fw_and_collect_metadata(
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
+
+        # Keep track of which outputs alias other outputs
+        out_tensor_alias_counts = collections.defaultdict(int)
+        for o in flat_f_outs:
+            if isinstance(o, torch.Tensor):
+                out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] += 1
+
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
@@ -759,30 +786,46 @@ def run_functionalized_fw_and_collect_metadata(
                 and o.requires_grad
                 and o._base.requires_grad
             ):
-                # First, check if o's ._base is an existing output
-                maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
-                if maybe_existing_out_idx is not None:
-                    # Special case where the output is an alias of a graph intermediate, but that intermediate
-                    # is itself also a user output.
-                    output_type = OutputType.alias_of_intermediate_base_is_user_output
-                    base_idx = maybe_existing_out_idx
+                if out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] == 1:
+                    # Note [Intermediate Bases Optimization]
+                    # Normally if we have an output that aliases an intermediate,
+                    # we need to add the extra "intermediate base" logic further down
+                    # to prevent autograd from yelling at us if the user later tries to
+                    # mutate that output.
+                    # However, the common case here is if we have an output that aliases an intermediate,
+                    # but doesn't alias any other outputs.
+                    # In that case, autograd shouldn't have to worry about the aliasing at all
+                    # (if that output is mutated, there are no other live aliases for autograd to worry about).
+                    # The "intermediate bases" can hurt inductor perf by forcing more variables to become outputs.
+                    # So as an optimization, we won't do intermediate base handling in this case.
+                    # Instead, we'll hide the aliasing from autograd using aten._unsafe_view().
+                    output_type = OutputType.unsafe_view_alias
+                    base_idx = None
                 else:
-                    # Next, check if o's ._base is an intermediate base that we already returned
-                    maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
-                        id(o._base), None
-                    )
-                    if maybe_existing_base_output_idx is not None:
-                        output_type = OutputType.alias_of_intermediate
-                        base_idx = maybe_existing_base_output_idx
+                    # First, check if o's ._base is an existing output
+                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
+                    if maybe_existing_out_idx is not None:
+                        # Special case where the output is an alias of a graph intermediate, but that intermediate
+                        # is itself also a user output.
+                        output_type = OutputType.alias_of_intermediate_base_is_user_output
+                        base_idx = maybe_existing_out_idx
                     else:
-                        # Otherwise, take o._base and explicitly return it as an output in the compiled graph
-                        new_out_idx = len(intermediate_bases)
-                        base_idx = new_out_idx
-                        # Indicate to the logic later on (when we trace the joint)
-                        # that this particular output should get it's ._base appended to the forward graph outputs
-                        output_type = OutputType.alias_of_intermediate_save_as_output
-                        intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
-                        intermediate_bases.append(o._base)
+                        # Next, check if o's ._base is an intermediate base that we already returned
+                        maybe_existing_base_output_idx = intermediate_base_tensor_id_to_output_idx.get(
+                            id(o._base), None
+                        )
+                        if maybe_existing_base_output_idx is not None:
+                            output_type = OutputType.alias_of_intermediate
+                            base_idx = maybe_existing_base_output_idx
+                        else:
+                            # Otherwise, take o._base and explicitly return it as an output in the compiled graph
+                            new_out_idx = len(intermediate_bases)
+                            base_idx = new_out_idx
+                            # Indicate to the logic later on (when we trace the joint)
+                            # that this particular output should get it's ._base appended to the forward graph outputs
+                            output_type = OutputType.alias_of_intermediate_save_as_output
+                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
+                            intermediate_bases.append(o._base)
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
@@ -815,7 +858,7 @@ def run_functionalized_fw_and_collect_metadata(
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
-            if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
+            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias] and issubclass(info.raw_type, torch.Tensor)
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -849,6 +892,7 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
+    enable_log: bool = True
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -925,6 +969,8 @@ def fn_prepped_for_autograd(
         ]
 
         outs = fn(*args_maybe_cloned)
+        assert isinstance(outs, (tuple, list))
+        outs = list(outs)
         assert len(meta.output_info) == len(outs)
 
         mutated_inputs_to_return = [
@@ -934,9 +980,12 @@ def fn_prepped_for_autograd(
         ]
 
         intermediate_bases = []
-        for o, info in zip(outs, meta.output_info):
+        for i, (o, info) in enumerate(zip(outs, meta.output_info)):
             if info.output_type == OutputType.alias_of_intermediate_save_as_output:
                 intermediate_bases.append(o._base)
+            elif info.output_type == OutputType.unsafe_view_alias:
+                # See Note [Intermediate Bases Optimization]
+                outs[i] = torch.ops.aten._unsafe_view.default(o, o.shape)
 
         assert meta.num_intermediate_bases == len(intermediate_bases)
 
@@ -953,7 +1002,7 @@ def fn_prepped_for_autograd(
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
         output_grad_mask = [
-            meta.output_info[i].output_type == OutputType.non_alias
+            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, torch.Tensor)
@@ -1023,6 +1072,8 @@ def create_joint(
 
         setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
 
+        if config.functionalize_rng_ops:
+            PhiloxStateTracker.mark_beginning_of_backward()
         backward_out = []
         # Call the backwards pass
         if grad_primals:
@@ -1116,8 +1167,16 @@ def create_functionalized_graph(
     def fwd_helper(*args):
         return functionalized_f_helper(*args)
 
+    helper = joint_helper if trace_joint else fwd_helper
+    if config.functionalize_rng_ops:
+        # Setup the wrapper for functionalization of rng ops
+        helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
+
     with enable_python_dispatcher():
-        return make_fx(joint_helper if trace_joint else fwd_helper, decomposition_table=aot_config.decompositions)(*args)
+        fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
+
+
+    return fx_g
 
 
 def normalize_as_list(x):
@@ -1250,23 +1309,49 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     assert copy_count == copy_count2
 
-    aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
+    if aot_config.enable_log:
+        aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
+        if config.functionalize_rng_ops:
+            # Add the seed and offset as example inputs to pass to the compiler
+            fake_mode = detect_fake_mode()
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+            flat_args = (seed, offset, *flat_args)
         compiled_fw = compiler(fw_module, flat_args)
+
+    # Get the RNG functionalization related metadata to be used at runtime.
+    rng_metadata = RNGMeta(False, PhiloxTotalOffsets(0, 0))
+    if config.functionalize_rng_ops:
+        rng_metadata = RNGMeta(config.functionalize_rng_ops, PhiloxStateTracker.get_accumulated_offsets())
+
 
     compiled_fn = create_runtime_wrapper(
         compiled_fw,
         runtime_metadata=fw_metadata,
+        indices_of_inps_to_detach=[],
         trace_joint=False,
-        keep_input_mutations=aot_config.keep_inference_input_mutations
+        keep_input_mutations=aot_config.keep_inference_input_mutations,
+        disable_amp=disable_amp
     )
 
-    return compiled_fn
+    @wraps(compiled_fn)
+    def wrapper(*args):
+        if rng_metadata.is_compiled_with_functional_rng_ops:
+            # Add the seed and offset to args
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+            out = compiled_fn(seed, offset, *args)
+            # Advance the rng state offset
+            CUDARngStateHelper.advance_torch_state(rng_metadata.philox_total_offsets.total_fwd_offset)
+            return out
+        else:
+            return compiled_fn(*args)
+
+    return wrapper
 
 
 # Returns the number of detected copy_
@@ -1822,31 +1907,33 @@ def aot_wrapper_dedupe(
     # This is done via (respectively):
     #
     #   seen_args = {a: 0, b: 1, c: 2}
-    #   add_dupe_map = {  # how to get args from the deduped list
-    #       0: 0,
-    #       1: 1,
-    #       2: 0,
-    #       3: 2,
-    #   }
+    #   enumerate(add_dupe_map) = [  # how to get args from the deduped list
+    #       (0, 0),
+    #       (1, 1),
+    #       (2, 0),
+    #       (3, 2),
+    #   ]
     #   keep_arg_mask = [True, True, False, True]
 
     seen_args = {}
     keep_arg_mask = []
-    add_dupe_map = {}
+    # Implicitly map duped arg position (list index) to de-duped arg position
+    add_dupe_map: List[int] = []
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
             keep_arg_mask.append(False)
-            add_dupe_map[i] = seen_args[t]
+            add_dupe_map.append(seen_args[t])
             continue
         keep_arg_mask.append(True)
         seen_args[t] = j
-        add_dupe_map[i] = j
+        add_dupe_map.append(j)
         j += 1
-
-    unique_args = j
+    assert len(add_dupe_map) == duped_arg_len, (
+        f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+    )
 
     # NB: Hot path, avoid set lookups here
     # TODO: Can avoid the zip here too, probably
@@ -1866,8 +1953,8 @@ def aot_wrapper_dedupe(
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
-        for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            if dupe_arg_pos != kept_pos:
+        for dupe_arg_pos, (kept_pos, keep_arg) in enumerate(zip(add_dupe_map, keep_arg_mask)):
+            if not keep_arg:
                 dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
                 kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
                 tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
@@ -1881,7 +1968,8 @@ def aot_wrapper_dedupe(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*deduped_flat_args)
-        assert ref_fw_metadata == updated_fw_metadata
+        assert ref_fw_metadata == updated_fw_metadata, \
+            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}'
 
     compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata)
 
@@ -2009,7 +2097,8 @@ def aot_wrapper_synthetic_base(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated
+        assert ref_fw_metadata == fw_metadata_updated, \
+            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(fw_metadata_updated)}'
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
 
@@ -2062,25 +2151,32 @@ def create_runtime_wrapper(
     compiled_fn,
     *,
     runtime_metadata: ViewAndMutationMeta,
+    indices_of_inps_to_detach: List[int],
     trace_joint: bool,
     keep_input_mutations: bool,
+    disable_amp: bool
 ):
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(*args):
         if trace_joint:
+            args_ = list(args)
+            # See Note [Detaching inputs that never need gradients]
+            for idx in indices_of_inps_to_detach:
+                if isinstance(args_[idx], torch.Tensor):
+                    args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_with_args(
                     compiled_fn,
-                    args,
-                    disable_amp=True,
+                    args_,
+                    disable_amp=disable_amp,
                 )
         else:
             all_outs = call_func_with_args(
                 compiled_fn,
                 args,
-                disable_amp=True,
+                disable_amp=disable_amp,
             )
 
         num_mutated_inps = runtime_metadata.num_mutated_inputs
@@ -2186,7 +2282,7 @@ def create_runtime_wrapper(
             for i, (o, info) in enumerate(zip(
                 fw_outs_no_intermediate_bases, runtime_metadata.output_info
             )):
-                if info.output_type == OutputType.non_alias:
+                if info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias:
                     fw_outs_including_aliases.append(o)
                     continue
                 if trace_joint:
@@ -2223,6 +2319,41 @@ def create_runtime_wrapper(
             return fw_outs
     return runtime_wrapper
 
+def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
+    # Functionalization of rng ops changes the calling convention of the joint graph.
+    # It goes from (primals, tangents) to (seed, offset, primals, tangents)
+    # At runtime, we pass on the current seed and offset. This is hidden from
+    # the user.
+    fake_mode = detect_fake_mode()
+
+    def override_get_rng_state(device: Union[int, str, torch.device] = 'cuda'):
+        out = PhiloxStateTracker.get_state_as_tensor()
+        return out
+
+    def override_set_rng_state(x, device: Union[int, str, torch.device] = 'cuda'):
+        PhiloxStateTracker.set_state_from_tensor(x)
+
+    def traced_joint(fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, primals, tangents):
+        with patch("torch.cuda.get_rng_state", override_get_rng_state), patch("torch.cuda.set_rng_state", override_set_rng_state):
+            return func(primals, tangents)
+
+    def traced_forward(fwd_seed, fwd_base_offset, *primals):
+        with patch("torch.cuda.get_rng_state", override_get_rng_state), patch("torch.cuda.set_rng_state", override_set_rng_state):
+            return func(*primals)
+
+    if trace_joint:
+        # Get the current seed and offset to setup tracing.
+        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+        bwd_seed, bwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+        PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
+        PhiloxStateTracker.record_state(bwd_seed, bwd_base_offset, "backward")
+        return traced_joint, (fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, *args)
+    else:
+        # Get the current seed and offset to setup tracing.
+        fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+        PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
+        return traced_forward, (fwd_seed, fwd_base_offset, *args)
+
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
@@ -2246,32 +2377,26 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
 
-    if config.use_functionalize:
-        fx_g = create_functionalized_graph(
-            joint_fn_to_trace,
-            joint_inputs,
-            meta=fw_metadata,
-            aot_config=aot_config,
-            trace_joint=True,
-        )
+    fx_g = create_functionalized_graph(
+        joint_fn_to_trace,
+        joint_inputs,
+        meta=fw_metadata,
+        aot_config=aot_config,
+        trace_joint=True,
+    )
 
-        # There should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fx_g.graph)
-        # Redudant with the check above, but worth having in case tracing introduced
-        # a fake tensor. Unlikely.
-        # See Note: [Fake Modules and AOTAutograd]
-        torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
-    else:
-        # joint_forward_backward() now always runs with functionalization, and factoring it out
-        # to make that toggleable is a bit painful.
-        # aot autograd without functionalization is wrong anyway, so we error.
-        raise AssertionError(
-            "Graph partitioning without functionalization is not sound, we may introduce errors"
-        )
+    # There should be *NO* mutating ops in the graph at this point.
+    assert_functional_graph(fx_g.graph)
 
-    aot_joint_log.info(format_graph_code(f"====== Joint graph {aot_config.aot_id} =====\n", fx_g))
+    # Redudant with the check above, but worth having in case tracing introduced
+    # a fake tensor. Unlikely.
+    # See Note: [Fake Modules and AOTAutograd]
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
+    fx_g.graph.eliminate_dead_code()
+    fx_g.recompile()
+
+    if aot_config.enable_log:
+        aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2288,13 +2413,90 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
-        aot_graphs_log.info(format_graph_code(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
+        # Note [Detaching inputs that never need gradients]
+        # See https://github.com/pytorch/pytorch/issues/97745
+        # Suppose we have a function like this that we want to compile:
+        #
+        # def f(x, y):
+        #     return torch.mul(x, y.detach())
+        #
+        # What gradients should we compute for x and y?
+        # By default, AOTAutograd will compute a gradient for **every** input that requires gradients,
+        # and so we'll compute:
+        #    x_grad_input = y
+        #    y_grad_input = None
+        # Does this preserve the semantics of eager mode?
+        # Unfortunately, no.
+        # Doing the above will cause autograd to **continue** to backprop the autograd tape
+        # that was generated from constructing y.
+        #
+        # This is **different** from what would have happened in eager mode.
+        # In eager mode, if we backprop through the output of this function, autograd will only traverse
+        # the bit of the autograd tape corresponding to "x".
+        # In particular, if a user had previously backpropped through y's autograd tape,
+        # And then they try to backprop through the output of the above function,
+        # then we'll hit the dreaded "Trying to backward through the graph a second time" error.
+        #
+        # You might think: If autograd sees that a gradient is None, shouldn't it stop early,
+        # instead of continuing the backprop through the ancestors of that node in the graph?
+        #
+        # Autograd has two passes:
+        # (1) a first pass that traverses the autograd graph and figures out which nodes need to be executed
+        # (2) a second pass that actually goes ahead and executes each node when it becomes ready,
+        #     propagating gradients
+        # By the time we're executing a node and we see that it produces a None, the set of nodes to execute
+        # is already locked-in.
+        #
+        # The fix: instead, we can recognize statically that the graph we're compiling will never contribute
+        # gradients to y, and prevent autograd from trying to traverse y's autograd tape at all.
+        # We can do this by manually detach'ing y before sending it through the `CompiledFunction`.
+        #
+        # Note that this solution is not bulletproof.
+        # It's possible to construct a case where eager may or may not have have tried to autograd through y,
+        # depending on the actual grad_outputs that were passed in during the backward.
+        # There is no easy fix for this: the simplest fix would be to run with `retain_graph=True`,
+        # allowing autograd to re-use the graph.
+        #
+        # An example of this case is:
+        # def f(x):
+        #     return x.detach() * 2, x * 3
+        # If we were to only backprop through outs[0], in eager, we would stop
+        # If we backward only on the first output, we shouldn't send a grad through x.
+        # But the custom autograd function doesn't know that: it will materialize zero grads for x * 3
+        # and we will end up with a zero grad at x.
+        # If we later backprop through the second output, this will also require backprop'ing through x.
+        # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
+        _indices_of_inps_to_detach = []
+        bw_outs = [n for n in bw_module.graph.nodes if n.op == "output"][0].args[0]
+        assert len(bw_outs) == len(fw_metadata.input_info)
+        for i, (bw_out) in enumerate(bw_outs):
+            if bw_out is None:
+                _indices_of_inps_to_detach.append(i)
+
+        if aot_config.enable_log:
+            aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+            aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
+            if config.functionalize_rng_ops:
+                # Update example inputs for the fw_compiler
+                fake_mode = detect_fake_mode()
+                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
+                flat_args = (seed, offset, *flat_args)
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, flat_args
             )
+
+
+    # Get the rng_metadata so that it can be used at runtime
+    rng_metadata = RNGMeta(False, PhiloxTotalOffsets(0, 0))
+    if config.functionalize_rng_ops:
+        rng_metadata = RNGMeta(config.functionalize_rng_ops, PhiloxStateTracker.get_accumulated_offsets())
+        # Total offsets differ for each AOT traced graph, so they can't be saved
+        # in the PhiloxStateTracker singleton object. Therefore, we save them
+        # into rng_meta side datastructure.
+
+
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -2304,7 +2506,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
-
+            args = deduped_flat_tensor_args
+            if rng_metadata.is_compiled_with_functional_rng_ops:
+                # Add the seed and offset to args
+                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+                args = (seed, offset, *args)
             # There is a pretty complicated calling convention around what the compiled fw returns.
             # The full list of outputs and their relative order is:
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
@@ -2312,7 +2518,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             #   of the original view, and not the synthetic base
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw,
-                deduped_flat_tensor_args,
+                args,
                 disable_amp=disable_amp,
             )
 
@@ -2346,7 +2552,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2358,7 +2564,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             else:
                 tensors_saved_for_backwards = fw_outs[num_forward_returns:]
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
+                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2402,6 +2608,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
+
+            if rng_metadata.is_compiled_with_functional_rng_ops:
+                # Advance total fwd offset
+                CUDARngStateHelper.advance_torch_state(rng_metadata.philox_total_offsets.total_fwd_offset)
             return tuple(raw_returns)
 
         @staticmethod
@@ -2447,7 +2657,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 out_tangents_filtered = [
                     x
                     for x, info in zip(out_tangents, out_info)
-                    if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
+                    if (info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias)
+                    and issubclass(info.raw_type, torch.Tensor)
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
                 flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
@@ -2474,32 +2685,25 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
             ]
 
+            rng_args = []
+            if rng_metadata.is_compiled_with_functional_rng_ops:
+                # Add the seed and offset to args
+                rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
+
             all_args = (
-                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
+                list(rng_args) + list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
+
             del contiguous_args
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
-                    if aot_config.dynamic_shapes:
-                        all_args_list = list(all_args)
-                        CompiledFunction.compiled_bw = create_aot_dispatcher_function(
-                            bw_module, all_args_list, AOTConfig(
-                                aot_config.bw_compiler, None, None,
-                                aot_config.decompositions, 0, aot_config.aot_id,
-                                aot_config.keep_inference_input_mutations,
-                                aot_config.dynamic_shapes,
-                                inference_compiler=None,
-                                aot_autograd_arg_pos_to_source=None,
-                            )
+                    context = disable_autocast_manager if disable_amp else nullcontext
+                    with context(), track_graph_compiling(aot_config, "backward"):
+                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            bw_module, all_args
                         )
-                    else:
-                        context = disable_autocast_manager if disable_amp else nullcontext
-                        with context(), track_graph_compiling(aot_config, "backward"):
-                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                bw_module, all_args
-                            )
 
                 ctx.maybe_clear_saved_tensors()
                 out = call_func_with_args(
@@ -2509,6 +2713,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     disable_amp=disable_amp,
                 )
 
+                if rng_metadata.is_compiled_with_functional_rng_ops:
+                    # Advance total bwd rng offset
+                    CUDARngStateHelper.advance_torch_state(rng_metadata.philox_total_offsets.total_bwd_offset)
                 return tuple(out)
 
             if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
@@ -2532,8 +2739,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     compiled_function = create_runtime_wrapper(
         CompiledFunction.apply,
         runtime_metadata=fw_metadata,
+        indices_of_inps_to_detach=_indices_of_inps_to_detach,
         trace_joint=True,
         keep_input_mutations=False,
+        disable_amp=disable_amp
     )
 
     if not config.debug_assert:
@@ -2598,68 +2807,61 @@ def create_aot_dispatcher_function(
     if aot_config.decompositions is None:
         aot_config.decompositions = {}
 
+
     aot_config.decompositions = {
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
 
-    # NB: don't bother setting allow_fallback_kernels; this should not actually
-    # be configurable in fake tensor, we should automatically do the right
-    # thing
-    if config.debug_fake_cross_ref:
-        # This is a little messy but TorchDynamo directly changes `use_fake_tensor`
-        # so it's not enough for user to change the config manually
-        # TODO: have TorchDynamo read in `use_fake_tensor` from os environ /
-        # coordinate flags
-        config.use_fake_tensor = False
+    if config.functionalize_rng_ops:
+        # Update the decompositions with functionalized random decompositions
+        aot_config.decompositions = {
+            **rng_decompositions,
+            **aot_config.decompositions,
+        }
 
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
-    for x in flat_args:
-        if isinstance(x, FakeTensor):
-            fake_mode = x.fake_mode
-            shape_env = fake_mode.shape_env
-            break
-    else:
+    fake_mode = detect_fake_mode(flat_args)
+    if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = (
-            FakeTensorMode(shape_env=shape_env)
-            if config.use_fake_tensor
-            else nullcontext()
-        )
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+    else:
+        shape_env = fake_mode.shape_env
 
-    cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
 
         def process_inputs(flat_args):
-            if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
-                def convert(idx, x):
-                    if shape_env is not None:
-                        from torch._dynamo.source import ConstantSource
-                        if isinstance(x, int):
-                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
-                    if not isinstance(x, torch.Tensor):
-                        return x
-                    if isinstance(x, FakeTensor):
-                        assert x.fake_mode is fake_mode
-                        return x
-                    if (
-                        idx < aot_config.num_params_buffers
-                        and config.static_weight_shapes
-                    ):
-                        return fake_mode.from_tensor(x, static_shapes=True)
-                    return fake_mode.from_tensor(x, static_shapes=False)
+            def convert(idx, x):
+                if shape_env is not None:
+                    from torch._dynamo.source import ConstantSource
+                    if isinstance(x, int):
+                        return shape_env.create_symintnode(
+                            shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
+                            hint=x
+                        )
+                if not isinstance(x, torch.Tensor):
+                    return x
+                if isinstance(x, FakeTensor):
+                    assert x.fake_mode is fake_mode
+                    return x
+                # TODO: Ensure that this codepath is never exercised from
+                # Dynamo
+                if (
+                    idx < aot_config.num_params_buffers
+                    and config.static_weight_shapes
+                ):
+                    return fake_mode.from_tensor(x, static_shapes=True)
+                return fake_mode.from_tensor(x, static_shapes=False)
 
-                return [convert(idx, x) for idx, x in enumerate(flat_args)]
-            else:
-                return flat_args
+            return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
         fake_flat_args = process_inputs(flat_args)
 
@@ -2668,10 +2870,13 @@ def create_aot_dispatcher_function(
             and torch.is_grad_enabled()
         )
         with enable_python_dispatcher():
-            fw_metadata = run_functionalized_fw_and_collect_metadata(
-                flat_fn,
-                keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
-            )(*fake_flat_args)
+            # Patch set_rng_state as set_rng_state with fake tensors is
+            # nonsensical. This does not affect the collection of metadata.
+            with patch("torch.cuda.set_rng_state", lambda *args: None):
+                fw_metadata = run_functionalized_fw_and_collect_metadata(
+                    flat_fn,
+                    keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+                )(*fake_flat_args)
 
         # crappy version of dispatcher
         # TODO: Do this properly
@@ -2733,6 +2938,7 @@ def aot_function(
     *,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
+    enable_log=True,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -2805,6 +3011,7 @@ def aot_function(
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic,
         aot_autograd_arg_pos_to_source=None,
+        enable_log=enable_log,
     )
     cached_res = None
 
@@ -2991,6 +3198,8 @@ def aot_module_simplified(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
+    seen_sources = set()
+
     full_args = []
     # First, the params
     full_args.extend(params_flat)
@@ -3004,7 +3213,10 @@ def aot_module_simplified(
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
         for name in params.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
-            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
+            source = mod._param_name_to_source[name]
+            assert source not in seen_sources, source
+            seen_sources.add(source)
+            aot_autograd_arg_pos_to_source.append(source)
 
     # Next, the input args
     full_args.extend(args)
@@ -3017,7 +3229,10 @@ def aot_module_simplified(
                     # ... but not here!
                     if aot_autograd_arg_pos_to_source is None:
                         aot_autograd_arg_pos_to_source = []
-                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
+                    source = node._dynamo_source
+                    assert source not in seen_sources, source
+                    seen_sources.add(source)
+                    aot_autograd_arg_pos_to_source.append(source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)

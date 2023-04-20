@@ -122,7 +122,7 @@ class StorageWriter(abc.ABC):
         Writes the metadata and marks the current checkpoint as successful.
 
         The actual format/schema used for serializing `metadata` is an
-        implemetation detail. The only requirement is that it's recoverable
+        implementation detail. The only requirement is that it's recoverable
         in to the same object graph.
 
         Args:
