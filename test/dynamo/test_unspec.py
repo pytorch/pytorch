@@ -4,10 +4,10 @@ import unittest
 
 import numpy as np
 import torch
-
-from torch._dynamo.comptime import comptime
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
+from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
 
 
