@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import operator
 from dataclasses import asdict
-from typing import Callable, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import torch
 import torch.nn.functional as F
@@ -116,6 +116,8 @@ def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.activation is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.activation
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     assert quantization_spec.qscheme in [
@@ -141,6 +143,8 @@ def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig])
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.weight is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.weight
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     if quantization_spec.qscheme == torch.per_tensor_symmetric:
@@ -169,6 +173,8 @@ def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.bias is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.bias
     assert (
         quantization_spec.dtype == torch.float
@@ -259,9 +265,6 @@ class QNNPackQuantizer(Quantizer):
             self._annotate_maxpool2d(node, global_config)
             self._annotate_add_relu(node, global_config)
             self._annotate_add(node, global_config)
-            self._annotate_hardtanh(node, global_config)
-            self._annotate_mean(node, global_config)
-            self._annotate_adaptive_avg_pool2d(node, global_config)
 
         return model
 
@@ -369,6 +372,8 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
 
+    # TODO: move to `_pt2e/_propagate_annotation.py` after we have
+    # decided on the how we want to use pattern matching for annotation
     def _annotate_maxpool2d(
         self, node: Node, quantization_config: Optional[QuantizationConfig]
     ) -> None:
@@ -400,52 +405,6 @@ class QNNPackQuantizer(Quantizer):
             "input_output_share_observers": True,
             "_annotated": True,
         }
-
-    def _annotate_input_out_obs_sharing_op(
-        self,
-        op: Callable,
-        node: Node,
-        quantization_config: Optional[QuantizationConfig],
-    ) -> None:
-        io_obs_sharing_node = node
-        if (
-            io_obs_sharing_node.op != "call_function"
-            or io_obs_sharing_node.target != op
-        ):
-            return
-        if _is_annotated([io_obs_sharing_node]):
-            return
-
-        io_obs_sharing_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "input_output_share_observers": True,
-            "_annotated": True,
-        }
-
-    def _annotate_hardtanh(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
-    ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.hardtanh.default, node, quantization_config
-        )
-
-    def _annotate_mean(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
-    ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.mean.default, node, quantization_config
-        )
-        self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.mean.dim, node, quantization_config
-        )
-
-    def _annotate_adaptive_avg_pool2d(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
-    ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.adaptive_avg_pool2d.default, node, quantization_config
-        )
 
     def _annotate_add_relu(
         self, node: Node, quantization_config: Optional[QuantizationConfig]

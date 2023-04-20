@@ -8,6 +8,7 @@ import itertools
 import math
 import os
 import random
+import subprocess
 import sys
 import time
 import typing
@@ -55,7 +56,6 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from functorch.compile import config as functorch_config
 from torch._inductor import config, test_operators
 
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
@@ -187,12 +187,16 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
-def clone_preserve_strides(x):
+def clone_preserve_strides(x, device=None):
     if not isinstance(x, torch.Tensor):
         return x
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
-    ).clone()
+    )
+    if not device:
+        buffer = buffer.clone()
+    else:
+        buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
@@ -399,16 +403,10 @@ def check_model_cuda(
     if hasattr(model, "to"):
         model = model.to("cuda")
 
-    def copy_fn(x):
-        # preserve strides of the input on the device
-        if not isinstance(x, torch.Tensor):
-            return x
-        return torch.empty_strided(
-            x.size(), x.stride(), device="cuda", dtype=x.dtype
-        ).copy_(x)
-
     if copy_to_cuda:
-        example_inputs = tuple(copy_fn(x) for x in example_inputs)
+        example_inputs = tuple(
+            clone_preserve_strides(x, device="cuda") for x in example_inputs
+        )
 
     check_model(
         self,
@@ -3793,7 +3791,6 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     @config.patch({"triton.cudagraphs": True})
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -3816,7 +3813,6 @@ class CommonTemplate:
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -3835,7 +3831,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_input_mutation3(self):
         def fn(a):
             a += 1
@@ -3870,7 +3865,6 @@ class CommonTemplate:
         self.assertTrue(same(actual1, correct1))
         self.assertTrue(same(arg1, arg2))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -3883,7 +3877,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([8, 8]),))
 
-    @patch.object(functorch_config, "use_fake_tensor", True)
     def test_slice_mutation2(self):
         def fn(a):
             a[:, 20:40] = a[:, 20:40] + 1
@@ -6130,6 +6123,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     )
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
+
+        def test_indirect_device_assert(self):
+            dir_path = os.path.dirname(os.path.realpath(__file__))
+            test_path = os.path.join(dir_path, "indirect_assert_helper.py")
+            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+
+            for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
+                proc = subprocess.Popen(
+                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                stderr = proc.communicate()[1]
+                self.assertTrue(
+                    any(
+                        "index out of bounds" in err.decode("utf-8")
+                        for err in stderr.splitlines()
+                    ),
+                    f"{fn}, {ndims}, {dyn_shape}",
+                )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
