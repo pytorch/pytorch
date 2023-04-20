@@ -207,7 +207,7 @@ def mark_static(t, index=None):
             mark_static(t, i)
 
 
-def allow_in_graph_einops():
+def _allow_in_graph_einops():
     try:
         import einops
 
@@ -234,4 +234,4 @@ def allow_in_graph_einops():
         pass
 
 
-allow_in_graph_einops()
+_allow_in_graph_einops()
