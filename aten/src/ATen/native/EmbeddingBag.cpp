@@ -183,7 +183,7 @@ void fbgemm_spmdm_report_error_(
           idx,
           " which is not in the valid range [0, ",
           N,
-          "[");
+          ")");
     }
   }
   TORCH_CHECK(
