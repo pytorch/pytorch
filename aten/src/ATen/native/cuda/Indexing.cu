@@ -210,13 +210,13 @@ __global__ void indexing_backward_kernel_small_stride(
         grad_weight[weight_row + tidx] =
           static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale);
       } else {
-        scalar_t gradient = grad_weight[weight_row + tidx];
+        opmath_t gradient = (opmath_t)0.0;
         for (int64_t i = 0; i < num_duplicates; ++i) {
           grad_row = ((int64_t) indices[idx + i]) * stride + z * numel * stride;
-          gradient += static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale);
+          gradient += static_cast<opmath_t>(grad_output[grad_row + tidx]) * scale;
         }
 
-        grad_weight[weight_row + tidx] = gradient;
+        grad_weight[weight_row + tidx] = static_cast<scalar_t>(static_cast<opmath_t>(grad_weight[weight_row + tidx]) + gradient);
       }
     }
   }
