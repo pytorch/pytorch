@@ -352,7 +352,7 @@ oneOutput linalg_ldl_solve_batch_rule(
   auto pivots_ = moveBatchDimToFront(pivots, pivots_bdim);
   auto B_ = moveBatchDimToFront(B, B_bdim);
 
-  // LD and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must match
+  // LD and pivots's first {N-2} (for LD), {N-1} (for pivots) dimensions must match
   // So if only one of them is being vmapped over, we must expand out that dimension.
   if (LD_bdim.has_value() ^ pivots_bdim.has_value()) {
     auto bdim_size = get_bdim_size2(LD, LD_bdim, pivots, pivots_bdim);
