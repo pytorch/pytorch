@@ -114,11 +114,13 @@ struct TORCH_API DispatchStubImpl {
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
     void* mps_dispatch_ptr;
+    void* private_use1_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
     void* cuda_dispatch_ptr = nullptr;
     void* hip_dispatch_ptr = nullptr;
     void* mps_dispatch_ptr = nullptr;
+    void* private_use1_dispatch_ptr = nullptr;
   #endif
 };
 
@@ -168,6 +170,10 @@ public:
 
   void set_mps_dispatch_ptr(FnPtr fn_ptr) {
     impl.mps_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  }
+
+  void set_private_use1_dispatch_ptr(FnPtr fn_ptr) {
+    impl.private_use1_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
   static TORCH_API FnPtr DEFAULT;

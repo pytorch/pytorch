@@ -130,6 +130,10 @@ void* DispatchStubImpl::get_call_ptr(
       return mps_dispatch_ptr;
 #endif
 
+    case DeviceType::PrivateUse1:
+      TORCH_INTERNAL_ASSERT(private_use1_dispatch_ptr, "DispatchStub: missing PrivateUse1 kernel");
+      return private_use1_dispatch_ptr;
+
     default:
       AT_ERROR("DispatchStub: unsupported device type", device_type);
   }
