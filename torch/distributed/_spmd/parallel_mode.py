@@ -120,7 +120,7 @@ class DataParallel(ParallelMode):
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
         """optimize a distributed graph with a set of optimization passes"""
         # TODO: add more necessary arguments to this interface.
-        raise NotImplementedError()
+        return self._gm_passes(gm)
 
 
 class DTensorExpandMode(ParallelMode):
@@ -201,4 +201,4 @@ class DTensorExpandMode(ParallelMode):
         and optimization passes for the dtensor fallback parallel mode.
         """
         # TODO: move the trasnformation passed to this function
-        raise NotImplementedError()
+        return self._gm_passes(gm)

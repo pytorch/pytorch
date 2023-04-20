@@ -226,6 +226,18 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_dynamic(x, 0)
         opt_fn(x)
 
+    def test_isinstance_symint(self):
+        def fn(x):
+            assert isinstance(x.size(0), int)
+            return x * 2
+
+        x = torch.randn(20)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn(x)
+        y = torch.randn(30)
+        torch._dynamo.mark_dynamic(y, 0)
+        opt_fn(y)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
