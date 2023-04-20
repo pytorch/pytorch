@@ -1494,6 +1494,10 @@ class ShapeEnv:
             env_id = f"{frame_id}.{per_frame_id}"
         self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
         self.log.info("create_env")
+        self.frozen = False
+
+    def freeze(self):
+        self.frozen = True
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1637,6 +1641,12 @@ class ShapeEnv:
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
+
+    def create_unbacked_symbool(self):
+        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges(0, 1)
+        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
 
     def create_symbol(
         self,
@@ -2364,6 +2374,9 @@ class ShapeEnv:
             concrete_val = self.size_hint(expr)
         else:
             concrete_val = sympy.sympify(hint)
+
+        if self.frozen:
+            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
             self._maybe_guard_eq(expr, bool(concrete_val))
