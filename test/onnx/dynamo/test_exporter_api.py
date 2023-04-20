@@ -1,13 +1,13 @@
 # Owner(s): ["module: onnx"]
 import io
 import logging
-import unittest
 
 import onnx
 
 import torch
 from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
+from torch.onnx._internal import exporter
 from torch.onnx._internal.exporter import (
     _DEFAULT_OPSET_VERSION,
     ExportOutputSerializer,
@@ -15,7 +15,7 @@ from torch.onnx._internal.exporter import (
     ResolvedExportOptions,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal import common_utils
 
 
 class SampleModel(torch.nn.Module):
@@ -25,7 +25,7 @@ class SampleModel(torch.nn.Module):
         return (y, z)
 
 
-class TestExportOptionsAPI(unittest.TestCase):
+class TestExportOptionsAPI(common_utils.TestCase):
     def test_opset_version_default(self):
         options = ResolvedExportOptions(None)
         self.assertEquals(options.opset_version, _DEFAULT_OPSET_VERSION)
@@ -67,7 +67,7 @@ class TestExportOptionsAPI(unittest.TestCase):
         self.assertNotEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
 
 
-class TestDynamoExportAPI(unittest.TestCase):
+class TestDynamoExportAPI(common_utils.TestCase):
     def test_default_export(self):
         output = dynamo_export(SampleModel(), torch.randn(1, 1, 2))
         self.assertIsInstance(output, ExportOutput)
@@ -88,7 +88,7 @@ class TestDynamoExportAPI(unittest.TestCase):
         )
 
     def test_save_to_file_default_serializer(self):
-        with TemporaryFileName() as path:
+        with common_utils.TemporaryFileName() as path:
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(path)
             onnx.load(path)
 
@@ -106,7 +106,7 @@ class TestDynamoExportAPI(unittest.TestCase):
             ) -> None:
                 destination.write(expected_buffer.encode())
 
-        with TemporaryFileName() as path:
+        with common_utils.TemporaryFileName() as path:
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
                 path, serializer=CustomSerializer()
             )
@@ -125,7 +125,7 @@ class TestDynamoExportAPI(unittest.TestCase):
             ) -> None:
                 destination.write(expected_buffer.encode())
 
-        with TemporaryFileName() as path:
+        with common_utils.TemporaryFileName() as path:
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
                 path, serializer=CustomSerializer()
             )
@@ -135,13 +135,15 @@ class TestDynamoExportAPI(unittest.TestCase):
     def test_raise_on_invalid_save_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
             ExportOutput(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
-        export_output = ExportOutput(onnx.ModelProto())
+        export_output = ExportOutput(
+            onnx.ModelProto(), exporter.InputAdapter(), exporter.OutputAdapter()
+        )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]
         export_output.model_proto
 
 
-class TestProtobufExportOutputSerializerAPI(unittest.TestCase):
+class TestProtobufExportOutputSerializerAPI(common_utils.TestCase):
     def test_raise_on_invalid_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
             serializer = ProtobufExportOutputSerializer()
@@ -149,4 +151,4 @@ class TestProtobufExportOutputSerializerAPI(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()
