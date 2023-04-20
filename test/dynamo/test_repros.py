@@ -30,12 +30,7 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import (
-    rand_strided,
-    requires_static_shapes,
-    same,
-    skipIfPy311,
-)
+from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 
@@ -1067,7 +1062,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @skipIfPy311
     @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1355,7 +1349,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn3()
         self.assertTrue(same(ref, res))
 
-    @skipIfPy311
     def test_with_on_graph_break_inst(self):
         def reversible(x):
             print("Hello world")  # Cause graph break so inline fails
@@ -1380,7 +1373,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @skipIfPy311
     def test_with_on_graph_break_nested(self):
         def reversible(x):
             torch._dynamo.graph_break()  # Cause graph break so inline fails
@@ -1408,7 +1400,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     # https://github.com/pytorch/torchdynamo/issues/1446
-    @skipIfPy311
     def test_grad_mode_carrying_correct_state_after_graph_break(self):
         def fn(x):
             with torch.no_grad():
@@ -2296,7 +2287,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same_two_models(mod, opt_mod, args))
         opt_mod(*args)
 
-    @skipIfPy311
     def test_pointless_graph_removal(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
@@ -2401,7 +2391,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
-    @skipIfPy311
     def test_exception_in_dynamo_handling(self):
         hit_handler = False
 
@@ -2827,7 +2816,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(torch.ones([]), normalize), torch.ones([]).sin().cos())
 
-    @skipIfPy311
     def test_functools_wraps(self):
         def cool_name(x):
             return x.sin()
