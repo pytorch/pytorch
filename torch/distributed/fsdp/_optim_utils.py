@@ -482,6 +482,10 @@ def _flatten_optim_state(
             for unflat_param_state in unflat_param_states
         ]
         non_none_state_values = [v for v in state_values if v is not None]
+        # If all ranks have None, this is a None value
+        if not non_none_state_values:
+            flat_state[state_name] = None
+            continue
         are_pos_dim_tensors = are_zero_dim_tensors = are_non_tensors = True
         for v in non_none_state_values:
             are_pos_dim_tensors &= torch.is_tensor(v) and v.dim() > 0
@@ -1096,7 +1100,7 @@ def _get_param_id_to_param_from_optim_input(
 
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
-    def module_fn(module, prefix, flat_param_to_fqn):
+    def module_fn(module, prefix, tree_level, flat_param_to_fqn):
         for param_name, param in module.named_parameters(recurse=False):
             if type(param) is not FlatParameter:
                 continue
@@ -1529,7 +1533,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     to unique parameters.
     """
 
-    def module_fn(module, prefix, fqn_to_param_info):
+    def module_fn(module, prefix, tree_level, fqn_to_param_info):
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         if fsdp_state is None:
             return
@@ -1603,7 +1607,7 @@ def _all_gather_optim_state(
                     value.shape, value.dtype
                 )
         else:
-            processed_state.non_tensors = value
+            processed_state.non_tensors[state_name] = value
     object_list: List[StateInfo] = [
         processed_state for _ in range(fsdp_state.world_size)
     ]
