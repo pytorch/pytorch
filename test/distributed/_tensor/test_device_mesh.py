@@ -97,13 +97,13 @@ class DeviceMeshTest(DTensorTestBase):
     @with_comms
     def test_validate_device_mesh(self):
         mesh = torch.arange(self.world_size).reshape(2, -1)
-        mesh_subgp_1 = mesh[0]
-        mesh_subgp_2 = mesh[1]
+        mesh_subpg_1 = mesh[0]
+        mesh_subpg_2 = mesh[1]
         with self.assertRaisesRegex(RuntimeError, "different mesh"):
-            if self.rank in mesh_subgp_1:
-                mesh = DeviceMesh(self.device_type, mesh_subgp_1)
+            if self.rank in mesh_subpg_1:
+                mesh = DeviceMesh(self.device_type, mesh_subpg_1)
             else:
-                mesh = DeviceMesh(self.device_type, mesh_subgp_2)
+                mesh = DeviceMesh(self.device_type, mesh_subpg_2)
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
