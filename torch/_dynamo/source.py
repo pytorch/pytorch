@@ -177,6 +177,14 @@ class TensorProperty(enum.Enum):
     STRIDE = 1
     STORAGE_OFFSET = 2
 
+    def method_name(self):
+        if self is TensorProperty.SIZE:
+            return "size"
+        elif self is TensorProperty.STRIDE:
+            return "stride"
+        elif self is TensorProperty.STORAGE_OFFSET:
+            return "storage_offset"
+
 
 @dataclasses.dataclass(frozen=True)
 class TensorPropertySource(Source):
@@ -192,7 +200,16 @@ class TensorPropertySource(Source):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        instructions = [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_attr(self.prop.method_name()),
+        ]
+        if self.idx is not None:
+            instructions.append(codegen.create_load_const(self.idx))
+        instructions.extend(
+            create_call_function(1 if self.idx is not None else 0, True)
+        )
+        return instructions
 
     def guard_source(self):
         return self.base.guard_source()
@@ -274,9 +291,14 @@ class DefaultsSource(Source):
 class GetItemSource(Source):
     base: Source
     index: Any
+    index_is_slice: bool = False
 
     def __post_init__(self):
         assert self.base is not None
+        if isinstance(self.index, slice):
+            # store the hashable version of the slice so the whole GetItemSource is hashable
+            super().__setattr__("index", self.index.__reduce__())
+            super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -284,7 +306,10 @@ class GetItemSource(Source):
         if isinstance(self.index, Source):
             instrs.extend(self.index.reconstruct(codegen))
         else:
-            instrs.append(codegen.create_load_const(self.index))
+            if self.index_is_slice:
+                instrs.append(codegen.create_load_const(self.unpack_slice()))
+            else:
+                instrs.append(codegen.create_load_const(self.index))
         instrs.append(create_instruction("BINARY_SUBSCR"))
 
         return instrs
@@ -292,11 +317,18 @@ class GetItemSource(Source):
     def guard_source(self):
         return self.base.guard_source()
 
+    def unpack_slice(self):
+        assert self.index_is_slice
+        slice_class, slice_args = self.index
+        return slice_class(*slice_args)
+
     def name(self):
         if isinstance(self.index, Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
-            if isinstance(self.index, enum.Enum):
+            if self.index_is_slice:
+                return f"{self.base.name()}[{self.unpack_slice()!r}]"
+            elif isinstance(self.index, enum.Enum):
                 return f"{self.base.name()}[{enum_repr(self.index)}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
@@ -413,6 +445,15 @@ class FSDPNNModuleSource(NNModuleSource):
 
 @dataclasses.dataclass(frozen=True)
 class DeterministicAlgorithmsSource(Source):
+    def name(self):
+        return ""
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
+class DefaultDeviceSource(Source):
     def name(self):
         return ""
 

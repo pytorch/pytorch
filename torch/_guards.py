@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import logging
 import traceback
+import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -96,6 +97,7 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
+    # TODO: store this in slightly less formatted form
     stack: str
 
 
@@ -342,7 +344,7 @@ class TracingContext:
     Provides the currently installed TracingContext, or None.
 
     Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
-    will return NoNe.
+    will return None.
     """
 
     @staticmethod
@@ -354,6 +356,30 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
+
+    @staticmethod
+    def extract_stack():
+        self = TracingContext.get()
+        if self is None:
+            return traceback.StackSummary()
+        stack = list(self.frame_summary_stack)
+        if self.loc_in_frame is not None:
+            stack.append(self.loc_in_frame)
+        return traceback.StackSummary.from_list(stack)
+
+    # Call this when you want to call into some code that isn't necessarily
+    # associated with the current frame state
+    @staticmethod
+    @contextlib.contextmanager
+    def clear_frame():
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Frame context manager must be called within an ongoing trace."
+        with unittest.mock.patch.object(
+            tc, "frame_summary_stack", []
+        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+            yield
 
     @staticmethod
     @contextlib.contextmanager
@@ -369,17 +395,12 @@ class TracingContext:
             tc.frame_summary_stack.pop()
 
     @staticmethod
-    @contextlib.contextmanager
-    def current_loc(filename, lineno, frame_name):
+    def set_current_loc(filename, lineno, frame_name):
         tc = TracingContext.get()
         assert (
             tc is not None
         ), "Loc context manager must be called within an ongoing trace."
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
-        try:
-            yield
-        finally:
-            tc.loc_in_frame = None
 
 
 """
@@ -435,24 +456,31 @@ def detect_fake_mode(inputs: Any = None):
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from torch.utils._pytree import tree_flatten
 
+    fake_modes = []
+
     context = TracingContext.get()
     if context is not None:
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            return fake_mode
+            fake_modes.append((fake_mode, "tracing context", 0))
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
-    for m in reversed(_get_current_dispatch_mode_stack()):
+    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            return m
+            fake_modes.append((m, "active fake mode", i))
 
-    fake_mode = None
     flat_inputs, _ = tree_flatten(inputs)
-    for flat_input in flat_inputs:
+    for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
+            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+
+    if fake_modes:
+        fake_mode, desc1, i1 = fake_modes[0]
+        for m, desc2, i2 in fake_modes[1:]:
+            assert (
+                fake_mode is m
+            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
+        return fake_mode
+    else:
+        return None
