@@ -465,6 +465,7 @@ class GuardBuilder(GuardBuilderBase):
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
         )
+        output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
@@ -726,15 +727,26 @@ class CheckFunctionManager:
             )
             dynamic_dims = None
             if config.dynamic_shapes:
-                dynamic_dims = [
-                    self.output_graph.frame_state[name] for name in tensor_check_names
-                ]
-                for i, state in enumerate(dynamic_dims):
-                    if state is None:
-                        # Unpack the Nones into [None] for easier handling
-                        dynamic_dims[i] = tensor_check_examples[i].ndim * [None]
+                import sympy
 
-            print(dynamic_dims)
+                def convert(size):
+                    converted = []
+                    for dim in size:
+                        if isinstance(dim, (int, sympy.Integer)):
+                            converted.append(dim)
+                        else:
+                            converted.append(None)
+                    return converted
+
+                dynamic_dims = [
+                    convert(
+                        self.output_graph.tracing_context.fake_mode.from_tensor(
+                            t
+                        ).size()
+                    )
+                    for t in tensor_check_examples
+                ]
+
             tensor_guards = TensorGuards(
                 *tensor_check_examples,
                 dynamic_dims=dynamic_dims,
