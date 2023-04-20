@@ -8,6 +8,7 @@ import itertools
 import math
 import os
 import random
+import subprocess
 import sys
 import time
 import typing
@@ -197,7 +198,6 @@ def clone_preserve_strides(x, device=None):
     else:
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
-
     return out
 
 
@@ -5459,6 +5459,33 @@ class CommonTemplate:
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_sqrt_dynamic_shapes(self):
+        # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
+        # TODO: support cuda path.
+        if self.device == "cuda":
+            raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                B, N, C = x.shape
+                return self.get_rel_indices(N)
+
+            def get_rel_indices(self, num_patches: int) -> torch.Tensor:
+                img_size = int(num_patches**0.5)
+                ind = torch.arange(img_size)
+                return ind
+
+        self.common(
+            Model(),
+            [
+                torch.randn(8, 4, 4),
+            ],
+        )
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_index_dynamic_shapes(self):
         if self.device == "cuda":
             raise unittest.SkipTest("index dynamic shapes only supports cpu")
@@ -6123,6 +6150,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     )
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
+
+        def test_indirect_device_assert(self):
+            dir_path = os.path.dirname(os.path.realpath(__file__))
+            test_path = os.path.join(dir_path, "indirect_assert_helper.py")
+            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+
+            for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
+                proc = subprocess.Popen(
+                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                stderr = proc.communicate()[1]
+                self.assertTrue(
+                    any(
+                        "index out of bounds" in err.decode("utf-8")
+                        for err in stderr.splitlines()
+                    ),
+                    f"{fn}, {ndims}, {dyn_shape}",
+                )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
