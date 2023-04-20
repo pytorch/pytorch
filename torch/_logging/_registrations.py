@@ -3,7 +3,7 @@ from ._internal import register_artifact, register_log
 register_log("dynamo", "torch._dynamo")
 register_log("aot", "torch._functorch.aot_autograd")
 register_log("inductor", "torch._inductor")
-register_log("sym_shapes", "torch.fx.experimental.symbolic_shapes")
+register_log("dynamic", "torch.fx.experimental.symbolic_shapes")
 
 register_artifact("guards")
 register_artifact("bytecode")

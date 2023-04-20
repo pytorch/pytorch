@@ -128,4 +128,4 @@ class DTensorExpandMode(ParallelMode):
         and optimization passes for the dtensor fallback parallel mode.
         """
         # TODO: move the trasnformation passed to this function
-        raise NotImplementedError()
+        return self._gm_passes(gm)
