@@ -1932,7 +1932,10 @@ class ShapeEnv:
                 ):
                     continue
 
-                if ignore_static:
+                # This logic excludes static values found on tensors from guarding, because
+                # dynamo's check_tensor_fn does that (see guards.cpp).
+                # However, for non tensor sources, we still need to guard here.
+                if ignore_static and isinstance(source, TensorPropertySource):
                     maybe_static = self._maybe_evaluate_static(expr)
                     if isinstance(maybe_static, (int, sympy.Integer)):
                         self.log.info("Skipping guard %s", f"{source_ref(source)} == {maybe_static}")
