@@ -501,7 +501,7 @@ def _flatten_optim_state_dict(
     for key in all_state_keys:
         user_state = unflat_osd_state[key]
         if isinstance(user_state, torch.Tensor) and rank0_only and use_orig_params:
-            user_state = _broadcast_state(fsdp_state, user_state)
+            user_state = _broadcast_state(fsdp_state, user_state, group=group)
         flat_osd_state[key] = copy.copy(user_state)
 
     # Construct the "param_groups" part -- copy as is since it will be
