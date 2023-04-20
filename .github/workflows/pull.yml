@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches:
-      - master
       - main
       - release/*
       - landchecks/*
@@ -31,6 +30,8 @@ jobs:
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_8-gcc7-test:
@@ -353,7 +354,7 @@ jobs:
         ]}
 
   linux-focal-rocm5_4_2-py3_8-build:
-    # don't run build twice on master
+    # don't run build twice on main
     if: github.event_name == 'pull_request'
     name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_linux-build.yml

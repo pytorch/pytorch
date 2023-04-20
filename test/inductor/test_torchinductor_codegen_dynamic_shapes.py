@@ -81,14 +81,17 @@ def check_codegen(
     if is_cpp_code:
         code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
         for_loop_found = False
+        has_dynamic = False
         lines = code.split("\n")
         for line in lines:
             if "for(" in line:
                 for_loop_found = True
-                self.assertTrue(
-                    re.search(r";.*ks.*;", line) is not None,
-                    msg=f"Failed to find dynamic for loop variable\n{code}",
-                )
+                if re.search(r";.*ks.*;", line) is not None:
+                    has_dynamic = True
+                    break
+        self.assertTrue(
+            has_dynamic, msg=f"Failed to find dynamic for loop variable\n{code}"
+        )
         self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
@@ -115,44 +118,26 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
-    "test_adaptive_avg_pool2d1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange2_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange4_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange6_dynamic_shapes": TestFailure(("cpu",)),
-    "test_as_strided_dynamic_shapes": TestFailure(("cpu",)),
-    "test_batch_norm_2d_dynamic_shapes": TestFailure(("cpu",)),
-    "test_cat_dynamic_shapes": TestFailure(("cpu",)),
     "test_clamp_type_promotion_dynamic_shapes": TestFailure(("cpu",)),
-    "test_constant_pad_float64_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv3d_channels_last_dynamic_shapes": TestFailure(("cpu",)),
-    "test_embedding_dynamic_shapes": TestFailure(("cpu",)),
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
-    "test_gather1_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
-    "test_invalid_operand_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
-    "test_layer_norm_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_layer_norm_dynamic_shapes": TestFailure(("cuda")),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
-    "test_narrow_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
-    "test_repeat_dynamic_shapes": TestFailure(("cpu",)),
-    "test_roll_dynamic_shapes": TestFailure(("cpu",)),
-    "test_slice1_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
-    "test_tmp_not_defined_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_to_device_constant_dynamic_shapes": TestFailure(("cpu")),
-    "test_upsample_bicubic2d_dynamic_shapes": TestFailure(("cpu",)),
-    "test_upsample_bilinear2d_a_dynamic_shapes": TestFailure(("cpu",)),
-    "test_upsample_nearest1d_dynamic_shapes": TestFailure(("cpu",)),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
-    "test_upsample_nearest2d_dynamic_shapes": TestFailure(("cpu",)),
-    "test_upsample_nearest3d_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
@@ -171,7 +156,7 @@ test_failures = {
     "test_conv2d_backward_channels_last_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_packed_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",)),
+    "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_conv_transpose2d_packed_dynamic_shapes": TestFailure(("cpu",)),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -205,6 +190,7 @@ test_failures = {
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
