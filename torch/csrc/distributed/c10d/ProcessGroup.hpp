@@ -104,19 +104,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl
     // backends
-    if (getBackendType() == BackendType::NCCL) {
-      getBackend(deviceType)->startCoalescing();
-    }
+    auto backend = getBackend(deviceType);
+    backend->startCoalescing();
   }
 
-  virtual void endCoalescing(
-      c10::DeviceType deviceType,
-      std::vector<c10::intrusive_ptr<Work>>& reqs) {
-    // only nccl has implemented startCoalescing so only execute for nccl
+  virtual c10::intrusive_ptr<Work> endCoalescing(c10::DeviceType deviceType) {
+    // only nccl has implemented endCoalescing so only execute for nccl
     // backends
-    if (getBackendType() == BackendType::NCCL) {
-      getBackend(deviceType)->endCoalescing(reqs);
-    }
+    auto backend = getBackend(deviceType);
+    auto work = backend->endCoalescing();
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> broadcast(
