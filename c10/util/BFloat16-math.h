@@ -12,14 +12,15 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 namespace std {
 
 template <typename T>
-struct is_reduced_floating_point:
-    std::integral_constant<bool,
-      std::is_same<T, c10::Half>::value ||
-      std::is_same<T, c10::BFloat16>::value> {
-};
+struct is_reduced_floating_point
+    : std::integral_constant<
+          bool,
+          std::is_same<T, c10::Half>::value ||
+              std::is_same<T, c10::BFloat16>::value> {};
 
 template <typename T>
-constexpr bool is_reduced_floating_point_v = is_reduced_floating_point<T>::value;
+constexpr bool is_reduced_floating_point_v =
+    is_reduced_floating_point<T>::value;
 
 template <
     typename T,
