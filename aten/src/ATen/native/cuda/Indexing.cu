@@ -504,7 +504,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
-      if ((sliceSize == 1) && (sizeof(expandedValue.scalar_type()) > sizeof(kHalf))) {
+      if (sliceSize == 1) {
         // This implementation is faster with high amounts of duplicates but could overflow
         // if FP16 / BF16 is used
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
@@ -523,8 +523,6 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         });
       } else {
         if (sliceSize <= warp_size) {
-          // This implementation is faster than "indexing_backward" when duplicates are present
-          // but does not overflow with FP16/BF16
           AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
           expandedValue.scalar_type(), "indexing_backward_kernel_small_stride", [&] {
             indexing_backward_kernel_small_stride<scalar_t><<<grid, block, 0, stream>>>(
