@@ -178,7 +178,12 @@ TESTS = discover_tests(
         "onnx/test_pytorch_onnx_onnxruntime_cuda",
         "onnx/test_models",
         # These are not C++ tests
+        f"{CPP_TEST_PREFIX}/CMakeFiles",
+        f"{CPP_TEST_PREFIX}/CTestTestfile.cmake",
+        f"{CPP_TEST_PREFIX}/Makefile",
+        f"{CPP_TEST_PREFIX}/cmake_install.cmake",
         f"{CPP_TEST_PREFIX}/c10_intrusive_ptr_benchmark",
+        f"{CPP_TEST_PREFIX}/example_allreduce",
         f"{CPP_TEST_PREFIX}/parallel_benchmark",
         f"{CPP_TEST_PREFIX}/protoc",
         f"{CPP_TEST_PREFIX}/protoc-3.13.0.0",
