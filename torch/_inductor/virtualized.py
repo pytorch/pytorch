@@ -102,14 +102,24 @@ class KernelFormatterHandler:
 
     @staticmethod
     def ir_to_string(ir_fn, index, rindex=None):
-        from .ir import FlexibleLayout
-
         args = [index, rindex] if rindex is not None else [index]
         names = ["index", "rindex"] if rindex is not None else ["index"]
+        return KernelFormatterHandler.generic_ir_to_string(
+            ir_fn,
+            function_name="inner_fn",
+            args=args,
+            names=names,
+        )
+
+    @staticmethod
+    def generic_ir_to_string(ir_fn, *, function_name, args, names):
+        from .ir import FlexibleLayout
+
+        assert len(args) == len(names)
         formatter = KernelFormatterHandler(MockHandler())
 
         with formatter.output.indent(-1):
-            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
+            formatter.output.writeline(f"def {function_name}({', '.join(names)}):")
         for name, arg in zip(names, args):
             if arg:
                 lhs = ", ".join(

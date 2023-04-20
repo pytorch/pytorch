@@ -237,7 +237,7 @@ class _RecordLoadStoreInner(V.MockHandler):
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def reduction(
-        self, name: str, dtype, src_dtype, reduction_type, index, value
+        self, name: str, dtype, src_dtype, reduction_type, combine_fn, index, value
     ) -> str:
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 

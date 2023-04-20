@@ -710,7 +710,7 @@ class Kernel(CodeGen):
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, combine_fn, index, value):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -757,10 +757,10 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+            def reduction(name, dtype, src_dtype, reduction_type, combine_fn, index, value):
                 self.store_buffer_names.add(name)
                 return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
+                    name, dtype, src_dtype, reduction_type, combine_fn, index, value
                 )
 
         super().__enter__()

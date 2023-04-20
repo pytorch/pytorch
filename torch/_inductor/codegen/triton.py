@@ -1155,7 +1155,7 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, combine_fn, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
@@ -1184,8 +1184,9 @@ class TritonKernel(Kernel):
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
+        cond = " & ".join(masks)
+
         if self.persistent_reduction:
-            cond = " & ".join(masks)
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
@@ -1204,28 +1205,16 @@ class TritonKernel(Kernel):
                     f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
                 )
 
-            updated = value
-            if reduction_type in {"min", "argmin"}:
-                masks.append(f"({accumulator} > {value})")
-            elif reduction_type in {"max", "argmax"}:
-                masks.append(f"({accumulator} < {value})")
-            elif reduction_type == "sum":
-                updated = f"{accumulator} + {value}"
-            elif reduction_type == "prod":
-                updated = f"{accumulator} * {value}"
-            else:
-                raise NotImplementedError(f"reduction_type {reduction_type}")
-
-            cond = " & ".join(masks)
-
-            if accumulator_index:
+            if accumulator_index is not None:
                 # argmax or argmin
-                self.compute.writeline(
-                    f"{accumulator_index} = tl.where({cond},  {reduction_range_prefix}index, {accumulator_index})",
-                )
-            self.compute.writeline(
-                f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
-            )
+                combined_acc = accumulator, accumulator_index
+                combined_value = value, f"{reduction_range_prefix}index"
+                new_value, new_index = combine_fn(combined_acc, combined_value)
+                self.compute.writeline(f"{accumulator} = tl.where({cond}, {new_value}, {accumulator})")
+                self.compute.writeline(f"{accumulator_index} = tl.where({cond}, {new_index}, {accumulator_index})")
+            else:
+                new_value = combine_fn(accumulator, value)
+                self.compute.writeline(f"{accumulator} = tl.where({cond}, {new_value}, {accumulator}")
 
             if accumulator_index:
                 # argmax, argmin

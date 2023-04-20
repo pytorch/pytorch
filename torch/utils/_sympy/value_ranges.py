@@ -177,7 +177,7 @@ class ValueRangeAnalysis:
     def store(self, name, index, value, mode=None):
         return
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, combine_fn, index, value):
         return ValueRanges.unknown()
 
     def index_expr(self, index, dtype):

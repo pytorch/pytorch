@@ -433,6 +433,7 @@ class TileHint(Enum):
 
 @dataclasses.dataclass
 class Reduction(Loops):
+    combine_fn: Callable
     reduction_ranges: List[Expr]
     reduction_type: str
     # self.dtype represents the dst dtype
@@ -440,8 +441,26 @@ class Reduction(Loops):
     reduction_hint: ReductionHint
 
     def __str__(self):
-        return Loops.__str__(
-            self, names=("ranges", "reduction_ranges", "reduction_type")
+        names = ("ranges", "reduction_ranges", "reduction_type")
+        return self.str_helper(
+            [
+                f"'{self.device.type}'",
+                str(self.dtype),
+                self.inner_fn_str(),
+                self.combine_fn_str(),
+                *(f"{name}={getattr(self, name)}" for name in names),
+            ]
+        )
+
+    @cache_on_self
+    def combine_fn_str(self):
+        index = self._index(self.ranges)
+        example_arg = self.inner_fn(index)
+        return V.KernelFormatterHandler.generic_ir_to_string(
+            self.combine_fn,
+            function_name="combine_fn",
+            args=[example_arg, example_arg],
+            names=["a", "b"],
         )
 
     __repr__ = __str__
@@ -458,6 +477,7 @@ class Reduction(Loops):
             self.dtype,
             self.src_dtype,
             self.reduction_type,
+            self.combine_fn,
             indexer(vars),
             self.inner_fn(vars, reduction_vars),
         )
@@ -496,6 +516,7 @@ class Reduction(Loops):
         dst_dtype,
         src_dtype,
         inner_fn,
+        combine_fn,
         ranges,
         reduction_ranges,
         reduction_type,
@@ -593,14 +614,15 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         r = Reduction(
-            device,
-            dst_dtype,
-            inner_fn,
-            ranges,
-            reduction_ranges,
-            reduction_type,
-            src_dtype,
-            ReductionHint.DEFAULT,
+            device=device,
+            dtype=dst_dtype,
+            inner_fn=inner_fn,
+            combine_fn=combine_fn,
+            ranges=ranges,
+            reduction_ranges=reduction_ranges,
+            reduction_type=reduction_type,
+            src_dtype=src_dtype,
+            reduction_hint=ReductionHint.DEFAULT,
         )
 
         def get_read_indices(r):
@@ -666,53 +688,11 @@ class Reduction(Loops):
             )
 
     @staticmethod
-    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
+    def _unroll_reduction_fn(inner_fn, combine_fn, reduction_ranges, reduction_type):
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
             V.graph.sizevars.guard_static_shape(x) for x in reduction_ranges
         ]
-
-        if reduction_type == "sum":
-
-            def combine_fn(a, b):
-                return ops.add(a, b)
-
-        elif reduction_type == "prod":
-
-            def combine_fn(a, b):
-                return ops.mul(a, b)
-
-        elif reduction_type == "min":
-
-            def combine_fn(a, b):
-                return ops.minimum(a, b)
-
-        elif reduction_type == "max":
-
-            def combine_fn(a, b):
-                return ops.maximum(a, b)
-
-        elif reduction_type == "any":
-
-            def combine_fn(a, b):
-                return ops.logical_or(a, b)
-
-        elif reduction_type == "argmin":
-
-            def combine_fn(a, b):
-                return ops.minimum(a[0], b[0]), ops.where(
-                    ops.lt(b[0], a[0]), b[1], a[1]
-                )
-
-        elif reduction_type == "argmax":
-
-            def combine_fn(a, b):
-                return ops.maximum(a[0], b[0]), ops.where(
-                    ops.gt(b[0], a[0]), b[1], a[1]
-                )
-
-        else:
-            raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
         def fn(index):
             return functools.reduce(
@@ -748,10 +728,12 @@ class Reduction(Loops):
     @classmethod
     def create(
         cls,
+        *,
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable,
+        combine_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
@@ -817,7 +799,7 @@ class Reduction(Loops):
             return Pointwise.create(
                 device,
                 dst_dtype,
-                cls._unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type),
+                cls._unroll_reduction_fn(inner_fn, combine_fn, reduction_ranges, reduction_type),
                 ranges,
             )
 
@@ -845,14 +827,15 @@ class Reduction(Loops):
         if sr_qualified:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
-                device,
-                dst_dtype,
-                src_dtype,
-                inner_fn,
-                ranges,
-                reduction_ranges,
-                reduction_type,
-                reduction_numel,
+                device=device,
+                dst_dtype=dst_dtype,
+                src_dtype=src_dtype,
+                inner_fn=inner_fn,
+                combine_fn=combine_fn,
+                ranges=ranges,
+                reduction_ranges=reduction_ranges,
+                reduction_type=reduction_type,
+                reduction_numel=reduction_numel,
             )
             # intermediate reduction in split can contain complex indexing,
             # and num_splits will fail to correctly set the hint
@@ -862,15 +845,16 @@ class Reduction(Loops):
             if split > 1:
                 # triton doesn't support reduce to single element well, so break it up
                 return cls.create_multilayer(
-                    device,
-                    dst_dtype,
-                    src_dtype,
-                    inner_fn,
-                    ranges,
-                    reduction_ranges,
-                    reduction_type,
-                    split,
-                    reduction_hint,
+                    device=device,
+                    dst_dtype=dst_dtype,
+                    src_dtype=src_dtype,
+                    inner_fn=inner_fn,
+                    combine_fn=combine_fn,
+                    ranges=ranges,
+                    reduction_ranges=reduction_ranges,
+                    reduction_type=reduction_type,
+                    split=split,
+                    reduction_hint=reduction_hint,
                 )
         elif split_reduction and dynamo_config.dynamic_shapes:
             torch._logging.warning_once(
@@ -880,14 +864,15 @@ class Reduction(Loops):
 
         return TensorBox.create(
             Reduction(
-                device,
-                dst_dtype,
-                inner_fn,
-                ranges,
-                reduction_ranges,
-                reduction_type,
-                src_dtype,
-                reduction_hint,
+                device=device,
+                dtype=dst_dtype,
+                inner_fn=inner_fn,
+                combine_fn=combine_fn,
+                ranges=ranges,
+                reduction_ranges=reduction_ranges,
+                reduction_type=reduction_type,
+                src_dtype=src_dtype,
+                reduction_hint=reduction_hint,
             )
         )
 
@@ -921,6 +906,7 @@ class Reduction(Loops):
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable,
+        combine_fn: Callable,
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
@@ -981,14 +967,15 @@ class Reduction(Loops):
             else torch.float
         )
         intermediate = Reduction.create(
-            device,
-            intermediate_dtype,
-            src_dtype,
-            wrapper_fn,
-            [*ranges, split],
-            [block_size],
-            reduction_type,
-            reduction_hint,
+            device=device,
+            dst_dtype=intermediate_dtype,
+            src_dtype=src_dtype,
+            inner_fn=wrapper_fn,
+            combine_fn=combine_fn,
+            ranges=[*ranges, split],
+            reduction_ranges=[block_size],
+            reduction_type=reduction_type,
+            reduction_hint=reduction_hint,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -1007,14 +994,15 @@ class Reduction(Loops):
             reduction_hint = ReductionHint.OUTER_TINY
         return TensorBox.create(
             Reduction(
-                device,
-                dst_dtype,
-                intermediate_fn,
-                ranges,
-                [split],
-                reduction_type,
-                src_dtype,
-                reduction_hint,
+                device=device,
+                dtype=dst_dtype,
+                inner_fn=inner_fn,
+                combine_fn=combine_fn,
+                ranges=ranges,
+                reduction_ranges=[split],
+                reduction_type=reduction_type,
+                src_dtype=src_dtype,
+                reduction_hint=reduction_hint,
             )
         )
 
@@ -3962,10 +3950,22 @@ class LoopBodyBlock:
                 index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
-            def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+            @staticmethod
+            def reduction(name, dtype, src_dtype, reduction_type, combine_fn, index, value):
+                def shim(name, dtype, src_dtype, reduction_type, index, value):
+                    return V.ops.reduction(
+                        name, dtype, src_dtype, reduction_type, combine_fn, index, value
+                    )
+
                 index = add_index(index, "writes", name)
-                return self._inner.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
+
+                subblock_name = self.body.add_submodule(shim, "reduce_subblock")
+                self.body.subblocks[subblock_name] = LoopBodyBlock(self.body, lambda: None, [])
+                return tracer.create_proxy(
+                    "call_module",
+                    subblock_name,
+                    (name, dtype, src_dtype, reduction_type, index, value),
+                    {}
                 )
 
             def index_expr(self, index, dtype):
