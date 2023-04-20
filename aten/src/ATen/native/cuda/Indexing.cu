@@ -152,7 +152,7 @@ __global__ void indexing_backward_kernel_stride_1(
         grad_weight[weight_row] =
           static_cast<scalar_t>(static_cast<opmath_t>(grad_output[grad_row]) * scale);
       } else {
-        opmath_t gradient = static_cast<opmath_t>(grad_weight[weight_row]);
+        opmath_t gradient = (opmath_t)0.0;
 
         int laneIdx = threadIdx.x & 0x1f;
         int64_t num_warp_passes = num_duplicates / C10_WARP_SIZE;
@@ -171,7 +171,7 @@ __global__ void indexing_backward_kernel_stride_1(
             gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
           }
 
-          grad_weight[weight_row] = static_cast<scalar_t>(gradient);
+          grad_weight[weight_row] = static_cast<scalar_t>(static_cast<opmath_t>(grad_weight[weight_row]) + gradient);
         }
       }
     }
