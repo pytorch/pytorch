@@ -3795,7 +3795,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_src_mask_size = seq_len + 1
-        test(encoder_input_shape, decoder_input_shape, src_mask_len=wrong_src_mask_size)
+        test(encoder_input_shape, decoder_input_shape,
+             src_mask_len=wrong_src_mask_size, raises=True)
 
         # Incorrect tgt_mask
         encoder_input_shape = correct_encoder_input_shape
