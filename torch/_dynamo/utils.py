@@ -515,16 +515,10 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    # TODO: this is questionable
     if isinstance(x, torch._subclasses.FakeTensor):
-        with x.fake_mode:
-            return torch.empty_strided(
-                size=x.size(),
-                stride=x.stride(),
-                dtype=x.dtype,
-                layout=x.layout,
-                device=x.device,
-                requires_grad=x.requires_grad,
-            )
+        # this func fails on fake tensors in __torch_dispatch__
+        return x
 
     def torch_clone(x):
         y = torch.clone(x)
