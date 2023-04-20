@@ -854,15 +854,12 @@ class TorchHigherOrderOperator(VariableTracker):
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
-                    # Unused in branches
-                    graphargs=[],
                 )
             )
 
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
-            tx.output.graphargs = []
             tx.output.input_name_to_proxy.clear()
 
             args = []
