@@ -734,8 +734,9 @@ class CheckFunctionManager:
                 def convert(size):
                     converted = []
                     for dim in size:
-                        dim_expr = dim.node.expr
-                        if isinstance(dim_expr, (int, sympy.Integer)):
+                        if isinstance(dim, torch.SymInt):
+                            dim = dim.node.expr
+                        if isinstance(dim, (int, sympy.Integer)):
                             converted.append(int(dim))
                         else:
                             converted.append(None)
@@ -840,7 +841,6 @@ def guard_fail_hook(
     """
     called whenever a guard fails.
     """
-    breakpoint()
     first = index == 0
     global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
