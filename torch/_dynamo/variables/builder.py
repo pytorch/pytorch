@@ -1088,7 +1088,7 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
+    elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
@@ -1136,18 +1136,18 @@ def wrap_to_fake_tensor_and_record(
         curr_sizes = None
         if name not in tx.output.frame_state:
             # If there is no entry for this source, add the tensor to frame state with its current static size.
-            # E.g., {} -> {“x”: [2, 4]}
+            # E.g., {} -> {"x": [2, 4]}
             curr_sizes = list(e.size())
         else:
             curr_sizes = tx.output.frame_state[name]
             if curr_sizes is not None:
                 if e.ndim != len(curr_sizes):
                     # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                    # E.g. {“x”: [2, 3, 4]} -> {“x”: None}
+                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
                     curr_sizes = None
                 else:
                     # If there is already an entry, and the dim matches, for every size in the frame state which
-                    # disagrees with the current static size, replace it with None. E.g., {“x”: [2, 3]} -> {“x”: [2, None]}
+                    # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
                     for i, dim in enumerate(curr_sizes):
                         if e.size()[i] != dim:
                             curr_sizes[i] = None
@@ -1185,8 +1185,9 @@ def wrap_to_fake_tensor_and_record(
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
                 # NB: both static and dynamic have precedence over
-                automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
-
+                automatic_dynamic = config.automatic_dynamic_shapes and (
+                    curr_sizes is None or curr_sizes[i] is None
+                )
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints

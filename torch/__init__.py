@@ -1529,6 +1529,12 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def reset(self):
+        from torch._inductor import config
+        if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
+            if self.config.get("triton.cudagraphs", True):
+                from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+                reset_cudagraph_trees()
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,

@@ -77,7 +77,7 @@ C10_CUDA_API __inline__ WarningState& warning_state() {
 // reasons we want them to be inline
 C10_CUDA_API void __inline__ memcpy_and_sync(
     void* dst,
-    void* src,
+    const void* src,
     int64_t nbytes,
     cudaMemcpyKind kind,
     cudaStream_t stream) {
