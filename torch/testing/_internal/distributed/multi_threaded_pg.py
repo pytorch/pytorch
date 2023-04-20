@@ -1,7 +1,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from functools import partial, reduce
 
 import torch
@@ -18,6 +18,7 @@ from torch._C._distributed_c10d import (
     Store,
     ReduceOp,
 )
+from torch.distributed.distributed_c10d import _CollOp, P2POp
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -323,6 +324,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(input_tensor, self._world_size))
+        return self.reduce_scatter([output_tensor], [tensor_list], opts)
+
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)
         self._rank = rank
@@ -367,13 +372,15 @@ class WorldData:
     group_count: int
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
+    pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
+
 
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {})
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -415,6 +422,10 @@ class ThreadLocalWorld:
     @property
     def pg_to_tag(self):
         return self._get_world().pg_to_tag
+
+    @property
+    def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
+        return self._get_world().pg_coalesce_state
 
 
 _old_pg_world = None

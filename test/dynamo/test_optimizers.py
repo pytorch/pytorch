@@ -2,6 +2,8 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_adam in OptimizerTests)
 """
+import functools
+
 # Owner(s): ["module: dynamo"]
 
 import inspect
@@ -11,7 +13,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
+from torch.nn import Parameter
 
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
@@ -123,13 +125,29 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
             opt_training_iter_fn(batch, net, optimizer)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_state_dict(self):
+        @torch.compile(backend="eager")
+        def _test_state_dict(weight, bias, input):
+            def fn_base(optimizer, weight, bias):
+                optimizer.zero_grad()
+                i = input
+                loss = (weight.mv(i) + bias).pow(2).sum()
+                loss.backward()
+                return loss
+
+            optimizer = torch.optim.Adagrad([weight, bias])
+            fn = functools.partial(fn_base, optimizer, weight, bias)
+            return optimizer, fn
+
+        optimizer, fn = _test_state_dict(
+            Parameter(torch.randn(10, 5)),
+            Parameter(torch.randn(10)),
+            torch.randn(5, requires_grad=True),
+        )
+        optimizer.step(fn)
+
 
 if __name__ == "__main__":
-    # most optimizer tests are broken on 3.11
-    # TODO remove when 3.11 is fully supported
-    import sys
-
     from torch._dynamo.test_case import run_tests
 
-    if sys.version_info < (3, 11):
-        run_tests()
+    run_tests()
