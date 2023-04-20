@@ -1212,10 +1212,6 @@ def wrap_to_fake_tensor_and_record(
                 if marked_dynamic:
                     curr_sizes[i] = None
 
-                # For static - undo setting None
-                if marked_static:
-                    curr_sizes[i] = e.size()[i]
-
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints
