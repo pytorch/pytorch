@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 from unittest import mock
 
 import torch
+from torch._dynamo.utils import assert_no_fake_params_or_buffers, check_all_fake
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
@@ -72,14 +73,18 @@ def train_step_compiler(backend_compile_fn):
         assert (
             torch.is_grad_enabled()
         ), "Expected grad enabled when calling train_step_compile"
-        torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
+        if check_all_fake(mod):
+            deferred_init = True
+        else:
+            deferred_init = False
+            assert_no_fake_params_or_buffers(mod)
         assert len(real_inputs) > 0, "Expected at least one input"
         fake_mode = detect_fake_mode()
         assert isinstance(
             fake_mode, FakeTensorMode
         ), "Expected a valid FakeTensorMode"
 
-        def fakeify_inputs(flat_args):
+        def fakeify_tensors(flat_args):
             already_fake = {}
 
             def convert(idx, x):
@@ -102,8 +107,8 @@ def train_step_compiler(backend_compile_fn):
         }
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
-        fake_params_flat = fakeify_inputs(params_flat)
-        fake_inputs = fakeify_inputs(real_inputs)
+        fake_params_flat = params_flat if deferred_init else fakeify_tensors(params_flat)
+        fake_inputs = fakeify_tensors(real_inputs)
         assert (
             "optimizers" in mod.meta
         ), "Dynamo should populate GraphModule meta with optimizers dict"
@@ -180,7 +185,7 @@ def train_step_compiler(backend_compile_fn):
                     named_states[n] = opt.state[p]  # type: ignore[index]
 
         named_states_flat, named_states_spec = pytree.tree_flatten(named_states)
-        fake_named_states_flat = fakeify_inputs(named_states_flat)
+        fake_named_states_flat = fakeify_tensors(named_states_flat)
         named_states_len = len(named_states_flat)
         full_fake_args = fake_params_flat + fake_named_states_flat + fake_inputs
 
@@ -198,7 +203,15 @@ def train_step_compiler(backend_compile_fn):
             functional_fx_g = make_fx(functionalize(fx_g))(*full_fake_args)
 
         """
-        Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
+        Step 4: Call the backend compiler
+        """
+        
+        """
+        Step 5: Make the model 'real' if it was deferred
+        """
+        breakpoint()
+        """
+        Step 6: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo.
         """
 

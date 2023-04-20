@@ -1850,6 +1850,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         mutated_closure_cell_contents: Set[str],
         frame_state,
+        fake_mode,
     ):
         _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
         super().__init__(
@@ -1861,6 +1862,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 export,
                 export_constraints,
                 frame_state,
+                fake_mode
             ),
             instructions=instructions,
             f_locals=f_locals,

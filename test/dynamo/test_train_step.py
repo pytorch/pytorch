@@ -244,20 +244,21 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             model.zero_grad()
             return loss
 
-        fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
 
+        inputs = [torch.randn((128, 10))]
+
+        fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
         with fake_tensor_mode, proxy_mode:
             deferred_model = Seq()
             deferred_model.apply(init_weights)
             deferred_model._deferred = fx_tracer
             opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
         
-        # materialize_module(m)
-        inputs = [torch.randn((128, 10))]
         opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", fullgraph=True
+            train_step, backend="train_step_eager", fullgraph=True, fake_mode=fake_tensor_mode
         )
 
+        # materialize_module(m)
         loss = []
         for step in range(10):
             opt_loss = opt_train_step(deferred_model, opt_optimizer, inputs)

@@ -457,7 +457,6 @@ def detect_fake_mode(inputs: Any = None):
     from torch.utils._pytree import tree_flatten
 
     fake_modes = []
-
     context = TracingContext.get()
     if context is not None:
         fake_mode = context.fake_mode

@@ -1542,7 +1542,8 @@ def compile(model: Optional[Callable] = None, *,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
-            disable: builtins.bool = False) -> Callable:
+            disable: builtins.bool = False,
+            fake_mode=None) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
@@ -1601,7 +1602,7 @@ def compile(model: Optional[Callable] = None, *,
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
 
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable, fake_mode=fake_mode)(model)
 
 
 def _register_device_module(device_type, module):

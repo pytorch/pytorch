@@ -463,6 +463,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=False,
+    fake_mode=None
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -509,6 +510,7 @@ def optimize(
             backend,
             dynamic=dynamic,
             hooks=hooks,
+            fake_mode=fake_mode
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
@@ -961,6 +963,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=False,
+    fake_mode=None
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -972,7 +975,7 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend, export=export, export_constraints=export_constraints, fake_mode=fake_mode
         ),
         hooks,
         backend_ctx_ctor,

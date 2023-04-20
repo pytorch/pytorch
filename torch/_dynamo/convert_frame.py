@@ -219,6 +219,7 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints=None,
+    fake_mode=None,
 ):
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
@@ -340,6 +341,7 @@ def convert_frame_assert(
             hooks,
             frame,
             frame_state=frame_state,
+            fake_mode=fake_mode,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -359,11 +361,11 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
+    fake_mode=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
-
     # from .utils import print_once;  print_once(code.co_filename)
 
     def transform(instructions, code_options):
@@ -381,6 +383,7 @@ def _compile(
             export_constraints,
             mutated_closure_cell_contents,
             frame_state=frame_state,
+            fake_mode=fake_mode,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()
@@ -483,9 +486,10 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, fake_mode=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+    breakpoint()
+    inner_convert = convert_frame_assert(compiler_fn, one_graph=False, fake_mode=fake_mode)
 
     def _convert_frame(
         frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state

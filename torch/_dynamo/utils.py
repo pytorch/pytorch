@@ -1337,6 +1337,16 @@ def get_real_value(node, output_graph):
     return real_value
 
 
+def check_all_fake(gm):
+    all_fake = True
+    for name, buffer in gm.named_buffers():
+        if not isinstance(buffer, torch._subclasses.FakeTensor):
+            all_fake = False
+    for name, param in gm.named_parameters():
+        if not isinstance(param, torch._subclasses.FakeTensor):
+            all_fake = False
+    return all_fake
+
 def assert_no_fake_params_or_buffers(gm):
     from torch._subclasses.fake_tensor import FakeTensorConfig
 
