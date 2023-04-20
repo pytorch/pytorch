@@ -527,19 +527,19 @@ class MetaConverter:
                 ctx = contextlib.nullcontext()
                 if ignore_subclass:
                     ctx = torch._C.DisableTorchFunctionSubclass()
-                def paramify(r):
-                    if type(t) is torch.nn.Parameter:
-                        r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
-                    return r
                 with ctx:
                     r = self.meta_tensor(
                         t,
                         shape_env=shape_env,
-                        callback=lambda t: paramify(callback(t)),
+                        callback=callback,
                         source=source,
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
                     )
+                if type(t) is torch.nn.Parameter:
+                    # NB: Cannot directly use Parameter constructor
+                    # because that would force a detach, not desirable
+                    r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause
