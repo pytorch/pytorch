@@ -308,11 +308,11 @@ GETTER_BODY_ARRAYREF_SYMINT = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
     auto si = prop[i];
-    if (si.is_symbolic()) {
+    if (auto m = si.maybe_as_int()) {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(*m));
+    } else {
       auto py_symint = py::cast(si).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
-    } else {
-       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.as_int_unchecked()));
     }
 }
 return tup;
@@ -331,7 +331,11 @@ return PyLong_FromUnsignedLong((int64_t) prop);
 """
 
 GETTER_BODY_SYMINT = """\
-return prop.is_symbolic() ? py::cast(prop).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
+if (auto m = prop.maybe_as_int()) {
+  return PyLong_FromUnsignedLong(*m);
+} else {
+  return py::cast(prop).release().ptr();
+}
 """
 
 GETTER_BODY_DOUBLE = """\

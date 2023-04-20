@@ -782,6 +782,8 @@ class TorchHigherOrderOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
+            ClosureVariable,
+            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -827,16 +829,32 @@ class TorchHigherOrderOperator(VariableTracker):
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
-                    # Unused in branches
-                    graphargs=[],
                 )
             )
 
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+            if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
+                # closure vars other than 'self' are not in scope of generated code, so error early
+                # TODO(avik): we should eventually support this.
+                # (Feature request tracked here: https://github.com/pytorch/pytorch/issues/99401)
+                closure_vars = [
+                    var.name
+                    for var in f.closure.items
+                    if isinstance(var, ClosureVariable) and var.name != "self"
+                ]
+                if closure_vars:
+                    code = f.get_code()
+                    raise torch._dynamo.exc.UserError(
+                        torch._dynamo.exc.UserErrorType.ANTI_PATTERN,
+                        f"Cannot create subgraph for nested function '{code.co_name}' "
+                        f"at {code.co_filename}:{code.co_firstlineno} because "
+                        f"it closes over variables {closure_vars}. Please rewrite "
+                        f"'{code.co_name}' to take {closure_vars} as additional args.",
+                    )
+
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
-            tx.output.graphargs = []
-            tx.output.name_to_input.clear()
+            tx.output.input_name_to_proxy.clear()
 
             args = []
             # One argument to graph per sub_args
@@ -886,9 +904,12 @@ class TorchHigherOrderOperator(VariableTracker):
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
             # ops - see torch/dispatch/_dispatcher.py
-
             assert len(args) == 4
-            assert type(args[0]) in (TensorVariable, SymNodeVariable), str(
+            assert type(args[0]) in (
+                TensorVariable,
+                SymNodeVariable,
+                ConstantVariable,
+            ), str(
                 type(args[0])
             )  # predicate
             assert isinstance(
