@@ -23,12 +23,14 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
-from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.output_graph import OutputGraph
+from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
     same,
+    skipIfNotPy311,
     unsupported,
 )
 
@@ -48,10 +50,6 @@ from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
-
-
-def my_custom_function(x):
-    return x + 1
 
 
 class MyPickledModule(torch.nn.Module):
@@ -1075,6 +1073,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_constant_getattr(self):
+        # https://github.com/pytorch/pytorch/issues/97480
+        def fn():
+            return getattr(None, "arg", 3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        optimized_fn = torch._dynamo.optimize(cnt)(fn)
+        res = optimized_fn()
+        self.assertTrue(same(res, 3))
+
     def test_user_property(self):
         class MyConfig:
             @property
@@ -1687,56 +1695,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.run()(fn2)(torch.randn(4))
         self.assertEqual(cnts2.frame_count, 0)
 
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
-    def test_nested_disable_decorator(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch._dynamo.disable()
-        def fn1(x):
-            return torch.sin(x) * 10
-
-        @torch._dynamo.optimize(cnts)
-        def fn2(x):
-            x = x + 1
-            x = x + 1
-            x = fn1(x)  # graph break
-            x = x + 1
-            x = x + 1
-            return x
-
-        @torch._dynamo.optimize(cnts, nopython=True)
-        def fn3(x):
-            return fn2(x)
-
-        fn2(torch.randn(4, 5))
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 4)
-
-        try:
-            fn3(torch.randn(4, 5))
-            self.assertFalse(True)
-        except torch._dynamo.exc.Unsupported as e:
-            self.assertIn("call torch._dynamo.disable() wrapped function", str(e))
-
-    def test_graph_break(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch._dynamo.optimize(cnts)
-        def fn(x):
-            x = torch.cos(x)
-            x = torch.cos(x)
-            torch._dynamo.graph_break()
-            x = torch.cos(x)
-            x = torch.cos(x)
-            graph_break()
-            x = torch.cos(x)
-            x = torch.cos(x)
-            return x
-
-        fn(torch.randn(4, 5))
-        self.assertEqual(cnts.frame_count, 3)
-        self.assertEqual(cnts.op_count, 6)
-
     def test_torch_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -1935,7 +1893,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(sys.version_info < (3, 11), "linetable test for Python 3.11")
+    @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
             a = 10
@@ -1960,7 +1918,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(p1[0], p2[0])
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "linetable test for Python 3.11")
+    @skipIfNotPy311
     def test_linetable_311_writer2(self):
         """
         test large ops (LOAD_METHOD) and EXTENDED_ARGS
@@ -2376,46 +2334,6 @@ def fn():
         opt_f4 = torch._dynamo.optimize(cnts)(f4)
         res2 = opt_f4()
         self.assertTrue(same(res1, res2))
-
-    def test_disallow_in_graph(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch._dynamo.optimize(cnts)
-        def fn(a):
-            x = torch.add(a, 1)
-            x = torch.add(x, 1)
-            x = torch.sub(x, 1)
-            x = torch.add(x, 1)
-            x = torch.add(x, 1)
-            return x
-
-        torch._dynamo.disallow_in_graph(torch.sub)
-        fn(torch.randn(10))
-        torch._dynamo.allow_in_graph(torch.sub)
-
-        # check for graph break on sub
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 4)
-
-    def test_allow_in_graph(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        @torch._dynamo.optimize(cnts)
-        def fn(a):
-            x = torch.add(a, 1)
-            x = torch.add(x, 1)
-            x = my_custom_function(x)
-            x = torch.add(x, 1)
-            x = torch.add(x, 1)
-            return x
-
-        torch._dynamo.allow_in_graph(my_custom_function)
-        fn(torch.randn(10))
-        torch._dynamo.disallow_in_graph(my_custom_function)
-
-        # check for no graph break
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 5)
 
     def test_sample_input(self):
         from torch.testing._internal.common_methods_invocations import SampleInput
@@ -2970,6 +2888,154 @@ def fn():
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
+    def test_nonzero_static(self):
+        # invalid size
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
+        ):
+            torch.nonzero_static(torch.tensor([8]), size=-2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
+        ):
+            torch.nonzero_static(torch.tensor([8]), size=-2, out=torch.tensor(0))
+
+        # nonzero_static.out: out dtype mismatch
+        input_tensor = torch.tensor([8])
+        static_size = 1
+        out_tensor = torch.empty((static_size, input_tensor.dim()), dtype=torch.float)
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: Expected out tensor to have scalar type Long"
+        ):
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor)
+
+        # nonzero_static.out: out resize (shrink)
+        input_tensor = torch.tensor([8])
+        static_size = 1
+        out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
+                torch.tensor([0]),
+            )
+        )
+        self.assertTrue(
+            same(
+                out_tensor,
+                torch.tensor([0]),
+            )
+        )
+
+        # nonzero_static.out: out resize (enlarge)
+        input_tensor = torch.tensor([8])
+        static_size = 1
+        out_tensor = torch.empty((0), dtype=torch.long)
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
+                torch.tensor([0]),
+            )
+        )
+        self.assertTrue(
+            same(
+                out_tensor,
+                torch.tensor([0]),
+            )
+        )
+
+        # 0 rank
+        input_tensor = torch.tensor(6)
+        static_size = 2
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
+            )
+        )
+
+        # 0 size
+        input_tensor = torch.tensor([[[1]]])
+        static_size = 0
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
+            )
+        )
+
+        # 1D input
+        input_tensor = torch.tensor([0, 8])
+        static_size = 1
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.tensor([1]),
+            )
+        )
+
+        input_tensor = torch.tensor([8, 0])
+        static_size = 2
+        self.assertTrue(
+            same(
+                torch.nonzero_static(input_tensor, size=static_size),
+                torch.tensor([[0], [-1]]),  # padded with default fill_value "-1"
+            )
+        )
+
+        # 2D input
+        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
+        static_size = 5
+        fill_value = -100
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                torch.nonzero_static(
+                    input_tensor, size=static_size, fill_value=fill_value
+                ),
+                torch.tensor(
+                    [
+                        [0, 0],
+                        [1, 0],
+                        [1, 1],
+                        [fill_value, fill_value],
+                        [fill_value, fill_value],
+                    ]
+                ),
+            )
+        )
+        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
+        static_size = 2
+        fill_value = -100
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                torch.nonzero_static(
+                    input_tensor, size=static_size, fill_value=fill_value
+                ),
+                torch.tensor([[0, 0], [1, 0]]),
+            )
+        )
+
+        # 3D input
+        input_tensor = torch.tensor([[[0, 0], [0, -3]], [[0, 0], [5, 0]]])
+        static_size = 4
+        fill_value = -999
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                torch.nonzero_static(
+                    input_tensor,
+                    size=static_size,
+                    fill_value=fill_value,
+                ),
+                torch.tensor(
+                    [
+                        [0, 1, 1],
+                        [1, 1, 0],
+                        [fill_value, fill_value, fill_value],
+                        [fill_value, fill_value, fill_value],
+                    ]
+                ),
+            )
+        )
+
     def test_cond_with_quantization(self):
         from functorch.experimental.control_flow import cond
 
@@ -3178,31 +3244,23 @@ def fn():
         false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
         self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
 
-    def test_disable_optimize(self):
-        cnt = torch._dynamo.testing.CompileCounter()
+    def test_enum_guards(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
 
-        @torch._dynamo.optimize(cnt, disable=True)
-        def f1(x):
-            return x + 1
-
-        f1(torch.ones(6))
-        self.assertEqual(cnt.frame_count, 0)
-
-        @torch._dynamo.optimize(cnt, disable=True)
-        def f2(x):
-            return x + 1
-
-        f2(torch.ones(6))
-        self.assertEqual(cnt.frame_count, 0)
-
-        with patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"}):
-
-            @torch._dynamo.optimize(cnt)
-            def f3(x):
+        def fn(x, y):
+            if y == MyEnum.FOO:
                 return x + 1
+            else:
+                return x - 1
 
-            f3(torch.ones(6))
-        self.assertEqual(cnt.frame_count, 0)
+        x = torch.rand(3)
+        y = MyEnum.BAR
+        ref = fn(x, y)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
 
     @patch.object(torch._dynamo.config, "print_graph_breaks", True)
     def test_duplicate_graph_break_warning(self):
@@ -3256,7 +3314,7 @@ def fn():
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         opt_fn(x, y)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 5)
+        self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
@@ -3995,6 +4053,7 @@ def fn():
             root_tx=None,
             export=False,
             export_constraints=None,
+            frame_state={"_id": 0},
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
@@ -4298,17 +4357,15 @@ def fn():
                 z *= 3
             return z
 
-        # TODO remove condition once 3.11 is fully supported
-        if sys.version_info < (3, 11):
-            opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
-            self.assertEqual(opt_f(None, torch.ones(2)), 6)
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
             insts = bytecode_transformation.cleaned_instructions(f.__code__)
             for inst in insts:
                 self.assertNotIn("_NONE", inst.opname)
 
-    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
+    @skipIfNotPy311
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
         load_global = bytecode_transformation.create_load_global
@@ -4408,6 +4465,191 @@ def fn():
             dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
             self.assertEqual(dummy_opt(), test[3])
 
+    def test_exception_table_encode_varint(self):
+        # these numbers have no real meaning to them
+        nums = [
+            0b111_101010_000000,
+            0b1100_111000_010101_101010,
+        ]
+        b = bytecode_transformation.encode_exception_table_varint(
+            nums[0]
+        ) + bytecode_transformation.encode_exception_table_varint(nums[1])
+        nums_new = []
+        b_iter = iter(bytes(b))
+        while True:
+            try:
+                nums_new.append(
+                    bytecode_transformation.decode_exception_table_varint(b_iter)
+                )
+            except StopIteration:
+                break
+        self.assertEqual(nums, nums_new)
+
+    @skipIfNotPy311
+    def test_exception_table_parsing(self):
+        def fn():
+            try:
+                with a():
+                    b()
+                c()
+            except Exception:
+                d()
+            finally:
+                e()
+            f()
+
+        tab = bytecode_transformation.parse_exception_table(
+            fn.__code__.co_exceptiontable
+        )
+        b = bytecode_transformation.assemble_exception_table(tab)
+        self.assertEqual(b, fn.__code__.co_exceptiontable)
+
+    @skipIfNotPy311
+    def test_exception_table_e2e(self):
+        def fn():
+            try:
+                with a():
+                    b()
+                c()
+            except Exception:
+                d()
+            finally:
+                e()
+            f()
+
+        def nothing(*args):
+            pass
+
+        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
+
+    @skipIfNotPy311
+    def test_exception_table_e2e_2(self):
+        # last instructions of an exn_table entry is a large instruction
+        # i.e., LOAD_GLOBAL a
+        def fn():
+            try:
+                return a
+            except Exception:
+                pass
+
+        def nothing(*args):
+            pass
+
+        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
+
+    @skipIfNotPy311
+    def test_exception_table_entry_propagation(self):
+        insts = []
+        for _ in range(10):
+            insts.append(bytecode_transformation.create_instruction("NOP"))
+        insts[8].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[0], insts[9], insts[0], 0, True
+        )
+        insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[0], insts[0], insts[1], 0, True
+        )
+        insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[0], insts[2], insts[2], 0, True
+        )
+        insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[4], insts[6], insts[3], 0, True
+        )
+        insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[9], insts[9], insts[4], 0, True
+        )
+        insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[7], insts[9], insts[5], 0, True
+        )
+        bytecode_transformation.propagate_inst_exn_table_entries(insts)
+        expected = [1, 2, 2, 0, 3, 3, 3, 5, 5, 4]
+        for inst, exp in zip(insts, expected):
+            self.assertIsNotNone(inst.exn_tab_entry)
+            self.assertIs(inst.exn_tab_entry.target, insts[exp])
+
+    @skipIfNotPy311
+    def test_compute_exception_table_nested(self):
+        insts = []
+        for _ in range(20):
+            insts.append(bytecode_transformation.create_instruction("NOP"))
+        insts[10].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[1], insts[10], insts[0], 0, True
+        )
+        insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[1], insts[1], insts[1], 0, True
+        )
+        insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[1], insts[3], insts[2], 0, True
+        )
+        insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[5], insts[7], insts[3], 0, True
+        )
+        insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[10], insts[10], insts[4], 0, True
+        )
+        insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[8], insts[10], insts[5], 0, True
+        )
+        insts[14].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[13], insts[17], insts[6], 0, True
+        )
+        insts[16].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            insts[15], insts[16], insts[7], 0, True
+        )
+        bytecode_transformation.update_offsets(insts)
+        tab = bytecode_transformation.compute_exception_table(insts)
+        expected = [
+            (1, 1, 1),
+            (2, 3, 2),
+            (4, 4, 0),
+            (5, 7, 3),
+            (8, 9, 5),
+            (10, 10, 4),
+            (13, 14, 6),
+            (15, 16, 7),
+            (17, 17, 6),
+        ]
+        self.assertEquals(len(tab), len(expected))
+        for entry, exp in zip(tab, expected):
+            self.assertEquals(entry.start, exp[0] * 2)
+            self.assertEquals(entry.end, exp[1] * 2)
+            self.assertEquals(entry.target, exp[2] * 2)
+
+    @skipIfNotPy311
+    def test_remove_dead_code_with_exn_table_entries(self):
+        create_instruction = bytecode_transformation.create_instruction
+        target1 = create_instruction("NOP")
+        target2 = create_instruction("NOP")
+        target3 = create_instruction("NOP")
+        exn_start = create_instruction("NOP")
+        exn_end = create_instruction("NOP")
+        insts = [
+            create_instruction("JUMP_FORWARD", target=target1),
+            exn_start,  # dead
+            target1,
+            create_instruction("JUMP_FORWARD", target=target3),
+            exn_end,  # dead
+            target2,
+            target3,
+        ]
+        exn_start.exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
+            exn_start, exn_end, target2, 0, True
+        )
+        bytecode_transformation.propagate_inst_exn_table_entries(insts)
+        insts = bytecode_analysis.remove_dead_code(insts)
+        self.assertEquals(len(insts), 5)
+        self.assertNotIn(exn_start, insts)
+        self.assertNotIn(exn_end, insts)
+        self.assertIn(target2, insts)
+        self.assertIn(target3, insts)
+        bytecode_transformation.update_offsets(insts)
+        tab = bytecode_transformation.compute_exception_table(insts)
+        self.assertEquals(len(tab), 1)
+        self.assertEquals(tab[0].start, 2)
+        self.assertEquals(tab[0].end, 4)
+        self.assertEquals(tab[0].target, 6)
+
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
 
@@ -4437,6 +4679,21 @@ def fn():
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    def test_mark_static(self):
+        counter = CompileCounter()
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        y = torch.randn([3])
+        torch._dynamo.mark_static(y, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(y)
+
+        z = torch.randn([4])
+        torch._dynamo.optimize(counter)(my_dyn_fn)(z)
+
+        self.assertEqual(counter.frame_count, 2)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint(self):
@@ -4596,84 +4853,6 @@ def fn():
 
         model.training_step()
 
-    def test_torch_guards_stack_frame_register_inlining_disable(self):
-        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
-        x = torch.tensor([0.5, 0.5])
-
-        class encoder(torch.nn.Module):
-            def __init__(self, y):
-                super().__init__()
-                self.register_parameter("param", y)
-
-            @torch._dynamo.disable
-            def helper(self, x, y):
-                return x * y
-
-            def forward(self, a, *args):
-                x = a + a
-                return self.helper(x, self.param)
-
-        e = encoder(y)
-
-        seen_frames = []
-        import contextlib
-
-        @contextlib.contextmanager
-        def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
-            yield
-
-        with mock.patch(
-            "torch._guards.TracingContext.current_frame",
-            side_effect=global_context_capture_fn,
-        ):
-            torch._dynamo.optimize("eager")(e)(x)
-
-        self.assertEqual(len(seen_frames), 0)
-
-    def test_torch_guards_stack_frame_register_inlining_partially_disable(self):
-        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
-        x = torch.tensor([0.5, 0.5])
-
-        class encoder(torch.nn.Module):
-            def __init__(self, y):
-                super().__init__()
-                self.register_parameter("param", y)
-
-            @torch._dynamo.disable
-            def helper_disabled(self, x, y):
-                return x * y
-
-            def helper(self, x, y):
-                return x * y
-
-            def forward(self, a, *args):
-                x = a + a
-                return self.helper(x, self.param) + self.helper_disabled(x, self.param)
-
-        e = encoder(y)
-
-        seen_frames = []
-        import contextlib
-
-        @contextlib.contextmanager
-        def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
-            yield
-
-        with mock.patch(
-            "torch._guards.TracingContext.current_frame",
-            side_effect=global_context_capture_fn,
-        ):
-            torch._dynamo.optimize("eager")(e)(x)
-
-        self.assertEqual(len(seen_frames), 1)
-        self.assertEqual(seen_frames[0].name, "forward")
-        self.assertEqual(
-            seen_frames[0].line,
-            "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
-        )
-
     def test_torch_guards_stack_frame_register_inlining(self):
         x = torch.tensor([0.5, 0.5])
         y = torch.tensor([0.75, 0.75, 0.75, 0.75])
@@ -4820,6 +4999,27 @@ def fn():
             return -x * -y * a * b
 
         torch._dynamo.testing.standard_test(self, int_neg, 2)
+
+    def test_hash_getitem_slice(self):
+        s = GetItemSource(LocalSource("foo"), slice(None, -1, None))
+        s2 = GetItemSource(LocalSource("foo"), slice(None, -1, None))
+        s3 = GetItemSource(LocalSource("foo"), slice(None, -1, 2))
+        some_set = set()
+
+        self.assertTrue(s not in some_set)
+        self.assertTrue(s2 not in some_set)
+        self.assertTrue(s3 not in some_set)
+
+        some_set.add(s)
+
+        self.assertTrue(s in some_set)
+        # s and s2 should hash the  same
+        self.assertTrue(s2 in some_set)
+        # s3 should be different
+        self.assertTrue(s3 not in some_set)
+
+        self.assertTrue(s == s2)
+        self.assertTrue(s != s3)
 
 
 class CustomFunc1(torch.autograd.Function):

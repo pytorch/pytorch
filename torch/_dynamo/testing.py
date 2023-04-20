@@ -3,6 +3,7 @@ import dis
 import functools
 import logging
 import os.path
+import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -147,7 +148,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -297,3 +298,10 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass
+
+
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
+        return fn
+    return unittest.skip(fn)

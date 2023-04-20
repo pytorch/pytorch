@@ -232,20 +232,22 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   // Look for a SymNode to dispatch on
   SymNode base;
   bool all_hinted = true;
+  // NB: sizes/strides guaranteed to be positive, so only need
+  // is_heap_allocated
   for (const auto& s : sizes) {
     if (all_hinted && !s.has_hint()) {
       all_hinted = false;
     }
-    if (!base && s.is_symbolic()) {
-      base = s.toSymNodeImpl();
+    if (!base && s.is_heap_allocated()) {
+      base = s.toSymNode();
     }
   }
   for (const auto& s : strides) {
     if (all_hinted && !s.has_hint()) {
       all_hinted = false;
     }
-    if (!base && s.is_symbolic()) {
-      base = s.toSymNodeImpl();
+    if (!base && s.is_heap_allocated()) {
+      base = s.toSymNode();
     }
   }
   if (!base || all_hinted) {
@@ -943,7 +945,7 @@ void TensorImpl::Extend(int64_t num, float growthPct) {
       static_cast<int64_t>(std::ceil(
           static_cast<float>(sizes_and_strides_.size_at_unchecked(0)) *
           (1 + growthPct / 100))));
-  auto oldData = std::move(storage_.data_ptr());
+  auto oldData = std::move(storage_.mutable_data_ptr());
   auto oldSize = numel_;
   Resize(std::move(newCapacity));
   auto* newData = raw_mutable_data(data_type_);
@@ -993,7 +995,7 @@ void TensorImpl::ReserveSpace(int64_t outer_dim) {
     return;
   }
   // Old data is discarded
-  storage_.data_ptr().clear();
+  storage_.mutable_data_ptr().clear();
   auto oldSize = numel_;
   SmallVector<int64_t, 5> oldDims(
       sizes_and_strides.begin(), sizes_and_strides.end());
@@ -1125,7 +1127,8 @@ void TensorImpl::set_sizes_and_strides(
   auto int_sizes = asIntArrayRefSlowOpt(sizes);
   auto int_strides = asIntArrayRefSlowOpt(strides);
   if (int_sizes && int_strides &&
-      (!storage_offset.has_value() || !storage_offset->is_symbolic()) &&
+      // NB: storage_offset guaranteed to be positive
+      (!storage_offset.has_value() || !storage_offset->is_heap_allocated()) &&
       !has_symbolic_sizes_strides_) {
     set_sizes_and_strides(*int_sizes, *int_strides);
     if (storage_offset.has_value())

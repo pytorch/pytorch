@@ -18,6 +18,12 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      python-version:
+        required: false
+        type: string
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
       arch:
         required: true
         type: string
@@ -29,48 +35,18 @@ on:
         default: 270
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
-        required: true
-        description: access key id for test stats upload
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
-        required: true
-        description: secret acess key for test stats upload
 
 jobs:
-  # This needs to be run right before the test starts so that it can gather the
-  # latest labels from the PR
-  filter:
-    runs-on: [self-hosted, linux.large]
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
     # Also ensure that we always run with the right architecture
     defaults:
       run:
         shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -83,7 +59,6 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-      CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
     steps:
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
@@ -98,7 +73,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -106,19 +81,10 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Setup miniconda (x86, py3.8)
-        if: ${{ runner.arch == 'X64' }}
+      - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.8
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
-
-      - name: Setup miniconda (arm64, py3.9)
-        if: ${{ runner.arch == 'ARM64' }}
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: 3.9
+          python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
@@ -129,20 +95,19 @@ jobs:
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
-      - name: Install macOS homebrew dependencies
-        uses: nick-fields/retry@v2.8.2
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            # Install dependencies
-            brew install libomp
-            brew link --force libomp
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
+
+      - name: Check for keep-going label
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels.  It does not actually do any filtering.  All
+        # filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
 
       - name: Pre-process arm64 wheels
         if: inputs.build-environment == 'macos-12-py3-arm64'
@@ -164,8 +129,12 @@ jobs:
         env:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
         run: |
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          # shellcheck disable=SC1090
+          set -ex
+
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
 
           # sanitize the input commit message and PR body here:
           #
@@ -179,6 +148,19 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
           arch
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
+          # Print out some information about the test environment
+          which conda
+          conda --version
+          ${CONDA_RUN} which python3
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} python --version
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
