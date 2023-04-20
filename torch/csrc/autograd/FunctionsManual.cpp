@@ -5737,11 +5737,16 @@ Tensor lu_unpack_backward(
 
 Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
+  at::TensorOptions options;
 
   auto materialized = tensors.materialize();
   auto any_defined = false;
   for (const Tensor& t : materialized) {
-    any_defined |= isFwGradDefined(t);
+    if (isFwGradDefined(t)) {
+      any_defined = true;
+      options = t.options();
+      break
+    }
   }
 
   if (any_defined) {
@@ -5757,7 +5762,8 @@ Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
               : at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
-    out_fw_grad = at::cat(fw_grads, dim);
+    out_fw_grad = fw_grads.size() > 0 ? at::cat(fw_grads, dim)
+                                      : at::_efficientzerotensor({0}, options);
   }
 
   return out_fw_grad;
