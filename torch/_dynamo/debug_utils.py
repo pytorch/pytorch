@@ -221,9 +221,12 @@ def _cuda_system_info_comment():
     return model_str
 
 
-def generate_config_string():
+def generate_config_string(*, stable_output=False):
     import torch._functorch.config
     import torch._inductor.config
+
+    if stable_output:
+        return "# config omitted due to stable_output=True"
 
     return textwrap.dedent(
         f"""\
@@ -240,7 +243,7 @@ torch._functorch.config.load_config({repr(torch._functorch.config.save_config())
 TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
 
 
-def generate_compiler_repro_string(gm, args):
+def generate_compiler_repro_string(gm, args, *, stable_output=False):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -250,19 +253,20 @@ from torch._dynamo.testing import rand_strided
 from math import inf
 from torch.fx.experimental.proxy_tensor import make_fx
 
-{generate_config_string()}
+{generate_config_string(stable_output=stable_output)}
 
 {TEST_REPLACEABLE_COMMENT}
 {extra_imports}
 
         """
     )
-    model_str += f"# torch version: {torch.version.__version__}\n"
-    if hasattr(torch.version, "cuda"):
-        model_str += f"# torch cuda version: {torch.version.cuda}\n"
-    if hasattr(torch.version, "git_version"):
-        model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-    model_str += _cuda_system_info_comment()
+    if not stable_output:
+        model_str += f"# torch version: {torch.version.__version__}\n"
+        if hasattr(torch.version, "cuda"):
+            model_str += f"# torch cuda version: {torch.version.cuda}\n"
+        if hasattr(torch.version, "git_version"):
+            model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
+        model_str += _cuda_system_info_comment()
 
     model_str += NNModuleToString.convert(gm)
 
