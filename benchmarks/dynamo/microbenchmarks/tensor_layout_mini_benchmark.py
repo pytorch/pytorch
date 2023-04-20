@@ -36,7 +36,8 @@ def bench_conv(with_stack=True):
         return torch.convolution(x, weight, bias=None, **kwargs)
 
     def test_fn():
-        return torch.convolution(x_chan, weight_chan, bias=None, **kwargs)
+        # return torch.convolution(x_chan, weight_chan, bias=None, **kwargs) # 1.419x
+        return torch.convolution(x_chan, weight, bias=None, **kwargs) # 1.417x
 
     # warmup
     baseline_fn()
@@ -56,11 +57,50 @@ def bench_conv(with_stack=True):
 
     baseline_ms = do_bench(baseline_fn, rep=40)
     test_ms = do_bench(test_fn, rep=40)
-    print(f"baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
+    print(f"conv baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
 
+def bench_conv_backward():
+    out_channel, in_channel = 64, 3  # 1.139x
+    out_channel, in_channel = 128, 6 # 0.966x
+    out_channel, in_channel = 32, 3 # 0.955x
+    out_channel, in_channel = 32, 6 # 1.059x
+    grad_out = torch.rand(16, out_channel, 112, 112).cuda()
+    x = torch.rand(16, in_channel, 224, 224).cuda()
+    weight = torch.rand(out_channel, in_channel, 7, 7).cuda()
+
+    grad_out_chan = to_channels_last(grad_out)
+    x_chan = to_channels_last(x)
+    weight_chan = to_channels_last(weight)
+
+    kwargs = {
+        "bias_sizes": [0],
+        "stride": [2, 2],
+        "padding": [3, 3],
+        "dilation": [1, 1],
+        "transposed": False,
+        "output_padding": [0, 0],
+        "groups": 1,
+        "output_mask": [False, True, False],
+    }
+
+    def baseline_fn():
+        return torch.ops.aten.convolution_backward.default(
+            grad_out, x, weight, **kwargs
+        )
+
+    def test_fn():
+        return torch.ops.aten.convolution_backward.default(
+            # grad_out_chan, x_chan, weight_chan, **kwargs,
+            grad_out_chan, x_chan, weight, **kwargs,
+        )
+
+    baseline_ms = do_bench(baseline_fn, rep=40)
+    test_ms = do_bench(test_fn, rep=40)
+    print(f"conv backward baseline {baseline_ms} test {test_ms} speedup {baseline_ms / test_ms:.3f}x")
 
 def main():
     bench_conv()
+    # bench_conv_backward()
 
 
 if __name__ == "__main__":
