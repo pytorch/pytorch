@@ -7790,7 +7790,7 @@ class TestNNDeviceType(NNTestCase):
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
 
-            delta = 1e-1 if dtype == torch.bfloat16 else 1e-5
+            delta = 1e-1 if (dtype == torch.bfloat16 or dtype == torch.half) else 1e-5
             self.assertEqual(torch.abs(mean.data).mean(), 0, atol=delta, rtol=0)
             self.assertEqual(torch.abs(var.data).mean(), 1, atol=delta, rtol=0)
 
@@ -7824,12 +7824,12 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqualTypeString(output, input)
 
-    def _test_LayerNorm_cpu_mixed_dtype(self, device):
+    def _test_LayerNorm_cpu_mixed_dtype(self, device, dtype):
         for elementwise_affine in [True, False]:
             # layer norm input shape is normalized to m x n, cpu vectorized on n,
             # so make sure n exceeds vector length
-            input = torch.empty(2, 3, 11, 3, device=device, dtype=torch.bfloat16).random_(1, 10)
-            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, torch.bfloat16)
+            input = torch.empty(2, 3, 11, 3, device=device, dtype=dtype).random_(1, 10)
+            m = nn.LayerNorm([11, 3], elementwise_affine=elementwise_affine).to(device, dtype)
 
             # fp32
             m_fp32 = deepcopy(m).to(device, torch.float)
@@ -7837,21 +7837,21 @@ class TestNNDeviceType(NNTestCase):
             out_fp32 = m_fp32(x_fp32)
             out_fp32.sum().backward()
 
-            # bf16
+            # bf16/half
             m_bf16 = deepcopy(m)
             x_bf16 = input.clone().detach().requires_grad_()
             out_bf16 = m_bf16(x_bf16)
             out_bf16.sum().backward()
 
-            # bf16 mixed type
+            # bf16/half mixed type
             m_mix = deepcopy(m).to(device, torch.float)
             x_mix = input.clone().detach().requires_grad_()
             out_mix = m_mix(x_mix)
             out_mix.sum().backward()
-            self.assertEqual(out_fp32.bfloat16(), out_bf16)
-            self.assertEqual(out_fp32.bfloat16(), out_mix)
-            self.assertEqual(x_fp32.grad.bfloat16(), x_bf16.grad, atol=1e-1, rtol=1e-1)
-            self.assertEqual(x_fp32.grad.bfloat16(), x_mix.grad, atol=1e-1, rtol=1e-1)
+            self.assertEqual(out_fp32.to(dtype=dtype), out_bf16)
+            self.assertEqual(out_fp32.to(dtype=dtype), out_mix)
+            self.assertEqual(x_fp32.grad.to(dtype=dtype), x_bf16.grad, atol=1e-1, rtol=1e-1)
+            self.assertEqual(x_fp32.grad.to(dtype=dtype), x_mix.grad, atol=1e-1, rtol=1e-1)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
@@ -8338,13 +8338,15 @@ class TestNNDeviceType(NNTestCase):
         self._test_LayerNorm_general(device)
 
         if self.device_type == 'cuda' or self.device_type == 'cpu':
-            self._test_LayerNorm_general(device, dtype=torch.bfloat16)
+            for dtype in [torch.half, torch.bfloat16]:
+                self._test_LayerNorm_general(device, dtype=dtype)
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
         if self.device_type == 'cpu':
-            self._test_LayerNorm_cpu_mixed_dtype(device)
+            for dtype in [torch.half, torch.bfloat16]:
+                self._test_LayerNorm_cpu_mixed_dtype(device, dtype=dtype)
 
     @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):

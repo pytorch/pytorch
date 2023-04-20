@@ -75,24 +75,25 @@ inline void UpdateMomentsVec(
   AddMomentsVec(m0, m1_vec, m2_vec, m0_stk0, m1_stk0, m2_stk0);
 }
 
-// each bfloat16 vector will be converted to two float vectors,
+// each bfloat16/half vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
-template <>
-inline void UpdateMomentsVec<BFloat16>(
+template <typename T,
+          typename std::enable_if<is_reduced_floating_point<T>::value, int>::type = 0>
+inline void UpdateMomentsVec(
     int64_t m0,
-    const BFloat16* X_ptr,
+    const T* X_ptr,
     const std::array<vec::Vectorized<float>, kChunkSize>& c_vecs,
     int64_t& m0_stk0,
     vec::Vectorized<float>& m1_stk0,
     vec::Vectorized<float>& m2_stk0) {
-  using bVec = vec::Vectorized<BFloat16>;
+  using bVec = vec::Vectorized<T>;
   using fVec = vec::Vectorized<float>;
   fVec m1_fvec0(0), m1_fvec1(0);
   fVec m2_fvec0(0), m2_fvec1(0);
   for (const auto j : c10::irange(m0)) {
     const bVec x_bvec = bVec::loadu(X_ptr + j * bVec::size());
     fVec x_fvec0, x_fvec1;
-    std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+    std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
     const fVec delta_fvec0 = x_fvec0 - m1_fvec0;
     const fVec delta_fvec1 = x_fvec1 - m1_fvec1;
     m1_fvec0 += delta_fvec0 * c_vecs[j];

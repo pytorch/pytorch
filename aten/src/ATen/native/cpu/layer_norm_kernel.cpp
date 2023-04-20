@@ -83,7 +83,8 @@ void LayerNormKernelImplInternal(
   });
 }
 
-template <typename T, typename param_t>
+template <typename T, typename param_t,
+          typename std::enable_if<is_reduced_floating_point<T>::value, int>::type = 0>
 void layer_norm_kernel_mixed_type(
     const Tensor& X,
     const Tensor& gamma,
@@ -501,46 +502,6 @@ void layer_norm_backward_frame(
     }
   }
 }
-
-// template <>
-// void layer_norm_backward_frame<BFloat16, float, float>(
-//     const BFloat16* dY_data,
-//     const BFloat16* X_data,
-//     const float* mean_data,
-//     const float* rstd_data,
-//     const float* gamma_data,
-//     BFloat16* dX_data,
-//     BFloat16* dgamma_buffer_ptr,
-//     BFloat16* dbeta_buffer_ptr,
-//     const float scale,
-//     const bool gamma_null,
-//     const bool dX_null,
-//     const bool dgamma_null,
-//     const bool dbeta_null,
-//     int64_t N,
-//     int64_t i) {
-//       layer_norm_backward_mixed_type<BFloat16>(dY_data, X_data, mean_data, rstd_data, gamma_data, dX_data, dgamma_buffer_ptr, dbeta_buffer_ptr, scale, gamma_null, dX_null, dgamma_null, dbeta_null, N, i);
-//     }
-
-// template <>
-// void layer_norm_backward_frame<Half, float, float>(
-//     const Half* dY_data,
-//     const Half* X_data,
-//     const float* mean_data,
-//     const float* rstd_data,
-//     const float* gamma_data,
-//     Half* dX_data,
-//     Half* dgamma_buffer_ptr,
-//     Half* dbeta_buffer_ptr,
-//     const float scale,
-//     const bool gamma_null,
-//     const bool dX_null,
-//     const bool dgamma_null,
-//     const bool dbeta_null,
-//     int64_t N,
-//     int64_t i) {
-//       layer_norm_backward_mixed_type<Half>(dY_data, X_data, mean_data, rstd_data, gamma_data, dX_data, dgamma_buffer_ptr, dbeta_buffer_ptr, scale, gamma_null, dX_null, dgamma_null, dbeta_null, N, i);
-//     }
 
 template <typename T, typename T2>
 void LayerNormBackwardKernelImplInternal(
