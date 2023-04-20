@@ -1014,7 +1014,7 @@ class CUDAGraphNode:
 
             output_new_storages_index[o.untyped_storage().data_ptr()] = i
             self.output_storage_alias.append(UnaliasedStorage)
-            self.unaliased_in_all_paths[i] = True
+            self.unaliased_in_all_paths[i] = False  # True XXXX - testing no caching
 
         if self.stack_traces is None:
             self.stack_traces = [None for _ in range(len(outputs))]
@@ -1289,7 +1289,14 @@ class CUDAGraphNode:
         self, metadata: Dict[str, Any], storage=None
     ) -> Tensor:
         s = self.create_storage(metadata) if storage is None else storage
-        return torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(metadata, s)
+        return self._reconstruct_from_tensor_metadata_impl(metadata, s)
+
+    def _reconstruct_from_tensor_metadata_impl(
+        self, metadata: Dict[str, Any], storage
+    ) -> Tensor:
+        return torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
+            metadata, storage
+        )
 
     def create_storage(self, metadata):
         return torch._C._construct_storage_from_data_pointer(

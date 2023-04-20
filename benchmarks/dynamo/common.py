@@ -1370,6 +1370,22 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.empty_cache()
+
+                # there might be a better place to put this.. oh well
+                if mode != "eager":
+                    # warmup
+                    for _ in range(niters):
+                        fn(model, example_inputs)
+
+                    import cProfile
+
+                    prof = cProfile.Profile()
+                    prof.enable()
+                    for _ in range(niters):
+                        fn(model, example_inputs)
+                    prof.disable()
+                    prof.dump_stats("cudagraph_profile_no_caching.prof")
+
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
