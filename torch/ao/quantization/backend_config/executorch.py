@@ -356,6 +356,25 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
                 ._set_input_type_to_index({"weight": 1}))
     return embedding_op_configs
 
+def _get_default_op_configs() -> List[BackendPatternConfig]:
+    default_op_configs: List[BackendPatternConfig] = []
+    dtype_configs =[
+        qnnpack_default_op_qint8_symmetric_dtype_config,
+        executorch_default_op_quint8_dtype_config
+    ]
+    observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
+
+    default_ops = [
+        torch.nn.Dropout,
+        F.dropout,
+    ]
+    for op in default_ops:
+        default_op_configs.append(
+            BackendPatternConfig(op)
+               .set_observation_type(observation_type)
+               .set_dtype_configs(dtype_configs))
+
+    return default_op_configs
 # =====================
 # |  BACKEND CONFIGS  |
 # =====================
@@ -371,4 +390,5 @@ def get_executorch_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_share_qparams_ops_configs()) \
         .set_backend_pattern_configs(_get_bn_configs()) \
         .set_backend_pattern_configs(_get_cat_configs()) \
-        .set_backend_pattern_configs(_get_embedding_op_configs())
+        .set_backend_pattern_configs(_get_embedding_op_configs()) \
+        .set_backend_pattern_configs(_get_default_op_configs())
