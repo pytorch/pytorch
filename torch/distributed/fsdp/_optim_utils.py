@@ -1810,7 +1810,7 @@ def _scatter_orig_param_optim_state_dict(
                 info = _PosDimTensorInfo(value.shape, value.dtype)
                 no_tensor_osd["state"][key][state_name] = info
         no_tensor_osd["param_groups"] = unflat_osd["param_groups"]
-    obj_list = [no_tensor_osd] if rank == 0 else [None]
+    obj_list = [no_tensor_osd] if rank == 0 else [None]  # type: ignore[list-item]
     dist.broadcast_object_list(obj_list, src=0, group=group)
     no_tensor_osd = obj_list[0]  # type: ignore[assignment]
     assert no_tensor_osd is not None
