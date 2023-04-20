@@ -2441,7 +2441,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
-    @config.patch(dynamic_shapes=True)
     def test_cond_supported_pred_types(self):
         def true_fn(x):
             return x.cos()
@@ -2450,20 +2449,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.sin()
 
         def f_pred_traced_as_symnode_var(x):
-            return cond(x.shape[0] > 2 and x.shape[0] < 5, true_fn, false_fn, [x])
+            return cond(x.shape[0] > 2, true_fn, false_fn, [x])
 
         def f_pred_traced_as_tensor_var(x):
             return cond(x.all(), true_fn, false_fn, [x])
 
-        def f_pred_complex_expression_with_explicit_pre_type(x):
-            # It's important to make the pred type explicit here, otherwise
-            # it won't be traced correctly
-            pred: torch.SymBool = x.dim() > 1 and x.shape[1] > 5
-
+        def f_pred_complex_expression_traced_as_symnode_var(x):
             return cond(
-                pred,
-                lambda x: x.cos(),
-                lambda x: x.sin(),
+                x.dim() > 1 and x.shape[1] > 5 and x.shape[1] <= 10,
+                true_fn,
+                false_fn,
                 [x],
             )
 
@@ -2471,9 +2466,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for f in [
             f_pred_traced_as_symnode_var,
             f_pred_traced_as_tensor_var,
-            f_pred_complex_expression_with_explicit_pre_type,
+            f_pred_complex_expression_traced_as_symnode_var,
         ]:
-            gm, _ = torch._dynamo.export(f, *example_inputs)
+            gm, _ = torch._dynamo.export(
+                f, *example_inputs, aten_graph=True, tracing_mode="symbolic"
+            )
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
     def test_mixed_real_and_fake_inputs(self):
@@ -2525,7 +2522,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(gm(*true_inp), f(*true_inp))
         self.assertEqual(gm(*false_inp), f(*false_inp))
 
-    @config.patch(dynamic_shapes=True)
     def test_cond_raise_user_error_on_missing_args(self):
         def true_fn(x):
             return x.cos()
@@ -2541,7 +2537,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected 4 arguments",
         ):
-            torch._dynamo.export(f, *example_inputs)
+            torch._dynamo.export(
+                f, *example_inputs, aten_graph=True, tracing_mode="symbolic"
+            )
 
     def test_cond_raise_user_error_on_unsupported_pred(self):
         def f_unsupported_pred(x):
@@ -2553,7 +2551,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected pred to be SymInt/SymBool or a tensor",
         ):
-            torch._dynamo.export(f_unsupported_pred, *example_inputs)
+            torch._dynamo.export(
+                f_unsupported_pred,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
     def test_cond_raise_user_error_on_non_list_operands(self):
         def f_non_list_operands(x):
@@ -2564,7 +2567,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected a list but got",
         ):
-            torch._dynamo.export(f_non_list_operands, *example_inputs)
+            torch._dynamo.export(
+                f_non_list_operands,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
     def test_cond_raise_user_error_on_non_tensor_operands(self):
         def f_non_tensor_operands(x):
@@ -2578,7 +2586,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected a list of tensors",
         ):
-            torch._dynamo.export(f_non_tensor_operands, *example_inputs)
+            torch._dynamo.export(
+                f_non_tensor_operands,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
     def test_cond_raise_user_error_on_branch_args_mismatch(self):
         def true_fn(x, y):
@@ -2595,9 +2608,13 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "too many positional arguments",
         ):
-            torch._dynamo.export(f_branch_args_mismatch, *example_inputs)
+            torch._dynamo.export(
+                f_branch_args_mismatch,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
-    @config.patch(dynamic_shapes=True)
     def test_cond_raise_user_error_on_branch_return_non_tensor(self):
         def f_branch_return_non_tensor(x):
             return cond(x.shape[0] <= 5, lambda x: 3.14, lambda x: 3.14, [x])
@@ -2607,7 +2624,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected branch out type to be a single tensor",
         ):
-            torch._dynamo.export(f_branch_return_non_tensor, *example_inputs)
+            torch._dynamo.export(
+                f_branch_return_non_tensor,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
     def test_cond_raise_user_error_on_branch_return_multiple_tenors(self):
         def f_branch_return_multiple_tensors(x, y):
@@ -2618,7 +2640,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected branch out type to be a single tensor",
         ):
-            torch._dynamo.export(f_branch_return_multiple_tensors, *example_inputs)
+            torch._dynamo.export(
+                f_branch_return_multiple_tensors,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
 
     def test_cond_raise_user_error_on_mismatch_return_length(self):
         def true_fn(x):
@@ -2636,10 +2663,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             "Expected branch out type to be a single tensor",
         ):
             torch._dynamo.export(
-                f_mismatch_return_length, *example_inputs, aten_graph=True
+                f_mismatch_return_length,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
             )
 
-    @config.patch(dynamic_shapes=True)
     def test_cond_raise_user_error_on_mismatch_return_tensor_meta(self):
         def true_fn(x):
             return torch.tensor([[3], [2]])
@@ -2656,7 +2685,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             "Expected each tensor to have same metadata but got",
         ):
             torch._dynamo.export(
-                f_return_tensor_mismatch, *example_inputs, aten_graph=True
+                f_return_tensor_mismatch,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
             )
 
 
