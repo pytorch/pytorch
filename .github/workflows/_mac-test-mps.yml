@@ -83,7 +83,7 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Disable XProtect
+      - name: Disable XProtect and MDS
         continue-on-error: true
         run: |
           # Like Windows Defender, XProtect could interfere with the test
@@ -161,14 +161,14 @@ jobs:
           file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Archive conda environments
-        if: failure()
+        # if: failure()
         shell: bash
         run: |
           zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
 
       - name: Store conda environments on GHA for debugging
         uses: actions/upload-artifact@v3
-        if: failure()
+        # if: failure()
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}-temp
           retention-days: 14
