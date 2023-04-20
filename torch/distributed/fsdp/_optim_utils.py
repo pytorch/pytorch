@@ -1889,6 +1889,9 @@ def _scatter_orig_param_optim_state_dict(
                         )
                     dist.broadcast(broadcast_tensor, src=0, group=group)
                     non_FSDP_optim_state[state_name] = broadcast_tensor
+                else:
+                    # Save value if not a positive-dimension tensor
+                    non_FSDP_optim_state[state_name] = value
             flat_osd_state[key] = non_FSDP_optim_state
 
     # Handle user-defined state, states that are not associated with parameters.
@@ -1960,6 +1963,10 @@ def _scatter_orig_param_state(
                     non_zero_rank_optim_state[state_name] = sharded_tensor
                 else:
                     del sharded_tensor
+            else:
+                # Save value on target rank if not a positive-dimension tensor
+                if rank == target_rank:
+                    non_zero_rank_optim_state[state_name] = value
 
     # Lastly, shard on rank 0
     if rank != 0:
