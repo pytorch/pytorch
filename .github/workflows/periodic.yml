@@ -113,6 +113,7 @@ jobs:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-debug
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-debug-build.outputs.test-matrix }}
+      timeout-minutes: 600 # Debug tests take a while to run
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3

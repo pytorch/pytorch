@@ -148,6 +148,7 @@ jobs:
             -e TORCH_CUDA_ARCH_LIST \
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
+            -e DEBUG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
