@@ -130,13 +130,17 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
 
-def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype, cur_target_is_dynamic, reuse_input_obs_or_fq):
+def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype, cur_target_is_dynamic, reuse_input_obs_or_fq, is_zeroth_arg=False):
     """
     note: we will treat "not specified" as torch.float for now
     utility function that checks if we should insert an observer or fake quant node
     base on the requested dtype for the nodes from user
 
-    TODO: more detailed docs
+    is_zeroth_arg: we only dynamically quantize the first arg of the node right now
+      this should be removed when we enable configuring dynamic quantization
+      for a specific argument
+
+    TODO (before land): more detailed docs
     """
 
     # need to insert placeholder observer for dynamic quantization so that it can
@@ -145,7 +149,7 @@ def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype
         assert cur_target_dtype in _OBS_DTYPE_LIST, \
             "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
-        return True
+        return is_zeroth_arg
     if reuse_input_obs_or_fq:
         return False
     # non dynamic quantization
@@ -566,7 +570,8 @@ def _get_arg_target_is_dynamic_as_output(
         else:
             output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
     _, output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
-    return output_is_dynamic
+    # return output_is_dynamic
+    return False
 
 def _get_arg_target_dtype_as_input_to_node(
     arg: Node,
@@ -679,7 +684,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             arg_as_output_target_is_dynamic,
             arg_as_input_target_dtype,
             arg_as_input_target_is_dynamic,
-            reuse_input_obs_or_fq
+            reuse_input_obs_or_fq,
+            is_zeroth_arg=arg is node.args[0],
         )
 
     else:
