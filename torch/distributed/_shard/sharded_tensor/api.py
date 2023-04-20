@@ -57,6 +57,11 @@ _SHARDED_OPS: Dict[Callable, Callable] = {}
 # Customized user ops
 _CUSTOM_SHARDED_OPS: Dict[Callable, Callable] = {}
 
+NO_RANK: int = -1
+
+def _get_current_rank(pg: dist.ProcessGroup) -> int:
+    return dist.get_rank(pg) if pg else NO_RANK
+
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
         if sharded_tensor_id not in _sharded_tensor_map:
@@ -136,6 +141,7 @@ class ShardedTensorBase(torch.Tensor):
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         sharding_spec=None,
+        no_process_group_mode=False,
     ) -> "ShardedTensor":
         """
         Initialize a ShardedTensorBase with local shards and a global
@@ -195,7 +201,7 @@ class ShardedTensorBase(torch.Tensor):
                 rank,
                 True,
             )
-            if not local_shard_tensor.is_contiguous():
+            if not no_process_group_mode and not local_shard_tensor.is_contiguous():
                 raise ValueError(
                     "Only torch.contiguous_format memory_format is currently supported"
                 )
@@ -309,10 +315,12 @@ class ShardedTensor(ShardedTensorBase):
         memory_format=torch.contiguous_format,
         process_group=None,
         init_rrefs=False,
+        no_process_group_mode=False,
     ):
         # prepare initialization, initialize fields like
         # _process_group, _local_shards, etc.
-        self._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
+        self._no_process_group_mode = no_process_group_mode
+        self._prepare_init(process_group=process_group, init_rrefs=init_rrefs, no_process_group_mode=no_process_group_mode)
 
         if layout != torch.strided:
             raise ValueError('Only torch.strided layout is currently supported')
@@ -337,16 +345,12 @@ class ShardedTensor(ShardedTensorBase):
         # do post initialization (i.e. register sharded_tensor_id, initialize_rpc)
         self._post_init()
 
-    def _prepare_init(self, process_group=None, init_rrefs=False):
+    def _prepare_init(self, process_group=None, init_rrefs=False, no_process_group_mode=False):
         self._init_rrefs = init_rrefs
         self._sharded_tensor_id = None
-
-        self._process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-
+        self._process_group = process_group
+        if not self._process_group and not no_process_group_mode:
+            self._process_group = distributed_c10d._get_default_group()
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
@@ -892,6 +896,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None,
         init_rrefs=False,
         sharding_spec=None,
+        no_process_group_mode=False,
     ) -> "ShardedTensor":
         """
         Initialize a ShardedTensor with local shards and a global
@@ -901,12 +906,10 @@ class ShardedTensor(ShardedTensorBase):
                  not do cross rank validations, and fully rely on the user
                  for the correctness of sharded_tensor_metadata on each rank
         """
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        if not no_process_group_mode and not process_group:
+            process_group = distributed_c10d._get_default_group()
+
+        current_rank = _get_current_rank(process_group)
 
         shards_metadata = sharded_tensor_metadata.shards_metadata
 
@@ -916,7 +919,7 @@ class ShardedTensor(ShardedTensorBase):
         for shard_metadata in shards_metadata:  # type: ignore[attr-defined]
             rank, local_device = _parse_and_validate_remote_device(process_group, shard_metadata.placement)
 
-            if current_rank == rank:
+            if not process_group or current_rank == rank:
                 local_shard_metadatas.append(shard_metadata)
 
         if len(local_shards) != len(local_shard_metadatas):
@@ -930,7 +933,8 @@ class ShardedTensor(ShardedTensorBase):
         )._init_from_local_shards_and_global_metadata(
             local_shards, sharded_tensor_metadata, sharding_spec=sharding_spec
         )
-        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
+        sharded_tensor._prepare_init(
+            process_group=process_group, init_rrefs=init_rrefs, no_process_group_mode=no_process_group_mode)
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()

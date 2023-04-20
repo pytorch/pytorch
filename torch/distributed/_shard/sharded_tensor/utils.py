@@ -22,6 +22,10 @@ def _parse_and_validate_remote_device(pg, remote_device):
     rank = remote_device.rank()
     device = remote_device.device()
 
+
+    if not pg:
+        return rank, device
+
     # Validate rank, skip validation if rank is not part of process group.
     if not distributed_c10d._rank_not_in_group(pg):
         if rank is not None and (rank < 0 or rank >= distributed_c10d.get_world_size(pg)):

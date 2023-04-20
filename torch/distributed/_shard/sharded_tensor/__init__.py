@@ -27,7 +27,8 @@ def empty(sharding_spec: shard_spec.ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False) -> ShardedTensor:
+          init_rrefs=False,
+          no_process_group_mode=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with uninitialized data.
         Needs to be called on all ranks in an SPMD fashion.
@@ -69,6 +70,7 @@ def empty(sharding_spec: shard_spec.ShardingSpec,
         memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
+        no_process_group_mode=no_process_group_mode,
     )
 
 def ones(sharding_spec: shard_spec.ShardingSpec,
@@ -79,7 +81,8 @@ def ones(sharding_spec: shard_spec.ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False) -> ShardedTensor:
+         init_rrefs=False,
+         no_process_group_mode=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` with the scalar value 1.
         Needs to be called on all ranks in an SPMD fashion.
@@ -119,7 +122,8 @@ def ones(sharding_spec: shard_spec.ShardingSpec,
         pin_memory=pin_memory,
         memory_format=memory_format,
         process_group=process_group,
-        init_rrefs=init_rrefs
+        init_rrefs=init_rrefs,
+        no_process_group_mode=no_process_group_mode,
     )
 
 def zeros(sharding_spec: shard_spec.ShardingSpec,
@@ -130,7 +134,8 @@ def zeros(sharding_spec: shard_spec.ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False) -> ShardedTensor:
+          init_rrefs=False,
+          no_process_group_mode=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with the scalar value 0.
         Needs to be called on all ranks in an SPMD fashion.
@@ -170,7 +175,8 @@ def zeros(sharding_spec: shard_spec.ShardingSpec,
         pin_memory=pin_memory,
         memory_format=memory_format,
         process_group=process_group,
-        init_rrefs=init_rrefs
+        init_rrefs=init_rrefs,
+        no_process_group_mode=no_process_group_mode,
     )
 
 def full(sharding_spec: shard_spec.ShardingSpec,
@@ -183,7 +189,8 @@ def full(sharding_spec: shard_spec.ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False) -> ShardedTensor:
+         init_rrefs=False,
+         no_process_group_mode=False) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
         is inferred from fill_value. If dtype is specified, it will override the
@@ -222,6 +229,7 @@ def full(sharding_spec: shard_spec.ShardingSpec,
         memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
+        no_process_group_mode=no_process_group_mode,
     )
     torch.nn.init.constant_(sharded_tensor, fill_value)  # type: ignore[arg-type]
     return sharded_tensor
@@ -234,7 +242,8 @@ def rand(sharding_spec: shard_spec.ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False) -> ShardedTensor:
+         init_rrefs=False,
+         no_process_group_mode=False) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
         on the interval :math:`[0, 1)`. The shape of the tensor is defined by the
@@ -275,6 +284,7 @@ def rand(sharding_spec: shard_spec.ShardingSpec,
         memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
+        no_process_group_mode=no_process_group_mode,
     )
     torch.nn.init.uniform_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
     return sharded_tensor
@@ -287,7 +297,8 @@ def randn(sharding_spec: shard_spec.ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False) -> ShardedTensor:
+          init_rrefs=False,
+          no_process_group_mode=False) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with random numbers from a uniform distribution
         with mean `0` and variance `1` (also called standard normal distribution). The shape
@@ -329,6 +340,7 @@ def randn(sharding_spec: shard_spec.ShardingSpec,
         memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
+        no_process_group_mode=no_process_group_mode,
     )
     torch.nn.init.normal_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
     return sharded_tensor
