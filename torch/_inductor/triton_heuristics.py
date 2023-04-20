@@ -84,6 +84,7 @@ class CachingAutotuner(KernelInterface):
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
+        compile_meta["debug"] = config.triton.assert_indirect_indexing
         if warm_cache_only_with_cc:
             triton.compile(
                 self.fn,
@@ -179,7 +180,7 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
+            launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
         }
         return timings
@@ -282,7 +283,7 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         if self.cached is None:
-            ms = self.bench(launcher, *args, grid=grid)[0]
+            ms = self.bench(launcher, *args, grid=grid)
             num_in_out_ptrs = len(
                 [
                     arg_name
