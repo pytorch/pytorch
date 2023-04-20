@@ -2225,10 +2225,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:
             cell = self.closure_cells[inst.argval]
-            if isinstance(cell, ClosureVariable):
-                self.push(self.output.root_tx.symbolic_locals[cell.name])
-            else:
+            if isinstance(cell, variables.NewCellVariable):
                 self.push(self.output.side_effects.load_cell(cell))
+            else:
+                self.push(self.closure_cells[inst.argval])
         else:
             maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
             if isinstance(maybe_sym_local, variables.NewCellVariable):
@@ -2238,7 +2238,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
-        self.push(self.closure_cells[inst.argval])
+        if inst.argval in self.closure_cells:
+            self.push(self.closure_cells[inst.argval])
+        else:
+            self.push(self.symbolic_locals[inst.argval])
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)
