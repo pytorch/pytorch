@@ -20,6 +20,7 @@ import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
+    get_report_path,
     IS_CI,
     is_slow_gradcheck_env,
     parser as common_parser,
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_WITH_ROCM,
-    get_report_path,
 )
 from torch.utils import cpp_extension
 
