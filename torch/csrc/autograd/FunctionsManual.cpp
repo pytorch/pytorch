@@ -5745,7 +5745,7 @@ Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
     if (isFwGradDefined(t)) {
       any_defined = true;
       options = t.options();
-      break
+      break;
     }
   }
 
