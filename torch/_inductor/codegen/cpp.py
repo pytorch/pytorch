@@ -1923,7 +1923,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var):
+            def indirect_indexing(index_var, size):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
