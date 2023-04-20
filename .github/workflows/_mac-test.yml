@@ -60,6 +60,21 @@ jobs:
       PYTORCH_RETRY_TEST_CASES: 1
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
+      - name: Disable XProtect
+        continue-on-error: true
+        run: |
+          # Like Windows Defender, XProtect could interfere with the test
+          set +e
+          set -x
+
+          # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
+          for DAEMON in "com.apple.XProtect.daemon.scan" "com.apple.XprotectFramework.PluginService" "com.apple.XprotectFramework.scan"; do
+            sudo launchctl stop "${DAEMON}"
+            echo $?
+            sudo launchctl disable "system/${DAEMON}"
+            echo $?
+          done
+
       - name: Clean up leftover processes on MacOS pet runner
         continue-on-error: true
         run: |
@@ -163,10 +178,6 @@ jobs:
           ${CONDA_RUN} python --version
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
-          # TODO: Remove this once we figure out why sympy disappears on MacOS
-          ${CONDA_RUN} python3 -mpip install --ignore-installed --no-cache-dir "sympy==1.11.1"
-          ${CONDA_RUN} python3 -mpip list
-
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
