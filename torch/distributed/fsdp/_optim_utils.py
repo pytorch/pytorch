@@ -293,7 +293,9 @@ def _unflatten_communicated_optim_state(
 
 
 def _broadcast_processed_state(
-    fsdp_state: _FSDPState, optim_state: Dict[str, Any]
+    fsdp_state: _FSDPState,
+    optim_state: Dict[str, Any],
+    group: Optional[dist.ProcessGroup],
 ) -> Dict[str, Any]:
     objects: List[Any] = [None]
     if fsdp_state.rank == 0:
@@ -309,14 +311,16 @@ def _broadcast_processed_state(
                 return value
 
         objects[0] = tree_map(process_state, optim_state)
-    dist.broadcast_object_list(objects, src=0)
+    dist.broadcast_object_list(objects, src=0, group=group)
     if fsdp_state.rank == 0:
         return optim_state
     else:
         return objects[0]
 
 
-def _broadcast_state(fsdp_state: _FSDPState, state: Any) -> Any:
+def _broadcast_state(
+    fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
+) -> Any:
     device = torch.device("cuda")
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
@@ -334,7 +338,7 @@ def _broadcast_state(fsdp_state: _FSDPState, state: Any) -> Any:
         tensor = torch.zeros(
             state.shape, dtype=state.dtype, device=torch.device("cuda")
         )
-    dist.broadcast(tensor, src=0)
+    dist.broadcast(tensor, src=0, group=group)
     return tensor
 
 
@@ -370,10 +374,10 @@ def _shard_orig_param_state(
 def _flatten_optim_state_dict(
     optim_state_dict: Dict[str, Any],
     model: nn.Module,
-    shard_state: bool,
     use_orig_params: bool = False,
     optim: Optional[torch.optim.Optimizer] = None,
     rank0_only: bool = False,
+    group: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
     Flattens the full optimizer state dict, still keying by unflattened
@@ -402,9 +406,7 @@ def _flatten_optim_state_dict(
         Dict[str, Any]: The flattened optimizer state dict.
     """
     unflat_osd = optim_state_dict
-    if "state" not in unflat_osd  and not (
-        rank0_only and use_orig_params
-    ):
+    if "state" not in unflat_osd and not rank0_only:
         raise ValueError(
             '`optim_state_dict` must have the keys "state"'
             "to be a valid optimizer state dict"
@@ -413,11 +415,9 @@ def _flatten_optim_state_dict(
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
     fsdp_state = next(iter(fqn_to_fsdp_param_info.values())).state
 
-    # Broadcast unflat_osd if rank0_only
-    # TODO: This path is currently used by only use_orig_params=True. We should
-    # consolidate the use_orig_params=False case to simplify the code.
-    if rank0_only and use_orig_params:
-        unflat_osd = _broadcast_processed_state(fsdp_state, unflat_osd)
+    # Broadcast unflat_osd without non-scalar tensor if rank0_only is True.
+    if rank0_only:
+        unflat_osd = _broadcast_processed_state(fsdp_state, unflat_osd, group=group)
 
     # Construct the "state" part
     flat_osd_state: Dict[Union[_OptimStateKey, str], Any] = {}
@@ -440,13 +440,13 @@ def _flatten_optim_state_dict(
             continue
         all_state_keys.difference_update(fqns)
 
-        if rank0_only and use_orig_params:
+        if rank0_only:
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
                 for state_name, param_state in unflat_osd_state[fqn].items():
                     unflat_osd_state[fqn][state_name] = _broadcast_state(
-                        fsdp_state, unflat_osd_state[fqn][state_name]
+                        fsdp_state, unflat_osd_state[fqn][state_name], group=group
                     )
             fqn = fqns[0]
         if fqn in fqn_to_fsdp_param_info:
@@ -462,7 +462,6 @@ def _flatten_optim_state_dict(
                     fsdp_param_info,
                     unflat_osd_state,
                     fqns,
-                    shard_state,
                 )
             key = _OptimStateKey(tuple(fqns), True)
             # Only include non-empty states since as expected by
@@ -482,7 +481,7 @@ def _flatten_optim_state_dict(
             key = _OptimStateKey(tuple(fqns), False)
             flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
 
-        if rank0_only and use_orig_params:
+        if rank0_only:
             for fqn in fqns:
                 if not unflat_osd_state[fqn]:
                     continue
@@ -493,6 +492,7 @@ def _flatten_optim_state_dict(
                     else:
                         # Move the tensor in the original osd back to CPU to make the
                         # original osd unaffected.
+                        continue
                         unflat_osd_state[fqn][state_name] = unflat_osd_state[fqn][
                             state_name
                         ].cpu()
@@ -518,7 +518,6 @@ def _flatten_optim_state(
     fsdp_param_info: FSDPParamInfo,
     unflat_osd_state: Dict[str, Dict[str, Any]],
     unflat_param_names: List[str],
-    shard_state: bool,
 ) -> Dict[str, Any]:
     """
     Flattens the optimizer state in ``full_optim_state_dict`` for a single
@@ -532,9 +531,6 @@ def _flatten_optim_state(
             optimizer state dict corresponding to the unflattened parameters.
         unflat_param_names (List[str]): A :class:`list` of unflattened
             parameter names corresponding to the flat parameter ``flat_param``.
-        shard_state (bool): Whether to shard flattened positive-dimension
-            tensor state; if ``False``, then the full flat tensor is kept in
-            the returned :class:`dict.
 
     Returns:
         Dict[str, Any]: A :class:`dict` mapping state names to their values for
@@ -623,17 +619,14 @@ def _flatten_optim_state(
                 unflat_param_shapes,
                 handle,
             )
-            if shard_state:
-                # Shard the flattened tensor immediately to minimize max memory
-                # usage
-                sharded_flat_tensor, _ = FlatParamHandle._get_shard(
-                    flat_tensor,
-                    fsdp_state.rank,
-                    fsdp_state.world_size,
-                )
-                flat_state[state_name] = sharded_flat_tensor
-            else:
-                flat_state[state_name] = flat_tensor
+            # Shard the flattened tensor immediately to minimize max memory
+            # usage
+            sharded_flat_tensor, _ = FlatParamHandle._get_shard(
+                flat_tensor,
+                fsdp_state.rank,
+                fsdp_state.world_size,
+            )
+            flat_state[state_name] = sharded_flat_tensor
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
                 state_name,
@@ -827,241 +820,6 @@ def _flatten_non_tensor_optim_state(
         )
     non_tensor = next(iter(non_tensor_set))
     return non_tensor
-
-
-def _process_pos_dim_tensor_state(
-    flat_optim_state_dict: Dict[str, Any],
-    world_size: int,
-) -> Dict[str, Any]:
-    """
-    Processes positive-dimension tensor states in ``flat_optim_state_dict`` by
-    replacing them with metadata. This is done so the processed optimizer state
-    dict can be broadcast from rank 0 to all ranks without copying those tensor
-    states, and thus, this is meant to only be called on rank 0.
-
-    Args:
-        flat_optim_state_dict (Dict[str, Any]): Flattened optimizer state dict
-            with the positive-dimension tensor states unsharded.
-
-    Returns:
-        Dict[str, Any]: The flattened optimizer state dict with positive-
-        dimension tensor states replaced by metadata.
-    """
-    flat_osd = flat_optim_state_dict  # alias
-    no_tensor_osd: Dict[str, Any] = {"state": {}}
-    for key, param_state in flat_osd["state"].items():
-        no_tensor_osd["state"][key] = {}
-        for state_name, value in sorted_items(param_state):
-            is_pos_dim_tensor_state = torch.is_tensor(value) and value.dim() > 0
-            if not is_pos_dim_tensor_state:
-                no_tensor_osd["state"][key][state_name] = value
-                continue
-            if key.is_fsdp_managed:  # FSDP parameter
-                sharded_size = FlatParamHandle._get_sharded_size(
-                    value, rank=0, world_size=world_size
-                )
-                assert len(sharded_size) == 1, f"{sharded_size}"
-                info = _PosDimTensorInfo(sharded_size, value.dtype)
-            else:  # non-FSDP parameter
-                info = _PosDimTensorInfo(value.shape, value.dtype)
-            no_tensor_osd["state"][key][state_name] = info
-
-    # Only return no_tensor_osd with param_groups if it exists in flat_osd
-    if "param_groups" in flat_osd:
-        no_tensor_osd["param_groups"] = flat_osd["param_groups"]
-    return no_tensor_osd
-
-
-def _broadcast_processed_optim_state_dict(
-    processed_optim_state_dict: Optional[Dict[str, Any]],
-    rank: int,
-    group,
-) -> Dict[str, Any]:
-    """
-    Broadcasts the processed optimizer state dict from rank 0 to all ranks.
-
-    Args:
-        processed_optim_state_dict (Optional[Dict[str, Any]]): The flattened
-            optimizer state dict with positive-dimension tensor states replaced
-            with metadata if on rank 0; ignored otherwise.
-
-    Returns:
-        Dict[str, Any]: The processed optimizer state dict.
-    """
-    # Broadcast the two data structures rank 0 to all ranks
-    obj_list = [processed_optim_state_dict] if rank == 0 else [None]
-    dist.broadcast_object_list(obj_list, src=0, group=group)
-    processed_optim_state_dict = obj_list[0]  # type: ignore[assignment]
-    assert processed_optim_state_dict is not None
-    # Keep zero-dimension tensors on CPU
-    return processed_optim_state_dict
-
-
-def _broadcast_pos_dim_tensor_states(
-    processed_optim_state_dict: Dict[str, Any],
-    flat_optim_state_dict: Optional[Dict[str, Any]],
-    rank: int,
-    world_size: int,
-    group,
-    broadcast_device: torch.device,
-) -> Dict[str, Any]:
-    """
-    Takes ``processed_optim_state_dict``, which has metadata in place of
-    positive-dimension tensor states, and broadcasts those tensor states from
-    rank 0 to all ranks. For tensor states corresponding to FSDP parameters,
-    rank 0 shards the tensor and broadcasts shard-by-shard, and for tensor
-    states corresponding to non-FSDP parameters, rank 0 broadcasts the full
-    tensor.
-
-    Args:
-        processed_optim_state_dict (Dict[str, Any]): The flattened optimizer
-            state dict with positive-dimension tensor states replaced with
-            metadata; this should be returned by
-            :meth:`_process_pos_dim_tensor_state` and non-empty on all ranks.
-        flat_optim_state_dict (Optional[Dict[str, Any]]): The flattened
-            unsharded optimizer state dict with the actual positive-dimension
-            tensor states if on rank 0; ignored on nonzero ranks.
-
-    Returns:
-        Dict[str, Any]: The optimizer state dict with the positive-dimension
-        tensor state correctly populated via ``broadcast()`` s from rank 0.
-    """
-    assert (
-        rank != 0 or flat_optim_state_dict is not None
-    ), "Expects rank 0 to pass in the flattened optimizer state dict"
-    no_tensor_osd = processed_optim_state_dict  # alias
-    flat_osd = flat_optim_state_dict  # alias
-    for key, param_state in no_tensor_osd["state"].items():
-        for state_name, value in sorted_items(param_state):
-            is_pos_dim_tensor_state = isinstance(value, _PosDimTensorInfo)
-            if not is_pos_dim_tensor_state:
-                continue
-            if rank == 0:
-                assert flat_osd is not None
-                unsharded_tensor = flat_osd["state"][key][state_name]
-            else:
-                unsharded_tensor = None
-            shape, dtype = value.shape, value.dtype
-            if key.is_fsdp_managed:  # FSDP parameter
-                _broadcast_sharded_pos_dim_tensor_state(
-                    unsharded_tensor,
-                    param_state,
-                    state_name,
-                    shape,
-                    dtype,
-                    broadcast_device,
-                    rank,
-                    world_size,
-                    group,
-                )  # modify `param_state` destructively
-            else:  # non-FSDP parameter
-                _broadcast_unsharded_pos_dim_tensor_state(
-                    unsharded_tensor,
-                    param_state,
-                    state_name,
-                    shape,
-                    dtype,
-                    broadcast_device,
-                    rank,
-                    group,
-                )  # modify `param_state` destructively
-    return no_tensor_osd
-
-
-def _broadcast_sharded_pos_dim_tensor_state(
-    unsharded_tensor: Optional[torch.Tensor],
-    param_state: Dict[str, Any],
-    state_name: str,
-    shape: torch.Size,
-    dtype: torch.dtype,
-    broadcast_device: torch.device,
-    rank: int,
-    world_size: int,
-    group,
-) -> None:
-    """
-    Broadcasts positive-dimension tensor state for the state ``state_name``
-    corresponding to an FSDP parameter shard-by-shard, only to be saved on the
-    relevant rank. This modifies ``param_state`` destructively.
-
-    Args:
-        unsharded_tensor (Optional[torch.Tensor]): Unsharded tensor from which
-            to broadcast shards if on rank 0; ignored otherwise.
-        shape (torch.Size): Shape of the sharded tensor; same on all ranks.
-    """
-    get_shard: Optional[functools.partial[Tuple[torch.Tensor, int]]] = None
-    if rank == 0:
-        assert (
-            unsharded_tensor is not None
-        ), "Expects rank 0 to pass in the unsharded tensor"
-        get_shard = functools.partial(
-            FlatParamHandle._get_shard,
-            unsharded_tensor,
-        )
-    for target_rank in range(1, world_size):
-        if rank == 0:
-            assert get_shard is not None
-            sharded_tensor = get_shard(target_rank, world_size)[0].to(broadcast_device)
-        else:
-            sharded_tensor = torch.zeros(
-                shape,
-                requires_grad=False,
-                dtype=dtype,
-                device=broadcast_device,
-            )
-        dist.broadcast(sharded_tensor, src=0, group=group)
-        # Only keep the shard on the target rank and keep it on the broadcast
-        # device, which is typically GPU
-        if rank == target_rank:
-            param_state[state_name] = sharded_tensor
-        else:
-            del sharded_tensor
-    # Lastly, shard on rank 0
-    if rank != 0:
-        return
-    param_state[state_name] = get_shard(0, world_size)[0].to(broadcast_device)  # type: ignore[misc]
-
-
-def _broadcast_unsharded_pos_dim_tensor_state(
-    unsharded_tensor: Optional[torch.Tensor],
-    param_state: Dict[str, Any],
-    state_name: str,
-    shape: torch.Size,
-    dtype: torch.dtype,
-    broadcast_device: torch.device,
-    rank: int,
-    group,
-) -> None:
-    """
-    Broadcasts positive-dimension tensor state for the state ``state_name``
-    corresponding to an unsharded non-FSDP parameter from rank 0 to all ranks.
-    This modifies ``param_state`` destructively.
-
-    Args:
-        unsharded_tensor (Optional[torch.Tensor]): Unsharded tensor to
-            broadcast if on rank 0; ignored otherwise.
-    """
-    if rank == 0:
-        assert (
-            unsharded_tensor is not None
-        ), "Expects rank 0 to pass in the unsharded tensor"
-        assert (
-            shape == unsharded_tensor.shape
-        ), f"Shape mismatch: {shape} {unsharded_tensor.shape}"
-        assert (
-            dtype == unsharded_tensor.dtype
-        ), f"dtype mismatch: {dtype} {unsharded_tensor.dtype}"
-        unsharded_tensor = unsharded_tensor.to(broadcast_device)
-    else:
-        unsharded_tensor = torch.zeros(
-            shape,
-            requires_grad=False,
-            dtype=dtype,
-            device=broadcast_device,
-        )
-    dist.broadcast(unsharded_tensor, src=0, group=group)
-    # Keep the tensor on the broadcast device, which is typically GPU
-    param_state[state_name] = unsharded_tensor
 
 
 def _rekey_sharded_optim_state_dict(
