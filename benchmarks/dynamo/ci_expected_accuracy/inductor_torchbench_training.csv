@@ -23,6 +23,7 @@ maml_omniglot,pass,9
 mnasnet1_0,pass,9
 mobilenet_v2,pass,9
 nvidia_deeprecommender,pass,9
+opacus_cifar10,pass,44
 phlippe_densenet,pass,9
 phlippe_resnet,pass,9
 pytorch_CycleGAN_and_pix2pix,pass,9

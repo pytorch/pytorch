@@ -282,10 +282,13 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
+                if cur_module.weight.device != torch.device(
+                    "cpu"
+                ) or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]:
+                    continue
                 if cur_module.training:
                     continue
                 if dynamo_config.dynamic_shapes:
-                    computation_node_input_meta = None
                     computation_node_input_size = None
                     if (
                         type(cur_module) in [torch.nn.Linear]
@@ -293,8 +296,9 @@ def pack_module(gm: torch.fx.GraphModule):
                     ):
                         continue
                 else:
-                    computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                    computation_node_input_size = computation_node_input_meta.shape
+                    computation_node_input_size = (
+                        node.args[0].meta.get("tensor_meta").shape
+                    )
                     if type(cur_module) in [torch.nn.Linear]:
                         # for fp32 linear, only packed when has mkl.
                         if (
