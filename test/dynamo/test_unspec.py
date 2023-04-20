@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 import torch
 
+from torch._dynamo.comptime import comptime
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
@@ -237,6 +238,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(30)
         torch._dynamo.mark_dynamic(y, 0)
         opt_fn(y)
+
+    @torch._dynamo.config.patch("assume_static_by_default", True)
+    def test_propagate_dynamic_dim(self):
+        x = torch.randn(20)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        @torch.compile()
+        def fn(x):
+            y = x * 2
+            comptime.graph_break()
+            z = y * 2
+            return z
+
+        z = fn(x)
+        self.assertEqual(z._dynamo_dynamic_indices, {0})
 
 
 if __name__ == "__main__":
