@@ -233,11 +233,6 @@ else:
     debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
 
 
-# this is to resolve a import problem in fbcode, we will be deleting
-# this very shortly
-DO_NOT_USE_legacy_non_fake_example_inputs = False
-
-
 _save_config_ignore = {
     "repro_after",
     "repro_level",
