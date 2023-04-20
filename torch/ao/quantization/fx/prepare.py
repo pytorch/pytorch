@@ -130,7 +130,13 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
 
-def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype, cur_target_is_dynamic, reuse_input_obs_or_fq, is_zeroth_arg=False):
+def _needs_obs_or_fq(
+        prev_output_dtype: Any,
+        prev_output_is_dynamic: bool,
+        cur_target_dtype: Any,
+        cur_target_is_dynamic: bool,
+        reuse_input_obs_or_fq: bool,
+        is_zeroth_arg: bool = False) -> bool:
     """
     note: we will treat "not specified" as torch.float for now
     utility function that checks if we should insert an observer or fake quant node
@@ -140,7 +146,8 @@ def _needs_obs_or_fq(prev_output_dtype, prev_output_is_dynamic, cur_target_dtype
       this should be removed when we enable configuring dynamic quantization
       for a specific argument
 
-    TODO (before land): more detailed docs
+    Note: we want to refactor the annotation specification api soon to use
+    a map from user_node to obs_or_fq_ctr
     """
 
     # need to insert placeholder observer for dynamic quantization so that it can
