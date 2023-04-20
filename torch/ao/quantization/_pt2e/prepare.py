@@ -89,7 +89,6 @@ def prepare(
     node_name_to_scope: Dict[str, Tuple[str, type]],
     is_qat: bool,
 ) -> GraphModule:
-
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)

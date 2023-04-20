@@ -1,6 +1,7 @@
 from torch.fx import GraphModule
 
 from ._pt2e.prepare import prepare
+from ._pt2e._propagate_annotation import propagate_annotation
 from ._pt2e.qat_utils import _fuse_conv_bn_qat
 from ._pt2e.utils import (
     _get_node_name_to_scope,
@@ -54,6 +55,7 @@ def prepare_pt2e_quantizer(
     _fuse_conv_bn_(model)
     quantizer.annotate(model)
     quantizer.validate(model)
+    propagate_annotation(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
     # TODO: remove hack when we have better support for pattern matching
     # move around the observer for addmm
@@ -68,6 +70,7 @@ def prepare_qat_pt2e_quantizer(
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
+    propagate_annotation(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
