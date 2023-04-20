@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoLapack,
     skipCUDAIf,
     skipCUDAIfNoCusolver,
-    skipCUDAIfNoMagma,
+    skipROCMfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
     skipCUDAIfRocm,
     tol,
@@ -1408,7 +1408,7 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float32],
             ),
         ),
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
     OpInfo(
         "linalg.eigvals",
@@ -1421,7 +1421,7 @@ op_db: List[OpInfo] = [
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack],
         skips=(
             # exits early on eager extremal value test
             DecorateInfo(
@@ -1463,7 +1463,7 @@ op_db: List[OpInfo] = [
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack, with_tf32_off],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -1499,7 +1499,7 @@ op_db: List[OpInfo] = [
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack],
         skips=(
             # Pre-existing condition; Needs to be fixed
             DecorateInfo(
@@ -1593,7 +1593,7 @@ op_db: List[OpInfo] = [
         supports_out=True,
         sample_inputs_func=sample_inputs_linalg_lstsq,
         error_inputs_func=error_inputs_lstsq,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack],
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
@@ -1639,7 +1639,7 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack],
         skips=(
             # tests do not work with passing lambda for op
             DecorateInfo(
@@ -2226,7 +2226,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipROCMfNoMagma, skipCPUIfNoLapack],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),

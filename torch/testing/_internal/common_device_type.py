@@ -202,7 +202,7 @@ except ImportError:
 #         Skips the test if the device is a CPU device and LAPACK is not installed
 #     - @skipCPUIfNoMkl
 #         Skips the test if the device is a CPU device and MKL is not installed
-#     - @skipCUDAIfNoMagma
+#     - @skipROCMfNoMagma
 #         Skips the test if the device is a CUDA device and MAGMA is not installed
 #     - @skipCUDAIfRocm
 #         Skips the test if the device is a CUDA device and ROCm is being used
@@ -478,7 +478,7 @@ class CUDATestBase(DeviceTypeTestBase):
     _do_cuda_non_default_stream = True
     primary_device: ClassVar[str]
     cudnn_version: ClassVar[Any]
-    no_magma: ClassVar[bool]
+    is_rocm_and_no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
 
     def has_cudnn(self):
@@ -502,7 +502,7 @@ class CUDATestBase(DeviceTypeTestBase):
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         t = torch.ones(1).cuda()
-        cls.no_magma = not torch.cuda.has_magma
+        cls.is_rocm_and_no_magma = (torch.version.hip is not None) and (not torch.cuda.has_magma)
 
         # Determines if cuDNN is available and its version
         cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
@@ -1226,8 +1226,8 @@ def skipCPUIfNoMkldnn(fn):
 
 
 # Skips a test on ROCM if MAGMA is not available; always run this test on (non-ROCM) CUDA
-def skipCUDAIfNoMagma(fn):
-    return skipCUDAIf('no_magma', "no MAGMA library detected on ROCM")(skipCUDANonDefaultStreamIf(True)(fn))
+def skipROCMfNoMagma(fn):
+    return skipCUDAIf('is_rocm_and_no_magma', "no MAGMA library detected on ROCM")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
     return not TEST_WITH_ROCM
@@ -1242,7 +1242,7 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
-        return skipCUDAIfNoMagma(fn)
+        return skipROCMfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
