@@ -111,6 +111,7 @@ def simple_reduce_tests(rank, world_size):
 
     return tests
 
+
 class RendezvousEnvTest(TestCase):
     @requires_ucc()
     @retry_on_connect_failures
@@ -1103,7 +1104,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
 
 class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
-    
+
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
@@ -1125,6 +1126,7 @@ class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGrou
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
+
 
 if __name__ == "__main__":
     assert (
