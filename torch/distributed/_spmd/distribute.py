@@ -21,13 +21,13 @@ import torch.distributed._spmd.experimental_ops
 import torch.fx as fx
 import torch.nn as nn
 from torch._functorch.aot_autograd import aot_module, make_boxed_func
+from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.aot_function_patch import patched_aot_function
 from torch.distributed._spmd.comm_tensor import _get_tracer
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
-from torch._guards import detect_fake_mode
 
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.dispatch import (
