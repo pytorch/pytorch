@@ -1420,9 +1420,15 @@ class TestSDPA(NNTestCase):
         # See check_requires_grad_and_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
         size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
             # Should not fail because inputs don't require grad
-            torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
+            self.assertEqual(math_ref, flash_ref, atol=1e-3, rtol=1e-3)
 
             # Should fail because inputs require grad
             q = make_tensor(size, requires_grad=True)
