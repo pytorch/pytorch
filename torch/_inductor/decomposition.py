@@ -37,16 +37,9 @@ inductor_decompositions = get_decompositions(
         aten.unsafe_split,
     ]
 )
-quantized_decomps = get_decompositions(
-    [
-        quantized_decomposed.quantize_per_tensor,
-        quantized_decomposed.dequantize_per_tensor,
-    ]
-)
 decompositions = {
     **core_aten_decompositions(),
     **inductor_decompositions,
-    **quantized_decomps,
 }
 
 
