@@ -51,6 +51,8 @@ def reset():
     orig_code_map.clear()
     guard_failures.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
+    if hasattr(eval_frame.most_recent_backend, "reset"):
+        eval_frame.most_recent_backend.reset()
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
     reset_frame_count()
