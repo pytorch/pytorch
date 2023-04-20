@@ -237,7 +237,9 @@ def _dtensor_expand(
     with FakeTensorMode(allow_non_fake_inputs=True):
         fake_inps = [torch.empty_like(inp) for inp in inps]
 
-    return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
+    return _convert_to_distributed(
+        gm, fake_inps, schemas, default_mesh=mesh, _allow_partial=False
+    )[0]
 
 
 @contextmanager
@@ -572,6 +574,7 @@ def compile(
     def inner(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            last_train_step = kwargs.pop("last_train_step", False) if kwargs else False
             first_iter = False
             # Put the COMPILED_OBJECT_KEY in ``wrapper`` instead of ``func`` as
             # ``wrapper`` is the one that users will get.
@@ -590,7 +593,21 @@ def compile(
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
                     compiled_obj.gm = gm_transformation(compiled_obj.gm)
-                output = compiled_obj.gm(*flat_inps)[0]
+                if not last_train_step:
+                    output = compiled_obj.gm(*flat_inps)[0]
+                else:
+                    # This is the last train step. Call IterGraphModule.forward()
+                    # with the `last_iter` argument and catch the exception in
+                    # case the compiled_obj is not wrapped with IterGraphModule.
+                    try:
+                        output = compiled_obj.gm(*flat_inps, last_iter=last_train_step)[
+                            0
+                        ]
+                    except TypeError as e:
+                        if "last_iter" not in str(e):
+                            raise e
+                        output = compiled_obj.gm(*flat_inps)[0]
+
                 return output
 
         return wrapper
