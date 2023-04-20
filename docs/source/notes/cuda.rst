@@ -54,15 +54,50 @@ Below you can find a small example showcasing this::
         f = torch.randn(2).cuda(cuda2)
         # d.device, e.device, and f.device are all device(type='cuda', index=2)
 
+.. _cuda12-context-creation:
+
+CUDA 12 context creation
+------------------------
+
+Starting in CUDA 12.0 the behavior of `cudaSetDevice`_ changed resulting
+in immediate context creation on the device. Subsequently, a call to
+``torch.cuda.set_device(d)`` will immediately create CUDA context on the
+device ``d`` if it was not created previously. As a consequence of this eager behavior
+the tensor, model and stream creation and copying could potentially lead to unnecessary
+memory allocation on unused devices. In PyTorch 2.1.0a0+git69eef5a and newer this issue
+was addressed to avoid needless `cudaSetDevice`_ calls.
+
+An example of the CUDA 12 context behavior before PyTorch 2.1.0a0+git69eef5a::
+
+    x = torch.tensor([1., 2.], device="cuda:1") # Creates context on device 0 and device 1
+    s = torch.cuda.Stream(device="cuda:1")  # Creates context on device 0 and device 1
+
+    with torch.cuda.device("cuda:1"): # Creates context on device 0 and device 1
+        pass                          # Even if there are no CUDA operations
+
+
+After PyTorch 2.1.0a0+git69eef5a the context on device 0 is no longer being created::
+
+    x = torch.tensor([1., 2.], device="cuda:1") # Creates context on device 1 only
+    s = torch.cuda.Stream(device="cuda:1")  # Creates context on device 1 only
+
+    with torch.cuda.device("cuda:1"): # Creates context on device 1 only
+        pass                          # Even if there are no CUDA operations
+
+    torch.cuda.current_device() # Returns 0
+
+    torch.cuda.set_device(0) # Creates context on device 0
+
+This was made possible via lazily calling `cudaSetDevice`_ inside of ``c10::cuda::CUDAGuard``.
+Note, that ``torch.cuda.set_device(d)`` still eagerly creates CUDA context in CUDA 12! The
+described :ref:`cuda-semantics` is preserved. Please report a GitHub issue if there is any
+device misbehavior or memory pollution.
+
 .. note::
 
-    Starting in CUDA 12.0, the behavior of `cudaSetDevice`_ slightly changed resulting
-    in immediate context creation on the device. Subsequently, a call to
-    ``torch.cuda.set_device(d)`` will immediately create the CUDA context on the
-    device ``d`` if it was not created previously. This eager behavior could potentially
-    lead to GPU memory pollution. In PyTorch 2.1.0a0+git69eef5a and newer this issue was
-    addressed to avoid unnecessary context creation. Please report a GitHub issue if there
-    is any device misbehavior or memory pollution.
+    On previous CUDA versions (11.8 and older) the context-manager ``torch.cuda.device(d)``
+    and the method ``torch.cuda.set_device(d)`` never allocate context on any devices and
+    it will remain that way in all PyTorch + CUDA 11.x releases.
 
 .. _tf32_on_ampere:
 
