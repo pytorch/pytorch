@@ -13178,12 +13178,15 @@ repeat_interleave(input, repeats, dim=None, *, output_size=None) -> Tensor
 
 Repeat elements of a tensor.
 
+.. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
+   :noindex:
+
 .. warning::
 
     This is different from :meth:`torch.Tensor.repeat` but similar to ``numpy.repeat``.
 
 Args:
-    {input}
+    input (Tensor, optional): the input tensor.
     repeats (Tensor or int): The number of repetitions for each element.
         repeats is broadcasted to fit the shape of the given axis.
     dim (int, optional): The dimension along which to repeat values.
@@ -13217,9 +13220,6 @@ Example::
     tensor([[1, 2],
             [3, 4],
             [3, 4]])
-
-.. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
-   :noindex:
 
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
