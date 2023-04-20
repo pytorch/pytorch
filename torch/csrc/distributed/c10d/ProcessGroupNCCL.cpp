@@ -540,8 +540,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // Device synchronize only after we've completed timeout checks.
   if (!barrierTensors_.empty()) {
     // If we use the work to do barrier, we should block here
+    at::cuda::OptionalCUDAGuard gpuGuard;
     for (auto& device : devices_) {
-      at::cuda::CUDAGuard gpuGuard(device);
+      gpuGuard.set_index(device.index());
       AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
@@ -1388,44 +1389,62 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
     : Backend::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
+static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
+
 void ProcessGroupNCCL::startCoalescing() {
   coalescedDevices_.clear();
-  coalescing_active_ = true;
+  coalescedComms_.clear();
+  coalescing_state_ |= CoalActive;
   groupStart();
 }
 
-void ProcessGroupNCCL::endCoalescing(
-    std::vector<c10::intrusive_ptr<Work>>& reqs) {
-  if (!nccl_use_nonblocking()) {
+c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
+  if (!nccl_use_nonblocking() ||
+      coalescedComms_.size() == 0) { // There is no actual work being coalesced
     groupEnd();
   } else {
-    std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
-    for (const auto& req : reqs) {
-      auto ncclWork = static_cast<ProcessGroupNCCL::WorkNCCL*>(req.get());
-      ncclComms_.insert(
-          ncclComms_.end(),
-          ncclWork->ncclComms_.begin(),
-          ncclWork->ncclComms_.end());
-    }
-    groupEndNonblocking(ncclComms_);
-  }
-  if (reqs.size() != coalescedDevices_.size()) {
-    TORCH_CHECK(false, "Number of requests do not match number of collectives");
+    // `coalescedComms_` should have same set of comms across collectives
+    auto comms = coalescedComms_[0];
+    groupEndNonblocking(comms);
   }
 
-  int batch_idx = 0;
-  for (const auto& req : reqs) {
-    auto ncclWork = static_cast<ProcessGroupNCCL::WorkNCCL*>(req.get());
-    // @lint-ignore CLANGTIDY
-    std::vector<at::Device> devices = coalescedDevices_[batch_idx];
-    const auto key = getKeyFromDevices(devices);
-    auto& ncclStreams = ncclStreams_[key];
-    for (const auto i : c10::irange(devices.size())) {
-      (*ncclWork->ncclEndEvents_)[i].record(ncclStreams[i]);
-    }
-    batch_idx += 1;
+  coalescing_state_ = 0;
+
+  if (coalescedDevices_.size() == 0) {
+    // There is no actual work being coalesced
+    return nullptr;
   }
-  coalescing_active_ = false;
+
+  // `coalescedDevices_` should have same set of devices across collectives
+  auto devices = coalescedDevices_[0];
+
+  // Create Work object
+  auto work = initWork(
+      devices, rank_, OpType::COALESCED, "nccl:coalesced", c10::nullopt);
+
+  // Record stream event
+  // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
+  const auto key = getKeyFromDevices(devices);
+  auto& ncclStreams = ncclStreams_[key];
+  for (const auto i : c10::irange(devices.size())) {
+    auto& devEvent = (*work->ncclEndEvents_)[i];
+    devEvent.record(ncclStreams[i]);
+  }
+
+  // Set appropriate work parameters.
+  work->blockingWait_ = blockingWait_;
+  work->avoidRecordStreams_ = avoidRecordStreams_;
+  work->opTimeout_ = options_->timeout;
+  work->store_ = store_;
+
+  if (coalescing_state_ & CoalColl) {
+    workEnqueue(work);
+    // TODO: it seems we never enqueue work for single send/recv or batch P2P,
+    // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
+    // not being able to abort hanged P2P ops.
+  }
+
+  return work;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -1459,8 +1478,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
 
-  if (coalescing_active_) {
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
     coalescedDevices_.push_back(devices);
+    coalescedComms_.push_back(ncclComms);
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -1546,7 +1567,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(devices.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
-    if (!coalescing_active_) {
+    if (!coalescing_state_) {
       (*work->ncclEndEvents_)[i].record(ncclStream);
     }
     work->ncclComms_[i] = ncclComms[i];
@@ -1574,7 +1595,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
-  workEnqueue(work);
+  if (!coalescing_state_) {
+    workEnqueue(work);
+  }
 
   return work;
 }
@@ -1622,8 +1645,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
   auto& ncclComms = getNCCLComm(key, devices, opType, p2pRank, isSendRecvSelf);
 
-  if (coalescing_active_) {
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalP2P;
     coalescedDevices_.push_back(devices);
+    coalescedComms_.push_back(ncclComms);
   }
 
   // First let NCCL streams wait for input tensors allocation streams
@@ -1706,7 +1731,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(tensors.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    if (!coalescing_active_) {
+    if (!coalescing_state_) {
       (*work->ncclEndEvents_)[i].record(ncclStream);
     }
     work->ncclComms_[i] = ncclComms[i];
@@ -2164,8 +2189,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           _broadcast_oop(outputs_multi_dev, inputs_multi_dev, broadcastOpts);
       works.push_back(work);
     }
-    endCoalescing(works);
-    return initCoalescedWork(works, rank_, OpType::BROADCAST);
+    auto work = endCoalescing();
+    return work;
   }
 }
 
@@ -2289,8 +2314,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       auto work = _reduce_oop(outputs_multi_dev, inputs_multi_dev, reduceOpts);
       works.push_back(work);
     }
-    endCoalescing(works);
-    return initCoalescedWork(works, rank_, OpType::REDUCE);
+    auto work = endCoalescing();
+    return work;
   }
 }
 

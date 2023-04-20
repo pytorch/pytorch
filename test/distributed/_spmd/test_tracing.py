@@ -553,7 +553,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.aten.all_reduce.default
+                            if n.target == torch.ops.c10d_functional.all_reduce.default
                         ]
                     ),
                     1,
@@ -863,7 +863,7 @@ class CoverageTest(DTensorTestBase):
 
         self._test_train_step(train_step, mod, ids, tgt)
 
-    def _test_factory_ops(self, Model: Type[nn.Module]):
+    def _test_op_with_train_step(self, Model: Type[nn.Module]):
         torch.manual_seed(0)
         mod = Model().cuda(self.rank)
 
@@ -887,7 +887,7 @@ class CoverageTest(DTensorTestBase):
                 y = torch.full(x.shape, 7, device=x.device)
                 return y + self.fc(x)
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -902,7 +902,7 @@ class CoverageTest(DTensorTestBase):
                 z = torch.arange(0, x.numel(), device=x.device).view(x.shape)
                 return self.fc(x) + y + z
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -916,7 +916,21 @@ class CoverageTest(DTensorTestBase):
                 y = self.fc.weight.numel()
                 return self.fc(x) + y
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_stride(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.stride(0)
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -933,7 +947,46 @@ class CoverageTest(DTensorTestBase):
                 )
                 return self.fc(x) + y
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_stack(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.stack([x, self.fc(x)], dim=1)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_arithmetic_ops_on_symint(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x) + x.shape[0] * x.numel() - x.shape[0] // 2
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_slice(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x)[:, :1]
+
+        self._test_op_with_train_step(Model)
 
 
 if __name__ == "__main__":

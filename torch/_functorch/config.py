@@ -10,9 +10,9 @@ Global flags for aot autograd
 import os
 import sys
 
-use_functionalize = True
-
-use_fake_tensor = True
+# Converts torch rng ops to their functional philox rng equivalents. Note that
+# we functionalize only CUDA rng ops today.
+functionalize_rng_ops = False
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
@@ -22,8 +22,6 @@ fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 # This is currently off by default as it will harm tracing time,
 # but it is on by default for aot_eager.
 debug_assert = False
-
-debug_fake_cross_ref = os.environ.get("AOT_FAKE_CROSSREF", False)
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
 

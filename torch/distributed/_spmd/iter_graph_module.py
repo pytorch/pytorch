@@ -14,7 +14,7 @@ from torch.distributed._spmd.partial_lower import partial_lower
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -152,10 +152,25 @@ class IterGraph(fx.Graph):
             for node in reversed(subgraph):
                 if len(node.users) == 1:
                     key = next(iter(node.users.keys()))
-                    # This is the optimizer case where IterGraph functionalize
-                    # the optimizer. Remove the dependency.
-                    if key not in cast(List[Any], output.args[0]) and key == output:
-                        node.users.clear()
+                    if key == output:
+                        flatten_args, spec = tree_flatten((output.args, output.kwargs))
+                        if node not in flatten_args:
+                            # This optimizer node from the legacy _SPMD tracing.
+                            node.users.clear()
+                        elif str(node.target).startswith("aten.copy_"):
+                            # This is the case where the optimizer is
+                            # functionalized with copy_.
+                            for i in range(len(flatten_args)):
+                                if flatten_args[i] == node:
+                                    flatten_args[i] = node.args[0]
+                        else:
+                            # We have not figured out semantics of forwarding
+                            # all diff ops.
+                            raise RuntimeError(
+                                f"IterGraph does not how to forward the output of {node}"
+                            )
+                        output.args, output.kwargs = tree_unflatten(flatten_args, spec)
+
                 # This is the step case where there is a virtual data dependency
                 # (in-place update) between step and optimizer. And
                 # functionalize_optim add this dependency
@@ -232,7 +247,7 @@ class IterGraph(fx.Graph):
             node_inputs, spec = tree_flatten((node.args, node.kwargs))
             new_node_inputs = []
             for input_node in node_inputs:
-                if input_node in all_nodes or not isinstance(input_node, fx.Node):
+                if not isinstance(input_node, fx.Node) or input_node in all_nodes:
                     new_node_inputs.append(input_node)
                 else:
                     new_node_inputs.append(new_input_nodes[new_input_index])
@@ -242,8 +257,12 @@ class IterGraph(fx.Graph):
             new_input_nodes
         ), f"More inputs than needed {len(new_input_nodes)} > {new_input_index}"
 
-        # Update the in_spec of _PyTreeCodeGen
-        if isinstance(graph._codegen, _PyTreeCodeGen):
+        # Update the in_spec of _PyTreeCodeGen if in_spec is not None (the new
+        # SPMD makes in_spec as None).
+        if (
+            isinstance(graph._codegen, _PyTreeCodeGen)
+            and graph._codegen.pytree_info.in_spec is not None
+        ):
             codegen = graph._codegen
             original_tree_in = tree_unflatten(placeholders, codegen.pytree_info.in_spec)
             _, in_spec = tree_flatten(tuple(list(original_tree_in) + new_input_nodes))
@@ -487,32 +506,43 @@ class IterGraph(fx.Graph):
             ), f"The actual target node is None, {target_node}."
             actual_target_node.append(actual_node)
 
-    def node_update_arg(self, node: fx.Node, idx: int, arg: Argument) -> None:
+    def node_set_args(self, node: fx.Node, args: Tuple[Argument, ...]) -> None:
         if self._freeze_cross_iter_movement:
-            node.update_arg(int, arg)
+            node.args = args
             return
 
-        setup_arg = tree_map(
-            lambda _arg: self._lookup_node(_arg, self.setup_graph)
-            if isinstance(_arg, fx.Node)
-            else _arg,
-            arg,
+        setup_args = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), args
         )
         setup_node = self._lookup_node(node, self.setup_graph)
-        assert setup_node is not None, "setup_node is None"
-        setup_node.update_arg(idx, setup_arg)
-
-        node.update_arg(idx, arg)
-
-        cleanup_arg = tree_map(
-            lambda _arg: self._lookup_node(_arg, self.cleanup_graph)
-            if isinstance(_arg, fx.Node)
-            else _arg,
-            arg,
+        assert setup_node is not None
+        setup_node.args = setup_args
+        cleanup_args = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), args
         )
         cleanup_node = self._lookup_node(node, self.cleanup_graph)
-        assert cleanup_node is not None, "cleanup_node is None"
-        cleanup_node.update_arg(idx, cleanup_arg)
+        assert cleanup_node is not None
+        cleanup_node.args = cleanup_args
+        node.args = args
+
+    def node_set_kwargs(self, node: fx.Node, kwargs: Dict[str, Argument]) -> None:
+        if self._freeze_cross_iter_movement:
+            node.kwargs = kwargs
+            return
+
+        setup_kwargs = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.setup_graph), kwargs
+        )
+        setup_node = self._lookup_node(node, self.setup_graph)
+        assert setup_node is not None
+        setup_node.kwargs = setup_kwargs
+        cleanup_kwargs = tree_map_only(
+            fx.Node, lambda _arg: self._lookup_node(_arg, self.cleanup_graph), kwargs
+        )
+        cleanup_node = self._lookup_node(node, self.cleanup_graph)
+        assert cleanup_node is not None
+        cleanup_node.kwargs = cleanup_kwargs
+        node.kwargs = kwargs
 
     def node_replace_all_uses_with(
         self,
@@ -666,6 +696,9 @@ class IterGraphModule(nn.Module):
             if self._iter < self._max_iters:
                 assert len(output) == 2
                 self._previous_output = tuple(output[-1])
+                assert (
+                    len(self._previous_output) > 0
+                ), "There should be at least one extra output."
                 output = output[0]
         else:
             # No cross-iteration optimization is done. Simply call the
