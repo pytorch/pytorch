@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import enum
+import logging
 import functools
 import inspect
 import operator
@@ -104,6 +105,9 @@ from .torch import (
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+
+log = logging.getLogger(__name__)
 
 
 DimList = List
@@ -1210,6 +1214,7 @@ def wrap_to_fake_tensor_and_record(
                     dynamic = DimDynamic.DUCK
                 dynamic_dims.append(dynamic)
 
+        log.debug("wrap_to_fake %s %s %s %s", source.name(), tuple(e.shape), dynamic_dims, constraint_dims)
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
