@@ -178,10 +178,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(matrix_H);
   OP_DECOMPOSE(matrix_power);
   OP_DECOMPOSE2(max, other );
-  OP_DECOMPOSE(max_pool1d);
   OP_DECOMPOSE(max_pool1d_with_indices);
   OP_DECOMPOSE(max_pool2d);
-  OP_DECOMPOSE(max_pool3d);
   OP_DECOMPOSE(meshgrid);
   OP_DECOMPOSE2(meshgrid, indexing);
   OP_DECOMPOSE(mH);

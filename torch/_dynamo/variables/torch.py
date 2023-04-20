@@ -782,7 +782,6 @@ class TorchHigherOrderOperator(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
-            ClosureVariable,
             ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
@@ -833,25 +832,6 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
-            if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
-                # closure vars other than 'self' are not in scope of generated code, so error early
-                # TODO(avik): we should eventually support this.
-                # (Feature request tracked here: https://github.com/pytorch/pytorch/issues/99401)
-                closure_vars = [
-                    var.name
-                    for var in f.closure.items
-                    if isinstance(var, ClosureVariable) and var.name != "self"
-                ]
-                if closure_vars:
-                    code = f.get_code()
-                    raise torch._dynamo.exc.UserError(
-                        torch._dynamo.exc.UserErrorType.ANTI_PATTERN,
-                        f"Cannot create subgraph for nested function '{code.co_name}' "
-                        f"at {code.co_filename}:{code.co_firstlineno} because "
-                        f"it closes over variables {closure_vars}. Please rewrite "
-                        f"'{code.co_name}' to take {closure_vars} as additional args.",
-                    )
-
             # Setup the subgraph we're going to capture into
             tx.output.graph = torch.fx.Graph()
             tx.output.input_name_to_proxy.clear()

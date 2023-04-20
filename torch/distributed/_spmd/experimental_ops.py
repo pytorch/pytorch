@@ -258,7 +258,7 @@ def _prop_select(op_schema: OpSchema) -> OutputSharding:
     # if they are larger than dim.
     new_placements: List[Placement] = []
     for p in placements:
-        # Using isinstance instead of is_shard so that mypy won't complain
+        # Using isinstance instead of is_shard to so that mypy won't complain
         # about accessing dim attribute.
         if isinstance(p, Shard) and p.dim > dim:
             new_placements.append(Shard(p.dim - 1))

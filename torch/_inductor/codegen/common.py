@@ -183,11 +183,9 @@ class ExprPrinter(Printer):
         base = self._print(base)
         # NB: Remember this is sizevar computation!  You don't typically
         # expect to have to do floating point computation including exponents
-        # in sizevar compute.  Instead of adding support for floating
+        # in sizevar compute.  Instead of adding support for sqrt/floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
-        if exp == 0.5:
-            return f"math.sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -603,26 +601,20 @@ class CSE:
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable],
         write=True,
-        assignment=True,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
-        assert write or assignment
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
         if cache_key not in self.cache:
-            var = self.newvar() if assignment else None
+            var = self.newvar()
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if assignment:
-                    line = f"{self.prefix}{var} = {expr}{self.suffix}"
-                else:
-                    line = f"{expr}{self.suffix}"
-                buffer.writeline(line)
+                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
 
         return self.cache[cache_key]
 
@@ -729,7 +721,7 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var, size):
+            def indirect_indexing(index_var):
                 return sympy_symbol(str(index_var))
 
             @staticmethod

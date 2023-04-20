@@ -201,16 +201,10 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
 
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        return f"std::floor({self._print(expr.args[0])})"
-
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            return f"std::sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -1923,7 +1917,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
+            def indirect_indexing(index_var):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod

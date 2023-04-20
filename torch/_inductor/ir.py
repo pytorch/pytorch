@@ -3858,8 +3858,6 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
-        self.indirect_max_sizes = []
-        self.indirect_new = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
@@ -3895,18 +3893,16 @@ class LoopBody:
         self.submodules[name] = block
         return name
 
-    def add_indirect(self, size):
+    def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
         self.indirect_vars.append(var)
-        self.indirect_max_sizes.append(size)
         return var
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
-        self.indirect_new[old] = new
         self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def get_index(self, name):
@@ -3985,18 +3981,16 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size):
+            def indirect_indexing(index_proxy):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
                 """
 
                 def set_indirect(new_var):
-                    self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size)
-                    )
+                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
 
-                var = self.body.add_indirect(size)
+                var = self.body.add_indirect()
                 tracer.create_proxy(
                     "call_module",
                     self.body.add_submodule(set_indirect, f"set_{var}"),
