@@ -337,5 +337,8 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
         return torch.onnx.ExportOutput(
-            onnx_model, self._input_adapter, self._output_adapter
+            onnx_model,
+            self._input_adapter,
+            self._output_adapter,
+            self.options.diagnostics_context,
         )
