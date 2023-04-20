@@ -1536,6 +1536,35 @@ class _TorchCompileInductorWrapper:
                 from torch._inductor.cudagraph_trees import reset_cudagraph_trees
                 reset_cudagraph_trees()
 
+class _TorchCompileWrapper:
+    def __init__(self, backend, mode, options, dynamic):
+        from torch._dynamo.backends.registry import lookup_backend
+
+        if isinstance(backend, str):
+            self.compiler_name = backend
+        elif hasattr(backend, "__name__"):
+            self.compiler_name = backend.__name__
+        else:
+            self.compiler_name = str(backend)
+        self.dynamic = dynamic
+        self.compiler_fn = lookup_backend(backend)
+        self.kwargs = {}
+        # only pass the args if they non-empty
+        if mode and mode != "default":
+            self.kwargs["mode"] = mode
+        if options:
+            self.kwargs["options"] = options
+
+    def __eq__(self, other):
+        return (isinstance(other, _TorchCompileWrapper) and
+                self.compiler_fn == other.compiler_fn and
+                self.kwargs == other.kwargs and
+                self.dynamic == other.dynamic)
+
+    def __call__(self, model_, inputs_):
+        return self.compiler_fn(model_, inputs_, **self.kwargs)
+
+
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
             dynamic: builtins.bool = False,
@@ -1600,6 +1629,8 @@ def compile(model: Optional[Callable] = None, *,
         mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+    else:
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
