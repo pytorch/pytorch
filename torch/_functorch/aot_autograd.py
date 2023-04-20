@@ -3,6 +3,7 @@ import dataclasses
 import itertools
 import logging
 import warnings
+import pprint
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
@@ -79,6 +80,16 @@ pytree._register_pytree_node(
         dict(zip(c, x))
     ),
 )
+
+def partial_asdict(obj: Any) -> Any:
+    if dataclasses.is_dataclass(obj):
+        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
+    elif isinstance(obj, (list, tuple)):
+        return obj.__class__([partial_asdict(item) for item in obj])
+    elif isinstance(obj, dict):
+        return {k: partial_asdict(v) for k, v in obj.items()}
+    else:
+        return obj
 
 aten = torch.ops.aten
 
@@ -1746,7 +1757,7 @@ def create_synthetic_base_metadata(
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
             raw_type=torch.Tensor,
-            dynamic_dims={},  # TODO: something here?
+            dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
@@ -2110,8 +2121,10 @@ def aot_wrapper_synthetic_base(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated, \
-            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(fw_metadata_updated)}'
+        assert ref_fw_metadata == fw_metadata_updated, (
+            f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
+            f'actual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+        )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
 
@@ -2335,10 +2348,10 @@ def create_runtime_wrapper(
             for t, o in zip(ret_outs, runtime_metadata.output_info):
                 if o.dynamic_dims is None:
                     continue
-                if hasattr(t, '_dynamo_dynamic_indices'):
-                    t._dynamo_dynamic_indices |= o.dynamic_dims
+                if hasattr(t, '_dynamo_weak_dynamic_indices'):
+                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
                 else:
-                    t._dynamo_dynamic_indices = o.dynamic_dims.copy()
+                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
 
         return ret_outs
     return runtime_wrapper
