@@ -373,12 +373,12 @@ class NNModuleVariable(VariableTracker):
                 **options,
             )
 
-        if name == "_call_impl":
+        if name == "__call__":
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
-        elif name == "forward":
+        elif name in ("_call_impl", "forward"):
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
