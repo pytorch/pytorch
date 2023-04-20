@@ -436,7 +436,7 @@ class FlatParamHandle:
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
-        self._device_handler: Optional[_FSDPDeviceHandler] = None
+        self.device_handler = _FSDPDeviceHandler.from_device(self.device)
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -466,14 +466,6 @@ class FlatParamHandle:
             params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
-
-    @property
-    def device_handler(self) -> _FSDPDeviceHandler:
-        if self._device_handler is not None:
-            return self._device_handler
-
-        self._device_handler = _FSDPDeviceHandler.from_device(self.device)
-        return self._device_handler
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"

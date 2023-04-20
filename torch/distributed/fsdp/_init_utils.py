@@ -26,6 +26,7 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
+    _FSDPDeviceHandler,
     _FSDPState,
     _get_module_fsdp_state,
     _is_fsdp_flattened,
@@ -428,6 +429,7 @@ def _init_param_handle_from_module(
         device_from_device_id,
         state.rank,
     )
+    state.device_handler = _FSDPDeviceHandler.from_device(state.compute_device)
 
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     if sync_module_states:
@@ -512,6 +514,7 @@ def _init_param_handles_from_module(
                 device_from_device_id,
                 state.rank,
             )
+            state.device_handler = _FSDPDeviceHandler.from_device(state.compute_device)
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
         _init_param_handle_from_params(state, params, fully_sharded_module)
@@ -895,7 +898,7 @@ def _get_compute_device(
     if param is not None and param.device.type != "cpu":
         compute_device = param.device  # Determined by model param placement
     else:
-        if device_from_device_id is not None and device_from_device_id != "cuda":
+        if device_from_device_id is not None and device_from_device_id.type != "cuda":
             compute_device = device_from_device_id  # Determined by custom backend
         else:
             compute_device = torch.device("cuda", torch.cuda.current_device())

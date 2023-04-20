@@ -82,6 +82,14 @@ class _FSDPDeviceHandler:
             )
 
 
+class _UninitializedDeviceHandler(_FSDPDeviceHandler):
+    def __init__(self):
+        pass
+
+    def __getattribute__(self, __name: str) -> Any:
+        raise RuntimeError("Try using an uninitialized device handler.")
+
+
 class _FSDPState(_State):
     def __init__(self) -> None:
         # TODO: Move all the attributes to this class to enable typing for
@@ -106,22 +114,11 @@ class _FSDPState(_State):
         self.compute_device: Optional[torch.device] = None
         # Abstract device handler for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
-        self._device_handler: Optional[_FSDPDeviceHandler] = None
+        self.device_handler: _FSDPDeviceHandler = _UninitializedDeviceHandler()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
-
-    @property
-    def device_handler(self) -> _FSDPDeviceHandler:
-        if self._device_handler is not None:
-            return self._device_handler
-
-        assert (
-            self.compute_device is not None
-        ), "FSDP compute device has not been initialized."
-        self._device_handler = _FSDPDeviceHandler.from_device(self.compute_device)
-        return self._device_handler
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
