@@ -7,7 +7,6 @@ from typing import List, Optional, Tuple
 import sympy
 
 import torch
-import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
