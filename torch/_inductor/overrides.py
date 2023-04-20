@@ -8,6 +8,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.overrides import TorchFunctionMode
 
 from . import config
+from .utils import decode_device
 
 log = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ def rand_like(x, **kwargs):
     if isinstance(x, torch.fx.Proxy):
         # double check we don't FX trace this
         return x.tracer.create_proxy("call_function", rand_like, (x), kwargs)
-    assert kwargs.get("device", x.device) == x.device
+    assert decode_device(kwargs.get("device", x.device)) == x.device
     seed, offset = PhiloxRandomState.get_seed_offset(x)
     return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
 

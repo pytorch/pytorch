@@ -25,7 +25,7 @@ from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
-from .cuda_properties import get_device_capability
+from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +85,16 @@ def has_torchvision_roi_align():
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def decode_device(device):
+    if device is None:
+        return torch.tensor(0.0).device  # default device
+    if isinstance(device, str):
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=current_device())
+    return device
 
 
 def sympy_product(it):

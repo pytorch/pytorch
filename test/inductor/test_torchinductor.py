@@ -4599,6 +4599,20 @@ class CommonTemplate:
 
         self.common(fn, [torch.zeros([20, 20])])
 
+    def test_like_rands2(self):
+        # Test rand_like with kwargs `device` of str type
+        d = self.device
+        assert isinstance(d, str)
+
+        @torch.compile
+        def fn(x):
+            return torch.rand_like(x, device=d)
+
+        x = torch.ones(10, device=self.device, dtype=torch.float32)
+        a0 = fn(x).clone()
+        a1 = fn(x).clone()
+        self.assertFalse(torch.allclose(a0, a1))
+
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
