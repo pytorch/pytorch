@@ -3689,7 +3689,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None,
                  src_key_padding_mask_size=None, tgt_key_padding_mask_size=None,
                  memory_key_padding_mask_size=None,
-                 raises=False):
+                 # We set these as `False` by default so that tests are
+                 # forced to consider the attention masks. Otherwise
+                 # shapes may be ignored because a causal mask is
+                 # assumed. Obviously ignoring mask arguments is not
+                 # desired for argument checking tests.
+                 src_is_causal=False, tgt_is_causal=False,
+                 memory_is_causal=False, raises=False):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
             model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
@@ -3733,7 +3739,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                           memory_mask=memory_task,
                           src_key_padding_mask=src_key_padding_mask,
                           tgt_key_padding_mask=tgt_key_padding_mask,
-                          memory_key_padding_mask=memory_key_padding_mask)
+                          memory_key_padding_mask=memory_key_padding_mask,
+                          src_is_causal=src_is_causal,
+                          tgt_is_causal=tgt_is_causal,
+                          memory_is_causal=memory_is_causal)
             else:
                 model(encoder_input, decoder_input,
                       src_mask=src_mask,
@@ -3741,7 +3750,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                       memory_mask=memory_task,
                       src_key_padding_mask=src_key_padding_mask,
                       tgt_key_padding_mask=tgt_key_padding_mask,
-                      memory_key_padding_mask=memory_key_padding_mask)
+                      memory_key_padding_mask=memory_key_padding_mask,
+                      src_is_causal=src_is_causal,
+                      tgt_is_causal=tgt_is_causal,
+                      memory_is_causal=memory_is_causal)
 
 
         correct_encoder_input_shape = (seq_len, bsz, d_model)
