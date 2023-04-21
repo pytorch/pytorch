@@ -22,17 +22,17 @@
   _("libcuda.so", 0)                   \
   _("libnvidia-ml.so.1", 1)
 
-#define C10_FORALL_DRIVER_API(_)  \
-  _(cuMemAddressReserve, 0)       \
-  _(cuMemRelease, 0)              \
-  _(cuMemMap, 0)                  \
-  _(cuMemAddressFree, 0)          \
-  _(cuMemSetAccess, 0)            \
-  _(cuMemUnmap, 0)                \
-  _(cuMemCreate, 0)               \
-  _(cuGetErrorString, 0)          \
-  _(nvmlInit_v2, 1)               \
-  _(nvmlDeviceGetHandleByUUID, 1) \
+#define C10_FORALL_DRIVER_API(_)         \
+  _(cuMemAddressReserve, 0)              \
+  _(cuMemRelease, 0)                     \
+  _(cuMemMap, 0)                         \
+  _(cuMemAddressFree, 0)                 \
+  _(cuMemSetAccess, 0)                   \
+  _(cuMemUnmap, 0)                       \
+  _(cuMemCreate, 0)                      \
+  _(cuGetErrorString, 0)                 \
+  _(nvmlInit_v2, 1)                      \
+  _(nvmlDeviceGetHandleByPciBusId_v2, 1) \
   _(nvmlDeviceGetComputeRunningProcesses, 1)
 
 namespace c10 {

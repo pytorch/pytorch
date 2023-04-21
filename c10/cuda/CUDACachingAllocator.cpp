@@ -1134,33 +1134,20 @@ static std::string reportProcessMemoryInfo(int device) {
   cudaDeviceProp prop;
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
 
-  // CUDA reports uuid as bytes, but NVML expects a string starting with GPU-
-  auto* uuid = (uint8_t*)prop.uuid.bytes;
-  char uuid_str[41];
+  char pci_id[80];
   snprintf(
-      uuid_str,
-      sizeof(uuid_str),
-      "GPU-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-      uuid[0],
-      uuid[1],
-      uuid[2],
-      uuid[3],
-      uuid[4],
-      uuid[5],
-      uuid[6],
-      uuid[7],
-      uuid[8],
-      uuid[9],
-      uuid[10],
-      uuid[11],
-      uuid[12],
-      uuid[13],
-      uuid[14],
-      uuid[15]);
+      pci_id,
+      sizeof(pci_id),
+      NVML_DEVICE_PCI_BUS_ID_FMT,
+      prop.pciDomainID,
+      prop.pciBusID,
+      prop.pciDeviceID);
+
   nvmlDevice_t nvml_device;
   TORCH_INTERNAL_ASSERT(
       NVML_SUCCESS ==
-      DriverAPI::get()->nvmlDeviceGetHandleByUUID_(uuid_str, &nvml_device));
+      DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
+          pci_id, &nvml_device));
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
