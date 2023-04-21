@@ -4,6 +4,7 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
+import torch._refs
 
 from . import external_utils
 
