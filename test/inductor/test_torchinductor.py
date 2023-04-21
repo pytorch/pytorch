@@ -4600,7 +4600,7 @@ class CommonTemplate:
         self.common(fn, [torch.zeros([20, 20])])
 
     def test_like_rands2(self):
-        # Test rand_like with kwargs `device` of str type
+        # rand_like with kwargs `device` of str type
         d = self.device
         assert isinstance(d, str)
 
@@ -4612,6 +4612,22 @@ class CommonTemplate:
         a0 = fn(x).clone()
         a1 = fn(x).clone()
         self.assertFalse(torch.allclose(a0, a1))
+
+    @requires_cuda()
+    def test_like_rands3(self):
+        # rand_like with `device` which is different from `x.device`
+        def test_like_rands_on_different_device(device1, device2):
+            @torch.compile
+            def fn(x, device):
+                return torch.rand_like(x, device=device)
+
+            x = torch.ones(10, device=device1, dtype=torch.float32)
+            return fn(x, device2).clone()
+
+        a0 = test_like_rands_on_different_device("cpu", "cuda")
+        a1 = test_like_rands_on_different_device("cuda", "cpu")
+        self.assertTrue(a0.device.type == "cuda")
+        self.assertTrue(a1.device.type == "cpu")
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
