@@ -298,21 +298,25 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ) -> torch.onnx.ExportOutput:
-        # Apply decomposition table to the input graph.
-        module = passes.Decompose(
-            fx_module,
-            self.decomposition_table,
-            enable_dynamic_axes=self.options.dynamic_shapes,
-        ).run(*fx_module_args)
-
         # ONNX does not support views and mutations.
         # Functionalize to get a semantically equivalent graph without mutations.
+        # NOTE: Functionalize must run before decomposition and aten graph lowering.
+        # https://github.com/pytorch/pytorch/issues/99662
         module = passes.Functionalize(
-            module, enable_dynamic_axes=self.options.dynamic_shapes
+            fx_module, enable_dynamic_axes=self.options.dynamic_shapes
         ).run(*fx_module_args)
         # Input mutations are detected and distilled after `Functionalize` pass.
         # Remove them since ONNX inference does not need them.
         module = passes.RemoveInputMutation(module).run(*fx_module_args)
+
+        # Apply decomposition table to the input graph.
+        module = passes.Decompose(
+            module,
+            self.decomposition_table,
+            enable_dynamic_axes=self.options.dynamic_shapes,
+        ).run(*fx_module_args)
+
+        module = passes.ReplaceInplacePostFunctionalization(module).run(*fx_module_args)
 
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
         # The pass added nodes with static shape into original node metadata:

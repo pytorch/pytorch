@@ -468,6 +468,33 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_log_sigmoid(self):
+        # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
+        # conventional `torch.ops.aten.log_sigmoid`.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.LogSigmoid()
+
+            def forward(self, x):
+                return self.m(x)
+
+        input = torch.randn(2)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, Model(), (input,))
+
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.var_mean.correction"
+    )
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
     @skip_if_no_torchvision
     def test_resnet18(self):
         model = torchvision.models.resnet18(pretrained=False)
@@ -479,6 +506,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             (dummy_input,),
         )
 
+    @pytorch_test_common.xfail(
+        "Found unsupported input types on PyTorch Op aten.convolution.default with "
+        "ValueError: Unexpected input argument type is found in node arguments. arg: None;"
+    )
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
