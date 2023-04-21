@@ -810,8 +810,18 @@ def should_allow_numbers_as_tensors(func: OpOverload):
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", False)
 
+# Hack to make isinstance(x, FakeTensor) return True when x is a fake-ified NestedTensor.
+# A NestedTensor that has been fake-ified simply has a fake buffer.
+class FakeTensorMeta(torch._C._TensorMeta):
+    def __instancecheck__(self, instance):
+        from torch.nested._nested_tensor import NestedTensor
 
-class FakeTensor(torch.Tensor):
+        if isinstance(instance, NestedTensor):
+            return isinstance(instance.buffer, self)
+
+        return super().__instancecheck__(instance)
+
+class FakeTensor(torch.Tensor, metaclass=FakeTensorMeta):
     """
     Meta tensors give you the ability to run PyTorch code without having to
     actually do computation through tensors allocated on a `meta` device.
@@ -1104,6 +1114,7 @@ class FakeTensorMode(TorchDispatchMode):
             any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0
         )
+        has_nested = any([i.is_nested for i in flat_arg_fake_tensors])
 
         converter = self.fake_tensor_converter
 
@@ -1207,8 +1218,8 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        # Try for fastpath
-        if has_symbolic_sizes:
+        # Try for fastpath (not support for nested tensors right now)
+        if has_symbolic_sizes and not has_nested:
             fast_impl = get_fast_op_impls().get(func)
             if fast_impl is not None:
                 return fast_impl(self, *args, **kwargs)
@@ -1221,7 +1232,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             # Prefer Python decompositions over C++ ones
             if func in decomposition_table and (
-                has_symbolic_sizes
+                (has_symbolic_sizes and not has_nested)
                 or (
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely

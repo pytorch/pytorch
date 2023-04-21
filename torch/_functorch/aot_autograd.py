@@ -630,7 +630,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
     return aliased_out
 
 def to_fun(t):
-    if isinstance(t, Tensor):
+    if isinstance(t, Tensor) and not t.is_nested:
         return torch._to_functional_tensor(t, mirror_autograd_meta=True)
     else:
         return t
@@ -672,7 +672,7 @@ def run_functionalized_fw_and_collect_metadata(
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+            r = torch._to_functional_tensor(t, mirror_autograd_meta=True) if not t.is_nested else t
             memo[t] = r
             return r
         else:
@@ -706,7 +706,7 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for (i, (arg, f_arg)) in enumerate(zip(flat_args, flat_f_args)):
-            if not isinstance(arg, Tensor):
+            if not isinstance(arg, Tensor) or arg.is_nested:
                 new_arg = arg
             else:
                 torch._sync(f_arg)

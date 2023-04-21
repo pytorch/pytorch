@@ -127,6 +127,7 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            # TODO: Need is_nested here?
         }
         if not config.dynamic_shapes:
             props["size"] = tuple(value.size())

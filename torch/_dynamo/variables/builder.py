@@ -1119,6 +1119,88 @@ class TrackedFake:
         return False
 
 
+def _automatic_dynamic(e, tx, name, static_shapes):
+    # Prep for automatic dynamic
+    curr_sizes = None
+    if name not in tx.output.frame_state:
+        # If there is no entry for this source, add the tensor to frame state with its current static size.
+        # E.g., {} -> {"x": [2, 4]}
+        curr_sizes = list(e.size())
+    else:
+        curr_sizes = tx.output.frame_state[name]
+        if curr_sizes is not None:
+            if e.ndim != len(curr_sizes):
+                # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
+                # E.g. {"x": [2, 3, 4]} -> {"x": None}
+                curr_sizes = None
+            else:
+                # If there is already an entry, and the dim matches, for every size in the frame state which
+                # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
+                for i, dim in enumerate(curr_sizes):
+                    if e.size()[i] != dim:
+                        curr_sizes[i] = None
+
+    tx.output.frame_state[name] = curr_sizes
+
+    # TODO: index export_constraints ahead of time so we don't have to
+    # do a linear scan every time here
+    t_id = id(e)
+    dim2constraint = {}
+    if tx.output.export_constraints:
+        for constraint in tx.output.export_constraints:
+            if constraint.t_id == t_id:
+                if constraint.dim in dim2constraint:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        StrictMinMaxConstraint,
+                    )
+
+                    dim2constraint[constraint.dim] = StrictMinMaxConstraint(
+                        vr=constraint.constraint_range.vr
+                        & dim2constraint[constraint.dim].vr,
+                        warn_only=False,
+                    )
+                else:
+                    dim2constraint[constraint.dim] = constraint.constraint_range
+
+    dynamic_dims = None
+    constraint_dims = None
+    if tx.fake_mode.shape_env is not None:
+        dynamic_dims = []
+        constraint_dims = []
+        for i in range(e.dim()):
+            # NB: mark dynamic has precedence over static
+            marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+            marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
+            # NB: both static and dynamic have precedence over
+            automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
+
+            # We will process constraints first, as they will imply that we
+            # have a dynamic dimension
+            # Precedence: export constraints > eager constraints
+            constraint = dim2constraint.get(i)
+            if constraint is None:
+                if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                    constraint = RelaxedUnspecConstraint(warn_only=False)
+                elif not marked_static and automatic_dynamic:
+                    constraint = RelaxedUnspecConstraint(warn_only=True)
+            constraint_dims.append(constraint)
+
+            # Now, figure out if the dim is dynamic/duck/static
+            if constraint is not None or marked_dynamic:
+                # NB: We could assert static_shapes is False here, but it
+                # seems better to allow the user to override policy in this
+                # case
+                dynamic = DimDynamic.DYNAMIC
+            elif static_shapes or config.assume_static_by_default or marked_static:
+                dynamic = DimDynamic.STATIC
+            else:
+                dynamic = DimDynamic.DUCK
+            dynamic_dims.append(dynamic)
+
+    return dynamic_dims, constraint_dims
+
+
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
@@ -1130,85 +1212,9 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        name = source.name()
-
-        # Prep for automatic dynamic
-        curr_sizes = None
-        if name not in tx.output.frame_state:
-            # If there is no entry for this source, add the tensor to frame state with its current static size.
-            # E.g., {} -> {"x": [2, 4]}
-            curr_sizes = list(e.size())
-        else:
-            curr_sizes = tx.output.frame_state[name]
-            if curr_sizes is not None:
-                if e.ndim != len(curr_sizes):
-                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                    curr_sizes = None
-                else:
-                    # If there is already an entry, and the dim matches, for every size in the frame state which
-                    # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
-                    for i, dim in enumerate(curr_sizes):
-                        if e.size()[i] != dim:
-                            curr_sizes[i] = None
-
-        tx.output.frame_state[name] = curr_sizes
-
-        # TODO: index export_constraints ahead of time so we don't have to
-        # do a linear scan every time here
-        t_id = id(e)
-        dim2constraint = {}
-        if tx.output.export_constraints:
-            for constraint in tx.output.export_constraints:
-                if constraint.t_id == t_id:
-                    if constraint.dim in dim2constraint:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
-
-                        dim2constraint[constraint.dim] = StrictMinMaxConstraint(
-                            vr=constraint.constraint_range.vr
-                            & dim2constraint[constraint.dim].vr,
-                            warn_only=False,
-                        )
-                    else:
-                        dim2constraint[constraint.dim] = constraint.constraint_range
-
-        dynamic_dims = None
-        constraint_dims = None
-        if tx.fake_mode.shape_env is not None:
-            dynamic_dims = []
-            constraint_dims = []
-            for i in range(e.dim()):
-                # NB: mark dynamic has precedence over static
-                marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-                marked_static = i in getattr(e, "_dynamo_static_indices", set())
-
-                # NB: both static and dynamic have precedence over
-                automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
-
-                # We will process constraints first, as they will imply that we
-                # have a dynamic dimension
-                # Precedence: export constraints > eager constraints
-                constraint = dim2constraint.get(i)
-                if constraint is None:
-                    if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                        constraint = RelaxedUnspecConstraint(warn_only=False)
-                    elif not marked_static and automatic_dynamic:
-                        constraint = RelaxedUnspecConstraint(warn_only=True)
-                constraint_dims.append(constraint)
-
-                # Now, figure out if the dim is dynamic/duck/static
-                if constraint is not None or marked_dynamic:
-                    # NB: We could assert static_shapes is False here, but it
-                    # seems better to allow the user to override policy in this
-                    # case
-                    dynamic = DimDynamic.DYNAMIC
-                elif static_shapes or config.assume_static_by_default or marked_static:
-                    dynamic = DimDynamic.STATIC
-                else:
-                    dynamic = DimDynamic.DUCK
-                dynamic_dims.append(dynamic)
+        dynamic_dims, constraint_dims = None, None
+        if not e.is_nested:
+            dynamic_dims, constraint_dims = _automatic_dynamic(e, tx, source.name(), static_shapes)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

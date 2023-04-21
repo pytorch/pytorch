@@ -1,4 +1,5 @@
 import contextlib
+import sys
 import warnings
 import weakref
 from typing import ContextManager, List, Optional
@@ -265,6 +266,49 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif t.is_nested:
+                    assert (
+                        shape_env is not None
+                    ), "Dynamic shapes must be enabled for nested tensors"
+                    is_leaf = safe_is_leaf(t)
+
+                    from torch.nested._nested_tensor import NestedTensor
+                    from torch.fx.experimental.symbolic_shapes import constrain_range
+                    from torch._dynamo.source import TensorPropertySource, TensorProperty
+
+                    buffer_size = shape_env.create_unbacked_symint()
+                    constrain_range(buffer_size, min=2, max=sys.maxsize - 1)
+                    buffer = callback(
+                        lambda: torch.empty(buffer_size, device="meta", dtype=t.dtype)
+                    )
+
+                    # Construct symbolic sizes
+                    sizes = NestedTensor._sizes_from_shape_list(t._nested_tensor_size())
+                    sym_sizes = []
+                    for i, size in enumerate(sizes):
+                        if isinstance(size, list):
+                            # Convert to tuple to be hashable
+                            size = tuple(size)
+                        # TODO: Make sure source is okay!
+                        sym_sizes.append(
+                            shape_env.create_symintnode(
+                                shape_env.create_symbol(
+                                    size, TensorPropertySource(source, TensorProperty.SIZE, i)
+                                ),
+                                hint=size
+                            )
+                        )
+
+                    # NB: callback isn't called here to avoid fake-ifying the NT itself.
+                    # Rather, we return a NestedTensor with a fake buffer and symbolic sizes.
+                    r = NestedTensor(buffer, sym_sizes)
+
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    if t.requires_grad:
+                        r.requires_grad = True
+                    if t.requires_grad and not is_leaf:
+                        with torch.enable_grad():
+                            r = r.clone()
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
@@ -497,7 +541,6 @@ class MetaConverter:
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     # these are supported in meta conversion but the fallbacks

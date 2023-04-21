@@ -1425,6 +1425,9 @@ def tensor_always_has_static_shape(
     """
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
+    if tensor.is_nested:
+        # TODO: Fix the reason
+        return True, TensorStaticReason.NOT_TENSOR
     if config.dynamic_shapes is False:
         return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:

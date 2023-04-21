@@ -164,6 +164,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
+    # TODO: Make sure this works with NestedTensors
     for i, s in enumerate(tensor.shape):
         try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size(proxy, i), x), i)
 

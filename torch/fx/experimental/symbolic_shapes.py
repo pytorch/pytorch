@@ -1628,6 +1628,8 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             return int(sym)
+        if isinstance(sym, sympy.Array):
+            return SymInt(SymNode(sym, self, tuple[int], hint))
         return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):
@@ -1650,7 +1652,7 @@ class ShapeEnv:
 
     def create_symbol(
         self,
-        val: int,
+        val: Union[int, tuple],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -1673,7 +1675,7 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if val < 0:
+        if isinstance(val, int) and val < 0:
             from torch._dynamo.source import NegateSource
             assert constraint_dim is None, "constraints on negative unspec ints NYI"
             return -self.create_symbol(-val, NegateSource(source), dynamic_dim, constraint_dim)
@@ -1684,29 +1686,35 @@ class ShapeEnv:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
-            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-            self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
-            # We always associate vars to vals
-            self.var_to_val[sympy_expr] = sympy.Integer(val)
+            if isinstance(val, int):
+                sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+                self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
+                # We always associate vars to vals
+                self.var_to_val[sympy_expr] = sympy.Integer(val)
+                # Apply default range, which assumes not zero-one
+                self.var_to_range[sympy_expr] = self._default_value_range()
+                # Small performance optimization: if we have a min-max constraint,
+                # we can proactively narrow to that range
+                if isinstance(constraint_dim, StrictMinMaxConstraint):
+                    assert not duck
+                    self.var_to_range[sympy_expr] &= constraint_dim.vr
+
+                vr = self.var_to_range[sympy_expr]
+                if val not in vr:
+                    raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+            elif isinstance(val, tuple):
+                sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", integer=False)
+                log.info("create_symbol %s = %s (%s)", sympy_expr, val, hex(id(self)))
+                self.var_to_val[sympy_expr] = sympy.Array(val)
+            else:
+                raise NotImplementedError(f"Unsupported val type in create_symbol(): {type(val)}")
+
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
                 self.val_to_var[val] = sympy_expr
-
-            # Apply default range, which assumes not zero-one
-            self.var_to_range[sympy_expr] = self._default_value_range()
-
-            # Small performance optimization: if we have a min-max constraint,
-            # we can proactively narrow to that range
-            if isinstance(constraint_dim, StrictMinMaxConstraint):
-                assert not duck
-                self.var_to_range[sympy_expr] &= constraint_dim.vr
-
-            vr = self.var_to_range[sympy_expr]
-            if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
