@@ -70,7 +70,7 @@ class OpStrategy(StrategyType):
 
     def __init__(self, strategies: List[PlacementStrategy]) -> None:
         super().__init__()
-        self.strategies = strategies
+        self.strategies: List[PlacementStrategy] = strategies
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
@@ -89,7 +89,7 @@ class TupleStrategy(StrategyType):
 
     def __init__(self, childs: Tuple[StrategyType]) -> None:
         super().__init__()
-        self.childs = childs
+        self.childs: Tuple[StrategyType] = childs
 
     def __str__(self) -> str:
         tuple_strategies_str = "TupleStrategy: "
