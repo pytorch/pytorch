@@ -7,7 +7,6 @@ import os
 import re
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
-from unittest.mock import patch
 
 import torch
 import torch._guards
@@ -17,6 +16,7 @@ from torch._dynamo.utils import counters
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
 from ..fx import Transformer
@@ -524,7 +524,7 @@ def register_replacement(
         return args
 
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
-    with patch("functorch.compile.config.functionalize_rng_ops", False):
+    with functorch_config.patch(functionalize_rng_ops=False):
         argnames = [*inspect.signature(search_fn).parameters.keys()]
         requires_grad = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
