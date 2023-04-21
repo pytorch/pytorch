@@ -116,7 +116,8 @@ class _ResolvedExportOptions(ExportOptions):
 
         self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
         self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-        import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep + [onnx]script dep
+        # TODO: Prevent circular dep + [onnx]script dep
+        import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor
         from torch.onnx._internal.fx import (  # TODO: onnxscript is not available on Pytorch CI yet
             function_dispatcher,
         )
@@ -342,8 +343,10 @@ class FXGraphExtractor(abc.ABC):
     This class isolates FX extraction logic from the rest of the export logic.
     That allows a single ONNX exporter that can leverage different FX graphs."""
 
-    _input_adapter: io_adapter.InputAdapter
-    _output_adapter: io_adapter.OutputAdapter
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_adapter: io_adapter.InputAdapter = io_adapter.InputAdapter()
+        self.output_adapter: io_adapter.OutputAdapter = io_adapter.OutputAdapter()
 
     @_beartype.beartype
     def _export_fx_to_onnx(
@@ -388,12 +391,12 @@ class FXGraphExtractor(abc.ABC):
             self.adapt_input(io_adapter.RemoveNoneInputStep, fx_module_args, {})
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
-            self._output_adapter.append_step(io_adapter.FlattenOutputStep())
+            self.output_adapter.append_step(io_adapter.FlattenOutputStep())
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(options.opset_version)
         return torch.onnx.ExportOutput(
-            onnx_model, self._input_adapter, self._output_adapter
+            onnx_model, self.input_adapter, self.output_adapter
         )
 
     def adapt_input(
@@ -406,7 +409,7 @@ class FXGraphExtractor(abc.ABC):
         """Apply an input adapt step to the model args and kwargs.
 
         An input adapt step object is initialized, applied and recorded as part of
-        ``self._input_adapter`.
+        ``self.input_adapter`.
 
         Args:
             adapt_step_cls: The input adapt step class.
@@ -419,7 +422,7 @@ class FXGraphExtractor(abc.ABC):
         """
         step_init_args = step_init_args or ()
         adapt_step = adapt_step_cls(*step_init_args)
-        self._input_adapter.append_step(adapt_step)
+        self.input_adapter.append_step(adapt_step)
         return adapt_step.apply(model_args, model_kwargs)
 
     def adapt_output(
@@ -443,7 +446,7 @@ class FXGraphExtractor(abc.ABC):
         """
         step_init_args = step_init_args or ()
         adapt_step = adapt_step_cls(*step_init_args)
-        self._output_adapter.append_step(adapt_step)
+        self.output_adapter.append_step(adapt_step)
         return adapt_step.apply(model_outputs)
 
     @abc.abstractmethod

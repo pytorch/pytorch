@@ -158,6 +158,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
     """
 
     def __init__(self, concrete_args: Optional[Dict[str, Any]] = None):
+        super().__init__()
         # TODO: plumb ``concrete_args`` to symbolic_trace call at ``generate_fx``
         self.concrete_args = concrete_args
 
@@ -205,20 +206,17 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
-        self._input_adapter = io_adapter.InputAdapter()
-        self._output_adapter = io_adapter.OutputAdapter()
-
         graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace(
             model, model_args, model_kwargs
         )
 
         # Make sure all placeholder nodes are executed before get_attr nodes.
-        # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
+        # Otherwise, inputs can interleave with initializers in the final ModelProto.graph.input.
         # Basically, we want
-        #  ModeoProto.graph.input =
+        #  ModelProto.graph.input =
         #   [input_0, input_1, ..., input_n, weight_0, weight_1, ..., weight_m]
         # and we don't want
-        #  ModeoProto.graph.input =
+        #  ModelProto.graph.input =
         #   [input_0, weight_0, input_1, weight_1, ..., input_n, weight_0, weight_1, ..., weight_m]
         graph_module = passes.MovePlaceholderToFront(graph_module).run()
         # To save memory, move get_attr to input so that the generated model doesn't
