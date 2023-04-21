@@ -378,6 +378,7 @@ class QNNPackQuantizer(Quantizer):
             return
         relu_node = node
         getitem_node = relu_node.args[0]
+        assert isinstance(getitem_node, Node)
         if (
             getitem_node.op != "call_function"
             or getitem_node.target != operator.getitem
