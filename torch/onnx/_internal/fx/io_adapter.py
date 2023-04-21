@@ -450,7 +450,7 @@ class DynamoFlattenOutputStep(FlattenOutputStep):
             return super().apply(model_outputs)
 
 
-def _wrap_model_with_output_adapter(
+def wrap_model_with_output_adapter(
     model: Union[torch.nn.Module, Callable],
     output_adapter: DynamoFlattenOutputStep,
 ) -> Callable:

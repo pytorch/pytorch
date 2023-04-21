@@ -53,9 +53,6 @@ class ExportOptions:
     - ``True``: all input shapes are considered dynamic.
     - ``False``: all input shapes are considered static."""
 
-    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None
-    """Dictionary with all ATen operators supported by the exporter."""
-
     op_level_debug: Optional[bool] = None
     """Whether to export the model with op-level debug information by evaluating
     ops through ONNX Runtime."""
@@ -92,12 +89,15 @@ class _ResolvedExportOptions(ExportOptions):
     # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
     opset_version: int
     dynamic_shapes: bool
-    decomposition_table: Dict[torch._ops.OpOverload, Callable]
     op_level_debug: bool
     logger: logging.Logger
 
     # Private only attributes
+    decomposition_table: Dict[torch._ops.OpOverload, Callable]
+    """Dictionary with all ATen operators supported by the exporter."""
+
     fx_tracer: FXGraphExtractor
+    """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
     @_beartype.beartype
     def __init__(self, options: Optional[ExportOptions]):
@@ -116,7 +116,7 @@ class _ResolvedExportOptions(ExportOptions):
 
         self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
         self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-        import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Resolve circular dependency hell
+        import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep + [onnx]script dep
         from torch.onnx._internal.fx import (  # TODO: onnxscript is not available on Pytorch CI yet
             function_dispatcher,
         )
@@ -337,13 +337,16 @@ class ExportOutput:
 
 
 class FXGraphExtractor(abc.ABC):
-    """Abstract interface for FX graph extractor engines."""
+    """Abstract interface for FX graph extractor engines.
+
+    This class isolates FX extraction logic from the rest of the export logic.
+    That allows a single ONNX exporter that can leverage different FX graphs."""
 
     _input_adapter: io_adapter.InputAdapter
     _output_adapter: io_adapter.OutputAdapter
 
     @_beartype.beartype
-    def export_fx_to_onnx(
+    def _export_fx_to_onnx(
         self,
         options: _ResolvedExportOptions,
         fx_module: torch.fx.GraphModule,
@@ -450,9 +453,19 @@ class FXGraphExtractor(abc.ABC):
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-    ) -> Tuple[
-        torch.fx.GraphModule, Tuple[Any]
-    ]:  # By design, only torch.fx.GraphModule is needed
+    ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
+        """Analyzes user ``model`` and generates a FX graph.
+
+        Args:
+            options: The export options.
+            model: The user model.
+            model_args: The model's positional input arguments.
+            model_kwargs: The model's keyword input arguments.
+
+        Returns:
+            The generated FX Graph, and the model's adapted input arguments.
+        """
+        # By design, only torch.fx.GraphModule is needed
         # But FXSymbolicTracer modifies model data, which will be needed
         # to produce the ONNX proto in the next layer.
         # TODO: Refactor after https://github.com/pytorch/pytorch/pull/98421
@@ -487,7 +500,7 @@ class Exporter:
         #
         # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
         # to _export.
-        return self.options.fx_tracer.export_fx_to_onnx(
+        return self.options.fx_tracer._export_fx_to_onnx(
             self.options, graph_module, updated_model_args
         )
 
@@ -603,7 +616,6 @@ __all__ = [
     "ExportOptions",
     "ExportOutput",
     "ExportOutputSerializer",
-    "FXGraphExtractor",
     "UnsatisfiedDependencyError",
     "dynamo_export",
 ]
