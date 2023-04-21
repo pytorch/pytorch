@@ -1,5 +1,5 @@
-import operator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
 
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -18,7 +18,6 @@ from torch.distributed._tensor.op_schema import (
     OpStrategy,
     PlacementStrategy,
     StrategyType,
-    TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
@@ -262,14 +261,13 @@ def build_data_parallel_strategies(
     """
     activation_idx = num_params + num_states
     non_compute_ops = [
-        aten.clone.default,
-        aten.detach.default,
+        torch.ops._spmd.tag_grad.default,
         aten.ones_like.default,
-        aten.reshape.default,
         aten.t.default,
         aten.view.default,
-        torch.ops._spmd.tag_grad.default,
-        operator.getitem,
+        aten.reshape.default,
+        aten.detach.default,
+        aten.clone.default,
     ]
 
     dp_strategy_map = {}
@@ -366,6 +364,7 @@ def build_data_parallel_strategies(
             # param + activation (param must be replicate, act be sharded) -> out: activation
             # param/state + grad (param/state/grad be the same spec) -> out: param/state
             # param + state -> out: param
+
             if node.target in non_compute_ops:
                 # At this point, we should have removed all the `tag_grad` nodes in the graph
                 assert node.target != torch.ops._spmd.tag_grad.default
@@ -374,51 +373,40 @@ def build_data_parallel_strategies(
                 assert (
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
+                arg_node_strategy = dp_strategy_map[input_nodes[0]]
+                assert isinstance(arg_node_strategy, DataParallelStrategy)
+                arg_node_type = arg_node_strategy.node_type
+                input_full_reduction = arg_node_strategy.reduction_over_batch
 
-                arg_strategy = dp_strategy_map[input_nodes[0]]
+                if arg_node_type == NodeType.PARAM:
+                    replica_strategy = _gen_replicate_strategy(mesh)
+                    dp_strategy_map[node] = DataParallelStrategy(
+                        NodeType.PARAM, [replica_strategy]
+                    )
+                elif arg_node_type == NodeType.GRAD:
+                    partial_sig = _gen_partial_strategy(mesh)
+                    dp_strategy_map[node] = DataParallelStrategy(
+                        NodeType.GRAD, [partial_sig]
+                    )
+                elif arg_node_type == NodeType.ACT:
+                    arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                        input_nodes[0], mesh
+                    )
 
-                if node.target == operator.getitem:
-                    # for getitem call, just forward the strategy from the input
-                    getitem_idx = node.args[1]
-                    if isinstance(arg_strategy, TupleStrategy):
-                        # for tuple strategy, we need to get the child strategy from the tuple
-                        dp_strategy_map[node] = arg_strategy.childs[getitem_idx]
-                    else:
-                        # if it's not a tuple strategy, we just forward the arg strategy
-                        dp_strategy_map[node] = arg_strategy
+                    output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                        node, mesh, input_full_reduction
+                    )
+
+                    shard_strategy = PlacementStrategy(
+                        output_spec=output_spec, input_specs=[arg_node_spec]
+                    )
+                    dp_strategy_map[node] = DataParallelStrategy(
+                        NodeType.ACT, [shard_strategy]
+                    )
                 else:
-                    assert isinstance(arg_strategy, DataParallelStrategy)
-                    arg_node_type = arg_strategy.node_type
-                    input_full_reduction = arg_strategy.reduction_over_batch
-                    if arg_node_type == NodeType.PARAM:
-                        replica_strategy = _gen_replicate_strategy(mesh)
-                        dp_strategy_map[node] = DataParallelStrategy(
-                            NodeType.PARAM, [replica_strategy]
-                        )
-                    elif arg_node_type == NodeType.GRAD:
-                        partial_sig = _gen_partial_strategy(mesh)
-                        dp_strategy_map[node] = DataParallelStrategy(
-                            NodeType.GRAD, [partial_sig]
-                        )
-                    elif arg_node_type == NodeType.ACT:
-                        arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
-                            input_nodes[0], mesh
-                        )
-
-                        output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
-                            node, mesh, input_full_reduction
-                        )
-
-                        shard_strategy = PlacementStrategy(
-                            output_spec=output_spec, input_specs=[arg_node_spec]
-                        )
-                        dp_strategy_map[node] = DataParallelStrategy(
-                            NodeType.ACT, [shard_strategy]
-                        )
-                    else:
-                        raise RuntimeError(
-                            f"non compute op not supporting {arg_node_type}! "
-                        )
+                    raise RuntimeError(
+                        f"non compute op not supporting {arg_node_type}! "
+                    )
 
                 # finished processing this non-compute node
                 continue
@@ -450,8 +438,6 @@ def build_data_parallel_strategies(
                     assert len(produce_param_grad_strat) == 1
                     produce_param_grad_strat[0].input_specs = input_specs
             else:
-                # NOTE: This is the common region for all regular computation ops
-
                 input_node_types = [
                     dp_strategy_map[arg].node_type
                     for arg in input_args
@@ -531,10 +517,6 @@ def build_data_parallel_strategies(
                     dp_strategy_map[node] = DataParallelStrategy(
                         output_node_type, [replica_strategy, shard_strategy]
                     )
-                elif NodeType.PARAM in input_node_types:
-                    # at this point, inputs should only have parameters, the
-                    # strategy of this node would be the same as the input
-                    dp_strategy_map[node] = dp_strategy_map[input_args[0]]
                 else:
                     raise RuntimeError(
                         f"Unrecognized node: {node} with input node types: {input_node_types}."
@@ -596,20 +578,8 @@ def mark_data_parallel_shardings(
 
             placeholder_idx += 1
         elif node.op == "call_function":
-            if isinstance(node_strategy, TupleStrategy):
-                # For tuple strategy in the data parallel mode, it should have the same strategy
-                # for all tuple elements, assert that then use the first element's strategy as sharding
-                for child_strategy in node_strategy.childs:
-                    assert isinstance(child_strategy, DataParallelStrategy)
-                    assert (
-                        child_strategy.strategies == node_strategy.childs[0].strategies
-                    )
-
-                node_strategies = node_strategy.childs[0].strategies
-            else:
-                assert isinstance(node_strategy, DataParallelStrategy)
-                node_strategies = node_strategy.strategies
-
+            assert isinstance(node_strategy, DataParallelStrategy)
+            node_strategies = node_strategy.strategies
             assert (
                 len(node_strategies) <= 2
             ), "data parallel should have at most 2 strategies"
@@ -684,11 +654,15 @@ def partitioner(graph: GraphModule) -> GraphModule:
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
                 local_val = _to_local_shard(node.meta["val"], out_spec)
-                # update node value
+                local_tensor_meta = _extract_tensor_metadata(local_val)
+                # update metadata
                 node.meta["val"] = local_val
+                node.meta["tensor_meta"] = local_tensor_meta
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
-            output_val = node.meta["val"]
+            # for view related op that needs shape, adjust shape if needed
+            full_tensor = node.meta["val"]
+            full_shape = full_tensor.shape
 
             # check if there's misaligned sharding, insert reshard if there is
             expected_input_specs = node_sharding.input_specs
@@ -701,13 +675,11 @@ def partitioner(graph: GraphModule) -> GraphModule:
                     else expected_input_specs[idx]
                 )
                 if input_arg_spec != desired_spec:
-                    input_full_shape = input_arg.meta["tensor_meta"].shape
-
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
                         return _redistribute_with_local_tensor(
                             local_tensor,
-                            input_full_shape,
+                            full_shape,
                             out_spec.mesh,
                             input_arg_spec.placements,
                             desired_spec.placements,
@@ -725,41 +697,24 @@ def partitioner(graph: GraphModule) -> GraphModule:
                         )
                     node.replace_input_with(input_arg, output_node)
             if node.target in shape_adjustment_ops:
-                # for view related op that needs shape, adjust shape if needed
-                assert isinstance(output_val, torch.Tensor)
                 local_shape = compute_local_shape(
-                    output_val.shape, out_spec.mesh, out_spec.placements
+                    full_shape, out_spec.mesh, out_spec.placements
                 )
                 node.update_arg(1, local_shape)
 
-            # convert output tensor to local shard
+            # convert output to local shard
             # note that if the output is already local, we don't need to convert
-            if isinstance(output_val, list):
-                new_local_list = []
-                for tensor_val in output_val:
-                    local_val = _to_local_shard(tensor_val, out_spec)
-                    new_local_list.append(local_val)
-                node.meta["val"] = new_local_list
-            else:
-                if isinstance(output_val, torch.Tensor):
-                    if not hasattr(out_spec, "from_local"):
-                        local_val = _to_local_shard(output_val, out_spec)
-                        node.meta["val"] = local_val
-                else:
-                    raise RuntimeError(f"Output type {type(output_val)} not supported!")
+            if not hasattr(out_spec, "from_local"):
+                local_val = _to_local_shard(full_tensor, out_spec)
+                local_tensor_meta = _extract_tensor_metadata(local_val)
+                # update metadata
+                node.meta["val"] = local_val
+                node.meta["tensor_meta"] = local_tensor_meta
 
         elif node.op == "output":
             break
         else:
             raise RuntimeError(f"op code {node} not supported")
-
-    # clean up the graph by removing sharding and partitioning related metadata
-    for node in graph.graph.nodes:
-        if "sharding" in node.meta:
-            del node.meta["sharding"]
-        if "val" in node.meta and isinstance(node.meta["val"], torch.Tensor):
-            local_tensor_meta = _extract_tensor_metadata(node.meta["val"])
-            node.meta["tensor_meta"] = local_tensor_meta
 
     graph.graph.lint()
     graph.recompile()
@@ -785,7 +740,6 @@ def partition_data_parallel(
     num_params_buffers = len(params_buffers)
     flattened_states = pytree.tree_flatten(named_states)[0]
     num_states = len(flattened_states)
-
     # 1. First build up data parallel strategies for the whole graph
     strategy_map = build_data_parallel_strategies(
         graph, num_params_buffers, num_states, mesh=mesh
