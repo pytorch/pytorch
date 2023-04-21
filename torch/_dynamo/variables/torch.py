@@ -852,6 +852,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         f"at {code.co_filename}:{code.co_firstlineno} because "
                         f"it closes over variables {closure_vars}. Please rewrite "
                         f"'{code.co_name}' to take {closure_vars} as additional args.",
+                        ref_case_id=26,
                     )
 
             # Setup the subgraph we're going to capture into
