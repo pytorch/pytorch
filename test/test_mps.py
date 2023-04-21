@@ -10253,6 +10253,7 @@ class TestConsistency(TestCaseMPS):
         'addr', 'var_mean',
         'var_mean_unbiased',
         'native_layer_norm',
+        'nn.functional.layer_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
