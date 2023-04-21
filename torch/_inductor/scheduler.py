@@ -1185,6 +1185,90 @@ class Scheduler:
 
     @dynamo_timed
     def codegen(self):
+        from .debug import create_fx_from_snodes
+        fx_graph = create_fx_from_snodes(self.nodes)
+
+        def get_read_write_buffers_sizes(node, removable_bufs):
+            if isinstance(node, NopKernelSchedulerNode):
+                return 0, 0
+            reads = {dep.name for dep in node.read_writes.reads}
+            writes = {dep.name for dep in node.read_writes.writes}
+
+            def is_materialized(buf):
+                buf_uses = {user.node for user in self.name_to_node[buf].users}
+                return len(buf_uses - set(node.snodes)) > 0
+
+            if isinstance(node, FusedSchedulerNode):
+                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
+                writes = writes - removed_buffers
+                reads = reads - removed_buffers
+
+            def get_bytes(bufs):
+                node_bytes = 0
+                for buf in bufs:
+                    if buf in V.graph.name_to_buffer:
+                        buf = V.graph.name_to_buffer[buf]
+                    elif buf in V.graph.graph_inputs:
+                        buf = V.graph.graph_inputs[buf]
+                    else:
+                        continue
+                    if isinstance(buf.layout, ir.MultiOutputLayout):
+                        # node_bytes += 1
+                        val = tuple(buf.origins)[0].meta['val']
+                        if isinstance(val, tuple):
+                            node_bytes += sum([i.numel() * i.element_size() for i in val if isinstance(i, torch.Tensor)])
+                        elif isinstance(val, torch.Tensor):
+                            node_bytes += val.numel() * val.element_size()
+                        else:
+                            val += 1
+                    else:
+                        node_bytes += V.graph.sizevars.size_hint(
+                            sympy_product(buf.get_size())
+                        ) * get_dtype_size(buf.get_dtype())
+                return node_bytes
+            # print([read for read in reads if read in removable_bufs])
+            reads = [read for read in reads if read in removable_bufs]
+            return get_bytes(reads), get_bytes(writes)
+
+        def get_greedy_topo_ordering(fx_graph):
+            new_nodes = [node for node in fx_graph.nodes if 'fusion_meta' in node.meta]
+            indeg = {k: 0 for k in new_nodes}
+            from collections import defaultdict
+            buf_uses = defaultdict(set)
+            for node in new_nodes:
+                snode = node.meta['fusion_meta'].snode
+                for buf in snode.used_buffer_names():
+                    buf_uses[buf].add(snode)
+                for user in node.users:
+                    if user in indeg:
+                        indeg[user] += 1
+            result = []
+            while len(indeg) > 0:
+                indeg_snodes = set([i.meta['fusion_meta'].snode for i in tuple(indeg.keys())])
+                removable_bufs = []
+                for i in buf_uses.keys():
+                    if len(buf_uses[i] & indeg_snodes) == 1:
+                        removable_bufs.append(i)
+
+                def score_candidate(candidate):
+                    snode = candidate.meta['fusion_meta'].snode
+                    read_sizes, write_sizes = get_read_write_buffers_sizes(snode, removable_bufs)
+                    return write_sizes - read_sizes
+
+                candidates = [k for k in indeg.keys() if indeg[k] == 0]
+                candidates = sorted(candidates, key=score_candidate)
+                k = candidates[0]
+                result.append(k)
+                for user in k.users:
+                    if user in indeg:
+                        indeg[user] -= 1
+                del indeg[k]
+            return [node.meta['fusion_meta'].snode for node in result]
+
+        new_nodes = get_greedy_topo_ordering(fx_graph)
+        self.nodes = new_nodes
+        self.compute_last_usage()
+
         for node in self.nodes:
             self.enter_context(node)
             self.buffer_names_no_longer_needed.update(node.last_usage)
