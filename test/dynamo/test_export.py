@@ -16,10 +16,7 @@ from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    is_concrete_int,
-)
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
 
 
@@ -109,12 +106,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                if config.assume_static_by_default:
-                    # The guard produced here must be narrow, because
-                    # we are running with assume_static_by_default
-                    self.assertTrue("L['x'].size()[0] == 6" in guard.code_list)
-                else:
-                    self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -1539,6 +1531,160 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    def test_export_with_cond_branches_calling_methods(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            # ok
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def t(self, val):
+                return val + 1
+
+            def f(self, val):
+                return val - 1
+
+            def true_fn(self, val):
+                return self.linear(val) + self.t(val)
+
+            def false_fn(self, val):
+                return self.linear(val) - self.f(val)
+
+            def forward(self, pred, x):
+                return cond(pred, self.true_fn, self.false_fn, [x])
+
+        mod = Module()
+        x = torch.randn([3, 3])
+        pred = torch.tensor(x[0][0].item() < 0)
+        real_result = mod.forward(pred, x)
+        out_graph, _ = torch._dynamo.export(mod.forward, pred, x)
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    def test_export_with_cond_closure(self):
+        from functorch.experimental.control_flow import cond
+
+        class ModuleAccidentallyPassingError(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(val):
+                    return x * 2
+
+                def false_fn(val):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        class ModuleAccidentallyPassingFixed(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(x):
+                    return x * 2
+
+                def false_fn(x):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        class ModuleNoAccidentError(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(val):
+                    return x * 2
+
+                def false_fn(val):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x + 1])
+
+        class ModuleNoAccidentFixed(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                def true_fn(x):
+                    return x * 2
+
+                def false_fn(x):
+                    return x - 2
+
+                return cond(pred, true_fn, false_fn, [x + 1])
+
+        class ModuleClosureReproError(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, pred, x):
+                y = x + x
+
+                def true_fn(val):
+                    return self.linear(val) * (x + y)
+
+                def false_fn(val):
+                    return val * (y - x)
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        class ModuleClosureReproFixed(torch.nn.Module):
+            # error
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, pred, x):
+                y = x + x
+
+                def true_fn(x, y):
+                    return self.linear(x) * (x + y)
+
+                def false_fn(x, y):
+                    return x * (y - x)
+
+                return cond(pred, true_fn, false_fn, [x, y])
+
+        for Module in [
+            ModuleAccidentallyPassingError,
+            ModuleNoAccidentError,
+            ModuleClosureReproError,
+        ]:
+            mod = Module()
+            x = torch.randn([3, 3])
+            pred = torch.tensor(x[0][0].item() < 0)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError,
+                "Cannot create subgraph for nested function.*because it closes over variables",
+            ):
+                torch._dynamo.export(mod.forward, pred, x)
+
+        for Module in [
+            ModuleAccidentallyPassingFixed,
+            ModuleNoAccidentFixed,
+            ModuleClosureReproFixed,
+        ]:
+            mod = Module()
+            x = torch.randn([3, 3])
+            pred = torch.tensor(x[0][0].item() < 0)
+            real_result = mod.forward(pred, x)
+            out_graph, _ = torch._dynamo.export(mod.forward, pred, x)
+            dynamo_result = out_graph(pred, x)
+            self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
     @config.patch(dynamic_shapes=True)
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
@@ -2077,13 +2223,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
         constraints = [dynamic_dim(y, 0)]
-        if config.assume_static_by_default:
-            # The assume_static flag causes this to raise, as
-            # we are now esentially comparing with a constant
-            with self.assertRaises(ConstraintViolationError):
-                torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
-        else:
-            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
+        torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_no_raise(self):
@@ -2149,13 +2289,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
-        if config.assume_static_by_default:
-            # The assume_static flag causes this to raise, as
-            # we are now esentially comparing with a constant
-            with self.assertRaises(ConstraintViolationError):
-                torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
-        else:
-            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
@@ -2375,28 +2509,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
             )
 
-    @config.patch(assume_static_by_default=True, dynamic_shapes=True)
-    def test_propagate_assume_static_by_default(self):
-        def f(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
-        )
-
-        for node in gm.graph.nodes:
-            val = node.meta.get("val", None)
-            if val is not None:
-                shapes = val.shape
-                # there should no symbols
-                for shape in shapes:
-                    self.assertTrue(is_concrete_int(shape))
-
-        # this should be captured as static, as export won't generate any symbols.
-        self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
-
     def test_access_class_method_from_user_class(self):
         class A:
             @classmethod
@@ -2448,22 +2560,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def false_fn(x):
             return x.sin()
 
-        def f_pred_traced_as_constant_var(x):
-            return cond(x.dim() > 2, true_fn, false_fn, [x])
-
         def f_pred_traced_as_symnode_var(x):
-            return cond(x.shape[0] > 10, true_fn, false_fn, [x])
+            return cond(x.shape[0] > 2, true_fn, false_fn, [x])
 
         def f_pred_traced_as_tensor_var(x):
             return cond(x.all(), true_fn, false_fn, [x])
 
-        example_inputs = (torch.rand(5),)
+        def f_pred_complex_expression_traced_as_symnode_var(x):
+            return cond(
+                x.dim() > 1 and x.shape[1] > 5 and x.shape[1] <= 10,
+                true_fn,
+                false_fn,
+                [x],
+            )
+
+        example_inputs = (torch.rand(5, 8),)
         for f in [
-            f_pred_traced_as_constant_var,
             f_pred_traced_as_symnode_var,
             f_pred_traced_as_tensor_var,
+            f_pred_complex_expression_traced_as_symnode_var,
         ]:
-            gm, _ = torch._dynamo.export(f, *example_inputs)
+            gm, _ = torch._dynamo.export(
+                f, *example_inputs, aten_graph=True, tracing_mode="symbolic"
+            )
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
     def test_mixed_real_and_fake_inputs(self):
@@ -2514,6 +2633,213 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         false_inp = (torch.Tensor([6, 4, 5]), torch.ones(6, 4).add_(2))
         self.assertEqual(gm(*true_inp), f(*true_inp))
         self.assertEqual(gm(*false_inp), f(*false_inp))
+
+    def test_cond_raise_user_error_on_missing_args(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            return x.sin()
+
+        def f(x):
+            return cond(x.shape[0] > 10, true_fn, false_fn)
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected 4 arguments",
+        ):
+            torch._dynamo.export(
+                f, *example_inputs, aten_graph=True, tracing_mode="symbolic"
+            )
+
+    def test_cond_raise_user_error_on_unsupported_pred(self):
+        def f_unsupported_pred(x):
+            pred = torch.nn.Module()
+            return cond(pred, lambda x: x.sin(), lambda x: x.cos(), [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected pred to be bool/int or a tensor",
+        ):
+            torch._dynamo.export(
+                f_unsupported_pred,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_non_list_operands(self):
+        def f_non_list_operands(x):
+            return cond(torch.tensor(True), lambda x: x.sin(), lambda x: x.cos(), x)
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected a list but got",
+        ):
+            torch._dynamo.export(
+                f_non_list_operands,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_non_tensor_operands(self):
+        def f_non_tensor_operands(x):
+            a: float = 3.14
+            return cond(
+                torch.tensor(1234), lambda x, a: x.sin(), lambda x, a: x.cos(), [x, a]
+            )
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected a list of tensors",
+        ):
+            torch._dynamo.export(
+                f_non_tensor_operands,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_branch_args_mismatch(self):
+        def true_fn(x, y):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f_branch_args_mismatch(x, y):
+            return cond(torch.tensor([[[[100]]]]), true_fn, false_fn, [x, y])
+
+        example_inputs = (torch.rand(5), torch.rand(2))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "too many positional arguments",
+        ):
+            torch._dynamo.export(
+                f_branch_args_mismatch,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_branch_return_non_tensor(self):
+        def f_branch_return_non_tensor(x):
+            return cond(x.shape[0] <= 5, lambda x: 3.14, lambda x: 3.14, [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected branch out type to be a single tensor",
+        ):
+            torch._dynamo.export(
+                f_branch_return_non_tensor,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_branch_return_multiple_tenors(self):
+        def f_branch_return_multiple_tensors(x, y):
+            return cond(y, lambda x: (x, x), lambda x: (x, x), [x])
+
+        example_inputs = (torch.randn(4), torch.randn(2))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected branch out type to be a single tensor",
+        ):
+            torch._dynamo.export(
+                f_branch_return_multiple_tensors,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_mismatch_return_length(self):
+        def true_fn(x):
+            return x
+
+        def false_fn(x):
+            return (x, x)
+
+        def f_mismatch_return_length(x):
+            return cond(torch.tensor(100), true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected branch out type to be a single tensor",
+        ):
+            torch._dynamo.export(
+                f_mismatch_return_length,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_cond_raise_user_error_on_mismatch_return_tensor_meta(self):
+        def true_fn(x):
+            return torch.tensor([[3], [2]])
+
+        def false_fn(x):
+            return torch.tensor([3.14])
+
+        def f_return_tensor_mismatch(x):
+            return cond(x.shape[0] < 3, true_fn, false_fn, [x])
+
+        example_inputs = (torch.rand(5),)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected each tensor to have same metadata but got",
+        ):
+            torch._dynamo.export(
+                f_return_tensor_mismatch,
+                *example_inputs,
+                aten_graph=True,
+                tracing_mode="symbolic",
+            )
+
+    def test_export_defaults_ok(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[: x.size(0) - i, i : x.size(2), i:3])
+                return tuple(results)
+
+        gm, _ = torch._dynamo.export(
+            DynamicSliceExportMod(),
+            torch.randn(5, 5, 5),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    slice_tensor = torch.ops.aten.slice.Tensor(arg0, 2, 0, 3)
+    sym_size = torch.ops.aten.sym_size(arg0, 0)
+    sub = sym_size - 1
+    slice_tensor_1 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub);  sub = None
+    sym_size_1 = torch.ops.aten.sym_size(arg0, 2)
+    slice_tensor_2 = torch.ops.aten.slice.Tensor(slice_tensor_1, 1, 1, sym_size_1);  slice_tensor_1 = None
+    slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 2, 1, 3);  slice_tensor_2 = None
+    sub_1 = sym_size - 2
+    slice_tensor_4 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_1);  sub_1 = None
+    slice_tensor_5 = torch.ops.aten.slice.Tensor(slice_tensor_4, 1, 2, sym_size_1);  slice_tensor_4 = None
+    slice_tensor_6 = torch.ops.aten.slice.Tensor(slice_tensor_5, 2, 2, 3);  slice_tensor_5 = None
+    sub_2 = sym_size - 3;  sym_size = None
+    slice_tensor_7 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_2);  arg0 = sub_2 = None
+    slice_tensor_8 = torch.ops.aten.slice.Tensor(slice_tensor_7, 1, 3, sym_size_1);  slice_tensor_7 = sym_size_1 = None
+    slice_tensor_9 = torch.ops.aten.slice.Tensor(slice_tensor_8, 2, 3, 3);  slice_tensor_8 = None
+    return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
+        )
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
