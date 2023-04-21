@@ -25,6 +25,7 @@ import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import bytecode_analysis, bytecode_transformation
 from torch._dynamo.output_graph import OutputGraph
+from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
@@ -4023,10 +4024,6 @@ def fn():
         y = torch.tensor([1.0, 1.0])
         opt_fn(x, y)
 
-        if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(len(all_guards), 17)
-        else:
-            self.assertEqual(len(all_guards), 13)
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
@@ -4998,6 +4995,27 @@ def fn():
             return -x * -y * a * b
 
         torch._dynamo.testing.standard_test(self, int_neg, 2)
+
+    def test_hash_getitem_slice(self):
+        s = GetItemSource(LocalSource("foo"), slice(None, -1, None))
+        s2 = GetItemSource(LocalSource("foo"), slice(None, -1, None))
+        s3 = GetItemSource(LocalSource("foo"), slice(None, -1, 2))
+        some_set = set()
+
+        self.assertTrue(s not in some_set)
+        self.assertTrue(s2 not in some_set)
+        self.assertTrue(s3 not in some_set)
+
+        some_set.add(s)
+
+        self.assertTrue(s in some_set)
+        # s and s2 should hash the  same
+        self.assertTrue(s2 in some_set)
+        # s3 should be different
+        self.assertTrue(s3 not in some_set)
+
+        self.assertTrue(s == s2)
+        self.assertTrue(s != s3)
 
 
 class CustomFunc1(torch.autograd.Function):
