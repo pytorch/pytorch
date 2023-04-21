@@ -4,7 +4,7 @@
 
 #include <torch/torch.h>
 
-extern std::vector<at::Tensor> inductor_cpp_entry(
+extern std::vector<at::Tensor> inductor_entry_cpp(
     const std::vector<at::Tensor>& args);
 
 namespace torch {
@@ -37,7 +37,7 @@ TEST(AotInductorTest, BasicTest) {
   }
   inputs.push_back(x);
   inputs.push_back(y);
-  auto results_opt = inductor_cpp_entry(inputs);
+  auto results_opt = inductor_entry_cpp(inputs);
 
   ASSERT_TRUE(torch::allclose(results_ref, results_opt[0]));
 }

@@ -722,7 +722,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
-        self.call_func_name = "inductor_cpp_entry"
+        self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
 
     def seed(self):

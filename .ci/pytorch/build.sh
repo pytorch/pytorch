@@ -183,6 +183,10 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == *sm86* ]]; then
+  export BUILD_AOT_INDUCTOR_TEST=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
