@@ -14,11 +14,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import (
-    requires_numpy,
-    requires_numpy_pytorch_interop,
-    requires_static_shapes,
-)
+from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
@@ -928,6 +924,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             torch.from_numpy(a.real),
             torch.from_numpy(a.imag),
         )
+
+    @make_test
+    @requires_numpy_pytorch_interop
+    def test_mean_sum_np(x: torch.Tensor):
+        import numpy as np
+
+        x_mean = np.mean(x.numpy(), 1)
+        x_sum = np.sum(x_mean)
+        x_sum_array = np.asarray(x_sum)
+        return torch.from_numpy(x_sum_array)
 
 
 def global_func_with_default_tensor_args(

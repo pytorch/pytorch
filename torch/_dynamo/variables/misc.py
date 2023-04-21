@@ -569,14 +569,14 @@ class NumpyVariable(VariableTracker):
         import torch_np
 
         from .builder import wrap_fx_proxy_cls
-        from .tensor import NumpyTensorVariable
+        from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         # lookup method name in torch_np
         if hasattr(torch_np, self.value.__name__):
             func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
+                target_cls=NumpyNdarrayVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",

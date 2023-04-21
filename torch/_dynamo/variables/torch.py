@@ -318,9 +318,9 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, f"Got arguments {args}"
             assert not kwargs
             t = args[0]
-            from .tensor import NumpyTensorVariable
+            from .tensor import NumpyNdarrayVariable
 
-            if isinstance(t, NumpyTensorVariable):
+            if isinstance(t, NumpyNdarrayVariable):
                 # TODO: mark the tensor as non-resizable
                 return wrap_fx_proxy_cls(
                     target_cls=TensorVariable,
