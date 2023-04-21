@@ -150,6 +150,7 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
         run: |
           # shellcheck disable=SC1090
           set -ex
@@ -182,7 +183,17 @@ jobs:
           ${CONDA_RUN} which python
           ${CONDA_RUN} python --version
 
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          if [ $? -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
+
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
