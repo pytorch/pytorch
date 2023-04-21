@@ -12,6 +12,7 @@ from torch._decomp.decompositions import pw_cast_for_opmath
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
+from torch._inductor.utils import do_bench
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -155,7 +156,6 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
 
 def should_pad_bench(mat1, mat2, op, input=None):
     assert utils.has_triton()
-    from triton.testing import do_bench
 
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
