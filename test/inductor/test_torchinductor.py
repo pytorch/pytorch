@@ -1027,6 +1027,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_views5(self):
+        # tensor with shape 0 in any dimension
+        def forward(x):
+            y = x[:, 4:]
+            return y.view(len(y), -1, 4)
+
+        self.common(
+            forward,
+            (torch.randn(4, 4, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
