@@ -149,6 +149,8 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     ]
     conv_configs = []
     for convs in [_Conv2dMetadata]:
+        # (1) Single conv modules/functions
+        # -----------------------------------
         # conv module
         conv_configs.append(
             BackendPatternConfig(convs.root)
@@ -158,6 +160,14 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             .set_reference_quantized_module(convs.reference)
             .set_qat_module(convs.qat)
         )
+        # conv qat module
+        conv_configs.append(
+            BackendPatternConfig(convs.qat)
+            .set_observation_type(observation_type)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
+            .set_root_module(convs.root)
+            .set_reference_quantized_module(convs.reference)
+        )
         # functional conv
         conv_configs.append(
             BackendPatternConfig(convs.func)
@@ -165,6 +175,9 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             .set_dtype_configs(dtype_configs)
             ._set_input_type_to_index({"weight": 1, "bias": 2})
         )
+
+        # (2) Conv + relu
+        # -----------------------------------
         # conv module + relu module
         conv_configs.append(
             BackendPatternConfig((convs.root, nn.ReLU))
@@ -188,6 +201,14 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             .set_reference_quantized_module(convs.reference)
             .set_qat_module(convs.relu_qat)
         )
+        # conv relu, qat fused module
+        conv_configs.append(
+            BackendPatternConfig(convs.relu_qat)
+            .set_observation_type(observation_type)  # noqa: E131
+            .set_dtype_configs(dtype_configs)
+            .set_root_module(convs.root)
+            .set_reference_quantized_module(convs.reference)
+        )
         # functional conv + relu module
         conv_configs.append(
             BackendPatternConfig((convs.func, nn.ReLU))
@@ -200,6 +221,22 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             .set_observation_type(observation_type)  # noqa: E131
             .set_dtype_configs(dtype_configs)
         )
+        # fused conv relu
+        conv_configs.append(
+            BackendPatternConfig(convs.fused_conv_relu)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_qat_module(convs.relu_qat)
+        )
+
+        conv_configs.append(
+            BackendPatternConfig(convs.relu_qat)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            .set_root_module(convs.root)
+            .set_reference_quantized_module(convs.reference)
+        )
+
+        # (3) Conv + batchnorm (+ relu)
+        # -------------------------------
         # conv + batchnorm (+ relu)
         conv_configs.append(
             BackendPatternConfig((convs.root, convs.bn))
