@@ -1322,7 +1322,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 FALLBACK_ALLOW_LIST = {
     "torchvision::roi_align",
 }
-FALLBACK_DENY_LIST = {"aten::exponential"}  # fails accuracy on test_torch.py
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -1495,6 +1494,9 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+# fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
+make_fallback(aten.exponential.default, warn=False)
 
 
 @register_lowering(aten.clone)

@@ -34,7 +34,6 @@ from .exc import (
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
-    FALLBACK_DENY_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
     layout_constraints,
@@ -365,7 +364,7 @@ class GraphLowering(torch.fx.Interpreter):
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
-            elif config.implicit_fallbacks and base_name not in FALLBACK_DENY_LIST:
+            elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
