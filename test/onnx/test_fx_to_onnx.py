@@ -1,6 +1,4 @@
 # Owner(s): ["module: onnx"]
-import unittest
-
 import pytorch_test_common
 import torch
 from torch import nn
