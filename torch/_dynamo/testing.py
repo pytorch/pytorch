@@ -4,6 +4,7 @@ import functools
 import logging
 import os.path
 import sys
+import re
 import types
 import unittest
 from unittest.mock import patch
@@ -54,10 +55,7 @@ def named_buffers_for_optimized_module(mod):
 
 
 def remove_optimized_module_prefix(name):
-    prefix = "_orig_mod."
-    assert name.startswith(prefix)
-    name = name[len(prefix) :]
-    return name
+    return re.sub(r"^_orig_mod[.]", "", name)
 
 
 def collect_results(model, prediction, loss, example_inputs):
