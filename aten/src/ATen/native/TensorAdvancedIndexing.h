@@ -69,12 +69,19 @@ static inline bool can_use_expanded_index_path(
     return false;
   }
 
+  // when the inner size is 1, index tensor will also have 0 stride on inner dimensions
+  // skip this: https://github.com/pytorch/pytorch/issues/99595
+  int64_t inner_size = index.numel() / index.size(0);
+  if (inner_size == 1) {
+    return false;
+  }
+
   if (is_scatter_like) {
     // using `spmm` for scatter would require sorting on index,
     // this is only perf beneficial when the inner dimension, aka, `channels`
     // is big enough.
     constexpr int64_t threshold = 16;
-    if (index.numel() / index.size(0) < threshold) {
+    if (inner_size < threshold) {
       return false;
     }
   }
