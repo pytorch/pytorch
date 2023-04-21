@@ -57,6 +57,7 @@ default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
 
 isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 9)]
+isSM90Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0)
 
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
@@ -1435,6 +1436,30 @@ class TestSDPA(NNTestCase):
             v = make_tensor(size, requires_grad=True)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM90Device,
+                     "Does not support fused SDPA or not SM90 hardware")
+    @parametrize("head_dim", [32, 64, 72, 96, 128])
+    def test_flash_backward_success_sm90(self, head_dim: int):
+        device = 'cuda'
+        dtype = torch.float16
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        size = (2, 2, 4, head_dim)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        q_with_grad = make_tensor(size, requires_grad=True)
+        k_with_grad = make_tensor(size, requires_grad=True)
+        v_with_grad = make_tensor(size, requires_grad=True)
+
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            math_ref_with_grad = torch.nn.functional.scaled_dot_product_attention(q_with_grad, k_with_grad, v_with_grad, None, 0.0, False)
+
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
+            flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            self.assertEqual(math_ref, flash_ref, atol=1e-3, rtol=1e-3)
+
+            flash_ref_with_grad = torch.nn.functional.scaled_dot_product_attention(q_with_grad, k_with_grad, v_with_grad, None, 0.0, False)
+            self.assertEqual(math_ref_with_grad, flash_ref_with_grad, atol=1e-3, rtol=1e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused scaled dot product attention")
     def test_dispatch_fails_no_backend(self):
