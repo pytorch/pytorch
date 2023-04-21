@@ -1087,13 +1087,6 @@ def prod(x: List[int]):
     return r
 
 
-def sum(x: List[int]):
-    r = 0
-    for i in x:
-        r += i
-    return r
-
-
 @register_decomposition([aten.split_with_sizes, aten.unsafe_split_with_sizes])
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
