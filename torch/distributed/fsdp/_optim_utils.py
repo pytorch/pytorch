@@ -380,10 +380,8 @@ def _flatten_optim_state_dict(
     group: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Flattens the full optimizer state dict, still keying by unflattened
-    parameter names. If ``shard_state=True``, then FSDP-managed
-    ``FlatParameter`` 's optimizer states are sharded, and otherwise, they are
-    kept unsharded.
+    Flattens the full optimizer state dict, still keying by unflattened parameter
+    names.
 
     If ``use_orig_params`` is True, each rank will have all FSDP-managed
     parameters but some of these parameters may be empty due to the sharding.
@@ -501,7 +499,7 @@ def _flatten_optim_state_dict(
     for key in all_state_keys:
         user_state = unflat_osd_state[key]
         if isinstance(user_state, torch.Tensor) and rank0_only and use_orig_params:
-            user_state = _broadcast_state(fsdp_state, user_state, group=group)
+            user_state = _broadcast_state(fsdp_state, user_state)
         flat_osd_state[key] = copy.copy(user_state)
 
     # Construct the "param_groups" part -- copy as is since it will be

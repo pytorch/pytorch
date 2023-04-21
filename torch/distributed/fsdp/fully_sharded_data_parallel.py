@@ -1220,11 +1220,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         group: Optional[dist.ProcessGroup] = None,
     ) -> Dict[str, Any]:
         """
-        The internal API that is used by all the load optim_state_dict
-        implementations except for loading optim_state_dict with rank0_only is
-        True option.
-        Given model, optim, the saved optim_state_dict, this API adds the
-        FSDP internal information and internal sharding to the optim_state_dict.
+        The internal API that is used by all the load optim_state_dict implementations.
+        Given model, optim, and the saved optim_state_dict, this API adds the FSDP
+        internal information and internal sharding to the optim_state_dict.
         """
         if full_state_dict:
             FullyShardedDataParallel._warn_optim_input(optim_input)
