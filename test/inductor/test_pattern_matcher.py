@@ -181,6 +181,21 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
 
+        # https://github.com/pytorch/pytorch/issues/99686.
+        def fn(a):
+            x = torch.ops.aten.split_with_sizes.default(a, [3, 2, 3], dim=1)
+            cat = torch.ops.aten.cat.default([x[1], x[0], x[2]], dim=1)
+            return cat
+
+        args = [
+            torch.randn(1, 8, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
