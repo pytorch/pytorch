@@ -2706,9 +2706,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 5)
 
-        gm, _ = torch._dynamo.export(
-            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
-        )
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
     @torch._dynamo.config.patch("specialize_int", False)
@@ -2869,7 +2867,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch.zeros(6, 4),
             torch.tensor(1),
             aten_graph=True,
-            tracing_mode="symbolic",
         )
         self.assertEqual(
             f(torch.zeros(6, 4), torch.tensor(1)),
@@ -2973,7 +2970,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f,
             torch.zeros(6, 4),
             aten_graph=True,
-            tracing_mode="symbolic",
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
