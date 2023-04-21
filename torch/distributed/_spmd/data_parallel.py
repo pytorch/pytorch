@@ -18,6 +18,7 @@ from torch.distributed._tensor.op_schema import (
     OpStrategy,
     PlacementStrategy,
     StrategyType,
+    TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
@@ -373,43 +374,51 @@ def build_data_parallel_strategies(
                 assert (
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
-                arg_node_strategy = dp_strategy_map[input_nodes[0]]
-                assert isinstance(arg_node_strategy, DataParallelStrategy)
-                arg_node_type = arg_node_strategy.node_type
-                input_full_reduction = arg_node_strategy.reduction_over_batch
+
+                arg_strategy = dp_strategy_map[input_nodes[0]]
 
                 if node.target == operator.getitem:
                     # for getitem call, just forward the strategy from the input
-                    dp_strategy_map[node] = dp_strategy_map[node.args[0]]
-                elif arg_node_type == NodeType.PARAM:
-                    replica_strategy = _gen_replicate_strategy(mesh)
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.PARAM, [replica_strategy]
-                    )
-                elif arg_node_type == NodeType.GRAD:
-                    partial_sig = _gen_partial_strategy(mesh)
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.GRAD, [partial_sig]
-                    )
-                elif arg_node_type == NodeType.ACT:
-                    arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
-                        input_nodes[0], mesh
-                    )
-
-                    output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
-                        node, mesh, input_full_reduction
-                    )
-
-                    shard_strategy = PlacementStrategy(
-                        output_spec=output_spec, input_specs=[arg_node_spec]
-                    )
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [shard_strategy]
-                    )
+                    getitem_idx = node.args[1]
+                    if isinstance(arg_strategy, TupleStrategy):
+                        # for tuple strategy, we need to get the child strategy from the tuple
+                        dp_strategy_map[node] = arg_strategy.childs[getitem_idx]
+                    else:
+                        # if it's not a tuple strategy, we just forward the arg strategy
+                        dp_strategy_map[node] = arg_strategy
                 else:
-                    raise RuntimeError(
-                        f"non compute op not supporting {arg_node_type}! "
-                    )
+                    assert isinstance(arg_strategy, DataParallelStrategy)
+                    arg_node_type = arg_strategy.node_type
+                    input_full_reduction = arg_strategy.reduction_over_batch
+                    if arg_node_type == NodeType.PARAM:
+                        replica_strategy = _gen_replicate_strategy(mesh)
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.PARAM, [replica_strategy]
+                        )
+                    elif arg_node_type == NodeType.GRAD:
+                        partial_sig = _gen_partial_strategy(mesh)
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.GRAD, [partial_sig]
+                        )
+                    elif arg_node_type == NodeType.ACT:
+                        arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                            input_nodes[0], mesh
+                        )
+
+                        output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                            node, mesh, input_full_reduction
+                        )
+
+                        shard_strategy = PlacementStrategy(
+                            output_spec=output_spec, input_specs=[arg_node_spec]
+                        )
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.ACT, [shard_strategy]
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"non compute op not supporting {arg_node_type}! "
+                        )
 
                 # finished processing this non-compute node
                 continue
@@ -441,6 +450,8 @@ def build_data_parallel_strategies(
                     assert len(produce_param_grad_strat) == 1
                     produce_param_grad_strat[0].input_specs = input_specs
             else:
+                # NOTE: This is the common region for all regular computation ops
+
                 input_node_types = [
                     dp_strategy_map[arg].node_type
                     for arg in input_args
@@ -585,7 +596,20 @@ def mark_data_parallel_shardings(
 
             placeholder_idx += 1
         elif node.op == "call_function":
-            node_strategies = node_strategy.strategies
+            if isinstance(node_strategy, TupleStrategy):
+                # For tuple strategy in the data parallel mode, it should have the same strategy
+                # for all tuple elements, assert that then use the first element's strategy as sharding
+                for child_strategy in node_strategy.childs:
+                    assert isinstance(child_strategy, DataParallelStrategy)
+                    assert (
+                        child_strategy.strategies == node_strategy.childs[0].strategies
+                    )
+
+                node_strategies = node_strategy.childs[0].strategies
+            else:
+                assert isinstance(node_strategy, DataParallelStrategy)
+                node_strategies = node_strategy.strategies
+
             assert (
                 len(node_strategies) <= 2
             ), "data parallel should have at most 2 strategies"
