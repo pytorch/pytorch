@@ -1087,10 +1087,21 @@ def prod(x: List[int]):
     return r
 
 
+def sum(x: List[int]):
+    r = 0
+    for i in x:
+        r += i
+    return r
+
+
 @register_decomposition([aten.split_with_sizes, aten.unsafe_split_with_sizes])
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
+    if sum(split_sizes) != self.shape[dim]:
+        raise ValueError(
+            "Split sizes don't add up to the tensor's size in the given dimension"
+        )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
