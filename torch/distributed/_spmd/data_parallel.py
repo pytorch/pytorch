@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
 
 from typing import Any, cast, Dict, List, Optional, Tuple
@@ -577,6 +578,7 @@ def mark_data_parallel_shardings(
 
             placeholder_idx += 1
         elif node.op == "call_function":
+            assert isinstance(node_strategy, DataParallelStrategy)
             node_strategies = node_strategy.strategies
             assert (
                 len(node_strategies) <= 2
