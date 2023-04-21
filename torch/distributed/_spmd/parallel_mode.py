@@ -193,7 +193,9 @@ class DTensorExpandMode(ParallelMode):
         with FakeTensorMode(allow_non_fake_inputs=True):
             fake_inps = [torch.empty_like(inp) for inp in inps]
 
-        return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
+        return _convert_to_distributed(
+            gm, fake_inps, schemas, default_mesh=mesh, _allow_partial=False
+        )[0]
 
     def transform_and_compile(self, gm: GraphModule) -> GraphModule:
         """
