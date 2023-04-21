@@ -511,6 +511,9 @@ def run_meta_crossref(
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args
+        elif func is torch.repeat_interleave:
+            if isinstance(kwargs.get("repeats", None), int):
+                test_expect = TestExpect.SUCCESS
         elif func is torch.ops.aten.index.Tensor:
             # Don't convert boolean tensors to meta as they will have nonzero
             # called on them
@@ -579,7 +582,7 @@ meta disagrees with real impl:
             else:
                 seen_succeeded.setdefault(func, set()).add(dtype)
                 if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                    raise RuntimeError(f"unexpected success {resolve_name(func)}")
+                    raise RuntimeError(f"unexpected success {resolve_name(func)} {meta_args} {meta_kwargs}")
 
     return rs
 
@@ -603,6 +606,7 @@ meta_function_expected_failures = {
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
+    torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.frexp : {f64, f16, bf16, f32},

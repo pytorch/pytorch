@@ -3,7 +3,7 @@ adv_inception_v3,pass,9
 beit_base_patch16_224,pass,9
 botnet26t_256,pass,11
 coat_lite_mini,pass,9
-convit_base,fail_to_run,8
+convit_base,pass,12
 convmixer_768_32,pass,6
 convnext_base,pass,9
 crossvit_9_240,pass,9
