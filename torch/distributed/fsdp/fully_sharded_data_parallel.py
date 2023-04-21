@@ -80,15 +80,12 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.utils import _p_assert
 
 from ._optim_utils import (
-    _broadcast_pos_dim_tensor_states,
-    _broadcast_processed_optim_state_dict,
     _flatten_optim_state_dict,
     _get_param_id_to_param_from_optim_input,
     _get_param_key_to_param,
     _get_param_to_param_id_from_optim_input,
     _get_param_to_param_key,
     _optim_state_dict,
-    _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
 from ._state_dict_utils import _register_all_state_dict_hooks
@@ -1227,11 +1224,15 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Given model, optim, and the saved optim_state_dict, this API adds the FSDP
         internal information and internal sharding to the optim_state_dict.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input,
-            optim,
-        )
+        if full_state_dict:
+            FullyShardedDataParallel._warn_optim_input(optim_input)
+            using_optim_input = FullyShardedDataParallel._is_using_optim_input(
+                optim_input,
+                optim,
+            )
+        else:
+            using_optim_input = False
+            assert optim_input is None and not rank0_only
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
             0
@@ -1241,78 +1242,24 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             for m in FullyShardedDataParallel.fsdp_modules(model)
         ), "Not all FSDP modules have the same _use_orig_params value"
 
-        if rank0_only:
-            rank = dist.get_rank(group)
-            world_size = dist.get_world_size(group)
-            # Flatten the optimizer state dict and construct a copy with the
-            # positive-dimension tensors' shapes in place of the tensors themselves
-            # since those tensors will be broadcast separately to avoid copying
-            if rank == 0 or use_orig_params:
-                if rank > 0:
-                    optim_state_dict = {}
-                flat_osd = _flatten_optim_state_dict(
-                    optim_state_dict,
-                    model=model,
-                    shard_state=False,
-                    use_orig_params=use_orig_params,
-                    optim=(optim if is_named_optimizer else None),
-                    rank0_only=True,
-                )
-                if not use_orig_params:
-                    processed_osd = _process_pos_dim_tensor_state(flat_osd, world_size)
-            if not use_orig_params:
-                # Broadcast the optim state dict without positive-dimension tensor
-                # state and the FSDP parameter IDs from rank 0 to all ranks
-                processed_osd = _broadcast_processed_optim_state_dict(
-                    processed_osd if rank == 0 else None,
-                    rank,
-                    group,
-                )
-                # Broadcast positive-dimension tensor state (both sharded tensors for
-                # FSDP parameters and unsharded tensors for non-FSDP parameters)
-                broadcast_device = (
-                    torch.device("cuda")
-                    if torch.cuda.is_available()
-                    else torch.device("cpu")
-                )
-                sharded_osd = _broadcast_pos_dim_tensor_states(
-                    processed_osd,
-                    flat_osd if rank == 0 else None,
-                    rank,
-                    world_size,
-                    group,
-                    broadcast_device,
-                )
-            else:
-                sharded_osd = flat_osd
-            # Rekey the optimizer state dict to use parameter IDs according to this
-            # rank's `optim`
-            ret_state_dict = _rekey_sharded_optim_state_dict(
-                sharded_osd,
-                model=model,
-                optim=optim,
-                optim_input=optim_input,
-                using_optim_input=using_optim_input,
-                is_named_optimizer=is_named_optimizer,
-            )
-        else:
-            sharded_osd = _flatten_optim_state_dict(
-                optim_state_dict,
-                model=model,
-                shard_state=True,
-                use_orig_params=use_orig_params,
-                optim=(optim if is_named_optimizer else None),
-                rank0_only=False,
-            )
-            ret_state_dict = _rekey_sharded_optim_state_dict(
-                sharded_osd,
-                model=model,
-                optim=optim,
-                optim_input=optim_input,
-                using_optim_input=using_optim_input,
-                is_named_optimizer=is_named_optimizer,
-            )
-        return ret_state_dict
+        if rank0_only and dist.get_rank(group) > 0:
+            optim_state_dict = {}
+        sharded_osd = _flatten_optim_state_dict(
+            optim_state_dict,
+            model=model,
+            use_orig_params=use_orig_params,
+            optim=(optim if is_named_optimizer else None),
+            rank0_only=rank0_only,
+            group=group,
+        )
+        return _rekey_sharded_optim_state_dict(
+            sharded_osd,
+            model=model,
+            optim=optim,
+            optim_input=optim_input,
+            using_optim_input=using_optim_input,
+            is_named_optimizer=is_named_optimizer,
+        )
 
     @staticmethod
     def full_optim_state_dict(
