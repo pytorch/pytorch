@@ -309,8 +309,8 @@ static void upsample_bilinear2d_out_cuda_template(
 
       at::Tensor input_cl = input.contiguous(at::MemoryFormat::ChannelsLast);
 
-      const scalar_t* idata = input_cl.data_ptr<scalar_t>();
-      scalar_t* odata = output.data_ptr<scalar_t>();
+      const scalar_t* idata = input_cl.const_data_ptr<scalar_t>();
+      scalar_t* odata = output.mutable_data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
           input_height, output_height, align_corners, scales_h);
@@ -406,8 +406,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
       Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
-      auto idata = grad_input.data_ptr<scalar_t>();
-      auto odata = grad_output.data_ptr<scalar_t>();
+      auto idata = grad_input.mutable_data_ptr<scalar_t>();
+      auto odata = grad_output.const_data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
           input_height, output_height, align_corners, scales_h);
@@ -436,8 +436,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       Tensor grad_input_c = grad_input.is_contiguous() ? grad_input : at::zeros(grad_input.sizes(), grad_input.options());
       Tensor grad_output = grad_output_.contiguous();
 
-      auto idata = grad_input_c.data_ptr<scalar_t>();
-      auto odata = grad_output.data_ptr<scalar_t>();
+      auto idata = grad_input_c.mutable_data_ptr<scalar_t>();
+      auto odata = grad_output.const_data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
           input_height, output_height, align_corners, scales_h);

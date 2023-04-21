@@ -288,6 +288,11 @@ def pack_module(gm: torch.fx.GraphModule):
                     continue
                 if cur_module.training:
                     continue
+                if (
+                    cur_module.weight.dtype == torch.bfloat16
+                    and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                ):
+                    continue
                 if dynamo_config.dynamic_shapes:
                     computation_node_input_size = None
                     if (
