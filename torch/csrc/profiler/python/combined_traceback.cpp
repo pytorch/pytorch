@@ -52,6 +52,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
   void appendSymbolized(
       const std::vector<CapturedTraceback::PyFrame>& to_symbolize,
       SymbolizedTracebacks& result) override {
+    py::gil_scoped_acquire acquire;
     py::str line_s = "line";
     py::str name_s = "name";
     py::str filename_s = "filename";

@@ -6,7 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -181,8 +181,8 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name == "resize_" and self.source is not None:
-            unimplemented("calling resize_() on graph input")
+        if name in ("resize_", "unsqueeze_") and self.source is not None:
+            unimplemented(f"calling {name}() on graph input")
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -423,6 +423,16 @@ class TensorVariable(VariableTracker):
                 tx, [result, kwargs["value"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
+        elif name == "__contains__":
+            # Rewrite __contains__ here so that downstream passes can trace through
+            # without dealing with unbacked symbool. Roughly the code we translate is:
+            # def __contains__(self, x):
+            #     return (x == self).any().item()
+            result = TorchVariable(torch.eq, **options).call_function(
+                tx, [self, args[0]], {}
+            )
+            result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
+            return result.call_method(tx, "item", [], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -461,10 +471,14 @@ class SymNodeVariable(VariableTracker):
     def __init__(self, proxy, sym_num, **kwargs):
         super().__init__(**kwargs)
         self.proxy = proxy
+        # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
 
     def python_type(self):
-        return type(self.sym_num)
+        if isinstance(self.sym_num, SymTypes):
+            return self.sym_num.node.pytype
+        else:
+            return type(self.sym_num)
 
     def unpack_var_sequence(self, tx):
         super().unpack_var_sequence(tx)
