@@ -7,7 +7,6 @@ from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from ..._subclasses import FakeTensorMode
 from .. import config
 from ..pattern_matcher import (
-    Arg,
     CallFunction,
     KeywordArg,
     Match,
@@ -50,7 +49,9 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     CallFunction(
         torch.ops.prims.convert_element_type.default,
         CallFunction(
-            torch.ops.prims.convert_element_type.default, Arg(), KeywordArg("dtype1")
+            torch.ops.prims.convert_element_type.default,
+            KeywordArg("arg"),
+            KeywordArg("dtype1"),
         ),
         KeywordArg("dtype2"),
     ),

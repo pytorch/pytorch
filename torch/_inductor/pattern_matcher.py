@@ -558,7 +558,9 @@ def register_replacement(
 
 def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
     """
-    Register an aten to inductor IR replacement pattern
+    Register an aten to inductor IR replacement pattern.  The decorated
+    function is saved and then called a lowering time allowing direct
+    pattern to inductor IR conversion.
     """
 
     def decorator(handler):
@@ -575,7 +577,8 @@ def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
 
 def register_graph_pattern(pattern, extra_check=_return_true, *, pass_dict):
     """
-    Register an aten to inductor IR replacement pattern
+    Register a pattern that runs a function on the FX graph, allowing
+    custom transformation code.
     """
 
     def decorator(handler):
