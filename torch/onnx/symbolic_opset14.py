@@ -121,11 +121,12 @@ def quantized_hardswish(g: jit_utils.GraphContext, x, op_scale, op_zero_point):
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
 
-# Ported from https://github.com/microsoft/onnx-script/blob/main/onnxscript/function_libs/torch_aten/ops/core.py
+# Ported from
+# https://github.com/microsoft/onnxscript/blob/6b1b81700b4523f31d8c6d3321e5d8ef5d42b764/onnxscript/function_libs/torch_aten/ops/nn.py#L1504
 # aten_scaled_dot_product_attention
-# NOTE: Need Trilu
+# NOTE: Need op.Trilu
 @_onnx_symbolic("aten::scaled_dot_product_attention")
-@symbolic_helper.parse_args("v", "v", "v", "v", "f", "b", "f")
+@symbolic_helper.parse_args("v", "v", "v", "v", "f", "b", "v")
 @_beartype.beartype
 def scaled_dot_product_attention(
     g: jit_utils.GraphContext,
@@ -135,51 +136,29 @@ def scaled_dot_product_attention(
     attn_mask: Optional[torch._C.Value] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    scale: Optional[float] = None,
+    scale: Optional[torch._C.Value] = None,
 ):
-    # Use trace_only to handle optional inputs
     assert (not is_causal) or (
         is_causal and symbolic_helper._is_none(attn_mask)
     ), "is_causal and attn_mask cannot be set at the same time"
 
-    if scale is None:
+    scale = symbolic_helper._maybe_get_const(scale, "f")
+    if symbolic_helper._is_none(scale):
         scale = _attention_scale(g, query)
 
     if is_causal:
         attn_mask = _causal_attention_mask(g, query, key)
 
     # Swap the last two axes of key
-    key_shape = g.op("Shape", key)
-    end_idx = g.op(
-        "Constant", value_t=torch.tensor([_constants.INT64_MAX], dtype=torch.int64)
+    # NOTE: onnx-script has different logic here, because the attribute perms in
+    # transpose needs list of ints
+    key_shape_builtin = symbolic_helper._get_tensor_rank(key)
+    key_transposed_axes = list(range(key_shape_builtin))
+    key_transposed_axes[-1], key_transposed_axes[-2] = (
+        key_transposed_axes[-2],
+        key_transposed_axes[-1],
     )
-    last_idx = g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
-    second_last_idx = g.op("Constant", value_t=torch.tensor([-2], dtype=torch.int64))
-    key_last_dim = g.op("Slice", key_shape, last_idx, end_idx)
-    key_second_last_dim = g.op("Slice", key_shape, second_last_idx, last_idx)
-    key_first_dims = g.op(
-        "Slice",
-        key_shape,
-        g.op(
-            "Constant", value_t=torch.tensor([_constants.INT64_MIN], dtype=torch.int64)
-        ),
-        second_last_idx,
-    )
-    # Contract the dimensions that are not the last two so we can transpose
-    # with a static permutation.
-    key_squeezed_shape = g.op(
-        "Concat",
-        g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)),
-        key_second_last_dim,
-        key_last_dim,
-        axis_i=0,
-    )
-    key_squeezed = g.op("Reshape", key, key_squeezed_shape)
-    key_squeezed_transposed = g.op("Transpose", key_squeezed, perm_i=[0, 2, 1])
-    key_transposed_shape = g.op(
-        "Concat", key_first_dims, key_last_dim, key_second_last_dim, axis_i=0
-    )
-    key_transposed = g.op("Reshape", key_squeezed_transposed, key_transposed_shape)
+    key_transposed = g.op("Transpose", key, perm_i=key_transposed_axes)
 
     # https://github.com/pytorch/pytorch/blob/12da0c70378b5be9135c6fda62a9863bce4a4818/aten/src/ATen/native/transformers/attention.cpp#L653
     # Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
@@ -205,18 +184,18 @@ def scaled_dot_product_attention(
         mul_qk_add = g.op("Add", mul_qk, attn_mask)
     else:
         raise ValueError(
-            "Unsupported type for attn_mask: {}".format(
-                _type_utils.JitScalarType.from_value(attn_mask)
-            )
+            f"Unsupported type for attn_mask: {_type_utils.JitScalarType.from_value(attn_mask)}"
         )
 
     attn_weight = g.op("Softmax", mul_qk_add, axis_i=-1)
-    attn_weight, _ = g.op(
-        "Dropout",
-        attn_weight,
-        g.op("Constant", value_t=torch.tensor(dropout_p, dtype=torch.float)),
-        outputs=2,
-    )
+
+    if dropout_p != 0:
+        attn_weight = g.op(
+            "Dropout",
+            attn_weight,
+            g.op("Constant", value_t=torch.tensor(dropout_p, dtype=torch.float)),
+        )
+
     return g.op("MatMul", attn_weight, value)
 
 
