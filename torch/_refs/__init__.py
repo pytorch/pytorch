@@ -4432,7 +4432,6 @@ def arange_start_step(
 @register_decomposition(aten.arange.default)
 @out_wrapper()
 def arange_default(
-    start: NumberType,
     end: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
