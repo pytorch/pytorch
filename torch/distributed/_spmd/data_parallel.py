@@ -776,6 +776,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
                 # have nested container as return types (i.e. fused adam have tuple[list]
                 # as return type), tracing can't capture the "val" correctly yet.
                 # TODO: See if we can fix this directly in tracing
+                # issue: https://github.com/pytorch/pytorch/issues/99356
                 continue
 
             output_val = node.meta["val"]
