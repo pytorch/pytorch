@@ -16,6 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
+from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
@@ -1253,7 +1254,7 @@ class CppVecKernel(CppKernel):
                 assert opt_ctx.is_bf16_mem_copy
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
         elif (V.graph.get_dtype(name) in [torch.uint8]) and (
-            opt_ctx.is_store_fp32_as_uint8
+            opt_ctx.is_store_float_as_uint8
         ):
             # TODO(Leslie): Optimize the implementation of store_float_as_uint8
             # * Pattern match of quantization op in the loop body.
@@ -1646,6 +1647,17 @@ class CppVecKernelChecker(CppVecKernel):
 
         return False
 
+    def is_load_integer_scalar_tensor(self, name: str, index: sympy.Expr):
+        load_dtype = V.graph.get_dtype(name)
+        buffer = V.graph.get_buffer(name)
+        return (
+            load_dtype in [torch.int32, torch.int64]
+            and isinstance(buffer, TensorBox)
+            and isinstance(buffer.data, StorageBox)
+            and (len(buffer.data.layout.size) == 0)
+            and (index == 0)
+        )
+
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
             load_dtype = V.graph.get_dtype(name)
@@ -1668,7 +1680,9 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"{load_dtype} not loaded as float")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes:
+            if (
+                load_dtype not in self.load_supported_dtypes
+            ) and not self.is_load_integer_scalar_tensor(name, index):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -1709,10 +1723,10 @@ class CppVecKernelChecker(CppVecKernel):
                     return self.simd_vec
             elif store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_uint8 = self.can_store_fp32_as_uint8(
+                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
                     name, value_node
                 )
-                if not opt_ctx.is_store_fp32_as_uint8:
+                if not opt_ctx.is_store_float_as_uint8:
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -1970,6 +1984,18 @@ class CppVecKernelChecker(CppVecKernel):
                                 opt_ctx.is_load_uint8_as_float = True
                             elif dtype == torch.float:
                                 pass
+                            elif (
+                                dtype in [torch.int32, torch.int64]
+                                and input_value.target == "load"
+                            ):
+                                buffer = V.graph.get_buffer(input_value.args[1])
+                                # Check if load of a scalar tensor of integer
+                                if not (
+                                    isinstance(buffer, TensorBox)
+                                    and isinstance(buffer.data, StorageBox)
+                                    and len(buffer.data.layout.size) == 0
+                                ):
+                                    self.disable_vec(f"to_dtype: dtype {dtype}")
                             else:
                                 self.disable_vec(f"to_dtype: dtype {dtype}")
                     elif dtype == torch.bfloat16:
