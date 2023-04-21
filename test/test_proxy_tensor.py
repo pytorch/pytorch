@@ -755,6 +755,44 @@ class TestFakeProxyTensor(TestCase):
         x, y = torch.randn(2), torch.randn(2)
         self.assertEqual(g(x, y), f(x, y))
 
+    def test_fused_adam(self):
+        # See https://github.com/pytorch/pytorch/issues/99356
+        params = [torch.randn(10, 10, requires_grad=True) for _ in range(10)]
+        grads = [torch.randn(10, 10) for _ in range(10)]
+        exp_avgs = [torch.randn(10, 10) for _ in range(10)]
+        exp_avg_sqs = [torch.randn(10, 10) for _ in range(10)]
+        max_exp_avg_sqs = [torch.randn(10, 10) for _ in range(10)]
+        state_steps = [torch.tensor(0) for _ in range(10)]
+
+        def fused_adam(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
+            return aten._fused_adam.default(
+                params,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                lr=0.1,
+                beta1=0.9,
+                beta2=0.999,
+                weight_decay=0.01,
+                eps=1e-8,
+                amsgrad=False,
+                maximize=False,
+            )
+
+        gm = make_fx(fused_adam, tracing_mode='fake')(
+            params,
+            grads,
+            exp_avgs,
+            exp_avg_sqs,
+            max_exp_avg_sqs,
+            state_steps,
+        )
+        for n in gm.graph.nodes:
+            if n.op == "call_function" and n.target == aten._fused_adam.default:
+                self.assertIn('val', n.meta)
+
     def test_alias(self):
         def f(x):
             return torch.ops.aten.alias(x)
