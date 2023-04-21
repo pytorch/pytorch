@@ -193,8 +193,6 @@ def _create_op_overload_to_exporter_key_table() -> (
                 # different exporter keys.
 
                 table[op_overload] = op_overload_packet._qualified_op_name
-    # NOTE: Below are not in torch.ops.aten/torch.ops.prim
-    table[torch.ops.aten.sym_size.int] = "aten::sym_size"
     return table
 
 
