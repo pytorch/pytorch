@@ -2,7 +2,7 @@ import inspect
 import itertools
 import operator
 import types
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import torch.fx
 import torch.random
