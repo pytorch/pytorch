@@ -47,6 +47,10 @@ class DummyModule(object):
     def set_rng_state(new_state: torch.Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
         pass
 
+    @staticmethod
+    def is_available():
+        return True
+
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
@@ -161,6 +165,34 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         x = x.foo()
         self.assertTrue(x.is_foo)
         self.assertTrue(hasattr(torch.nn.Module, 'foo'))
+
+        # check whether the attributes and methods for storage of the corresponding custom backend are generated correctly
+        torch.utils.generate_methods_for_privateuse1_backend(for_tensor=False, for_module=False, for_storage=True)
+
+        x = torch.empty(4, 4)
+        # check TypedStorage
+        z1 = x.storage()
+        self.assertFalse(z1.is_foo)
+        z1 = z1.foo()
+        self.assertFalse(self.module.custom_add_called())
+        self.assertTrue(z1.is_foo)
+        with self.assertRaisesRegex(RuntimeError, "Invalid device"):
+            z1.foo(torch.device("cpu"))
+        z1 = z1.cpu()
+
+        y = torch.empty(4, 4)
+        # check UntypedStorage
+        z2 = y.untyped_storage()
+        self.assertFalse(z2.is_foo)
+        z2 = z2.foo()
+        self.assertFalse(self.module.custom_add_called())
+        self.assertTrue(z2.is_foo)
+
+        storage = torch.UntypedStorage(4, device=torch.device('foo'))
+        self.assertEqual(torch.serialization.location_tag(storage), 'foo')
+        cpu_storage = torch.empty(4, 4).storage()
+        foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
+        self.assertTrue(foo_storage.is_foo)
 
     def test_open_device_random(self):
         torch.utils.rename_privateuse1_backend('foo')
