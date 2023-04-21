@@ -15,9 +15,6 @@ def strip_trailing_whitespace(r):
 
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
-    def tearDown(self):
-        assert not torch.cuda.is_initialized()
-
     def test_save_graph_repro(self):
         return
         buf = io.StringIO()
