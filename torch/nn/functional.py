@@ -3766,7 +3766,7 @@ if upsample.__doc__:
     upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
-def is_integer(x) -> bool:
+def _is_integer(x) -> bool:
     r"""Type check the input number is an integer.
     Will return True for int, SymInt and Tensors with integer elements.
     """
