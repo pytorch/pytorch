@@ -32,12 +32,13 @@ struct PaddingParams {
   PaddingParams(const Tensor& input, const Tensor& output, IntArrayRef padding) {
     ndim = padding.size() / 2;
 
+    std::cout << "" << std::endl;
+    std::cout << "" << std::endl;
     std::cout << "### input shape: " << input.sizes() << "; " << input.strides() << std::endl;
     std::cout << "### output shape: " << output.sizes() << "; " << output.strides() << std::endl;
     std::cout << "### padding: " << padding << std::endl;
     std::cout << "### input: " << input << std::endl;
     std::cout << "### ndim: " << ndim << std::endl;
-    std::cout << "" << std::endl;
 
     bool is_batch = input.dim() == ndim + 2;
     nbatch = is_batch ? input.size(0) : 1;
@@ -198,6 +199,7 @@ void cpu_padding(
       for (const auto i : c10::irange(begin, end)) {
         int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
         output_data[i] = input_data[c * input_width + iw];
+        data_index_step(c, channels, ow, output_width);
       }
     });
   } else if (ndim == 2) {
