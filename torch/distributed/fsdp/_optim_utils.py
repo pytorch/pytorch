@@ -325,10 +325,10 @@ def _flatten_optim_state_dict(
         Dict[str, Any]: The flattened optimizer state dict.
     """
     unflat_osd = optim_state_dict
-    if "state" not in unflat_osd or "param_groups" not in unflat_osd:
+    if "state" not in unflat_osd:
         raise ValueError(
-            '`optim_state_dict` must have the keys "state" and '
-            '"param_groups" to be a valid optimizer state dict'
+            '`optim_state_dict` must have the keys "state"'
+            "to be a valid optimizer state dict"
         )
     param_to_fqns = _get_param_to_fqns(model)
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
@@ -395,8 +395,12 @@ def _flatten_optim_state_dict(
 
     # Construct the "param_groups" part -- copy as is since it will be
     # rekeyed later according to the target rank's optimizer
-    flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
-    return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
+    # Only copy param_groups if it exists in unflat_osd
+    if "param_groups" in unflat_osd:
+        flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
+        return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
+    else:
+        return {"state": flat_osd_state}
 
 
 def _flatten_optim_state(
@@ -750,7 +754,10 @@ def _process_pos_dim_tensor_state(
             else:  # non-FSDP parameter
                 info = _PosDimTensorInfo(value.shape, value.dtype)
             no_tensor_osd["state"][key][state_name] = info
-    no_tensor_osd["param_groups"] = flat_osd["param_groups"]
+
+    # Only return no_tensor_osd with param_groups if it exists in flat_osd
+    if "param_groups" in flat_osd:
+        no_tensor_osd["param_groups"] = flat_osd["param_groups"]
     return no_tensor_osd
 
 
@@ -1008,19 +1015,22 @@ def _rekey_sharded_optim_state_dict(
         )
         rekeyed_osd_state[flat_param_key] = param_state
 
-    rekeyed_osd_param_groups: List[Dict[str, Any]] = []
-    for unflat_param_group in sharded_osd["param_groups"]:
-        flat_param_group = copy.deepcopy(unflat_param_group)
-        flat_param_keys = sorted(
-            {
-                unflat_param_name_to_flat_param_key[unflat_param_name]
-                for unflat_param_name in unflat_param_group["params"]
-            }
-        )
-        flat_param_group["params"] = flat_param_keys
-        rekeyed_osd_param_groups.append(flat_param_group)
-
-    return {"state": rekeyed_osd_state, "param_groups": rekeyed_osd_param_groups}
+    # Only process param_groups if it exists in sharded_osd
+    if "param_groups" in sharded_osd:
+        rekeyed_osd_param_groups: List[Dict[str, Any]] = []
+        for unflat_param_group in sharded_osd["param_groups"]:
+            flat_param_group = copy.deepcopy(unflat_param_group)
+            flat_param_keys = sorted(
+                {
+                    unflat_param_name_to_flat_param_key[unflat_param_name]
+                    for unflat_param_name in unflat_param_group["params"]
+                }
+            )
+            flat_param_group["params"] = flat_param_keys
+            rekeyed_osd_param_groups.append(flat_param_group)
+        return {"state": rekeyed_osd_state, "param_groups": rekeyed_osd_param_groups}
+    else:
+        return {"state": rekeyed_osd_state}
 
 
 def _get_param_id_to_param_from_optim_input(
@@ -1100,7 +1110,7 @@ def _get_param_id_to_param_from_optim_input(
 
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
-    def module_fn(module, prefix, flat_param_to_fqn):
+    def module_fn(module, prefix, tree_level, flat_param_to_fqn):
         for param_name, param in module.named_parameters(recurse=False):
             if type(param) is not FlatParameter:
                 continue
@@ -1412,7 +1422,7 @@ def _optim_state_dict(
     """
     _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
-    fsdp_osd: Dict[str, Any] = {"state": {}, "param_groups": []} if to_save else {}
+    fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
@@ -1518,9 +1528,10 @@ def _optim_state_dict(
             )
             fsdp_osd_state[key] = value
 
-        fsdp_osd["param_groups"] = _unflatten_param_groups(
-            optim_state_dict, param_key_to_param, param_to_fqns
-        )
+        if "param_groups" in optim_state_dict:
+            fsdp_osd["param_groups"] = _unflatten_param_groups(
+                optim_state_dict, param_key_to_param, param_to_fqns
+            )
 
     return fsdp_osd
 
@@ -1533,7 +1544,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     to unique parameters.
     """
 
-    def module_fn(module, prefix, fqn_to_param_info):
+    def module_fn(module, prefix, tree_level, fqn_to_param_info):
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         if fsdp_state is None:
             return
