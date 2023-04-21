@@ -87,8 +87,8 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
-        x_shape = (1, 3, 56, 56)
-        for mode_train in [True, False]:
+        options = itertools.product([[3, 56, 56]], [True, False])
+        for x_shape, mode_train in options:
             mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
                 mode=mode_train
             )
@@ -171,14 +171,14 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed(self):
-        x_shape = (1, 3, 28, 28)
         mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
-        v = torch.randn(x_shape, dtype=torch.float32)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
+        for x_shape in [[1, 3, 28, 28], [3, 28, 28]]:
+            v = torch.randn(x_shape, dtype=torch.float32)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
