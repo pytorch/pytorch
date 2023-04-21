@@ -35,6 +35,7 @@ from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.utils._pytree import tree_map
 
 
 @dataclass
@@ -291,12 +292,88 @@ def _unflatten_communicated_optim_state(
     return unflat_param_state
 
 
+def _broadcast_processed_state(
+    fsdp_state: _FSDPState, optim_state: Dict[str, Any]
+) -> Dict[str, Any]:
+    objects: List[Any] = [None]
+    if fsdp_state.rank == 0:
+
+        def process_state(value: Any) -> Any:
+            if torch.is_tensor(value):
+                if value.dim() == 0:
+                    # Ensure that `step` is on CPU.
+                    return value.cpu()
+                else:
+                    return _PosDimTensorInfo(value.shape, value.dtype)
+            else:
+                return value
+
+        objects[0] = tree_map(process_state, optim_state)
+    dist.broadcast_object_list(objects, src=0)
+    if fsdp_state.rank == 0:
+        return optim_state
+    else:
+        return objects[0]
+
+
+def _broadcast_state(fsdp_state: _FSDPState, state: Any) -> Any:
+    device = torch.device("cuda")
+    if fsdp_state.rank == 0:
+        if not isinstance(state, torch.Tensor) or state.dim() == 0:
+            return state
+        tensor = state.to(device)
+    else:
+        if isinstance(state, torch.Tensor):
+            assert state.dim() == 0, (
+                "For non-zero ranks, a tensor state should have zero dimension, "
+                "but got the state with shape {state.shape()}."
+            )
+            return state
+        elif not isinstance(state, _PosDimTensorInfo):
+            return state
+        tensor = torch.zeros(
+            state.shape, dtype=state.dtype, device=torch.device("cuda")
+        )
+    dist.broadcast(tensor, src=0)
+    return tensor
+
+
+def _shard_orig_param_state(
+    fsdp_param_info: FSDPParamInfo,
+    fqn: str,
+    optim_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Shard the optimizer state for the original parameter with the name ``fqn``.
+    This API should only be used when ``use_orig_params`` is True.
+    """
+    if not optim_state:
+        return {}
+    fsdp_state = fsdp_param_info.state
+    flat_param = fsdp_param_info.handle.flat_param
+    param_idx = fsdp_param_info.param_indices[fqn]
+    shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
+    optim_state = _gather_state_dict(optim_state, fsdp_state.process_group)
+    if not shard_param_info.in_shard:
+        return {}
+    # Flatten and shard the state.
+    new_optim_state: Dict[str, Any] = {}
+    intra_param_start_idx = shard_param_info.intra_param_start_idx
+    intra_param_end_idx = shard_param_info.intra_param_end_idx
+    for state_name, value in optim_state.items():
+        if torch.is_tensor(value) and value.dim() > 0:
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
+        new_optim_state[state_name] = value
+    return new_optim_state
+
+
 def _flatten_optim_state_dict(
     optim_state_dict: Dict[str, Any],
     model: nn.Module,
     shard_state: bool,
     use_orig_params: bool = False,
     optim: Optional[torch.optim.Optimizer] = None,
+    rank0_only: bool = False,
 ) -> Dict[str, Any]:
     """
     Flattens the full optimizer state dict, still keying by unflattened
@@ -325,13 +402,20 @@ def _flatten_optim_state_dict(
         Dict[str, Any]: The flattened optimizer state dict.
     """
     unflat_osd = optim_state_dict
-    if "state" not in unflat_osd:
+    if "state" not in unflat_osd and not (rank0_only and use_orig_params):
         raise ValueError(
             '`optim_state_dict` must have the keys "state"'
             "to be a valid optimizer state dict"
         )
     param_to_fqns = _get_param_to_fqns(model)
     fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
+    fsdp_state = next(iter(fqn_to_fsdp_param_info.values())).state
+
+    # Broadcast unflat_osd if rank0_only
+    # TODO: This path is currently used by only use_orig_params=True. We should
+    # consolidate the use_orig_params=False case to simplify the code.
+    if rank0_only and use_orig_params:
+        unflat_osd = _broadcast_processed_state(fsdp_state, unflat_osd)
 
     # Construct the "state" part
     flat_osd_state: Dict[Union[_OptimStateKey, str], Any] = {}
@@ -353,12 +437,19 @@ def _flatten_optim_state_dict(
         if fqn not in unflat_osd_state:
             continue
         all_state_keys.difference_update(fqns)
+
+        if rank0_only and use_orig_params:
+            for fqn in fqns:
+                if not unflat_osd_state[fqn]:
+                    continue
+                for state_name, param_state in unflat_osd_state[fqn].items():
+                    unflat_osd_state[fqn][state_name] = _broadcast_state(
+                        fsdp_state, unflat_osd_state[fqn][state_name]
+                    )
+            fqn = fqns[0]
         if fqn in fqn_to_fsdp_param_info:
             fsdp_param_info = fqn_to_fsdp_param_info[fqn]
             if use_orig_params:
-                assert (
-                    shard_state
-                ), "If use_orig_params is True, shard_state must be True."
                 flat_state = _shard_orig_param_state(
                     fsdp_param_info,
                     fqn,
@@ -389,9 +480,27 @@ def _flatten_optim_state_dict(
             key = _OptimStateKey(tuple(fqns), False)
             flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
 
+        if rank0_only and use_orig_params:
+            for fqn in fqns:
+                if not unflat_osd_state[fqn]:
+                    continue
+                for state_name, param_state in list(unflat_osd_state[fqn].items()):
+                    if fsdp_state.rank > 0:
+                        # Deference the tensor so that PyTorch can collect the memory.
+                        del unflat_osd_state[fqn][state_name]
+                    else:
+                        # Move the tensor in the original osd back to CPU to make the
+                        # original osd unaffected.
+                        unflat_osd_state[fqn][state_name] = unflat_osd_state[fqn][
+                            state_name
+                        ].cpu()
+
     # Handle user-defined state, states that are not associated with parameters.
     for key in all_state_keys:
-        flat_osd_state[key] = copy.copy(unflat_osd_state[key])
+        user_state = unflat_osd_state[key]
+        if isinstance(user_state, torch.Tensor) and rank0_only and use_orig_params:
+            user_state = _broadcast_state(fsdp_state, user_state)
+        flat_osd_state[key] = copy.copy(user_state)
 
     # Construct the "param_groups" part -- copy as is since it will be
     # rekeyed later according to the target rank's optimizer
@@ -1739,32 +1848,3 @@ def _gather_orig_param_state(
         value = value.cpu()
         gathered_state[state_name] = value
     return gathered_state
-
-
-def _shard_orig_param_state(
-    fsdp_param_info: FSDPParamInfo,
-    fqn: str,
-    optim_state: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Shard the optimizer state for the original parameter with the name ``fqn``.
-    This API should only be used when ``use_orig_params`` is True.
-    """
-    if not optim_state:
-        return {}
-    fsdp_state = fsdp_param_info.state
-    flat_param = fsdp_param_info.handle.flat_param
-    param_idx = fsdp_param_info.param_indices[fqn]
-    shard_param_info = flat_param._shard_param_infos[param_idx]  # type: ignore[attr-defined]
-    optim_state = _gather_state_dict(optim_state, fsdp_state.process_group)
-    if not shard_param_info.in_shard:
-        return {}
-    # Flatten and shard the state.
-    new_optim_state: Dict[str, Any] = {}
-    intra_param_start_idx = shard_param_info.intra_param_start_idx
-    intra_param_end_idx = shard_param_info.intra_param_end_idx
-    for state_name, value in optim_state.items():
-        if torch.is_tensor(value) and value.dim() > 0:
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
-        new_optim_state[state_name] = value
-    return new_optim_state
