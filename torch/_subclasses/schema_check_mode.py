@@ -124,6 +124,11 @@ class SchemaCheckMode(TorchDispatchMode):
                             raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                         else:
                             self.aliasing.append(Aliasing(func._schema.name, name, f"output_{j}"))
+                    for i, inp in enumerate(tree_flatten(after)[0]):
+                        if inp is tuple_out[j]:
+                            raise RuntimeError(f"""\
+Dispatcher operators below autograd are not allowed to directly return inputs.
+However, we found that `outputs[{str(j)}] is {name}""")
                 if any(has_mutated(a, b, c) for a, b, c in zip(tree_flatten(before)[0], tree_flatten(after)[0], md)):
                     if not schema_info.is_mutable(SchemaArgument(SchemaArgType.input, i)):
                         raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")

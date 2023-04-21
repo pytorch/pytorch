@@ -16,6 +16,31 @@ from torch.testing._internal.common_device_type import ops, OpDTypes, instantiat
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
+def secretly_aliasing(x):
+    return x.view(-1)
+
+def secretly_mutating(x):
+    x.mul_(2)
+    return x * 3
+
+def output_is_input(x):
+    return x
+
+custom_lib = torch.library.Library("bad_schemas", "DEF")
+custom_lib.define("secretly_aliasing(Tensor x) -> Tensor")
+custom_lib.define("secretly_mutating(Tensor x) -> Tensor")
+custom_lib.define("output_is_input(Tensor(a) x) -> Tensor(a)")
+
+custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")
+custom_lib_cpu.impl("secretly_aliasing", secretly_aliasing)
+custom_lib_cpu.impl("secretly_mutating", secretly_mutating)
+custom_lib_cpu.impl("output_is_input", output_is_input)
+
+custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")
+custom_lib_meta.impl("secretly_aliasing", secretly_aliasing)
+custom_lib_meta.impl("secretly_mutating", secretly_mutating)
+custom_lib_meta.impl("output_is_input", output_is_input)
+
 # This TorchDispatchTensor Subclass is used to simulate an incorrect schema
 # which is then used to test that SchemaCheckMode behaves as expected
 
@@ -364,6 +389,48 @@ class TestSchemaCheck(JitTestCase):
             x = torch.rand((3, 3))
             with SchemaCheckMode() as s:
                 IncorrectAliasTensor(x).aminmax(dim=0)
+
+    # When this file was written, python op registration didn't exist.
+    # It's probably worth re-writing the entire file to use it,
+    # but instead I just added extra tests.
+    def test_alias_check_fail_custom_ops_secretly_aliasing(self):
+        def f(x):
+            return torch.ops.bad_schemas.secretly_aliasing(x)
+
+        f_compiled = torch.compile(f, backend="eager_debug")
+        x = torch.rand((3, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "not defined to alias output but was aliasing"):
+            with SchemaCheckMode() as s:
+                out = f(x)
+        with self.assertRaisesRegex(RuntimeError, "not defined to alias output but was aliasing"):
+            out = f_compiled(x)
+
+    def test_alias_check_fail_custom_ops_secretly_mutating(self):
+        def f(x):
+            return torch.ops.bad_schemas.secretly_mutating(x)
+
+        f_compiled = torch.compile(f, backend="eager_debug")
+        x = torch.rand((3, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "not defined as mutable but was mutated"):
+            with SchemaCheckMode() as s:
+                out = f(x)
+        with self.assertRaisesRegex(RuntimeError, "not defined as mutable but was mutated"):
+            out = f_compiled(x)
+
+    def test_alias_check_fail_custom_ops_output_is_input(self):
+        def f(x):
+            return torch.ops.bad_schemas.output_is_input(x)
+
+        f_compiled = torch.compile(f, backend="eager_debug")
+        x = torch.rand((3, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "are not allowed to directly return inputs"):
+            with SchemaCheckMode() as s:
+                out = f(x)
+        with self.assertRaisesRegex(RuntimeError, "are not allowed to directly return inputs"):
+            out = f_compiled(x)
 
     # Tests that is_alias_of returns as expected
     def test_is_alias_of_basic(self):
