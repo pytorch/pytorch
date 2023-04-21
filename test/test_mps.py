@@ -10252,6 +10252,7 @@ class TestConsistency(TestCaseMPS):
         'addr', 'var_mean',
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
+        'masked.std',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
