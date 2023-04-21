@@ -542,6 +542,10 @@ test_libtorch() {
       # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
       "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
+
+    if [[ "${BUILD_ENVIRONMENT}" == *sm86* ]]; then
+      "$BUILD_BIN_DIR"/test_aot_inductor --gtest_output=xml:$TEST_REPORTS_DIR/test_aot_inductor.xml
+    fi
     assert_git_not_dirty
   fi
 }
