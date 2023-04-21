@@ -36,6 +36,8 @@ def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.activation is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.activation
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     assert quantization_spec.qscheme in [torch.per_tensor_affine]
@@ -54,6 +56,8 @@ def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig])
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.weight is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.weight
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
     if quantization_spec.qscheme == torch.per_channel_symmetric:
@@ -70,6 +74,8 @@ def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
     if quantization_config is None:
         return None
     assert quantization_config is not None
+    if quantization_config.bias is None:
+        return None
     quantization_spec: QuantizationSpec = quantization_config.bias
     assert quantization_spec.dtype == torch.float, "Only float dtype for bias is supported for bias right now"
     return PlaceholderObserver.with_args(dtype=quantization_spec.dtype)
