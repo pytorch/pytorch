@@ -1233,7 +1233,8 @@ class Scheduler:
                         ) * get_dtype_size(buf.get_dtype())
                 return node_bytes
             # print([read for read in reads if read in removable_bufs])
-            return get_bytes([read for read in reads if read in removable_bufs]), get_bytes(writes)
+            reads = [read for read in reads if read in removable_bufs]
+            return get_bytes(reads), get_bytes(writes)
 
         def get_greedy_topo_ordering(fx_graph):
             new_nodes = [node for node in fx_graph.nodes if 'fusion_meta' in node.meta]
@@ -1241,7 +1242,7 @@ class Scheduler:
             from collections import defaultdict
             buf_uses = defaultdict(set)
             for node in new_nodes:
-                snode = node.meta['fusion_meta'].snodes[0]
+                snode = node.meta['fusion_meta'].snode
                 for buf in snode.used_buffer_names():
                     buf_uses[buf].add(snode)
                 for user in node.users:
@@ -1249,14 +1250,14 @@ class Scheduler:
                         indeg[user] += 1
             result = []
             while len(indeg) > 0:
-                indeg_snodes = set([i.meta['fusion_meta'].snodes[0] for i in tuple(indeg.keys())])
+                indeg_snodes = set([i.meta['fusion_meta'].snode for i in tuple(indeg.keys())])
                 removable_bufs = []
                 for i in buf_uses.keys():
                     if len(buf_uses[i] & indeg_snodes) == 1:
                         removable_bufs.append(i)
 
                 def score_candidate(candidate):
-                    snode = candidate.meta['fusion_meta'].snodes[0]
+                    snode = candidate.meta['fusion_meta'].snode
                     read_sizes, write_sizes = get_read_write_buffers_sizes(snode, removable_bufs)
                     return write_sizes - read_sizes
 
@@ -1268,7 +1269,7 @@ class Scheduler:
                     if user in indeg:
                         indeg[user] -= 1
                 del indeg[k]
-            return [node.meta['fusion_meta'].snodes[0] for node in result]
+            return [node.meta['fusion_meta'].snode for node in result]
 
         new_nodes = get_greedy_topo_ordering(fx_graph)
         self.nodes = new_nodes
