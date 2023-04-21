@@ -126,7 +126,9 @@ class SchemaCheckMode(TorchDispatchMode):
                             self.aliasing.append(Aliasing(func._schema.name, name, f"output_{j}"))
                     for i, inp in enumerate(tree_flatten(after)[0]):
                         if inp is tuple_out[j]:
-                            raise RuntimeError(f"""\
+                            # Only mutable ops e.g. (add_, add.out) are allowed to directly return inputs.
+                            if not schema_info.is_mutable(SchemaArgument(SchemaArgType.input, i)):
+                                raise RuntimeError(f"""\
 Dispatcher operators below autograd are not allowed to directly return inputs.
 However, we found that `outputs[{str(j)}] is {name}""")
                 if any(has_mutated(a, b, c) for a, b, c in zip(tree_flatten(before)[0], tree_flatten(after)[0], md)):
