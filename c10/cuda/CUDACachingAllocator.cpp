@@ -10,7 +10,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
-#define PYTORCH_C10_DRIVER_API_SUPPORTED
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #include <sys/types.h>
@@ -1131,10 +1130,36 @@ static std::string reportProcessMemoryInfo(int device) {
   c10::call_once(nvml_init, [] {
     TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
   });
+
+  cudaDeviceProp prop;
+  C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+
+  // CUDA reports uuid as bytes, but NVML expects a string starting with GPU-
+  auto* uuid = (uint8_t*)prop.uuid.bytes;
+  char uuid_str[41];
+  snprintf(
+      uuid_str,
+      sizeof(uuid_str),
+      "GPU-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+      uuid[0],
+      uuid[1],
+      uuid[2],
+      uuid[3],
+      uuid[4],
+      uuid[5],
+      uuid[6],
+      uuid[7],
+      uuid[8],
+      uuid[9],
+      uuid[10],
+      uuid[11],
+      uuid[12],
+      uuid[13],
+      uuid[14],
+      uuid[15]);
   nvmlDevice_t nvml_device;
-  TORCH_INTERNAL_ASSERT(
-      NVML_SUCCESS ==
-      DriverAPI::get()->nvmlDeviceGetHandleByIndex_v2_(device, &nvml_device));
+  auto x = DriverAPI::get()->nvmlDeviceGetHandleByUUID_(uuid_str, &nvml_device);
+  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == x);
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
   nvmlReturn_t r;
