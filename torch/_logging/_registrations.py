@@ -6,6 +6,7 @@ register_log("inductor", "torch._inductor")
 register_log("sym_shapes", "torch.fx.experimental.symbolic_shapes")
 
 register_artifact("guards")
+register_artifact("graph_breaks")
 register_artifact("bytecode")
 register_artifact("graph")
 register_artifact("graph_code")

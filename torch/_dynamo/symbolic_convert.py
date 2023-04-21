@@ -20,7 +20,7 @@ from unittest.mock import patch
 import torch
 import torch._logging
 from torch._guards import Checkpointable, TracingContext
-
+from torch._logging import getArtifactLogger
 from . import (
     allowed_functions,
     config,
@@ -92,6 +92,7 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
+graph_breaks_log = getArtifactLogger(__name__, "graph_breaks")
 
 
 @functools.lru_cache(None)
@@ -365,12 +366,8 @@ def break_graph_if_unsupported(*, push):
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
-                if (
-                    config.print_graph_breaks
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    log.warning(
+                if (graph_break_dup_warning_checker.add(frame_loc)):
+                    graph_breaks_log.info(
                         "Graph break: %s from user code at %s",
                         excp,
                         user_stack_formatted,

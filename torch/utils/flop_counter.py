@@ -196,7 +196,7 @@ def normalize_tuple(x):
 
 
 # Define the suffixes for different orders of magnitude
-suffixes = ["", "K", "M", "B", "T", "P", "E"]
+suffixes = ["", "K", "M", "B", "T", "P", "E", "Z", "Y", "R", "Q"]
 # Thanks BingChat!
 def get_suffix_str(number):
     # Find the index of the appropriate suffix based on the number of digits
