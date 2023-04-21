@@ -3,8 +3,8 @@ import dis
 import functools
 import logging
 import os.path
-import sys
 import re
+import sys
 import types
 import unittest
 from unittest.mock import patch

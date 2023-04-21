@@ -91,30 +91,33 @@ class OptimizedModule(torch.nn.Module):
         # Installs the params/buffer
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
+        self._initialize()
 
-        # do this stuff in constructor to lower overhead slightly
-        if isinstance(mod.forward, types.MethodType) and skipfiles.check(
+    def _initialize(self):
+        # Do this stuff in constructor to lower overhead slightly
+        if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
             inspect.getsourcefile(self._orig_mod.forward)
         ):
-            # this is likely a torch.nn.* instance in skipfiles.py
-            # workaround to add an extra frame we can capture
-            self.forward = self.dynamo_ctx(external_utils.wrap_inline(mod))
+            # This may be a torch.nn.* instance in skipfiles.py which
+            # won't trigger a frame evaluation workaround to add an extra
+            # frame we can capture
+            self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
-            self.forward = self.dynamo_ctx(mod.__call__)
+            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
-        # these are needed for some tests to work
-        self.named_parameters = mod.named_parameters
-        self.named_buffers = mod.named_buffers
-
-        if hasattr(mod, "_initialize_hook"):
+        if hasattr(self._orig_mod, "_initialize_hook"):
             self.__call__ = self._call_lazy_check
 
     def __getstate__(self):
-        return (self._orig_mod, self.dynamo_ctx)
+        state = dict(self.__dict__)
+        state.pop("forward", None)
+        state.pop("__call__", None)
+        return state
 
     def __setstate__(self, state):
-        self.__init__(*state)  # type: ignore[misc]
+        self.__dict__ = state
+        self._initialize()
 
     def __getattr__(self, name):
         if name == "_orig_mod":
