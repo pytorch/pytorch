@@ -517,28 +517,33 @@ inline bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
+inline bool check_head_dim_gt64_and_sm_ge86(sdp_params params, bool debug) {
   // Memory Efficient Attention is throwing a cuda illegal memory error
-  // on sm86 when head_dim is 128.
+  // on sm86 or newer when head_dim is greater than 64.
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm86 = (dprops->major == 8) && (dprops->minor == 6);
-  if (is_sm86 && (params.query.sym_size(-1) == 128)) {
+  bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
+  // Categorically disable sm90 as well. Will want to fix this once we have H100s available for testing.
+  is_sm86_or_newer = is_sm86_or_newer || (dprops->major > 8);
+  if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
     if (debug) {
       TORCH_WARN(
-        "Memory Efficient Attention does not currently support head_dim == 128 on sm86",
-        "because it is throwing a cuda illegal memory error on sm86 when head_dim is 128.");
+          "Memory Efficient Attention does not currently support head_dim greater than 64 on sm86 or newer");
     }
     return false;
   }
   return true;
 }
 
-inline bool check_requires_grad_and_head_dim_128_and_sm86(sdp_params params, bool debug){
-  // Flash Attention will raise an error in the backward pass if the head_dim size is 128
-  // And the device is not sm80, the other head_dim check catches everything but sm86
-  if (!check_requires_grad(params, false) && !check_gpu_sm86_head_dim_128(params, false)){
-    if (debug){
-      TORCH_WARN("Flash attention currently doesn't support training with head_dim == 128 on sm86.");
+inline bool check_requires_grad_and_head_dim_gt64_and_sm_ge86(
+    sdp_params params,
+    bool debug) {
+  // Flash Attention will raise an error in the backward pass if the head_dim
+  // size is greater than 64 And the device is sm86 or newer.
+  if (!check_requires_grad(params, false) &&
+      !check_head_dim_gt64_and_sm_ge86(params, false)) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
     }
     return false;
   }
@@ -581,7 +586,7 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
-      check_requires_grad_and_head_dim_128_and_sm86,
+      check_requires_grad_and_head_dim_gt64_and_sm_ge86,
       check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -617,7 +622,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_gpu_sm86_head_dim_128,
+      check_head_dim_gt64_and_sm_ge86,
       check_for_seq_len_0_nested_tensor,
       check_for_non_zero_dropout,
       check_use_deterministic_algorithms);
