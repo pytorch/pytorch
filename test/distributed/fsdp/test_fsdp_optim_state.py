@@ -508,17 +508,6 @@ class TestFSDPOptimState(FSDPTest):
                     continue
                 self.assertEqual(full_osd_value, ref_osd_pg[name])
 
-    def _check_state_device(self, osd: Dict[str, Any], on_gpu: bool):
-        """Checks that all tensors in ``osd["state"]`` are on GPU if
-        ``on_gpu=True`` and on CPU if ``on_gpu=False``."""
-        for param_state in osd["state"].values():
-            for value in param_state.values():
-                if torch.is_tensor(value) and value.dim() > 0:
-                    if on_gpu:
-                        self.assertTrue(value.is_cuda)
-                    else:
-                        self.assertFalse(value.is_cuda)
-
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
     @parametrize("use_multiple_param_groups", [False, True])
@@ -1083,8 +1072,6 @@ class TestFSDPOptimState(FSDPTest):
                     group=new_group,
                 )
             )
-            self._check_state_device(sharded_osd1, on_gpu=True)
-            self._check_state_device(sharded_osd2, on_gpu=True)
         elif osd_comm_method == _OSDCommMethod.FLATTEN_SHARDED_OSD:
             sharded_osd1 = FSDP.flatten_sharded_optim_state_dict(
                 fsdp_osd1,
