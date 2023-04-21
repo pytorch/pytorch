@@ -1364,10 +1364,6 @@ class PlaceholderObserver(ObserverBase):
         return x
 
     @torch.jit.export
-    def extra_repr(self):
-        return "dtype={}, is_dynamic={}".format(self.dtype, self.is_dynamic)
-
-    @torch.jit.export
     def calculate_qparams(self):
         raise Exception(
             "calculate_qparams should not be called for PlaceholderObserver"
