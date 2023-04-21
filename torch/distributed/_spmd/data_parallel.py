@@ -438,7 +438,9 @@ def build_data_parallel_strategies(
                 produce_param_grad_strat = node_strategy.strategies
                 has_activation = False
                 for arg in input_args:
-                    arg_node_type = dp_strategy_map[arg].node_type
+                    arg_strategy = dp_strategy_map[arg]
+                    assert isinstance(arg_strategy, DataParallelStrategy)
+                    arg_node_type = arg_strategy.node_type
                     if arg_node_type == NodeType.ACT:
                         # activation sharded
                         has_activation = True
@@ -489,7 +491,7 @@ def build_data_parallel_strategies(
                 # NOTE: This is the common region for all regular computation ops
 
                 input_node_types = [
-                    dp_strategy_map[arg].node_type
+                    cast(DataParallelStrategy, dp_strategy_map[arg]).node_type
                     for arg in input_args
                     if isinstance(dp_strategy_map[arg], DataParallelStrategy)
                 ]
@@ -635,6 +637,7 @@ def mark_data_parallel_shardings(
             if isinstance(node_strategy, TupleStrategy):
                 # For tuple strategy in the data parallel mode, it should have the same strategy
                 # for all tuple elements, assert that then use the first element's strategy as sharding
+                node_strategy = cast(TupleStrategy, node_strategy)
                 first_strategy = cast(node_strategy.childs[0], DataParallelStrategy)
                 for child_strategy in node_strategy.childs:
                     if isinstance(child_strategy, DataParallelStrategy):
