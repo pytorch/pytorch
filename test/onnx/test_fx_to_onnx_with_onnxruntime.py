@@ -468,6 +468,25 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_log_sigmoid(self):
+        # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
+        # conventional `torch.ops.aten.log_sigmoid`.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.LogSigmoid()
+
+            def forward(self, x):
+                return self.m(x)
+
+        input = torch.randn(2)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, Model(), (input,))
+
     @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "
         "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
