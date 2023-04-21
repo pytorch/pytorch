@@ -739,6 +739,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if V.graph.aot_mode:
             self.header.splice(
                 """
+                /* AOTInductor generated code */
+
                 #include <ATen/ScalarOps.h>
                 """
             )
