@@ -51,9 +51,34 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
 
+        from torch._functorch.aot_autograd import get_aot_graph_name
+
+        graph_name = get_aot_graph_name()
+
+        # TODO: why do we need to deepcopy the original graph?
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
-        inner_compiled_fn = None
+
+        try:
+            # Call the compiler_fn - which is either aot_autograd or inductor
+            # with fake inputs
+            inner_compiled_fn = compiler_fn(gm, example_inputs)
+        except Exception as e:
+            if config.repro_after == "aot":
+                if config.repro_level == 1:
+                    dump_compiler_graph_state(
+                        fx.GraphModule(gm, orig_graph),
+                        example_inputs,
+                        compiler_name,
+                    )
+                elif config.repro_level == 2:
+                    dump_to_minify(
+                        fx.GraphModule(gm, orig_graph),
+                        example_inputs,
+                        compiler_name,
+                    )
+                log.error("CompilerError")
+            raise
 
         def deferred_for_real_inputs(real_inputs):
             """
@@ -63,10 +88,6 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             should be called with real tensors. Therefore, the actual invocation
             is deferred.
             """
-            # Avoid re-compiling when we call the compiled function twice. This happens
-            # when we run the model inference or training in a for loop like here
-            # https://github.com/pytorch/torchdynamo/issues/1687#issuecomment-1280040633
-            nonlocal inner_compiled_fn
             # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
             # because inductor clears the tensor list in its codegen. And example_inputs
             # are available only for the first invocation.
@@ -86,10 +107,10 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                if inner_compiled_fn is None:
-                    inner_compiled_fn = compiler_fn(gm, example_inputs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
-                    log.warning("Accuracy failed for the AOT Autograd graph")
+                    log.warning(
+                        "Accuracy failed for the AOT Autograd graph %s", graph_name
+                    )
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
                         copy_tensor_attrs,
@@ -106,10 +127,6 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     return inner_compiled_fn(real_inputs)
             else:
                 try:
-                    # Call the compiler_fn - which is either aot_autograd or inductor
-                    # with fake inputs
-                    if inner_compiled_fn is None:
-                        inner_compiled_fn = compiler_fn(gm, example_inputs)
                     # Call the compiled function with real inputs
                     out = inner_compiled_fn(real_inputs)
                     # sync cuda kernels to ensure IMA detection
@@ -131,16 +148,14 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                             copy_tensor_attrs,
                             compiler_name,
                         )
-                    log.error("CompilerError")
                     raise
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+            return compiled_fn
         else:
-            compiled_fn = compiler_fn(gm, example_inputs)
-
-        return compiled_fn
+            return inner_compiled_fn
 
     return debug_wrapper
 
@@ -150,7 +165,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def save_graph_repro(fd, gm, args, compiler_name):
+def save_graph_repro(fd, gm, args, compiler_name, *, stable_output=False):
     sync_line = ""
     for arg in args:
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -159,7 +174,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
 
     if "inductor" in compiler_name:
         fd.write("import torch._inductor.overrides\n")
-    fd.write(generate_compiler_repro_string(gm, args))
+    fd.write(generate_compiler_repro_string(gm, args, stable_output=stable_output))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
         fd.write(

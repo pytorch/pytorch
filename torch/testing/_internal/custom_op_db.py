@@ -106,7 +106,6 @@ def numpy_nonzero_impl(x):
 def numpy_nonzero_fake(x):
     ctx = torch._custom_op.get_ctx()
     i0 = ctx.new_data_dependent_symint()
-    ctx.constrain_range(i0, min=2)
     shape = [x.dim(), i0]
     result = x.new_empty(shape, dtype=torch.long)
     return result
@@ -180,7 +179,6 @@ def numpy_nms_fake(boxes, scores, iou_threshold):
 
     ctx = torch._custom_op.get_ctx()
     i0 = ctx.new_data_dependent_symint()
-    ctx.constrain_range(i0, min=2)
     result = boxes.new_empty([i0, 4])
     return result
 

@@ -632,6 +632,26 @@ class TestCustomOp(TestCase):
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
         del foo
 
+    def test_new_data_dependent_symint(self):
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
+        def foo999(x):
+            ...
+
+        @foo999.impl_fake()
+        def foo999_meta(x):
+            ctx = torch._custom_op.get_ctx()
+            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
+                ctx.new_data_dependent_symint(min=1)
+            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
+                ctx.new_data_dependent_symint(min=-1)
+            with self.assertRaisesRegex(ValueError, "SymInt"):
+                ctx.new_data_dependent_symint(max=x.numel())
+            return torch.clone(x)
+
+        x = torch.randn(2, 3, device='cpu')
+        make_fx(foo999, tracing_mode='symbolic')(x)
+        del foo999
+
     def test_meta_for_data_dependent_shape_operation(self):
         from torch.testing._internal.custom_op_db import numpy_nonzero
 
@@ -680,6 +700,7 @@ class TestCustomOp(TestCase):
         with self.assertRaises(torch._subclasses.fake_tensor.DynamicOutputShapeException):
             make_fx(f, tracing_mode='fake')(x)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -1547,6 +1568,48 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             x.numpy()
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
+
+    def test_record_stream(self) -> None:
+        class TestMode(TorchDispatchMode):
+            def __init__(self, testcase):
+                self.testcase = testcase
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.testcase.assertEqual(func.name(), "aten::record_stream")
+                self.testcase.assertIsInstance(args[0], torch.Tensor)
+                self.testcase.assertIsInstance(args[1], torch.Stream)
+                self.testcase.assertEqual(args[1].stream_id, 1)
+                self.testcase.assertEqual(args[1].device_index, 2)
+                self.testcase.assertEqual(args[1].device_type, 3)
+
+        t = torch.tensor(5.)
+        s = torch.Stream(stream_id=1, device_index=2, device_type=3)
+        with TestMode(self):
+            t.record_stream(s)
+
+    def test_return_stream(self) -> None:
+        l_def = torch.library.Library("test_return_stream", "DEF")
+        l_def.define("return_stream(Tensor self) -> Stream")
+        l_impl = torch.library.Library("test_return_stream", "IMPL", "CPU")
+        l_impl.impl("return_stream", lambda _: torch.Stream(stream_id=0, device_index=1, device_type=2))
+
+        class TestMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.Stream(stream_id=1, device_index=2, device_type=3)
+
+        t = torch.tensor(5.)
+        s = torch.ops.test_return_stream.return_stream(t)
+        self.assertIsInstance(s, torch.Stream)
+        self.assertEqual(s.stream_id, 0)
+        self.assertEqual(s.device_index, 1)
+        self.assertEqual(s.device_type, 2)
+
+        with TestMode():
+            s = torch.ops.test_return_stream.return_stream(t)
+        self.assertIsInstance(s, torch.Stream)
+        self.assertEqual(s.stream_id, 1)
+        self.assertEqual(s.device_index, 2)
+        self.assertEqual(s.device_type, 3)
 
     def test_subclass_autograd_device_check(self) -> None:
         class NonWrapperSubclass(torch.Tensor):

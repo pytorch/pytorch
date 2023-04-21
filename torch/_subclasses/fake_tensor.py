@@ -398,6 +398,32 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
+# Many of these operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration.
+# TODO: fix registrations, add all existing impls that are correct
+def unsupported_complex_op(op):
+    if op.namespace not in ("aten", "prims"):
+        return False
+    if op is aten._fft_c2c.default:
+        return False
+
+    op_name = op.name()
+    if "fft" in op_name:
+        return True
+    if "_linalg_svd" in op_name:
+        return True
+    if op is torch.ops.prims.svd.default:
+        return True
+    return False
+
+
+# These operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration
+@register_op_impl(unsupported_complex_op)
+def unsupported_fft(fake_mode, func, *args, **kwargs):
+    raise UnsupportedOperatorException(func)
+
+
 # Dont default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
@@ -1244,7 +1270,12 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
+        # TODO - fix prims complex ops
+        if (
+            "prims::" in func._schema.name
+            and hasattr(func, "prim_meta_impl")
+            and not unsupported_complex_op(func)
+        ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
