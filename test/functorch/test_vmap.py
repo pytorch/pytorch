@@ -3864,10 +3864,10 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, 0))
             # self_logical_rank > 0
             boundaries = torch.tensor([[0, 1, 5, 7, 9], [1, 2, 5, 7, 9]], device=device)
-            v = torch.rand(5, 5)
+            v = torch.rand(5, 5, device=device)
             self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, None))
             boundaries = torch.tensor([[0, 1, 5, 7, 9], [1, 2, 5, 7, 9]], device=device)
-            v = torch.rand(2, 5, 5)
+            v = torch.rand(2, 5, 5, device=device)
             self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, 0))
 
         check_vmap_fallback(self, test, torch.searchsorted)
