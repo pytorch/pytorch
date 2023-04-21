@@ -15,6 +15,7 @@ import gc
 import inspect
 import io
 import json
+import logging
 import math
 import operator
 import os
@@ -91,6 +92,7 @@ import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
+log = logging.getLogger(__name__)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -113,11 +115,10 @@ disabled_tests_dict = {}
 slow_tests_dict = {}
 
 def maybe_load_json(filename):
-    if os.path.exists(filename):
+    if os.path.isfile(filename):
         with open(filename, 'r') as fp:
-            data = json.load(fp)
-            return data
-    print(f"Attempted to load {filename} but it does not exist.")
+            return json.load(fp)
+    log.warning("Attempted to load json file '%s' but it does not exist.", filename)
     return {}
 
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
