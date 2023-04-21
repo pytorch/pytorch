@@ -24,6 +24,16 @@ from torch.onnx import _constants, _type_utils, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 
+__all__ = [
+    "hardswish",
+    "tril",
+    "triu",
+    "reshape",
+    "batch_norm",
+    "quantized_hardswish",
+    "scaled_dot_product_attention",
+]
+
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=14)
 
 

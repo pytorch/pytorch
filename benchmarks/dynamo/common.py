@@ -84,6 +84,11 @@ CI_SKIP[CI("eager", training=False)] = [
     "torchrec_dlrm",
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
+    # KeyError: '_ignore_torch_cuda_oom'
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
 ]
 
 CI_SKIP[CI("eager", training=True)] = [
@@ -93,7 +98,7 @@ CI_SKIP[CI("eager", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
-    "vision_maskrcnn",  # eager_variation
+    "vision_maskrcnn",  # eager_two_runs_differ
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -153,7 +158,23 @@ CI_SKIP[CI("aot_eager", training=True)] = [
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
-    *CI_SKIP[CI("aot_eager", training=False)],
+    # TorchBench
+    "DALLE2_pytorch",  # AttributeError: text_encodings
+    "llama",  # does not support complex32
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
+    "demucs",  # OOM
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
     # TorchBench
     "detectron2",
     "hf_T5",  # accuracy
@@ -167,10 +188,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
-    # Huggingface
-    "AllenaiLongformerBase",
-    "DebertaV2ForQuestionAnswering",  # OOM
-    "OPTForCausalLM",  # OOM
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -223,13 +240,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
-    # Huggingface
-    "BlenderbotForCausalLM",  # OOM
-    "GoogleFnet",  # Eager model failed to run
-    "MBartForConditionalGeneration",  # OOM
-    "M2M100ForConditionalGeneration",  # OOM
-    "XGLMForCausalLM",  # OOM
-    "MT5ForConditionalGeneration",  # fails accuracy
 ]
 
 # Skips for dynamic=True
@@ -1258,7 +1268,11 @@ class BenchmarkRunner:
             Records the status in the csv file
             """
             if current_name in self.non_deterministic_models:
-                if accuracy_status in ("pass", "eager_variation", "fail_accuracy"):
+                if accuracy_status in (
+                    "pass",
+                    "eager_two_runs_differ",
+                    "fail_accuracy",
+                ):
                     accuracy_status = "pass"
 
             headers = ["dev", "name", "batch_size", "accuracy"]
@@ -1319,19 +1333,36 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            model_copy = deepcopy_and_maybe_ddp(model)
-            self.init_optimizer(name, current_device, model_copy.parameters())
-            correct_result = self.run_n_iterations(
-                model_copy, clone_inputs(example_inputs)
-            )
+            try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
+                correct_result = self.run_n_iterations(
+                    model_copy, clone_inputs(example_inputs)
+                )
+            except Exception as e:
+                accuracy_status = (
+                    "eager_1st_run_OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "eager_1st_run_fail"
+                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
             reset_rng_state()
-            model_copy = deepcopy_and_maybe_ddp(model)
-            self.init_optimizer(name, current_device, model_copy.parameters())
-            correct_rerun_result = self.run_n_iterations(
-                model_copy, clone_inputs(example_inputs)
-            )
+            try:
+                model_copy = deepcopy_and_maybe_ddp(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
+                correct_rerun_result = self.run_n_iterations(
+                    model_copy, clone_inputs(example_inputs)
+                )
+            except Exception as e:
+                accuracy_status = (
+                    "eager_2nd_run_OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "eager_2nd_run_fail"
+                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
+
             # Two eager runs should have exactly same result
             if not same(
                 correct_result,
@@ -1341,7 +1372,7 @@ class BenchmarkRunner:
                 tol=0,
                 equal_nan=self.equal_nan,
             ):
-                accuracy_status = "eager_variation"
+                accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             correct_rerun_result = None
 
@@ -2407,14 +2438,19 @@ def run(runner, args, original_dir=None):
             # NB: This must be done late enough so that we don't do more
             # conversions on the inputs
             # NB: Assumes only the first batch-y like dimension is the batch
+            marked = False
+
             def detect_and_mark_batch(t):
+                nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
                         torch._dynamo.mark_dynamic(t, i)
+                        marked = True
                         break
 
             if args.dynamic_batch_only:
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
+                assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
             if args.log_operator_inputs:
                 log_operator_inputs(
