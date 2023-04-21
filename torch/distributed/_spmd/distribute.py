@@ -21,6 +21,7 @@ import torch.distributed._spmd.experimental_ops
 import torch.fx as fx
 import torch.nn as nn
 from torch._functorch.aot_autograd import aot_module, make_boxed_func
+from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.aot_function_patch import patched_aot_function
 from torch.distributed._spmd.comm_tensor import _get_tracer
@@ -913,7 +914,9 @@ def distribute(
     flat_kwargs, _ = tree_flatten(kwargs)
     input_set: Set[Any] = set(flat_args + flat_kwargs)
 
-    fake_mode: FakeTensorMode = FakeTensorMode()
+    fake_mode: FakeTensorMode = detect_fake_mode(input_set)
+    if fake_mode is None:
+        fake_mode = FakeTensorMode()
 
     # will update this to the original forward inputs
     original_inputs: List[Optional[Sequence[Any]]] = [None]

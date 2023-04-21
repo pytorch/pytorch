@@ -710,7 +710,9 @@ class Kernel(CodeGen):
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, combine_fn, index, value):
+    def reduction(
+        self, name, dtype, src_dtype, reduction_type, combine_fn, index, value
+    ):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -757,7 +759,9 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, combine_fn, index, value):
+            def reduction(
+                name, dtype, src_dtype, reduction_type, combine_fn, index, value
+            ):
                 self.store_buffer_names.add(name)
                 return self.reduction(
                     name, dtype, src_dtype, reduction_type, combine_fn, index, value
@@ -809,3 +813,8 @@ class OptimizationContext:
     dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
+
+    # Load uint8 value as float32
+    is_load_uint8_as_float: bool = False
+    # Store float32 value as uint8
+    is_store_float_as_uint8: bool = False

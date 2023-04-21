@@ -799,7 +799,9 @@ class Reduction(Loops):
             return Pointwise.create(
                 device,
                 dst_dtype,
-                cls._unroll_reduction_fn(inner_fn, combine_fn, reduction_ranges, reduction_type),
+                cls._unroll_reduction_fn(
+                    inner_fn, combine_fn, reduction_ranges, reduction_type
+                ),
                 ranges,
             )
 
@@ -3951,7 +3953,9 @@ class LoopBodyBlock:
                 return self._inner.store(name, index, value, mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, combine_fn, index, value):
+            def reduction(
+                name, dtype, src_dtype, reduction_type, combine_fn, index, value
+            ):
                 def shim(name, dtype, src_dtype, reduction_type, index, value):
                     return V.ops.reduction(
                         name, dtype, src_dtype, reduction_type, combine_fn, index, value
@@ -3960,12 +3964,14 @@ class LoopBodyBlock:
                 index = add_index(index, "writes", name)
 
                 subblock_name = self.body.add_submodule(shim, "reduce_subblock")
-                self.body.subblocks[subblock_name] = LoopBodyBlock(self.body, lambda: None, [])
+                self.body.subblocks[subblock_name] = LoopBodyBlock(
+                    self.body, lambda: None, []
+                )
                 return tracer.create_proxy(
                     "call_module",
                     subblock_name,
                     (name, dtype, src_dtype, reduction_type, index, value),
-                    {}
+                    {},
                 )
 
             def index_expr(self, index, dtype):

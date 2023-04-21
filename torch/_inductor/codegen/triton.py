@@ -1155,7 +1155,9 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, combine_fn, index, value):
+    def reduction(
+        self, name, dtype, src_dtype, reduction_type, combine_fn, index, value
+    ):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
@@ -1210,11 +1212,17 @@ class TritonKernel(Kernel):
                 combined_acc = accumulator, accumulator_index
                 combined_value = value, f"{reduction_range_prefix}index"
                 new_value, new_index = combine_fn(combined_acc, combined_value)
-                self.compute.writeline(f"{accumulator} = tl.where({cond}, {new_value}, {accumulator})")
-                self.compute.writeline(f"{accumulator_index} = tl.where({cond}, {new_index}, {accumulator_index})")
+                self.compute.writeline(
+                    f"{accumulator} = tl.where({cond}, {new_value}, {accumulator})"
+                )
+                self.compute.writeline(
+                    f"{accumulator_index} = tl.where({cond}, {new_index}, {accumulator_index})"
+                )
             else:
                 new_value = combine_fn(accumulator, value)
-                self.compute.writeline(f"{accumulator} = tl.where({cond}, {new_value}, {accumulator}")
+                self.compute.writeline(
+                    f"{accumulator} = tl.where({cond}, {new_value}, {accumulator}"
+                )
 
             if accumulator_index:
                 # argmax, argmin
