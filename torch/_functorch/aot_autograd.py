@@ -21,13 +21,13 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions, PhiloxTotalOffsets
@@ -2533,6 +2533,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # in the PhiloxStateTracker singleton object. Therefore, we save them
         # into rng_meta side datastructure.
 
+    saved_context = TracingContext.get()
 
 
     class CompiledFunction(torch.autograd.Function):
@@ -2737,9 +2738,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
                     context = disable_autocast_manager if disable_amp else nullcontext
-                    with context(), track_graph_compiling(aot_config, "backward"):
+                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, all_args
+                            bw_module, fx_placeholder_vals(bw_module)
                         )
 
                 ctx.maybe_clear_saved_tensors()

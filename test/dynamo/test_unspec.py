@@ -252,7 +252,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return z
 
         z = fn(x)
-        self.assertEqual(z._dynamo_dynamic_indices, {0})
+        self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
 
 
 if __name__ == "__main__":
