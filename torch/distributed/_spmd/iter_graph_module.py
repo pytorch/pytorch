@@ -152,10 +152,25 @@ class IterGraph(fx.Graph):
             for node in reversed(subgraph):
                 if len(node.users) == 1:
                     key = next(iter(node.users.keys()))
-                    # This is the optimizer case where IterGraph functionalize
-                    # the optimizer. Remove the dependency.
-                    if key not in cast(List[Any], output.args[0]) and key == output:
-                        node.users.clear()
+                    if key == output:
+                        flatten_args, spec = tree_flatten((output.args, output.kwargs))
+                        if node not in flatten_args:
+                            # This optimizer node from the legacy _SPMD tracing.
+                            node.users.clear()
+                        elif str(node.target).startswith("aten.copy_"):
+                            # This is the case where the optimizer is
+                            # functionalized with copy_.
+                            for i in range(len(flatten_args)):
+                                if flatten_args[i] == node:
+                                    flatten_args[i] = node.args[0]
+                        else:
+                            # We have not figured out semantics of forwarding
+                            # all diff ops.
+                            raise RuntimeError(
+                                f"IterGraph does not how to forward the output of {node}"
+                            )
+                        output.args, output.kwargs = tree_unflatten(flatten_args, spec)
+
                 # This is the step case where there is a virtual data dependency
                 # (in-place update) between step and optimizer. And
                 # functionalize_optim add this dependency
@@ -232,7 +247,7 @@ class IterGraph(fx.Graph):
             node_inputs, spec = tree_flatten((node.args, node.kwargs))
             new_node_inputs = []
             for input_node in node_inputs:
-                if input_node in all_nodes or not isinstance(input_node, fx.Node):
+                if not isinstance(input_node, fx.Node) or input_node in all_nodes:
                     new_node_inputs.append(input_node)
                 else:
                     new_node_inputs.append(new_input_nodes[new_input_index])
@@ -242,8 +257,12 @@ class IterGraph(fx.Graph):
             new_input_nodes
         ), f"More inputs than needed {len(new_input_nodes)} > {new_input_index}"
 
-        # Update the in_spec of _PyTreeCodeGen
-        if isinstance(graph._codegen, _PyTreeCodeGen):
+        # Update the in_spec of _PyTreeCodeGen if in_spec is not None (the new
+        # SPMD makes in_spec as None).
+        if (
+            isinstance(graph._codegen, _PyTreeCodeGen)
+            and graph._codegen.pytree_info.in_spec is not None
+        ):
             codegen = graph._codegen
             original_tree_in = tree_unflatten(placeholders, codegen.pytree_info.in_spec)
             _, in_spec = tree_flatten(tuple(list(original_tree_in) + new_input_nodes))
@@ -626,7 +645,12 @@ class IterGraphModule(nn.Module):
     data dependency for all 3 graphs.
     """
 
-    def __init__(self, main_gm: fx.GraphModule, enable_inductor: bool = False) -> None:
+    def __init__(
+        self,
+        main_gm: fx.GraphModule,
+        max_iters: int = -1,
+        enable_inductor: bool = False,
+    ) -> None:
         super().__init__()
 
         def _copy_gm(src: fx.GraphModule, graph: fx.Graph) -> fx.GraphModule:
@@ -642,13 +666,13 @@ class IterGraphModule(nn.Module):
         )
 
         self._iter = 0
-        self._max_iters = 0
+        self._max_iters = max_iters
         self._previous_output: Tuple[Any, ...] = tuple()
         self._num_extra_output = 0
         self._is_frozen = False
         self._enable_inductor = enable_inductor
 
-    def setup(self, max_iters: int = 0) -> None:
+    def finalize_setup(self) -> None:
         """
         Must be called before the forward() is called. This method setups
         the internal states and also get the signal from users that what
@@ -661,22 +685,18 @@ class IterGraphModule(nn.Module):
                 self.main_gm = partial_lower(self.main_gm)
             self._is_frozen = True
 
-        # TODO: There are cases where max_iters is not known or not precise,
-        # e.g., data is depleted. One suggestion from the reviewer is to
-        # add one extra argument to forward(..., last_iter: bool = False) to
-        # allow users to tell us if the last iteration happens.
-        if max_iters <= 0:
-            raise ValueError(f"Incorrect max_iters is set, {max_iters}")
         self._iter = 0
-        self._max_iters = max_iters
 
-    def _run(self, gm: fx.GraphModule, *args, **kwargs) -> Any:
+    def _run(self, gm: fx.GraphModule, last_iter: bool, *args, **kwargs) -> Any:
         if self._num_extra_output > 0:
             new_args = args + (self._previous_output)
             output = gm(*new_args, **kwargs)
-            if self._iter < self._max_iters:
+            if not last_iter:
                 assert len(output) == 2
                 self._previous_output = tuple(output[-1])
+                assert (
+                    len(self._previous_output) > 0
+                ), "There should be at least one extra output."
                 output = output[0]
         else:
             # No cross-iteration optimization is done. Simply call the
@@ -684,16 +704,18 @@ class IterGraphModule(nn.Module):
             output = gm(*args, **kwargs)
         return output
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
+    def forward(self, *args: Any, last_iter: bool = False, **kwargs: Any) -> Any:
         self._iter += 1
-        if self._iter == 1:
-            logger.info("Using the setup graph")
-            gm = self.setup_gm
-            profiler_string = "## IterGraphModule: Setup Graph ##"
-        elif self._iter == self._max_iters:
+        last_iter = last_iter or self._iter == self._max_iters
+        if last_iter:
             logger.info("Using the cleanup graph")
             gm = self.cleanup_gm
             profiler_string = "## IterGraphModule: Cleanup Graph ##"
+            self._iter = 0
+        elif self._iter == 1:
+            logger.info("Using the setup graph")
+            gm = self.setup_gm
+            profiler_string = "## IterGraphModule: Setup Graph ##"
         else:
             gm = self.main_gm
             if self._iter == 2:
@@ -703,7 +725,7 @@ class IterGraphModule(nn.Module):
                 profiler_string = "## IterGraphModule ##"
 
         with record_function(profiler_string):
-            return self._run(gm, *args, **kwargs)
+            return self._run(gm, last_iter, *args, **kwargs)
 
     @property
     def graph(self) -> IterGraph:
