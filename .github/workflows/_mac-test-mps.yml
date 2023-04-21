@@ -145,10 +145,11 @@ jobs:
           # Install pip dependencies if they are not found. This is to mitigate a peculiar
           # flaky missing dependencies on MacOS
           ${CONDA_RUN} python3 -c "import torch"
+          popd
+
           if [ $? -ne 0 ]; then
             ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
           fi
-          popd
           set -e
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
