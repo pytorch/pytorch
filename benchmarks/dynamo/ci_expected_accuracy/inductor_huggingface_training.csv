@@ -1,7 +1,9 @@
 name,accuracy,graph_breaks
 AlbertForMaskedLM,pass,7
 AlbertForQuestionAnswering,pass,7
+AllenaiLongformerBase,pass,134
 BartForCausalLM,pass,7
+BartForConditionalGeneration,OOM,4
 BertForMaskedLM,pass,7
 BertForQuestionAnswering,pass,7
 BlenderbotSmallForCausalLM,pass,7
@@ -10,6 +12,7 @@ CamemBert,pass,7
 DebertaForMaskedLM,pass,52
 DebertaForQuestionAnswering,pass,52
 DebertaV2ForMaskedLM,pass_due_to_skip,0
+DebertaV2ForQuestionAnswering,eager_1st_run_OOM,0
 DistilBertForMaskedLM,pass,7
 DistilBertForQuestionAnswering,pass,7
 DistillGPT2,pass,7
@@ -18,11 +21,15 @@ ElectraForQuestionAnswering,pass,7
 GPT2ForSequenceClassification,pass,9
 LayoutLMForMaskedLM,pass,7
 LayoutLMForSequenceClassification,pass,9
+M2M100ForConditionalGeneration,0.0000,0
 MBartForCausalLM,pass,7
+MBartForConditionalGeneration,OOM,4
+MT5ForConditionalGeneration,pass,7
 MegatronBertForCausalLM,pass,7
 MegatronBertForQuestionAnswering,pass,7
 MobileBertForMaskedLM,pass,4
 MobileBertForQuestionAnswering,pass,4
+OPTForCausalLM,pass,7
 PLBartForCausalLM,pass,7
 PLBartForConditionalGeneration,pass,7
 PegasusForCausalLM,pass,7
@@ -33,5 +40,6 @@ Speech2Text2ForCausalLM,pass,7
 T5ForConditionalGeneration,pass,7
 T5Small,pass,7
 TrOCRForCausalLM,pass,7
+XGLMForCausalLM,eager_2nd_run_OOM,0
 XLNetLMHeadModel,pass,7
 YituTechConvBert,pass,7
