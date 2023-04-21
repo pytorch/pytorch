@@ -87,6 +87,8 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     the fused QAT subgraph equivalent. The input graph should already be annotated.
     The annotations in the original nodes will be preserved in the corresponding
     nodes in the new subgraph.
+
+    Note: This also handles the (conv + bn + relu) pattern.
     """
     m.graph.eliminate_dead_code()
     m.recompile()
