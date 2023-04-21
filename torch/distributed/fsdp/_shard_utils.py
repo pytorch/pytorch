@@ -12,9 +12,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensorMetadata,
     TensorProperties,
 )
-from torch.distributed._shard.sharding_spec import (
-    ShardMetadata,
-)
+from torch.distributed._shard.sharding_spec import ShardMetadata
 
 
 def _all_gather_sharded_tensor(
