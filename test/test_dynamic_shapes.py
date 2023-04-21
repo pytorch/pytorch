@@ -1,37 +1,45 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
-from torch._C import _disabled_torch_function_impl
+import contextlib
+import copy
+import itertools
+import math
+import operator
+
+import sympy
+import torch
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, \
-    IS_WINDOWS, parametrize, instantiate_parametrized_tests
-import unittest
-import torch
-import operator
-import itertools
-import contextlib
-import math
-import copy
-from torch.utils._pytree import tree_map
+from torch import sym_int, SymBool, SymFloat, SymInt
+from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import SymNode, \
-    FloorDiv, ShapeEnv, sym_sqrt, sym_float, to_node, GuardOnDataDependentSymNode, \
-    guard_bool, guard_int, guard_float
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraints,
+    DimDynamic,
+    FloorDiv,
+    guard_bool,
+    guard_float,
+    guard_int,
+    GuardOnDataDependentSymNode,
+    ShapeEnv,
+    sym_float,
+    sym_sqrt,
+    SymNode,
+    to_node,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch import SymBool, SymInt, SymFloat, sym_int
+from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
-
-try:
-    import sympy
-    # TODO(jansel): these tests fail on windows
-    HAS_SYMPY = not IS_WINDOWS
-except ImportError:
-    HAS_SYMPY = False
-skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
-
 
 meta_funcs = {}
 
@@ -121,21 +129,33 @@ class FakeSymbolicTensor(torch.Tensor):
 
 def create_symbolic_tensor(name, arg, shape_env):
     from torch._dynamo.source import ConstantSource
+
+    constraint_dims = [None] * arg.dim()
+    dynamic_dims = [DimDynamic.DUCK] * arg.dim()
     sym_shapes, sym_strides, sym_storage_offset = \
-        shape_env.create_symbolic_sizes_strides_storage_offset(arg, source=ConstantSource(name))
+        shape_env.create_symbolic_sizes_strides_storage_offset(
+            arg,
+            source=ConstantSource(name),
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims
+        )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
 def create_symint(shape_env, i: int):
     from torch._dynamo.source import ConstantSource
     return shape_env.create_symintnode(
-        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")),
+        shape_env.create_symbol(
+            i,
+            source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+            dynamic_dim=DimDynamic.DUCK,
+            constraint_dim=None,
+        ),
         hint=i
     )
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
-    @skipIfNoSympy
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
@@ -150,7 +170,6 @@ class TestPySymInt(TestCase):
                     self.assertTrue(op(args[0][1], args[1][1]) == op(args[0][0], args[1][0]))
 
 
-    @skipIfNoSympy
     def test_reverse_arith_ops(self):
         shape_env = ShapeEnv()
 
@@ -161,7 +180,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(5 * a == 5 * 2)
 
 
-    @skipIfNoSympy
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -187,7 +205,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
         self.assertTrue(y.storage_offset() == 12)
 
-    @skipIfNoSympy
     def test_binary(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -205,7 +222,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[1] == 4)
         self.assertTrue(z.shape[2] == 3)
 
-    @skipIfNoSympy
     def test_symint_args(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -222,7 +238,6 @@ class TestPySymInt(TestCase):
         z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - 1)
         self.assertTrue(z.shape[2] == 2)
 
-    @skipIfNoSympy
     def test_symint_vargs(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -267,13 +282,11 @@ class TestPySymInt(TestCase):
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
 
-    @skipIfNoSympy
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
         self.assertIsInstance(x.stride()[0], SymInt)
 
-    @skipIfNoSympy
     def test_size_expressions(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -289,7 +302,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
-    @skipIfNoSympy
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -300,14 +312,12 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(x.numel(), int)
         self.assertIsInstance(torch.numel(x), int)
 
-    @skipIfNoSympy
     def test_int_to_float(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
         r = sym_float(x.shape[0])
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
 
-    @skipIfNoSympy
     def test_aten_ops(self):
 
         shape_env = ShapeEnv()
@@ -330,21 +340,18 @@ class TestPySymInt(TestCase):
         # tuple of ints, not tuple
         torch.fx.symbolic_trace(m)
 
-    @skipIfNoSympy
     def test_meta_symint(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device='meta')
         self.assertIsInstance(r.shape[0], SymInt)
 
-    @skipIfNoSympy
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
-    @skipIfNoSympy
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -359,19 +366,12 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
 
-        a2 = create_symint(shape_env, -3)
-        r = sym_int(a2 / 2)
-        self.assertEqual(guard_int(r), -1)
-        self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(ceiling(-s2/2), -1)""")
-
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[3][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
 
-    @skipIfNoSympy
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
@@ -380,7 +380,6 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
 
-    @skipIfNoSympy
     def test_sym_floor(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -388,27 +387,72 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
+        r = math.floor(3.0 * a0)
+        self.assertEqual(r, 15)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
 
-    @skipIfNoSympy
+    def test_sym_ceil(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.ceil(a0 / 2)
+        self.assertEqual(r, 3)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(ceiling(s0/2), 3)""")
+        r = math.floor(3.0 * a0)
+        self.assertEqual(r, 15)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+
+
     def test_int_conversion(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
-        self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
+        int(a0)
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
-    @skipIfNoSympy
     def test_data_dependent_guard(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
 
-    @skipIfNoSympy
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
         r = torch.empty_strided((a0, 7), (1, a0), device='meta')
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
 
-    @skipIfNoSympy
+    def test_specialize_zero_one(self):
+        shape_env = ShapeEnv(specialize_zero_one=True)
+        a0 = create_symint(shape_env, 5)
+        assert a0 != 1
+        self.assertEqual(len(shape_env.guards), 0)
+
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        a0 = create_symint(shape_env, 5)
+        assert a0 != 1
+        self.assertEqual(len(shape_env.guards), 1)
+
+    def test_duck_shape(self):
+        shape_env = ShapeEnv(duck_shape=True)
+        a0 = create_symint(shape_env, 5)
+        a1 = create_symint(shape_env, 5)
+        assert a0 == a1
+        self.assertEqual(len(shape_env.guards), 0)
+
+        shape_env = ShapeEnv(duck_shape=False)
+        a0 = create_symint(shape_env, 5)
+        a1 = create_symint(shape_env, 5)
+        assert a0 == a1
+        self.assertEqual(len(shape_env.guards), 1)
+
+    def test_int_bool(self):
+        # See https://github.com/pytorch/pytorch/issues/95981
+        shape_env = ShapeEnv(duck_shape=True)
+        a0 = create_symint(shape_env, 5)
+        assert a0
+        self.assertEqual(len(shape_env.guards), 0)
+
     def test_symint_as_scalar(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -432,7 +476,6 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(sym_int_encountered)
 
-    @skipIfNoSympy
     def test_deepcopy(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -440,7 +483,6 @@ class TestPySymInt(TestCase):
         new_shape_env = copy.deepcopy(shape_env)
         self.assertEqual(len(new_shape_env.guards), 1)
 
-    @skipIfNoSympy
     def test_print_readable_with_symints(self):
         def f(a, b):
             dim0 = a.shape[0] + b.shape[0]
@@ -462,7 +504,7 @@ class f(torch.nn.Module):
         sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
         sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
         add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
+        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
         getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
@@ -472,8 +514,9 @@ class f(torch.nn.Module):
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
-        seed_node = (create_symint(shape_env, 1) / 1.).node
-        bool_seed_node = (create_symint(shape_env, 1) == 1).node
+        # NB: don't use one as that will get specialized
+        seed_node = (create_symint(shape_env, 2) / 2.).node
+        bool_seed_node = (create_symint(shape_env, 2) == 2).node
 
         def get_sym_inp(inp):
             # NB: this must come before int
@@ -632,7 +675,6 @@ class TestFloorDiv(TestCase):
                 yield (x, -y)
                 yield (-x, -y)
 
-    @skipIfNoSympy
     def test_floordiv_float_int(self):
         values = (
             (2.5, 2.1),
@@ -646,7 +688,6 @@ class TestFloorDiv(TestCase):
         for x, y in TestFloorDiv.yield_test_cases(values):
             self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_bool(self):
         values = (
             (False, True),
@@ -667,7 +708,6 @@ class TestFloorDiv(TestCase):
                  rf", expected integer or real"),
                 lambda: TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_complex(self):
         values = (
             (1.5 + 2.5j, 1.3 + 3.5j),
@@ -688,7 +728,6 @@ class TestFloorDiv(TestCase):
                  rf", expected integer or real"),
                 lambda: TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_div_by_zero(self):
         values = (
             (2.5, 0),
@@ -706,7 +745,6 @@ class TestFloorDiv(TestCase):
                 "division by zero",
                 lambda: TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_zero_base(self):
         values = (
             (0, 2.5),
@@ -720,7 +758,6 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_div_by_one(self):
         values = (
             (2.5, 1),
@@ -732,7 +769,6 @@ class TestFloorDiv(TestCase):
         for x, y in TestFloorDiv.yield_test_cases(values):
             self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
@@ -752,7 +788,6 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
-    @skipIfNoSympy
     def test_floordiv_assumptions(self):
         # We define two Symbols (with different names) for each type to make
         # sure the behavior is consistent regardless of whether both arguments
@@ -797,6 +832,945 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
+
+
+class TestDimConstraints(TestCase):
+    def test_dim_constraints_reduce_congruences_simple(self):
+        from sympy import Symbol
+        from torch.fx.experimental.symbolic_shapes import DimConstraints
+
+        s = Symbol("s", positive=True, integer=True)
+        dim_constraints = DimConstraints({}, {})
+        dim_constraints._congruences[s] = {
+            (s / 2) % 2,
+            (s / 2) % 8,
+            (s / 2) % 4,
+            s % 2,
+            ((s / 16) + 2) % 4,
+        }
+        congruences = dim_constraints.reduce_congruences()
+        self.assertEqual(congruences[s], {(s + 32) % 64})
+
+    def test_dim_constraints_reduce_inequalities_simple(self):
+        from sympy import Eq, Interval, Ne, Symbol
+        from sympy.solvers.inequalities import reduce_inequalities
+
+        s = Symbol("s", positive=True, integer=True)
+        exprs = {
+            s >= 2,
+            Ne(8 * s, 16),
+            Ne(s / 2, 1),
+            Ne(16 * s, 32),
+            s < 16,
+            Ne(s, 2),
+            s / 2 < 16,
+            s / 2 > 1,
+            s / 2 >= 2,
+            Ne(3 * s / 2, 3),
+        }
+        solution = reduce_inequalities(exprs, s).as_set()
+        self.assertEqual(solution, Interval.Ropen(4, 16))
+
+        exprs.add(Eq(s / 2, 4))
+        solution = reduce_inequalities(exprs, s).as_set()
+        self.assertEqual(solution, {8})
+
+    def test_dim_constraints_solve_full(self):
+        from sympy import Eq, Integer, Mod, Ne, Symbol
+        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+
+        src0 = TensorPropertySource(
+            base=LocalSource(local_name="x0"), prop=TensorProperty.SIZE, idx=0
+        )
+        src2 = TensorPropertySource(
+            base=LocalSource(local_name="x2"), prop=TensorProperty.SIZE, idx=0
+        )
+        src3 = TensorPropertySource(
+            base=LocalSource(local_name="x3"), prop=TensorProperty.SIZE, idx=0
+        )
+        src4 = TensorPropertySource(
+            base=LocalSource(local_name="x4"), prop=TensorProperty.SIZE, idx=0
+        )
+
+        src1 = TensorPropertySource(
+            base=LocalSource(local_name="x1"), prop=TensorProperty.SIZE, idx=2
+        )
+        src7 = TensorPropertySource(
+            base=LocalSource(local_name="x7"), prop=TensorProperty.SIZE, idx=3
+        )
+
+        src5 = TensorPropertySource(
+            base=LocalSource(local_name="x5"), prop=TensorProperty.SIZE, idx=1
+        )
+        src8 = TensorPropertySource(
+            base=LocalSource(local_name="x8"), prop=TensorProperty.SIZE, idx=1
+        )
+
+        src6 = TensorPropertySource(
+            base=LocalSource(local_name="x6"), prop=TensorProperty.SIZE, idx=1
+        )
+        src9 = TensorPropertySource(
+            base=LocalSource(local_name="x9"), prop=TensorProperty.SIZE, idx=1
+        )
+        src10 = TensorPropertySource(
+            base=LocalSource(local_name="x10"), prop=TensorProperty.SIZE, idx=1
+        )
+
+        src11 = TensorPropertySource(
+            base=LocalSource(local_name="x11"), prop=TensorProperty.SIZE, idx=1
+        )
+        src12 = TensorPropertySource(
+            base=LocalSource(local_name="x12"), prop=TensorProperty.SIZE, idx=2
+        )
+
+        s0 = Symbol("s0", positive=True, integer=True)
+        s1 = Symbol("s1", positive=True, integer=True)
+        s5 = Symbol("s5", positive=True, integer=True)
+        s6 = Symbol("s6", positive=True, integer=True)
+        symbol_to_source = {
+            s0: [src0, src2, src3, src4],
+            s1: [src1, src7],
+            s5: [src5, src8],
+            s6: [src6, src9, src10],
+        }
+        var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
+        dim_constraints = DimConstraints(symbol_to_source, var_to_val)
+        dim_constraints.add_equality(src2, s0)
+        dim_constraints.add_equality(src3, s0)
+        dim_constraints.add_equality(src4, s0)
+        dim_constraints.add_equality(src7, s1)
+        dim_constraints.add_equality(src8, s5)
+        dim_constraints.add_equality(src9, s6)
+        dim_constraints.add_equality(src10, s6)
+        dim_constraints.add_equality(src11, Integer(1))
+        dim_constraints.add_equality(src12, Integer(3))
+
+        dim_constraints.add(s1**2 <= 2147483647)
+        dim_constraints.add(32 * s1**2 <= 2147483647)
+        dim_constraints.add(s0 < 16)
+        dim_constraints.add(Eq(Mod(s1, 2), 0))
+        dim_constraints.add(Ne(FloorDiv(s1, 2), 1))
+        dim_constraints.add(Ne((FloorDiv(s1, 2)) ** 2, 1))
+        dim_constraints.add(32 * (FloorDiv(s1, 2)) ** 2 <= 2147483647)
+        dim_constraints.add((FloorDiv(s1, 2)) ** 2 > 1)
+        dim_constraints.add(Ne(FloorDiv(s1, 2), 1))
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 2)) ** 2
+            + 128 * (FloorDiv((FloorDiv(s1, 2) - 1), 2))
+            + 64
+            <= 2147483647
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 2) + 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 2)) ** 2
+                + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 2))
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 2) + 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 2)) ** 2
+            + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 2))
+            + 1
+            > 1
+        )
+        dim_constraints.add(
+            128 * (FloorDiv((FloorDiv(s1, 2) - 1), 4)) ** 2
+            + 256 * (FloorDiv((FloorDiv(s1, 2) - 1), 4))
+            + 128
+            <= 2147483647
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 4) + 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 4)) ** 2
+                + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 4))
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 4) + 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 4)) ** 2
+            + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 4))
+            + 1
+            > 1
+        )
+        dim_constraints.add(
+            256 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            + 512 * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+            + 256
+            <= 2147483647
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+            + 1
+            > 1
+        )
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1 >= 3)
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            <= 2147483647
+        )
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1 >= 0)
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1 >= 1)
+        dim_constraints.add(
+            Ne(
+                60 * s0 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * s0 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * s0,
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+                0,
+            )
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+            >= 0
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 0))
+        dim_constraints.add(
+            1
+            < 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, -1))
+        dim_constraints.add(
+            Ne(
+                60 * s0 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * s0 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * s0,
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            > 0
+        )
+        dim_constraints.add(
+            Eq(
+                60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2 * (Mod(s0, 2))
+                - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8) * Mod(s0, 2)
+                + 60 * (Mod(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                60
+                * (FloorDiv(s0, 2))
+                * (FloorDiv(s0, (FloorDiv(s0, 2))))
+                * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120
+                * FloorDiv(s0, 2)
+                * FloorDiv(s0, (FloorDiv(s0, 2)))
+                * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2)))),
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv(s0, 2), 1))
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60,
+                0,
+            )
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            >= 0
+        )
+        dim_constraints.add(
+            1
+            < 60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+        )
+        dim_constraints.add(Ne(16 * s0, 32))
+        dim_constraints.add(Eq(16 * (Mod(s0, 2)), 0))
+        dim_constraints.add(Ne(16 * s0, 32))
+        dim_constraints.add(Eq(16 * (Mod(s0, 2)), 0))
+        dim_constraints.add(FloorDiv(s0, 2) >= 2)
+        dim_constraints.add(Ne(FloorDiv(s0, 2), 1))
+        dim_constraints.add(1 < FloorDiv(s0, 2))
+        dim_constraints.add(Ne(s0, 2))
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            >= 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+        )
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, 2))
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120
+            * FloorDiv(s0, 2)
+            * FloorDiv(s0, (FloorDiv(s0, 2)))
+            * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            > 0
+        )
+        dim_constraints.add(
+            Ne(
+                60
+                * (FloorDiv(s0, 2))
+                * (FloorDiv(s0, (FloorDiv(s0, 2))))
+                * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120
+                * FloorDiv(s0, 2)
+                * FloorDiv(s0, (FloorDiv(s0, 2)))
+                * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2)))),
+                3 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2)))),
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 20,
+                0,
+            )
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 0
+        )
+        dim_constraints.add(
+            Ne(
+                20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 20,
+                20,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                20
+                * (
+                    Mod(
+                        1,
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 1,
+                    )
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                20
+                * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+                * (
+                    Mod(
+                        1,
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        - 2
+                        * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                    )
+                )
+                - 20
+                * Mod(
+                    1,
+                    (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    - 2
+                    * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+            >= 1
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 0
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 1
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 2
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            > 1
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            < 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60,
+                60,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1,
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+                * (
+                    Mod(
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        - 2
+                        * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                        1,
+                    )
+                )
+                - Mod(
+                    (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    - 2
+                    * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                    1,
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+                FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1,
+            )
+        )
+        dim_constraints.add(Ne(8 * s0, 16))
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            >= (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+        )
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            <= 2147483647
+        )
+        dim_constraints.add(
+            90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+            <= 2147483647
+        )
+        dim_constraints.add(FloorDiv(s0, 2) < 16)
+        dim_constraints.add(FloorDiv(s0, 2) > 1)
+        dim_constraints.add(
+            Ne(
+                90 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 180 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 90 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+            > 1
+        )
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            > 1
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+            > 1
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            > 1
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)),
+                3 * (FloorDiv(s0, 2)),
+            )
+        )
+        dim_constraints.add(
+            60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, 2))
+            > 0
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            > 0
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                6,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            > 0
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                0,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            <= 2147483647
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            <= 20480
+        )
+        dim_constraints.add(
+            Ne(
+                90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 90,
+                0,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            > 1
+        )
+        dim_constraints.add(
+            90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+            <= 20480
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            <= 20480
+        )
+        dim_constraints.add(
+            Ne(
+                240 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 480 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 240,
+                0,
+            )
+        )
+        dim_constraints.add(Eq(6 * s5, 132))
+        dim_constraints.add(Eq(4, FloorDiv(s0, 2)))
+        dim_constraints.add(Eq(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 4))
+        dim_constraints.add(
+            Ne(
+                64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 128 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 64 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 128 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 64
+        )
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 128 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 64
+            <= 2147483647
+        )
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 128 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 64
+            > 1
+        )
+        dim_constraints.add(
+            62 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 124 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 62
+            <= 2147483647
+        )
+        dim_constraints.add(
+            Ne(
+                62 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 124 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 62 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 62 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 124 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 62
+        )
+        dim_constraints.add(Ne(3 * (FloorDiv(s0, 2)), 3))
+        dim_constraints.add(Ne(3 * (FloorDiv(s0, 2)), 3))
+        dim_constraints.add(Eq(FloorDiv(s0, 2), 4))
+        dim_constraints.add(Eq(4, FloorDiv(s0, 2)))
+        dim_constraints.add(Eq(FloorDiv(s0, 2), 4))
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1 >= 3)
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 384 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 576
+            <= 2147483647
+        )
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3 >= 0)
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3 >= 1)
+        dim_constraints.add(
+            Ne(
+                64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 384 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 576 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 9,
+                1,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 9,
+                0,
+            )
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            >= 0
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3, 0))
+        dim_constraints.add(
+            1
+            < 64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 384 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 576
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3, 1))
+        dim_constraints.add(
+            Ne(
+                64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 384 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 576 * (FloorDiv(s0, 2)),
+                256,
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                64
+                * (
+                    Mod(
+                        (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 9 * (FloorDiv(s0, 2)),
+                        4,
+                    )
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                FloorDiv(s0, 2),
+                FloorDiv(
+                    (
+                        (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 9 * (FloorDiv(s0, 2))
+                    ),
+                    4,
+                ),
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                FloorDiv(
+                    (
+                        (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 9 * (FloorDiv(s0, 2))
+                    ),
+                    4,
+                ),
+                FloorDiv(s0, 2),
+            )
+        )
+        dim_constraints.add(Ne(64 * (Mod(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 4)), 0))
+        dim_constraints.add(
+            Eq(
+                64
+                * (
+                    Mod(
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 1,
+                        4,
+                    )
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 384 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 576 * (FloorDiv(s0, 2))
+            > 0
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            >= 1
+        )
+        dim_constraints.add(
+            Eq(
+                64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 384 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 576,
+                256,
+            )
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 360 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 540
+            <= 2147483647
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 360 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 540 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 360 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 540
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            <= 2147483647
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 9 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            > 1
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 360 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 540
+            > 1
+        )
+        dim_constraints.add(s0 >= 2)
+        dim_constraints.add(s1 >= 2)
+        dim_constraints.add(s6 >= 2)
+        dim_constraints.add(s5 >= 2)
+
+        dim_constraints.solve()
+        self.assertEqual(dim_constraints._static_results, {
+            "L['x3'].size()[0] == 8",
+            "L['x4'].size()[0] == 8",
+            "L['x1'].size()[2] = 96",
+            "L['x11'].size()[1] == 1",
+            "L['x7'].size()[3] == 96",
+            "L['x12'].size()[2] == 3",
+            "L['x8'].size()[1] == 22",
+            "L['x2'].size()[0] == 8",
+            "L['x5'].size()[1] = 22",
+            "L['x0'].size()[0] = 8",
+        })
+        self.assertEqual(dim_constraints._dynamic_results, {
+            "dynamic_dim(L['x10'], 1) == dynamic_dim(L['x6'], 1)",
+            "2 <= dynamic_dim(L['x6'], 1)",
+            "dynamic_dim(L['x9'], 1) == dynamic_dim(L['x6'], 1)",
+        })
+
+
 
 if __name__ == '__main__':
     run_tests()

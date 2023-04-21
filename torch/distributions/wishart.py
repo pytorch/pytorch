@@ -4,7 +4,7 @@ from numbers import Number
 from typing import Union
 
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property

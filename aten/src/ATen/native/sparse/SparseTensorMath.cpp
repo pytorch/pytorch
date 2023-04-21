@@ -13,11 +13,11 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -75,7 +75,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 // --------------------------------------------------------------------
@@ -482,7 +482,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
     auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
         commonDtype, "cadd_sparse", [&] {
           scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
           scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
@@ -1250,11 +1250,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const SparseTensor& sparse_,
     const Tensor& dense,
     const Scalar& beta,
-    const Scalar& alpha
-) {
-  AT_ASSERT(r.layout() == kStrided, "addmm_sparse_dense: expected strided result tensor, got tensor with layout ", r.layout());
-  AT_ASSERT(sparse_.layout() == kSparse, "addmm_sparse_dense: expected sparse tensor, got tensor with layout ", sparse_.layout());
-
+    const Scalar& alpha) {
   // TODO: This error message seems awfully opaque
   TORCH_CHECK(
       t.is_cpu(),
@@ -1263,15 +1259,30 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   TORCH_CHECK(
       r.is_cpu(),
       "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got tensor on ",
-      t.device());
+      r.device());
   TORCH_CHECK(
       sparse_.is_cpu(),
       "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got tensor on ",
-      t.device());
+      sparse_.device());
   TORCH_CHECK(
       dense.is_cpu(),
       "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got tensor on ",
-      t.device());
+      dense.device());
+
+  TORCH_CHECK(
+      r.layout() == kStrided,
+      "addmm_sparse_dense: expected strided result tensor, got tensor with layout ",
+      r.layout());
+  TORCH_CHECK(
+      t.layout() == kStrided,
+      "addmm_sparse_dense: expected 't' to have strided layout, got tensor with layout ",
+      t.layout());
+  TORCH_CHECK(
+      sparse_.layout() == kSparse && dense.layout() == kStrided,
+      "addmm_sparse_dense: expected either 'mat1' to have sparse layout and 'mat2' to have strided layout, got 'mat1' with layout ",
+      sparse_.layout(),
+      " and 'mat2' with layout ",
+      dense.layout());
 
   TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");
@@ -1308,7 +1319,6 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   );
 
   return r;
-
 }
 
 Tensor& addmm_out_sparse_dense_cpu(
@@ -2054,4 +2064,4 @@ Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

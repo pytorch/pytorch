@@ -16,7 +16,6 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch.testing._internal.common_utils as common
-from torch._six import string_classes
 from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_tcp_store
@@ -336,7 +335,7 @@ class MyPythonStore(dist.Store):
         self.store = {}
 
     def set(self, key, value):
-        if not isinstance(key, string_classes):
+        if not isinstance(key, (str, bytes)):
             raise AssertionError("Expected set to be called with string key")
         if type(value) is not bytes:
             raise AssertionError("Expected set to be called with bytes value")

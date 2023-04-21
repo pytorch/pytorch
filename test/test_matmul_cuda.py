@@ -17,8 +17,10 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import (
     IS_ARM64,
+    IS_JETSON,
     parametrize,
     run_tests,
+    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -40,7 +42,7 @@ class TestMatmulCuda(TestCase):
         super(self.__class__, self).tearDown()
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
@@ -104,16 +106,24 @@ class TestMatmulCuda(TestCase):
     def test_cublas_addmm_alignment(self):
         dtype = torch.half
         device = 'cuda'
-        A = torch.rand((5120 * 2560 + 1), requires_grad=True, dtype=dtype, device=device)
-        A = A[1:].reshape(5120, 2560)
-        # check that heuristic does not fail on 2-byte alignment
-        X = torch.rand((26, 1, 2560), requires_grad=True, dtype=dtype, device=device)
-        B = torch.rand((5120), requires_grad=True, dtype=dtype, device=device)
-        out = torch.nn.functional.linear(X, A, B)
-        self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
+        # perturb X, A, or B alignment
+        for idx in range(0, 3):
+            for offset in range(1, 3):
+                offsets = [0, 0, 0]
+                offsets[idx] = offset
+                x_offset, a_offset, b_offset = offsets
+                A = torch.rand((5120 * 2560 + a_offset), requires_grad=True, dtype=dtype, device=device)
+                A = A[a_offset:].reshape(5120, 2560)
+                X = torch.rand((26 * 2560 + x_offset), requires_grad=True, dtype=dtype, device=device)
+                X = X[x_offset:].reshape(26, 1, 2560)
+                B = torch.rand((5120 + b_offset), requires_grad=True, dtype=dtype, device=device)
+                B = B[b_offset:].reshape(5120)
+                out = torch.nn.functional.linear(X, A, B)
+                self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
               [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))

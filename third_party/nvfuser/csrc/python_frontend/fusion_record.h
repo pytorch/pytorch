@@ -1367,7 +1367,7 @@ struct NormOpRecord : RecordFunctor {
       std::string name,
       RecordType type,
       std::vector<int>& axes,
-      int64_t correction,
+      double correction,
       bool keep_dim)
       : RecordFunctor(std::move(args), std::move(outputs), name, type),
         axes_(axes),
@@ -1441,7 +1441,7 @@ struct NormOpRecord : RecordFunctor {
   //! Dimensions of tensor to reduce for variance calculation
   std::vector<int> axes_;
   //! Bessel's correction value
-  int64_t correction_;
+  double correction_;
   //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
 };
@@ -1451,7 +1451,7 @@ struct VarianceOpRecord : NormOpRecord {
       std::vector<State> args,
       std::vector<State> outputs,
       std::vector<int>& axes,
-      int64_t correction,
+      double correction,
       bool keep_dim)
       : NormOpRecord(
             std::move(args),
@@ -1480,7 +1480,7 @@ struct VarianceMeanOpRecord : NormOpRecord {
       std::vector<State> args,
       std::vector<State> outputs,
       std::vector<int>& axes,
-      int64_t correction,
+      double correction,
       bool keep_dim)
       : NormOpRecord(
             std::move(args),

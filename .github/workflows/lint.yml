@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches:
-      - master
       - main
       - release/*
       - landchecks/*
@@ -25,13 +24,22 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
         conda activate "${CONDA_ENV}"
 
+        CACHE_DIRECTORY="/tmp/.lintbin"
+        # Try to recover the cached binaries
+        if [[ -d "${CACHE_DIRECTORY}" ]]; then
+          # It's ok to fail this as lintrunner init would download these binaries
+          # again if they do not exist
+          cp -r "${CACHE_DIRECTORY}" . || true
+        fi
+
         # This has already been cached in the docker image
-        lintrunner init
+        lintrunner init 2> /dev/null
 
         # Do build steps necessary for linters
         python3 -m tools.linter.clang_tidy.generate_build_files
@@ -63,6 +71,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -98,7 +107,7 @@ jobs:
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: -1
@@ -116,6 +125,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -135,7 +145,7 @@ jobs:
           echo '    .github/scripts/generate_ci_workflows.py'
           echo
           echo 'If running that command does nothing, you may need to rebase'
-          echo 'onto a more recent commit from the PyTorch master branch.'
+          echo 'onto a more recent commit from the PyTorch main branch.'
           RC=1
         fi
 
@@ -150,6 +160,7 @@ jobs:
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -188,6 +199,7 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       fetch-depth: 0
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
@@ -208,7 +220,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: 1

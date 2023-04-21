@@ -16,7 +16,7 @@ import functools
 import warnings
 import inspect
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -893,6 +893,8 @@ def trace(
                 example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
 
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
     return traced
 
 
@@ -1198,7 +1200,7 @@ class TracedModule(ScriptModule):
 
 
 class TopLevelTracedModule(TracedModule):
-    forward = _CachedForward()
+    forward: Callable[..., Any] = _CachedForward()  # type: ignore[assignment]
 
     def _reconstruct(self, cpp_module):
         """

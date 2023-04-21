@@ -512,7 +512,7 @@ class Module:
         if '_buffers' not in self.__dict__:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -553,7 +553,7 @@ class Module:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("parameter name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -595,7 +595,7 @@ class Module:
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("module name should be a string. Got {}".format(
                 torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
@@ -1335,7 +1335,7 @@ class Module:
                           "is deprecated and will be removed in future versions. This hook will be missing "
                           "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
         else:
-            # At this point the grad_ouput part of the hook will most likely be correct
+            # At this point the grad_output part of the hook will most likely be correct
             inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
 
             next_functions = {n[0] for n in grad_fn.next_functions}
@@ -1743,7 +1743,7 @@ class Module:
     def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
         ...
 
-    # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
+    # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing references to the whole state of the module.
@@ -2263,8 +2263,7 @@ class Module:
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
-                    yield m
+                yield from module.named_modules(memo, submodule_prefix, remove_duplicate)
 
     def train(self: T, mode: bool = True) -> T:
         r"""Sets the module in training mode.
@@ -2331,7 +2330,7 @@ class Module:
         return self
 
     def zero_grad(self, set_to_none: bool = True) -> None:
-        r"""Sets gradients of all model parameters to zero. See similar function
+        r"""Resets gradients of all model parameters. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
         Args:

@@ -179,7 +179,7 @@ class StackFrame:
 
 @dataclasses.dataclass
 class Stack:
-    """Records a stack trace. The top of the stack is the first element in the list."""
+    """Records a stack trace. The frames are in order from newest to oldest stack frame."""
 
     frames: List[StackFrame] = dataclasses.field(default_factory=list)
     message: Optional[str] = None

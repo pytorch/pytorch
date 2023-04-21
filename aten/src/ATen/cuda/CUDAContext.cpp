@@ -47,7 +47,7 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 cudaDeviceProp* getDeviceProperties(int64_t device) {
   c10::call_once(init_flag, initCUDAContextVectors);
   if (device == -1) device = c10::cuda::current_device();
-  AT_ASSERT(device >= 0 && device < num_gpus);
+  AT_ASSERT(device >= 0 && device < num_gpus, "device=", device, ", num_gpus=", num_gpus);
   c10::call_once(device_flags[device], initDeviceProperty, device);
   return &device_properties[device];
 }
@@ -55,8 +55,8 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 bool canDeviceAccessPeer(int64_t device, int64_t peer_device) {
   c10::call_once(init_flag, initCUDAContextVectors);
   if (device == -1) device = c10::cuda::current_device();
-  AT_ASSERT(device >= 0 && device < num_gpus);
-  AT_ASSERT(peer_device >= 0 && peer_device < num_gpus);
+  AT_ASSERT(device >= 0 && device < num_gpus, "device=", device, ", num_gpus=", num_gpus);
+  AT_ASSERT(peer_device >= 0 && peer_device < num_gpus, "peer_device=", peer_device, ", num_gpus=", num_gpus);
   int can_access = 0;
   AT_CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, device, peer_device));
   return can_access != 0;

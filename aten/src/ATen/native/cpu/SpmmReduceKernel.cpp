@@ -29,7 +29,7 @@ void spmm_reduce_kernel_impl(
     const Tensor& values,
     const Tensor& other_) {
 
-  int64_t nnz = other_.numel();
+  int64_t nnz = values.numel();
   if (nnz == 0) {
     return;
   }

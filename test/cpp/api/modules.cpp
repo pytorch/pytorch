@@ -4061,6 +4061,27 @@ TEST_F(ModulesTest, ReplicationPad3d) {
   }
 }
 
+TEST_F(ModulesTest, ZeroPad1d) {
+  {
+    ZeroPad1d m(ZeroPad1dOptions(2));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{0., 0., 0., 1., 2., 3., 0., 0.}, {0., 0., 4., 5., 6., 7., 0., 0.}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad1d m(ZeroPad1dOptions({3, 1}));
+    auto input = torch::arange(6, torch::kFloat).reshape({1, 2, 3});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{0., 0., 0., 0., 1., 2., 0.}, {0., 0., 0., 3., 4., 5., 0.}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, ZeroPad2d) {
   {
     ZeroPad2d m(ZeroPad2dOptions(2));
@@ -4087,6 +4108,66 @@ TEST_F(ModulesTest, ZeroPad2d) {
            {0., 0., 1., 2., 0.},
            {0., 3., 4., 5., 0.},
            {0., 6., 7., 8., 0.}}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ZeroPad3d) {
+  {
+    ZeroPad3d m(ZeroPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{{{0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.}},
+           {{0., 0., 0., 0.},
+            {0., 0., 1., 0.},
+            {0., 2., 3., 0.},
+            {0., 0., 0., 0.}},
+           {{0., 0., 0., 0.},
+            {0., 4., 5., 0.},
+            {0., 6., 7., 0.},
+            {0., 0., 0., 0.}},
+           {{0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.}}}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad3d m(ZeroPad3dOptions({1, 2, 1, 2, 1, 2}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{{{0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 0., 1., 0., 0.},
+            {0., 2., 3., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 4., 5., 0., 0.},
+            {0., 6., 7., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}}}}},
         torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
@@ -4935,13 +5016,25 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
-TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
+TEST_F(ModulesTest, PrettyPrintZeroPad) {
+  ASSERT_EQ(
+      c10::str(ZeroPad1d(ZeroPad1dOptions(2))),
+      "torch::nn::ZeroPad1d(padding=[2, 2])");
+  ASSERT_EQ(
+      c10::str(ZeroPad1d(ZeroPad1dOptions({3, 1}))),
+      "torch::nn::ZeroPad1d(padding=[3, 1])");
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
       "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
       "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
+  ASSERT_EQ(
+      c10::str(ZeroPad3d(ZeroPad3dOptions(1))),
+      "torch::nn::ZeroPad3d(padding=[1, 1, 1, 1, 1, 1])");
+  ASSERT_EQ(
+      c10::str(ZeroPad3d(ZeroPad3dOptions({1, 2, 1, 2, 1, 2}))),
+      "torch::nn::ZeroPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintConstantPad) {

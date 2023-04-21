@@ -263,6 +263,10 @@ class MaxUnpool1d(_MaxUnpoolNd):
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
 
+    Note:
+        This operation may behave nondeterministically when the input indices has repeat values.
+        See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
+
     .. note:: :class:`MaxPool1d` can map several input sizes to the same output
               sizes. Hence, the inversion process can get ambiguous.
               To accommodate this, you can provide the needed output size
@@ -332,6 +336,10 @@ class MaxUnpool2d(_MaxUnpoolNd):
     :class:`MaxUnpool2d` takes in as input the output of :class:`MaxPool2d`
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
+
+    Note:
+        This operation may behave nondeterministically when the input indices has repeat values.
+        See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool2d` can map several input sizes to the same output
               sizes. Hence, the inversion process can get ambiguous.
@@ -414,6 +422,10 @@ class MaxUnpool3d(_MaxUnpoolNd):
     :class:`MaxUnpool3d` takes in as input the output of :class:`MaxPool3d`
     including the indices of the maximal values and computes a partial inverse
     in which all non-maximal values are set to zero.
+
+    Note:
+        This operation may behave nondeterministically when the input indices has repeat values.
+        See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool3d` can map several input sizes to the same output
               sizes. Hence, the inversion process can get ambiguous.

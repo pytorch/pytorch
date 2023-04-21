@@ -23,13 +23,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _patch_torch,
-    _type_utils,
-    errors,
-)
+from torch.onnx import _constants, _deprecation, _type_utils, errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
 from torch.types import Number

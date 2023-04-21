@@ -53,6 +53,7 @@ def tensor_N(shape, dtype=float):
 class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
     def setUp(self):
+        super().setUp()
         if not TEST_TENSORBOARD:
             return self.skipTest("Skip the test since TensorBoard is not installed")
         if TEST_WITH_CROSSREF:
@@ -93,14 +94,14 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
             self.assertIsInstance(make_np(tensor), np.ndarray)
 
             # CUDA tensor
-            if torch.cuda.device_count() > 0:
+            if torch.cuda.is_available():
                 self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
 
             # regular variable
             self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
 
             # CUDA variable
-            if torch.cuda.device_count() > 0:
+            if torch.cuda.is_available():
                 self.assertIsInstance(make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
 
         # python primitive type
@@ -806,7 +807,7 @@ class TestTensorBoardNumpy(BaseTestCase):
         model = ModelHelper(name="mnist")
         # how come those inputs don't break the forward pass =.=a
         workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
 
         with core.NameScope("conv1"):
             conv1 = brew.conv(model, "data", 'conv1', dim_in=1, dim_out=20, kernel=5)
@@ -841,7 +842,7 @@ class TestTensorBoardNumpy(BaseTestCase):
     def test_caffe2_simple_cnnmodel(self):
         model = cnn.CNNModelHelper("NCHW", name="overfeat")
         workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
         with core.NameScope("conv1"):
             conv1 = model.Conv("data", "conv1", 3, 96, 11, stride=4)
             relu1 = model.Relu(conv1, conv1)

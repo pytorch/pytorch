@@ -36,7 +36,7 @@ from copy import deepcopy
 from collections import namedtuple
 
 from torch.fx.proxy import TraceError
-from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMATIBLITY
+from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
 
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
@@ -46,6 +46,7 @@ from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_verifier import VerifierTest  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
@@ -321,7 +322,7 @@ class TestFX(JitTestCase):
         def f(x, y):
             x = control_flow.cond(x[0] == 0, true, false, [x, y])
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace HigherOrderOperators"):
             _ = symbolic_trace(f)
 
     def test_disallow_override(self):
@@ -1719,6 +1720,31 @@ class TestFX(JitTestCase):
                 break
         stack_list = list(mod_stack.items())
         self.assertEqual(stack_list, expected_stack)
+
+    def test_transformer_preserves_nn_module_stack_for_get_attr(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1, 1))
+
+            def forward(self, x):
+                return self.weight + x
+
+        tracer = torch.fx.Tracer()
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        for node in gm.graph.nodes:
+            if node.op == 'get_attr':
+                node.meta["nn_module_stack"] = "self"
+                node.meta["stack_trace"] = "stack_trace"
+                node.meta["source_fn"] = "source_fn"
+        new_gm = Transformer(gm).transform()
+        for node in new_gm.graph.nodes:
+            if node.op == 'get_attr':
+                self.assertEqual(node.meta["nn_module_stack"], "self")
+                self.assertEqual(node.meta["stack_trace"], "stack_trace")
+                self.assertEqual(node.meta["source_fn"], "source_fn")
+
 
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
@@ -3857,7 +3883,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 if isinstance(v, types.ModuleType):
                     check_symbols_have_bc_designation(v, prefix + [k])
                 elif isinstance(v, (type, types.FunctionType)):
-                    if v not in _MARKED_WITH_COMATIBLITY:
+                    if v not in _MARKED_WITH_COMPATIBILITY:
                         non_back_compat_objects.setdefault(v)
 
         check_symbols_have_bc_designation(torch.fx, ['torch', 'fx'])

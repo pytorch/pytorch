@@ -25,7 +25,7 @@ struct TORCH_API ORTHooksInterface {
 // for the "..." in a variadic macro"
 struct TORCH_API ORTHooksArgs {};
 
-C10_DECLARE_REGISTRY(ORTHooksRegistry, ORTHooksInterface, ORTHooksArgs);
+TORCH_DECLARE_REGISTRY(ORTHooksRegistry, ORTHooksInterface, ORTHooksArgs);
 #define REGISTER_ORT_HOOKS(clsname) \
   C10_REGISTER_CLASS(ORTHooksRegistry, clsname, clsname)
 

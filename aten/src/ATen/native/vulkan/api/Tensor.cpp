@@ -124,8 +124,7 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
 
     c10::SmallVector<int64_t, 6u> gpu_sizes(3);
 
-    // Channel dim will be always be aligned. For 4 dimensional tensors, batch
-    // and channel are combined, then aligned.
+    // Channel dim will be be aligned to the next multiple of 4
     switch (ndim) {
       case 1:
         gpu_sizes[0] = 4;
@@ -146,8 +145,8 @@ c10::SmallVector<int64_t, 6u> calc_gpu_sizes(
         break;
 
       case 4:
-        int64_t combined_depth = sizes[0] * sizes[1];
-        gpu_sizes[0] = api::utils::align_up(combined_depth, INT64_C(4));
+        int64_t padded_c = api::utils::align_up(sizes[1], INT64_C(4));
+        gpu_sizes[0] = sizes[0] * padded_c;
         gpu_sizes[1] = sizes[2];
         gpu_sizes[2] = sizes[3];
         break;

@@ -197,7 +197,7 @@ def forward(self, arg0_1):
     view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [16, 64, 128, 128]);  view_copy_2 = None
     view_copy_4 = torch.ops.aten.view_copy.default(clone, [16, 64, 128, 128]);  clone = None
     sum_1 = torch.ops.aten.sum.default(view_copy_3)
-    ones_like = torch.ops.aten.ones_like.default(sum_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand_copy = torch.ops.aten.expand_copy.default(ones_like, [16, 64, 128, 128]);  ones_like = None
     view_copy_5 = torch.ops.aten.view_copy.default(expand_copy, [1, 1024, 128, 128]);  expand_copy = None
     new_empty_strided = torch.ops.aten.new_empty_strided.default(view_copy_5, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
@@ -1450,7 +1450,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     def test_batch_norm(self):
         def f(x, running_mean, running_var):
             with enable_python_dispatcher():
-                return torch.batch_norm(x, None, None, running_mean, running_var, False, 0.1, 1e-5, False)
+                return torch.batch_norm(x, None, None, running_mean, running_var, True, 0.1, 1e-5, False)
 
         self.assert_functionalization(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
         logs = self.get_logs(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
@@ -1460,7 +1460,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]
@@ -1480,7 +1480,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]

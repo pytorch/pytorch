@@ -66,9 +66,9 @@ class PackBMatrix final {
     return packed_weights_;
   }
 
-  uint8_t* unpackWeights(
+  void unpackWeights(
       const uint8_t* kernel_zero_points,
-      int n_elements
+      int8_t* kernel
     ) const;
 
   size_t getInputChannels() const

@@ -1,17 +1,14 @@
 # Owner(s): ["module: functorch"]
 
-import functorch
-from unittest.mock import patch
 import functools
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 import test_aotdispatch
 
 
 def make_functionalize_fn(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        with patch.object(functorch.compile.config, "use_functionalize", True):
-            return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
 
     return _fn
 
@@ -34,7 +31,8 @@ def make_functionalize_test(cls):
             setattr(FunctionalizeTest, name, None)
             setattr(FunctionalizeTest, new_name, fn)
 
-    return FunctionalizeTest
+    # https://github.com/pytorch/pytorch/issues/96560
+    return skipIfRocm(FunctionalizeTest)
 
 
 FunctionalizeTestPythonKeyAOT = make_functionalize_test(test_aotdispatch.TestAOTAutograd)

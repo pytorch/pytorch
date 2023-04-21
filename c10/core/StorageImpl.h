@@ -3,6 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/impl/PyObjectSlot.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -43,7 +44,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
         size_bytes_(std::move(size_bytes)),
-        size_bytes_is_symbolic_(size_bytes_.is_symbolic()),
+        size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
@@ -61,33 +62,23 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            size_bytes.is_symbolic()
+            size_bytes.is_heap_allocated()
                 ? allocator->allocate(0)
                 : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() override = default;
 
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
-    size_bytes_is_symbolic_ = false;
-  }
-
-  template <typename T>
-  inline T* data() const {
-    return unsafe_data<T>();
-  }
-
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(this->data_ptr_.get());
+    size_bytes_is_heap_allocated_ = false;
   }
 
   // Destructor doesn't call release_resources because it's
@@ -97,7 +88,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   size_t nbytes() const {
-    TORCH_CHECK(!size_bytes_is_symbolic_);
+    // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
+    TORCH_CHECK(!size_bytes_is_heap_allocated_);
     return size_bytes_.as_int_unchecked();
   }
 
@@ -108,7 +100,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
     size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
+    size_bytes_is_heap_allocated_ = false;
   }
 
   void set_nbytes(c10::SymInt size_bytes) {
@@ -119,7 +111,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return resizable_;
   };
 
-  at::DataPtr& data_ptr() {
+  at::DataPtr& mutable_data_ptr() {
     return data_ptr_;
   };
 
@@ -138,13 +130,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_ = std::move(data_ptr);
   }
 
-  // TODO: Return const ptr eventually if possible
-  void* data() {
+  const void* data() const {
     return data_ptr_.get();
   }
 
-  void* data() const {
-    return data_ptr_.get();
+  void* mutable_data() {
+    return data_ptr_.mutable_get();
   }
 
   at::DeviceType device_type() const {
@@ -198,7 +189,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
     size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
+    size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
     resizable_ = false;
   }
@@ -216,11 +207,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  private:
   DataPtr data_ptr_;
   SymInt size_bytes_;
-  bool size_bytes_is_symbolic_;
+  bool size_bytes_is_heap_allocated_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  impl::PyObjectSlot pyobj_slot_;
 };
 } // namespace c10

@@ -664,14 +664,14 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       //   self = inplace_op(self)
       //
       // For CPU/CUDA backends, we employ one AsStridedBackward0 Node to
-      // represent the chain of view backward ops for effienciency.
+      // represent the chain of view backward ops for efficiency.
       //
       // However in XLA backend we don't have full support of
       // AsStridedBackward0, we instead run a full forward pass with a tensor
       // that requires gradient to get proper grad_fn setup, then save it to
       // DifferentiableViewMeta for future use. This is fairly cheap for XLA
       // lazy tensor approach (but would be really expensive for CPU/CUDA). XLA
-      // Tensor only run thorugh VariableType dispatch and lower the forward
+      // Tensor only run through VariableType dispatch and lower the forward
       // pass to a XLA HLO graph, then we take grad_fn and never materialize the
       // tensor content. So we only construct the graph but not execute it,
       // which is a fairly cheap operation to do.

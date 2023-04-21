@@ -339,6 +339,16 @@ def _safe_zero_index(x):
     assert len(x) == 1
     return x[0]
 
+# jacrev and jacfwd don't support complex functions
+# Helper function to throw appropriate error.
+def error_if_complex(func_name, args, is_input):
+    flat_args, _ = tree_flatten(args)
+    for idx, arg in enumerate(flat_args):
+        if isinstance(arg, torch.Tensor) and arg.dtype.is_complex:
+            input_or_output = ("inputs" if is_input else "outputs")
+            err_msg = (f"{func_name}: Expected all {input_or_output} "
+                       f"to be real but received complex tensor at flattened input idx: {idx}")
+            raise RuntimeError(err_msg)
 
 @exposed_in("torch.func")
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
@@ -475,6 +485,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
     @wraps(func)
     def wrapper_fn(*args):
+        error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
         if has_aux:
             output, vjp_fn, aux = vjp_out
@@ -483,6 +494,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
         flat_output, output_spec = tree_flatten(output)
+
+        error_if_complex("jacrev", flat_output, is_input=False)
 
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
@@ -531,7 +544,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # Iterate and concat the jacobians of different
             # inputs.
             for idx in range(len(flat_primals)):
-                r = tuple(map(lambda r_: r_[idx], chunked_results))
+                r = tuple((r_[idx] for r_ in chunked_results))
                 flat_results.append(torch.cat(r, 0))
 
             return flat_results
@@ -554,7 +567,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                     for t in flat_basis_chunk:
                         assert t.size(0) == 1
 
-                    flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
+                    flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
 
@@ -1095,6 +1108,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     """
     @wraps(func)
     def wrapper_fn(*args):
+        error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
@@ -1103,6 +1117,8 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
 
         def push_jvp(basis):
             output = _jvp_with_argnums(func, args, basis, argnums=argnums, has_aux=has_aux)
+            # output[0] is the output of `func(*args)`
+            error_if_complex("jacfwd", output[0], is_input=False)
             if has_aux:
                 _, jvp_out, aux = output
                 return jvp_out, aux

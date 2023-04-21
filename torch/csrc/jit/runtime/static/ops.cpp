@@ -393,7 +393,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   // not guarantee bit exactness vs the jit interpreter. Note aten::relu is not
   // included even though it uses NNC because the results of relu should always
   // match.
-  static const FastSet<std::string> fast_ops{
+  static const c10::FastSet<std::string> fast_ops{
       "aten::add", "aten::tanh", "aten::sigmoid", "aten::logit"};
   return fast_ops.count(op_name) > 0;
 }
@@ -417,7 +417,7 @@ bool hasVarArgs(Node* n) {
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   auto it = node_has_out_variant.find(n);
   if (it != node_has_out_variant.end()) {
     return it->second;
@@ -430,7 +430,7 @@ bool canReuseInputsOutputs(
 // This means the IValues will not change run to run
 bool inputsCanRunOutOfPlace(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
     if (!canReuseInputsOutputs(input->node(), node_has_out_variant)) {
       return false;
@@ -441,7 +441,7 @@ bool inputsCanRunOutOfPlace(
 
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   const auto& type = n->output()->type();
   bool is_supported_type = false;
   if (type->kind() == TypeKind::ListType) {
@@ -488,7 +488,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       const bool can_optimize =
-          isOptimizableContainerType(n, FastMap<Node*, bool>());
+          isOptimizableContainerType(n, c10::FastMap<Node*, bool>());
       const auto& type = n->output()->type()->expectRef<ListType>();
       const size_t size = n->inputs().size();
       if (!can_optimize) {
@@ -543,7 +543,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       const bool can_optimize =
-          isOptimizableContainerType(n, FastMap<Node*, bool>());
+          isOptimizableContainerType(n, c10::FastMap<Node*, bool>());
       const size_t size = n->inputs().size();
       if (!can_optimize) {
         return [size](ProcessedNode* p_node) {

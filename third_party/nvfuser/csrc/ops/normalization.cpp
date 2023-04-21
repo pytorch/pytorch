@@ -37,14 +37,14 @@ TensorView* variance(
     bool unbiased,
     bool keepdim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
-  int64_t correction = unbiased ? 1 : 0;
+  double correction = unbiased ? 1 : 0;
   return variance(x, dims, correction, keepdim);
 }
 
 TensorView* variance(
     TensorView* x,
     const std::vector<int>& dims,
-    int64_t correction,
+    double correction,
     bool keepdim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
@@ -62,7 +62,7 @@ TensorView* variance(
   auto num_features = numFeatures(x, dims, kNumberOfDims);
   if (correction > 0) {
     num_features =
-        sub(num_features, IrBuilder::create<Int>(x->container(), correction));
+        sub(num_features, IrBuilder::create<Double>(x->container(), correction));
   }
   auto y = div(sum_x_mean_sub_sq, num_features);
 
@@ -72,7 +72,7 @@ TensorView* variance(
 VarMeanResult variance_mean(
     TensorView* x,
     const std::vector<int>& dims,
-    int64_t correction,
+    double correction,
     bool keepdim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
@@ -108,7 +108,7 @@ VarMeanResult variance_mean(
   auto num_features = numFeatures(x, dims, kNumberOfDims);
   if (correction > 0) {
     num_features =
-        sub(num_features, IrBuilder::create<Int>(x->container(), correction));
+        sub(num_features, IrBuilder::create<Double>(x->container(), correction));
   }
 
   auto welford_out = Welford(x, dims);

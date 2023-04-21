@@ -109,7 +109,7 @@ struct TORCH_API ProfilerResult {
  * For example, if part of the model is lowered to a dsp backend, then
  * the execution of that part of the model is delegated to the backend.
  * When backend finishes execution it has an option to provide profiling
- * information (latency only at th emoment) corresponding to different operators
+ * information (latency only at the moment) corresponding to different operators
  * that were executed in the backend.
  * When such events are recorded by backend using this API, the event
  * records will be collected by active kineto profiler. If no kineto profiler

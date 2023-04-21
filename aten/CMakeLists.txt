@@ -94,8 +94,7 @@ else()
 endif()
 
 list(APPEND ATen_CPU_INCLUDE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_subdirectory(src/ATen)
 
 # Pass source, includes, and libs to parent

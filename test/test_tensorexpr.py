@@ -7,7 +7,7 @@ from torch import nn
 import unittest
 import itertools
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests, skipIfTorchDynamo
 
 from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
@@ -34,6 +34,7 @@ def warmup_and_run_forward(f, *args):
     return results
 
 
+@skipIfTorchDynamo()
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
         def easy(x, y):
