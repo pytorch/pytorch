@@ -80,8 +80,11 @@ class OpStrategy(StrategyType):
 class TupleStrategy(StrategyType):
     """
     TupleStrategy represents the output strategy of this op is a tuple
-    of strategy lists, this would be used if the output strategies might
-    be different from each other
+    of strategy, i.e. If the output of this op is a tuple of tensors, we should
+    return a TupleStrategy that contains a tuple of OpStrategy.
+
+    NOTE: if the output of the op is a List[Tensor], it's likely we should return
+    OpStrategy directly in all cases.
     """
 
     def __init__(self, childs: Tuple[StrategyType]) -> None:
