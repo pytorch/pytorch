@@ -832,9 +832,25 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
-            # Setup the subgraph we're going to capture into
-            tx.output.graph = torch.fx.Graph()
-            tx.output.input_name_to_proxy.clear()
+            # NOTE: [The new speculate_subgraph strategy]
+            # We temporarily overwrite tx.output with a new OutputGraph that
+            # we capture f into and save the original OutputGraph as tx.base_output.
+            #
+            # We need to keep tx.base_output around because we still need to
+            # perform operations on it. Namely, if we encounter a new global
+            # while tracing f, then we need to lift that global to be an input
+            # of tx.base_output.
+            output = torch._dynamo.output_graph.OutputGraph(
+                f.get_globals(),
+                tx.output.code_options,
+                tx.output.compiler_fn,
+                tx,
+                tx.output.export,
+                tx.output.export_constraints,
+                tx.output.frame_state
+            )
+            tx.base_output = tx.output
+            tx.output = output
 
             args = []
             # One argument to graph per sub_args
@@ -863,6 +879,7 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             tx.output.side_effects.prune_dead_object_new(tx)
+
             state = tx.copy_graphstate()
 
             guards = state.output.guards
@@ -870,8 +887,10 @@ class TorchHigherOrderOperator(VariableTracker):
 
             comparable_state = get_comparable_state(state)
             graph = tx.output.graph
-            tx.output.graph = graph_checkpoint
-            tx.restore_graphstate(checkpoint)
+            freevars = tx.output.freevars
+
+            tx.output = tx.base_output
+            tx.base_output = None
 
             return (
                 output,
@@ -879,6 +898,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 guards,
                 nn_modules,
                 comparable_state,
+                freevars,
             )
 
         if self.value.__name__ == "cond":
@@ -1022,6 +1042,36 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
+        elif self.value.__name__ == "wrap":
+            checkpoint = tx.copy_graphstate()
+            (
+                body_r,
+                body_graph,
+                body_guards,
+                body_nn_modules,
+                body_cmp,
+                freevars,
+            ) = speculate_subgraph(
+                args[0],
+                [
+                    *args[1:],
+                ],
+                tx.output.graph,
+                checkpoint,
+            )
+
+            body_name = add_subgraph(
+                "body", torch.fx.GraphModule(body_nn_modules, body_graph)
+            )
+
+
+            # Add guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+
+            body_node = make_attr(body_name)
+            p_args = (body_node, *(arg.as_proxy() for arg in args[1:]), *(arg.as_proxy() for arg in freevars))
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 

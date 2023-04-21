@@ -776,7 +776,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return self.load_builtin(inst)
 
         source = self.get_global_source(name)
-        self.push(VariableBuilder(self, source)(value))
+        if self.base_output is not None:
+            tmp = self.output
+            self.output = self.base_output
+            try:
+                var = VariableBuilder(self, source)(value)
+                self.maybe_lift_freevar(var)
+            finally:
+                self.base_output = self.output
+                self.output = tmp
+        else:
+            var = VariableBuilder(self, source)(value)
+        self.push(var)
 
     def STORE_GLOBAL(self, inst):
         value = self.pop()
@@ -1796,6 +1807,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.accept_prefix_inst = True
         self.prefix_insts = []
 
+        self.base_output = None
+
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
@@ -2222,11 +2235,34 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     raise exc.RestartAnalysis()
                 unimplemented("write to __closure__ while inlining")
 
+    def maybe_lift_freevar(self, var):
+        if self.parent.base_output is None:
+            return
+        if var in self.parent.output.freevars:
+            return
+        if type(var.as_proxy()) != torch.fx.Proxy:
+            return
+        self.parent.output.freevars.add(var)
+        name = var.as_proxy().node.name
+        if self.output.input_name_to_proxy:
+            prev_name = next(reversed(self.output.input_name_to_proxy))
+            node = self.output.input_name_to_proxy[prev_name].node
+            ctx = self.output.graph.inserting_after(node)
+        else:
+            ctx = self.output.graph.inserting_before(None)
+        with ctx:
+            proxy = self.output.create_proxy("placeholder", name, (), {})
+
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:
             cell = self.closure_cells[inst.argval]
             if isinstance(cell, ClosureVariable):
-                self.push(self.output.root_tx.symbolic_locals[cell.name])
+                var = self.output.root_tx.symbolic_locals[cell.name]
+                # If we are tracing a subgraph and we have not yet seen this
+                # freevar, then we need to lift it to become an input of
+                # the subgraph.
+                self.maybe_lift_freevar(var)
+                self.push(var)
             else:
                 self.push(self.output.side_effects.load_cell(cell))
         else:
@@ -2235,6 +2271,52 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(self.output.side_effects.load_cell(maybe_sym_local))
             else:
                 super().LOAD_DEREF(inst)
+
+    def LOAD_GLOBAL(self, inst):
+        if sys.version_info >= (3, 11):
+            if inst.arg % 2:
+                self.PUSH_NULL(inst)
+
+        name = inst.argval
+
+        if config.replay_record_enabled:
+            if name in self.f_globals:
+                self.exec_recorder.add_global_var(name, self.f_globals[name])
+            else:
+                assert name in self.f_builtins
+                self.exec_recorder.builtins[name] = self.f_builtins[name]
+
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
+
+        if name in self.symbolic_globals:
+            variable = self.output.side_effects[self.symbolic_globals[name]]
+            self.push(self.output.side_effects.load_global(variable, name))
+            return
+
+        try:
+            value = self.f_globals[name]
+        except KeyError:
+            return self.load_builtin(inst)
+
+        source = self.get_global_source(name)
+        # Invariant: self.parent.base_output is not None <-> we are tracing a subgraph
+        if self.parent.base_output is not None:
+            # If we are tracing a subgraph and we have not yet seen this
+            # global, then we need to:
+            # - build the variable in the outermost graph (which will
+            #   automatically lift it to be an input of the graph)
+            # - lift the variable to become an input of the subgraph.
+            tmp = self.parent.output
+            self.parent.output = self.parent.base_output
+            self.parent.base_output = None
+            var = VariableBuilder(self.parent, source)(value)
+            self.parent.base_output = self.parent.output
+            self.parent.output = tmp
+            self.maybe_lift_freevar(var)
+        else:
+            var = VariableBuilder(self, source)(value)
+        self.push(var)
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()

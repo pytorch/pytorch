@@ -199,6 +199,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         frame_state,
     ):
         super().__init__()
+        self.freevars = set({})
         self.graph = torch.fx.Graph()
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
