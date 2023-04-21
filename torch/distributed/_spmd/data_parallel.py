@@ -33,8 +33,7 @@ _spmd_lib_def = torch.library.Library("_spmd", "DEF")
 _spmd_lib_def.define("tag_grad(Tensor self) -> Tensor")
 
 _spmd_lib_impl = torch.library.Library("_spmd", "IMPL")
-for dispatch_key in ("CPU", "CUDA", "Meta"):
-    _spmd_lib_impl.impl("tag_grad", lambda x: x, dispatch_key)
+_spmd_lib_impl.impl("tag_grad", lambda x: x, "CompositeExplicitAutograd")
 
 
 class DataParallelStyle(Enum):
@@ -52,7 +51,7 @@ class DataParallelStyle(Enum):
                     is similar to the behavior of FullyShardedDataParallel, the
                     difference is that FullyShardedDataParallel (ZERO-3), which
                     shards the model using FlatParameter based sharding,
-                    while this style shard each parameter into DTensor.
+                    while this style shards each parameter into DTensor.
     """
 
     DEFAULT = 0
@@ -77,15 +76,30 @@ class DataParallelStrategy(OpStrategy):
     """
     DataParallelStrategy is a special case of OpStrategy that only records
     the "data parallel style" placement strategy for each fx Node.
+
+    It takes a list of PlacementStrategy, where each PlacementStrategy describes
+    one way to distribute the tensor and computation. In the DataParallel case,
+    there're two possible ways to distribute the parameters:
+        1. replicate the parameter over a set of devices (DDP like behavior)
+        2. shard the parameter on its tensor dimension 0 over a set of devices
+           (FSDP like behavior).
+
+    In addition to the strategy list, we also need to:
+    1. `node_type`: record the type of each node in the graph, so that we can
+        determine how to propagate in a data parallel fashion.
+    2. `reduce_over_batch` is specifically tied to data parallel as the loss
+        calculation usually results in scalar tensor where it comes from a
+        reduction over the batch dimension. We need to know this information
+        so that we could keep the output as sharded.
     """
 
     def __init__(
         self,
         node_type: NodeType,
-        startegy_list: List[PlacementStrategy],
+        strategy_list: List[PlacementStrategy],
         reduction_over_batch: bool = False,
     ):
-        super().__init__(startegy_list)
+        super().__init__(strategy_list)
         self.node_type = node_type
         self.reduction_over_batch = reduction_over_batch
 
@@ -114,16 +128,18 @@ def gradients_tagging(params: Dict[str, torch.Tensor]):
             h.remove()
 
 
-class BatchDimAnalyzer(object):
+class BatchDimAnalyzer:
     """
     This class is used to analyze the batch dimension of each tensor/node in the
     graph. We need to know the batch dimension of each tensor/node so that we know
     exactly the sharding layout of intermediate tensors.
 
-    We possibly should use symbolic shapes to track the batch dimension, but this
-    needs to happen with dynamo, as dynamo is the only place we can mark a single
-    dimension. For now, we just use the batch dimension of the first input tensor
-    as the hint to track the batch dimension of all tensors/nodes in the graph.
+    We possibly should evaluate using symbolic shapes to track the batch dimension.
+    We can experiment it later with dynamo integration (as dynamo have mark_dynamic
+    API which allows marking batch dimension only) or try to use FakeTensorMode to
+    mark the batch dimension. For now, let's just use the batch dimension of the first
+    input tensor as the hint to track the batch dimension of all tensors/nodes in
+    the graph.
     """
 
     def __init__(self, batch_dim: int = 0) -> None:
@@ -157,58 +173,69 @@ class BatchDimAnalyzer(object):
             raise RuntimeError(f"batch dim analysis failed on node: {node}!")
         return self.batch_dim_map[node]
 
-    def get_batch_dim_shard_spec(
-        self, node: fx.Node, mesh: DeviceMesh, input_full_reduction: bool = False
-    ) -> Tuple[DTensorSpec, bool]:
+    def compute_batch_dim(self, node: fx.Node, full_reduction=False) -> int:
         """
-        simple batch dim analysis that analyze the batch dim of the node
-        and return the corresponding shard spec
+        compute the batch dimension for the `node`
         """
         assert self.batch_dim_size != -1, "batch dim size is not initialized!"
 
         if node in self.batch_dim_map:
-            node_batch_dim = self.get_batch_dim(node)
-            batch_dim_shard_spec = DTensorSpec(
-                mesh=mesh, placements=[Shard(node_batch_dim)]
-            )
-            return batch_dim_shard_spec, False
+            # if batch dim already computed, simply return it
+            return self.batch_dim_map[node]
 
         shape = node.meta["val"].shape
 
-        # for reduction op that reduces over the sharded batch dim
-        # we don't generate partial, but rather, we generate shard
-        # This is because the intention of data parallel is to never
-        # do full reduction across batch dimension, it would still
-        # keep the reduction activation sharded.
-        reduction_over_batch = False
-        reduction_ops = [aten.sum.default, aten.mean.default]
-        if node.target in reduction_ops and len(shape) == 0:
-            operand = node.all_input_nodes[0]
-            if operand in self.batch_dim_map:
-                operand_batch_dim = self.get_batch_dim(operand)
-                if operand_batch_dim == 0:
-                    reduction_over_batch = True
-                    self.set_batch_dim(node, operand_batch_dim)
-
-            else:
-                raise RuntimeError(f"batch dim analysis failed on node: {node}!")
-        elif input_full_reduction:
-            # the first consumer node that consumes the full reduction
+        if full_reduction:
+            # if it's a full reduction then we use operand batch dim as
+            # the node's batch dim
             operand = node.all_input_nodes[0]
             assert (
                 operand in self.batch_dim_map
             ), "input have full reduction but not in dim map!"
-            self.set_batch_dim(node, self.get_batch_dim(operand))
+            operand_batch_dim = self.get_batch_dim(operand)
+            self.set_batch_dim(node, operand_batch_dim)
+            return operand_batch_dim
         else:
+            # loop through the dim size to find the batch dim
             for i, dim_size in enumerate(shape):
                 if dim_size == self.batch_dim_size:
                     self.set_batch_dim(node, i)
+                    return i
 
-        node_batch_dim = self.get_batch_dim(node)
+        # if we reach here, it means we failed to find the batch dim
+        raise RuntimeError(f"batch dim analysis failed on node: {node}!")
+
+    def get_batch_dim_shard_spec(
+        self, node: fx.Node, mesh: DeviceMesh, input_full_reduction: bool = False
+    ) -> Tuple[DTensorSpec, bool]:
+        """
+        This function first compute the batch dimension for the current node,
+        then generate the sharding spec that shards on the batch dimension.
+        """
+        # for reduction op that reduces over the sharded batch dim
+        # we don't generate partial, but rather, we generate shard
+        # This is because the intention of data parallel is to never
+        # do full reduction across batch dimension, it would still
+        # keep the reduction activation as sharded.
+        reduction_over_batch = False
+        reduction_ops = [aten.sum.default, aten.mean.default]
+        shape = node.meta["val"].shape
+        if node.target in reduction_ops and len(shape) == 0:
+            operand = node.all_input_nodes[0]
+            if operand in self.batch_dim_map:
+                operand_batch_dim = self.get_batch_dim(operand)
+                if operand_batch_dim == self.batch_dim:
+                    reduction_over_batch = True
+            else:
+                raise RuntimeError(f"batch dim analysis failed on node: {node}!")
+
+        full_reduction = reduction_over_batch or input_full_reduction
+        node_batch_dim = self.compute_batch_dim(node, full_reduction)
         batch_dim_shard_spec = DTensorSpec(
             mesh=mesh, placements=[Shard(node_batch_dim)]
         )
-        if reduction_over_batch or input_full_reduction:
+
+        if full_reduction:
             batch_dim_shard_spec.from_local = True  # type: ignore[attr-defined]
 
         return batch_dim_shard_spec, reduction_over_batch
@@ -270,7 +297,7 @@ def build_data_parallel_strategies(
     ]
 
     dp_strategy_map = {}
-    batch_dim_analzer = BatchDimAnalyzer(batch_dim)
+    batch_dim_analyzer = BatchDimAnalyzer(batch_dim)
     placeholder_idx = 0
     num_param_grad = 0
 
@@ -294,8 +321,6 @@ def build_data_parallel_strategies(
             if num_param_grad == num_params:
                 # early break if we have already processed all param_grads
                 break
-
-    train_step_graph.recompile()
 
     # next we forward propagate to mark all the sharding
     for node in train_step_graph.graph.nodes:
@@ -328,26 +353,26 @@ def build_data_parallel_strategies(
             elif placeholder_idx < activation_idx:
                 # optimizer states follow the same strategy as
                 # the corresponding parameters
-                placemenet_strategies: List[PlacementStrategy] = []
+                placement_strategies: List[PlacementStrategy] = []
 
                 replica_strategy = _gen_replicate_strategy(mesh)
-                placemenet_strategies.append(replica_strategy)
+                placement_strategies.append(replica_strategy)
 
                 if node.meta["val"].ndim > 0:
                     # if the state is a scalar, we don't want to shard it
                     # i.e. param state step is usually a scalar tensor
                     shard_strategy = _gen_shard_strategy(mesh, 0)
-                    placemenet_strategies.append(shard_strategy)
+                    placement_strategies.append(shard_strategy)
                 dp_strategy_map[node] = DataParallelStrategy(
-                    NodeType.STATE, placemenet_strategies
+                    NodeType.STATE, placement_strategies
                 )
             else:
                 activation_batch_dim_size = node.meta["val"].shape[batch_dim]
                 # find the first activation node and use its batch dim size
-                if batch_dim_analzer.batch_dim_size == -1:
-                    batch_dim_analzer.init_batch_dim_size(activation_batch_dim_size)
+                if batch_dim_analyzer.batch_dim_size == -1:
+                    batch_dim_analyzer.init_batch_dim_size(activation_batch_dim_size)
 
-                batch_dim_analzer.set_batch_dim(node, batch_dim)
+                batch_dim_analyzer.set_batch_dim(node, batch_dim)
                 shard_strategy = _gen_shard_strategy(mesh, batch_dim)
                 dp_strategy_map[node] = DataParallelStrategy(
                     NodeType.ACT, [shard_strategy]
@@ -388,11 +413,11 @@ def build_data_parallel_strategies(
                         NodeType.GRAD, [partial_sig]
                     )
                 elif arg_node_type == NodeType.ACT:
-                    arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                    arg_node_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
                         input_nodes[0], mesh
                     )
 
-                    output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                    output_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
                         node, mesh, input_full_reduction
                     )
 
@@ -427,7 +452,7 @@ def build_data_parallel_strategies(
                     if arg_node_type == NodeType.ACT:
                         # activation sharded
                         has_activation = True
-                        act_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                        act_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
                             arg, mesh
                         )
 
@@ -451,7 +476,7 @@ def build_data_parallel_strategies(
                         node_type = arg_strategy.node_type
                         if node_type == NodeType.ACT:
                             # activation must stay sharded
-                            act_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                            act_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
                                 arg, mesh
                             )
 
@@ -469,7 +494,7 @@ def build_data_parallel_strategies(
                     (
                         output_spec,
                         reduction_over_batch,
-                    ) = batch_dim_analzer.get_batch_dim_shard_spec(node, mesh)
+                    ) = batch_dim_analyzer.get_batch_dim_shard_spec(node, mesh)
 
                     shard_strategy = PlacementStrategy(
                         output_spec=output_spec, input_specs=input_specs
