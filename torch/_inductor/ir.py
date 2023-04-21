@@ -4075,7 +4075,11 @@ class InPlaceHint(ExternKernel):
     Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
     Wrap the input of your inplace op to enable this behavior.
 
-    See collectives lowering for examples of how to use it.
+    The design is based on two key decisions:
+    - this node is resposible for allocating the in/out buffer used by the collective.
+        This is controlled by the ``should_allocate`` method that returns True here and
+        False for the collective node
+    - The scheduler special-case this node and enable it to reuse its input.
     """
 
     def __init__(self, layout, input):
