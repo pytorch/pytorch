@@ -4,13 +4,17 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
-#if !defined(USE_ROCM) && defined(PYTORCH_EXPANDABLE_SEGMENTS_SUPPORTED)
+#define PYTORCH_C10_DRIVER_API_SUPPORTED
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include <c10/util/Exception.h>
@@ -258,7 +262,7 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#if !defined(USE_ROCM) && defined(PYTORCH_EXPANDABLE_SEGMENTS_SUPPORTED)
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
 Note [Expandable Segments]
@@ -803,7 +807,7 @@ class CachingAllocatorConfig {
   }
 
   static bool expandable_segments() {
-#ifndef PYTORCH_EXPANDABLE_SEGMENTS_SUPPORTED
+#ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
     if (instance().m_expandable_segments) {
       TORCH_WARN_ONCE("expandable_segments not supported on this platform")
     }
@@ -1121,6 +1125,43 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
   }
 }
 
+static std::string reportProcessMemoryInfo(int device) {
+#ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
+  static c10::once_flag nvml_init;
+  c10::call_once(nvml_init, [] {
+    TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
+  });
+  nvmlDevice_t nvml_device;
+  TORCH_INTERNAL_ASSERT(
+      NVML_SUCCESS ==
+      DriverAPI::get()->nvmlDeviceGetHandleByIndex_v2_(device, &nvml_device));
+  std::vector<nvmlProcessInfo_v1_t> procs(8);
+  unsigned int size = procs.size();
+  nvmlReturn_t r;
+  while ((r = DriverAPI::get()->nvmlDeviceGetComputeRunningProcesses_(
+              nvml_device, &size, procs.data())) ==
+         NVML_ERROR_INSUFFICIENT_SIZE) {
+    procs.resize(size);
+  }
+  unsigned int self_pid = getpid();
+  std::stringstream ss;
+  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
+  ss << "";
+  for (auto i : c10::irange(size)) {
+    auto& proc = procs[i];
+    if (self_pid == proc.pid) {
+      ss << "Including non-PyTorch memory, this process";
+    } else {
+      ss << "Process " << proc.pid;
+    }
+    ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
+  }
+  return ss.str();
+#else
+  return "";
+#endif
+}
+
 namespace Native {
 
 class DeviceCachingAllocator {
@@ -1295,6 +1336,8 @@ class DeviceCachingAllocator {
         allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
       }
 
+      std::string proc_info = reportProcessMemoryInfo(device);
+
       if (record_history) {
         record_trace(
             TraceEntry::OOM,
@@ -1358,19 +1401,20 @@ class DeviceCachingAllocator {
           false,
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
-          " (GPU ",
+          ". GPU ",
           device,
-          "; ",
+          " has a total capacty of ",
           format_size(device_total),
-          " total capacity; ",
-          format_size(allocated_bytes),
-          " already allocated; ",
+          " of which ",
           format_size(device_free),
-          " free; ",
-          allowed_info,
-          format_size(reserved_bytes),
-          " reserved in total by PyTorch)",
-          " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
+          " is free. ",
+          proc_info,
+          "Of the allocated memory ",
+          format_size(allocated_bytes),
+          " is allocated by PyTorch, and ",
+          format_size(reserved_bytes - allocated_bytes),
+          " is reserved by PyTorch but unallocated.",
+          " If reserved but unallocated memory is large try setting max_split_size_mb to avoid"
           " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
           "");
     }
