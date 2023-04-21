@@ -511,9 +511,6 @@ def run_meta_crossref(
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args
-        elif func is torch.repeat_interleave:
-            if isinstance(kwargs.get("repeats", None), int):
-                test_expect = TestExpect.SUCCESS
         elif func is torch.ops.aten.index.Tensor:
             # Don't convert boolean tensors to meta as they will have nonzero
             # called on them
@@ -606,7 +603,6 @@ meta_function_expected_failures = {
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
-    torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.frexp : {f64, f16, bf16, f32},
@@ -643,6 +639,10 @@ meta_function_expected_failures = {
 
 meta_function_expected_failures_only_outplace = {
     torch.nn.functional.rrelu : {f64, bf16, f32},
+}
+
+meta_function_expected_failures_conditional = {
+    torch.repeat_interleave : (lambda dtype, *args, **kwargs: not isinstance(kwargs.get("repeats", None), int)),
 }
 
 """
@@ -801,6 +801,8 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
         elif not self.inplace and self.dtype in meta_function_expected_failures_only_outplace.get(func, set()):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
+            test_expect = TestExpect.XFAILURE
+        elif meta_function_expected_failures_conditional.get(func, lambda _: False)(self.dtype, *args, **kwargs):
             test_expect = TestExpect.XFAILURE
         elif not self.inplace and \
                 self.dtype in meta_function_device_expected_failures_only_outplace[self.device_type].get(func, set()):
