@@ -369,8 +369,6 @@ def build_data_parallel_strategies(
             # param/state + grad (param/state/grad be the same spec) -> out: param/state
             # param + state -> out: param
 
-            # print(f">>>> processing node: {node}")
-
             if node.target in non_compute_ops:
                 # At this point, we should have removed all the `tag_grad` nodes in the graph
                 assert node.target != torch.ops._spmd.tag_grad.default
@@ -385,45 +383,44 @@ def build_data_parallel_strategies(
                     # for getitem call, just forward the strategy from the input
                     getitem_idx = node.args[1]
                     if isinstance(arg_strategy, TupleStrategy):
-                        # For tuple strategy, we need to get the child strategy from
-                        # this tuple strategy
-                        print(
-                            f">>>>>> getting item {getitem_idx} from tuple strategy: {arg_strategy}"
-                        )
+                        # for tuple strategy, we need to get the child strategy from the tuple
                         dp_strategy_map[node] = arg_strategy.childs[getitem_idx]
                     else:
                         # if it's not a tuple strategy, we just forward the arg strategy
                         dp_strategy_map[node] = arg_strategy
-                elif arg_strategy.node_type == NodeType.PARAM:
-                    replica_strategy = _gen_replicate_strategy(mesh)
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.PARAM, [replica_strategy]
-                    )
-                elif arg_strategy.node_type == NodeType.GRAD:
-                    partial_sig = _gen_partial_strategy(mesh)
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.GRAD, [partial_sig]
-                    )
-                elif arg_strategy.node_type == NodeType.ACT:
-                    input_full_reduction = arg_strategy.reduction_over_batch
-                    arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
-                        input_nodes[0], mesh
-                    )
-
-                    output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
-                        node, mesh, input_full_reduction
-                    )
-
-                    shard_strategy = PlacementStrategy(
-                        output_spec=output_spec, input_specs=[arg_node_spec]
-                    )
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [shard_strategy]
-                    )
                 else:
-                    raise RuntimeError(
-                        f"non compute op not supporting {arg_node_type}! "
-                    )
+                    assert isinstance(arg_strategy, DataParallelStrategy)
+                    arg_node_type = arg_strategy.node_type
+                    input_full_reduction = arg_strategy.reduction_over_batch
+                    if arg_node_type == NodeType.PARAM:
+                        replica_strategy = _gen_replicate_strategy(mesh)
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.PARAM, [replica_strategy]
+                        )
+                    elif arg_node_type == NodeType.GRAD:
+                        partial_sig = _gen_partial_strategy(mesh)
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.GRAD, [partial_sig]
+                        )
+                    elif arg_node_type == NodeType.ACT:
+                        arg_node_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                            input_nodes[0], mesh
+                        )
+
+                        output_spec, _ = batch_dim_analzer.get_batch_dim_shard_spec(
+                            node, mesh, input_full_reduction
+                        )
+
+                        shard_strategy = PlacementStrategy(
+                            output_spec=output_spec, input_specs=[arg_node_spec]
+                        )
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.ACT, [shard_strategy]
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"non compute op not supporting {arg_node_type}! "
+                        )
 
                 # finished processing this non-compute node
                 continue
@@ -461,13 +458,11 @@ def build_data_parallel_strategies(
                 # TODO: Currently this specializes to fused optimizer ops, but we need
                 # to see how to generalize this strategy building logic
                 output_strategy_len = len(node.args) - 1
-                print(f">>>> fused adam: node args: {node.args}")
-                print(f">>>>> fused adam: node output: {node.meta}")
                 tuple_strategies = []
                 for i in range(output_strategy_len):
-                    if not isinstance(node.args[i], (list, tuple)):
+                    if not isinstance(node.args[i], list):
                         raise RuntimeError(
-                            f"Expecting node or list/tuple as arg to build Tuple Strategy, but found type {type(node.args[i])}!"
+                            f"Expecting node or list as arg to build Tuple Strategy, but found type {type(node.args[i])}!"
                         )
                     # for list/tuple arg, use the first one to find out the node type
                     if len(node.args[i]) > 0:
@@ -483,15 +478,12 @@ def build_data_parallel_strategies(
                             arg_strategy.node_type, [replica_strategy, shard_strategy]
                         )
                     else:
-                        # if the list/tuple is empty, use a dummy strategy
+                        # if the list/tuple is empty, use a dummy tuple strategy
                         out_node_strategy = TupleStrategy(())
 
                     tuple_strategies.append(out_node_strategy)
 
                 output_tuple_strategy = TupleStrategy(tuple_strategies)
-                print(
-                    f">>>>> tuple strategy built for fused adam: {output_tuple_strategy}"
-                )
                 dp_strategy_map[node] = output_tuple_strategy
             else:
                 # NOTE: This is the common region for all regular computation ops
@@ -641,12 +633,22 @@ def mark_data_parallel_shardings(
             placeholder_idx += 1
         elif node.op == "call_function":
             if isinstance(node_strategy, TupleStrategy):
-                # TupleStrategy node does not have sharding because it's just a container
-                # for the all the shardings of following computation nodes
-                node.meta["sharding"] = None
-                continue
+                # For tuple strategy in the data parallel mode, it should have the same strategy
+                # for all tuple elements, assert that then use the first element's strategy as sharding
+                for child_strategy in node_strategy.childs:
+                    if isinstance(child_strategy, DataParallelStrategy):
+                        assert (
+                            child_strategy.strategies == node_strategy.childs[0].strategies
+                        )
+                    else:
+                        # if the child strategy is not data parallel strategy, it should be an empty tuple strategy
+                        assert isinstance(child_strategy, TupleStrategy) and len(child_strategy.childs) == 0
 
-            node_strategies = node_strategy.strategies
+                node_strategies = node_strategy.childs[0].strategies
+            else:
+                assert isinstance(node_strategy, DataParallelStrategy)
+                node_strategies = node_strategy.strategies
+
             assert (
                 len(node_strategies) <= 2
             ), "data parallel should have at most 2 strategies"
@@ -716,8 +718,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
         # None sharding means this node don't need sharding
         if node_sharding is None:
             continue
-
-        print(f">>>> processing node: {node}, with sharding: {node_sharding}")
 
         if node.op == "placeholder":
             out_spec = node_sharding.output_spec
@@ -819,7 +819,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
 
     graph.graph.lint()
     graph.recompile()
-    graph.print_readable()
     return graph
 
 
@@ -843,23 +842,14 @@ def partition_data_parallel(
     flattened_states = pytree.tree_flatten(named_states)[0]
     num_states = len(flattened_states)
 
-<<<<<<< HEAD
-=======
     changed = graph.graph.eliminate_dead_code()
     if changed:
         graph.recompile()
-    graph.print_readable()
 
->>>>>>> 54368c5a32f... [spmd][WIP] add fused_adam tests for data parallel
     # 1. First build up data parallel strategies for the whole graph
     strategy_map = build_data_parallel_strategies(
         graph, num_params_buffers, num_states, mesh=mesh
     )
-
-    # print(f">>>>>>> strategy map <<<<<<<<<")
-    # for node in graph.graph.nodes:
-    #     print(node, strategy_map[node])
-    # print(f">>>>>>> strategy map <<<<<<<<<")
 
     # 2. Next we mark the data parallel strategy for each node base on
     #    the parallel_style
@@ -870,12 +860,6 @@ def partition_data_parallel(
         dp_strategy_map=strategy_map,
         parallel_mode=parallel_style,
     )
-
-    # print(f">>>>>>> node sharding map <<<<<<<<<")
-    # for node in graph.graph.nodes:
-    #     if "sharding" in node.meta:
-    #         print(node, node.meta["sharding"])
-    # print(f">>>>>>> node sharding map <<<<<<<<<")
 
     # 3. Partition the single machine graph to the distribute graph
     partitioned_graph = partitioner(graph)
