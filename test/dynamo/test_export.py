@@ -1518,7 +1518,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
-    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    @config.patch(capture_scalar_outputs=True)
     def test_export_with_cond_branches_calling_methods(self):
         from functorch.experimental.control_flow import cond
 
@@ -1551,7 +1551,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    @config.patch(capture_scalar_outputs=True)
     def test_export_with_cond_closure(self):
         from functorch.experimental.control_flow import cond
 
@@ -2524,7 +2524,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             f_pred_complex_expression_traced_as_symnode_var,
         ]:
             gm, _ = torch._dynamo.export(
-                f, *example_inputs, aten_graph=True, tracing_mode="symbolic"
+                f, *example_inputs, aten_graph=True
             )
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
@@ -2589,7 +2589,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             "Expected 4 arguments",
         ):
             torch._dynamo.export(
-                f, *example_inputs, aten_graph=True, tracing_mode="symbolic"
+                f, *example_inputs, aten_graph=True
             )
 
     def test_cond_raise_user_error_on_unsupported_pred(self):
@@ -2606,7 +2606,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_unsupported_pred,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_non_list_operands(self):
@@ -2622,7 +2621,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_non_list_operands,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_non_tensor_operands(self):
@@ -2641,7 +2639,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_non_tensor_operands,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_branch_args_mismatch(self):
@@ -2663,7 +2660,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_branch_args_mismatch,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_branch_return_non_tensor(self):
@@ -2679,7 +2675,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_branch_return_non_tensor,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_branch_return_multiple_tenors(self):
@@ -2695,7 +2690,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_branch_return_multiple_tensors,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_mismatch_return_length(self):
@@ -2717,7 +2711,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_mismatch_return_length,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_cond_raise_user_error_on_mismatch_return_tensor_meta(self):
@@ -2739,7 +2732,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f_return_tensor_mismatch,
                 *example_inputs,
                 aten_graph=True,
-                tracing_mode="symbolic",
             )
 
     def test_export_defaults_ok(self):
