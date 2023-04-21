@@ -272,7 +272,7 @@ def build_data_parallel_strategies(
         operator.getitem,
     ]
 
-    dp_strategy_map = {}
+    dp_strategy_map: Dict[fx.Node, StrategyType] = {}
     batch_dim_analzer = BatchDimAnalyzer(batch_dim)
     placeholder_idx = 0
     num_param_grad = 0
@@ -599,13 +599,12 @@ def mark_data_parallel_shardings(
             if isinstance(node_strategy, TupleStrategy):
                 # For tuple strategy in the data parallel mode, it should have the same strategy
                 # for all tuple elements, assert that then use the first element's strategy as sharding
+                first_strategy = cast(node_strategy.childs[0], DataParallelStrategy)
                 for child_strategy in node_strategy.childs:
                     assert isinstance(child_strategy, DataParallelStrategy)
-                    assert (
-                        child_strategy.strategies == node_strategy.childs[0].strategies
-                    )
+                    assert child_strategy.strategies == first_strategy.strategies
 
-                node_strategies = node_strategy.childs[0].strategies
+                node_strategies = first_strategy.strategies
             else:
                 assert isinstance(node_strategy, DataParallelStrategy)
                 node_strategies = node_strategy.strategies
