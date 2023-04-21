@@ -699,10 +699,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             codegen = pass2
 
         if config.numpy_ndarray_as_tensor:
-            from .variables.tensor import NumpyTensorVariable
+            from .variables.tensor import NumpyNdarrayVariable
 
             self.add_output_instructions(
-                NumpyTensorVariable.reconstruct_ndarray_before_return(codegen, self)
+                NumpyNdarrayVariable.reconstruct_ndarray_before_return(codegen, self)
             )
         # restore all the live local vars
         self.add_output_instructions(
