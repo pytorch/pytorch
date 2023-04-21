@@ -2,7 +2,7 @@ import inspect
 import itertools
 import operator
 import types
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import torch.fx
 import torch.random
@@ -365,7 +365,7 @@ class TensorVariable(VariableTracker):
             if kwargs and "force" in kwargs:
                 unimplemented(f"Tensor.numpy(force={kwargs['force']})")
             return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
+                target_cls=NumpyNdarrayVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
@@ -656,7 +656,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class NumpyTensorVariable(TensorVariable):
+class NumpyNdarrayVariable(VariableTracker):
     """
     Represents a torch_np.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
@@ -664,36 +664,24 @@ class NumpyTensorVariable(TensorVariable):
     def __init__(
         self,
         proxy: torch.fx.Proxy,
-        dtype=None,
-        device=None,
-        layout=None,
-        ndim=None,
-        size=None,
-        stride=None,
-        requires_grad=None,
-        is_quantized=None,
-        is_contiguous=None,
-        is_sparse=None,
         class_type=torch.Tensor,
-        specialized_value=None,
         **kwargs,
     ):
-        super().__init__(
-            proxy,
-            dtype,
-            device,
-            layout,
-            ndim,
-            size,
-            stride,
-            requires_grad,
-            is_quantized,
-            is_contiguous,
-            is_sparse,
-            class_type,
-            specialized_value,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.class_type = class_type
+
+    def python_type(self):
+        return self.class_type
+
+    def as_proxy(self):
+        return self.proxy
+
+    def reconstruct(self, codegen):
+        unimplemented("reconstruct needs to be implemented")
+
+    def unpack_var_sequence(self, tx):
+        super().unpack_var_sequence(tx)
 
     def var_getattr(self, tx, name):
         from torch._dynamo.variables import GetAttrVariable
@@ -703,7 +691,7 @@ class NumpyTensorVariable(TensorVariable):
         options = VariableTracker.propagate(self)
         if name in ["T", "real", "imag"]:
             result = wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
+                target_cls=NumpyNdarrayVariable,
                 tx=tx,
                 proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
                 example_value=None,
