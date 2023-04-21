@@ -335,10 +335,18 @@ def convolution(
 
     x.realize()
     weight.realize()
-    layout = conv_layout(x, weight, None, **kwargs)
-    req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
-    x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-    weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+
+    if config.layout_opt:
+        x = ir.ExternKernel.require_channels_last(x)
+        # NOTE: it's fine that weight is not channels last.
+        # We can make it contiguous if that's necessary.
+        weight = ir.ExternKernel.require_channels_last(weight)
+        layout = conv_layout(x, weight, None, **kwargs)
+    else:
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
     if bias is None:
         args = (x, weight)
@@ -416,5 +424,5 @@ def _convolution(
         x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
     )
 
-
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
+if not config.layout_opt:
+    add_layout_constraint(aten.convolution, constrain_to_fx_strides)

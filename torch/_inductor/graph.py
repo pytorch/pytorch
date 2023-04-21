@@ -54,7 +54,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
-
 def supported_dtype_of_cpp_wrapper(dtype, cuda):
     supported_dtype = {
         torch.float32,
@@ -176,7 +175,39 @@ class GraphLowering(torch.fx.Interpreter):
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
+        self.nodes_prefer_channels_last = self.find_nodes_prefer_channels_last() if config.layout_opt else set()
         self._warned_fallback = {"aten.convolution_backward"}
+
+    def find_nodes_prefer_channels_last(self):
+        """
+        The rule to decide if an node prefer channels last is simple.
+        1. if it's input/output of a convolution
+        2. if one of its user preferes channels last
+
+        We have rule 1 because cudnn runs a faster convolution kernel for channels last inputs;
+        Rule 2 is also important. It makes sure that indirect inputs to convolution also prefers
+        channels last.
+
+        Consider the scenario: conv -> batch-norm -> relu -> conv
+        Without rule 2, batch-norm output may use a congituous layout. That will cause 2 extra copies:
+        1. the output of batch-norm should be channels last initially since its input is a conv's output.
+           Forcing the batch-norm's output to be contiguous results in the first copy
+        2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
+           We need convert it to channels last layout which results in the second copy.
+        With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
+        can be saved.
+        """
+        output_set = set()
+        for n in reversed(self.module.graph.nodes):
+            if n.target == torch.ops.aten.convolution.default:
+                output_set.add(n)
+                continue
+
+            for user in n.users:
+                if user in output_set:
+                    output_set.add(n)
+                    break
+        return output_set
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
@@ -505,8 +536,13 @@ class GraphLowering(torch.fx.Interpreter):
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
+                    stride_order = ir.get_stride_order(strides)
+
+                    if len(result.get_size()) == 4 and (n in self.nodes_prefer_channels_last):
+                        stride_order = ir.NHWC_STRIDE_ORDER
+
                     result = ir.ExternKernel.require_stride_order(
-                        result, ir.get_stride_order(strides)
+                        result, stride_order
                     )
 
             # Realize if (1) any user need inputs realized, or (2) there is
@@ -527,11 +563,12 @@ class GraphLowering(torch.fx.Interpreter):
                         # When we do a better job selecting layout, we should
                         # revisit this.
                         need_fixed_layout = [
-                            torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
+                        if not config.layout_opt:
+                            need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,

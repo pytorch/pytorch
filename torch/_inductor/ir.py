@@ -133,6 +133,7 @@ def fuse_reindexing(reindex1, reindex2):
 
     return reindex
 
+NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 
 def stride_order2fill_order(order):
     """
@@ -2689,6 +2690,10 @@ class ExternKernel(InputsKernel):
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
         return x
+
+    @classmethod
+    def require_channels_last(cls, x):
+        return cls.require_stride_order(x, NHWC_STRIDE_ORDER)
 
     @classmethod
     def require_contiguous(cls, x):
