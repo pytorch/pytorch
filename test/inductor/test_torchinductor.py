@@ -1863,7 +1863,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
         self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
 
-
     def test_split_with_sizes_failed(self):
         @torch._dynamo.optimize("inductor")
         def fn(a):
