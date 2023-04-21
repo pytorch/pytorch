@@ -3704,7 +3704,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('scatter_reduce', 'mean'),
         xfail('nn.functional.max_unpool3d', ''),
-        xfail('linalg.ldl_solve', '', device_type='cpu'),
         xfail('chalf', ''),
         xfail('clamp_max', ''),
         xfail('jiterator_binary_return_by_ref', device_type='cuda'),
@@ -3729,7 +3728,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('equal', ''),
         xfail('linalg.lu', ''),
-        skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
@@ -4268,7 +4266,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # but it passes locally
         xfail('linalg.diagonal'),
         skip('linalg.matrix_norm', ''),
-        skip('linalg.ldl_solve', ''),
     })
     def test_vmap_linalg_failure_1D_input(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype, requires_grad=False):
