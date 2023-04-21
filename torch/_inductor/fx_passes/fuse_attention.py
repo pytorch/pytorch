@@ -5,7 +5,12 @@ import math
 import torch
 from ..._dynamo.utils import counters
 from .. import config
-from ..pattern_matcher import inference_graph, register_replacement, training_graph
+from ..pattern_matcher import (
+    filter_nodes,
+    inference_graph,
+    register_replacement,
+    training_graph,
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -141,6 +146,23 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
 # TODO(jansel): make these pattern work with lowmem_dropout=True
 
 
+def _sfdp_scale_factor_check(scale_factor_op):
+    def fn(match):
+        scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
+        # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
+        scale_factor = scale_factor_node.args[1]
+        # make sure the scale_factor a float/int. SymInt?
+        if not isinstance(scale_factor, (float, int)):
+            return False
+        return True
+
+    return fn
+
+
+def _return_true(match):
+    return True
+
+
 @functools.lru_cache(None)
 @config.patch(lowmem_dropout=False)
 def _sfdp_init():
@@ -161,13 +183,37 @@ def _sfdp_init():
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
 
-    for pattern, replacement, args, workaround in [
-        (_sfdp_pattern_1, _sfdp_replacement_1, [g(), g(), g(), c()], {}),
-        (_sfdp_pattern_2, _sfdp_replacement_2, [g(), g(), g(), c()], {}),
-        (_sfdp_pattern_3, _sfdp_replacement_3, [g(), g(), g(), c()], d),
-        (_sfdp_pattern_4, _sfdp_replacement_4, [g(), g(), g(), c()], d),
-        (_sfdp_pattern_5, _sfdp_replacement_5, [g(), g(), g(), b()], {}),
-        (_sfdp_pattern_6, _sfdp_replacement_6, [g(), g(), g(), b()], d),
+    for pattern, replacement, args, workaround, extra_check in [
+        (
+            _sfdp_pattern_1,
+            _sfdp_replacement_1,
+            [g(), g(), g(), c()],
+            {},
+            _sfdp_scale_factor_check(aten.div.Tensor),
+        ),
+        (
+            _sfdp_pattern_2,
+            _sfdp_replacement_2,
+            [g(), g(), g(), c()],
+            {},
+            _sfdp_scale_factor_check(aten.mul.Tensor),
+        ),
+        (
+            _sfdp_pattern_3,
+            _sfdp_replacement_3,
+            [g(), g(), g(), c()],
+            d,
+            _sfdp_scale_factor_check(aten.div.Tensor),
+        ),
+        (
+            _sfdp_pattern_4,
+            _sfdp_replacement_4,
+            [g(), g(), g(), c()],
+            d,
+            _sfdp_scale_factor_check(aten.mul.Tensor),
+        ),
+        (_sfdp_pattern_5, _sfdp_replacement_5, [g(), g(), g(), b()], {}, _return_true),
+        (_sfdp_pattern_6, _sfdp_replacement_6, [g(), g(), g(), b()], d, _return_true),
     ]:
         args = [*args, *workaround.values()]
         register_replacement(
@@ -176,6 +222,7 @@ def _sfdp_init():
             args,
             training_graph,
             patterns,
+            extra_check=extra_check,
             scalar_workaround=workaround,
         )
         register_replacement(
@@ -184,5 +231,6 @@ def _sfdp_init():
             args,
             inference_graph,
             patterns,
+            extra_check=extra_check,
             scalar_workaround=workaround,
         )
