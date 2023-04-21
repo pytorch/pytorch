@@ -638,11 +638,15 @@ def mark_data_parallel_shardings(
                 for child_strategy in node_strategy.childs:
                     if isinstance(child_strategy, DataParallelStrategy):
                         assert (
-                            child_strategy.strategies == node_strategy.childs[0].strategies
+                            child_strategy.strategies
+                            == node_strategy.childs[0].strategies
                         )
                     else:
                         # if the child strategy is not data parallel strategy, it should be an empty tuple strategy
-                        assert isinstance(child_strategy, TupleStrategy) and len(child_strategy.childs) == 0
+                        assert (
+                            isinstance(child_strategy, TupleStrategy)
+                            and len(child_strategy.childs) == 0
+                        )
 
                 node_strategies = node_strategy.childs[0].strategies
             else:
@@ -732,13 +736,8 @@ def partitioner(graph: GraphModule) -> GraphModule:
             expected_input_specs = node_sharding.input_specs
             for idx, input_arg in enumerate(node.all_input_nodes):
                 input_arg_sharding = input_arg.meta["sharding"]
-                if input_arg_sharding is None or "val" not in input_arg.meta:
-                    # if input sharding is None, it means it's not a tensor
-                    # and we don't need to partition it.
-                    continue
 
                 input_arg_spec = input_arg_sharding.output_spec
-                input_arg_tensor = input_arg.meta["val"]
                 desired_spec = (
                     out_spec
                     if expected_input_specs is None
@@ -746,6 +745,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
                 )
                 if input_arg_spec != desired_spec:
                     input_full_shape = input_arg.meta["tensor_meta"].shape
+                    input_arg_tensor = input_arg.meta["val"]
 
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
