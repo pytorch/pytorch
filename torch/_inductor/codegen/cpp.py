@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from pathlib import Path
-from typing import ClassVar, Dict, List
+from typing import Dict, List
 
 import numpy
 import sympy
@@ -27,12 +27,14 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
+    data_type_propagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
     OpOverrides,
+    OptimizationContext,
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -199,10 +201,16 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
 
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"std::floor({self._print(expr.args[0])})"
+
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
+        if exp == 0.5:
+            return f"std::sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -228,25 +236,6 @@ cexpr = CppPrinter().doprint
 
 def cexpr_index(index):
     return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
-
-
-@dataclasses.dataclass
-class OptimizationContext:
-    key: ClassVar[str] = "opt_ctx"
-
-    # Load value as mask
-    is_load_as_mask: bool = False
-    # Load bfloat16 value as float32
-    is_load_bf16_as_fp32: bool = False
-    # Store float32 value as bfloat16
-    is_store_fp32_as_bf16: bool = False
-    # do not  need type cast for
-    # for mem copy only node bf16 load -> bf16 store,
-    is_bf16_mem_copy: bool = False
-
-    dtype: torch.dtype = torch.float
-    ops_name: str = ""
-    is_most_inner_loop_irrevelant: bool = False
 
 
 class RecordOptimizationContext:
@@ -548,6 +537,14 @@ class CppVecOverrides(OpOverrides):
         return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
+    def int_minimum(a, b):
+        return f"at::vec::minimum({a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"at::vec::maximum({a}, {b})"
+
+    @staticmethod
     def square(a):
         return f"{a} * {a}"
 
@@ -812,6 +809,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def maximum(a, b):
         return f"({b} != {b}) ? {b} : std::max({a}, {b})"
+
+    @staticmethod
+    def int_minimum(a, b):
+        return f"std::min({a}, {b})"
+
+    @staticmethod
+    def int_maximum(a, b):
+        return f"std::max({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -1918,7 +1923,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var):
+            def indirect_indexing(index_var, size):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
@@ -1998,6 +2003,11 @@ class CppKernelProxy(CppKernel):
         self.loop_nest = None
         self.call_ranges = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+
+    def data_type_propagation(self, nodes):
+        for _node in nodes:
+            assert isinstance(_node, SchedulerNode)
+            data_type_propagation(_node)
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2145,6 +2155,7 @@ class CppKernelProxy(CppKernel):
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
+        self.data_type_propagation(nodes)
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(

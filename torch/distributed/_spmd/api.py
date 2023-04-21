@@ -21,6 +21,9 @@ from functorch import make_fx
 
 import torch
 import torch.distributed as dist
+
+# We need to import _functional_collectives to trigger op registration
+import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
 
@@ -387,8 +390,8 @@ FOREACH_DECOMP_TABLE = {
 
 
 DEDUP_TARGETS: Set[torch._ops.OpOverload] = {
-    aten.all_reduce.default,
-    aten.wait_tensor.default,
+    torch.ops.c10d_functional.all_reduce.default,
+    torch.ops.c10d_functional.wait_tensor.default,
 }
 
 
@@ -571,6 +574,7 @@ def compile(
     def inner(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            last_train_step = kwargs.pop("last_train_step", False) if kwargs else False
             first_iter = False
             # Put the COMPILED_OBJECT_KEY in ``wrapper`` instead of ``func`` as
             # ``wrapper`` is the one that users will get.
@@ -589,7 +593,21 @@ def compile(
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
                     compiled_obj.gm = gm_transformation(compiled_obj.gm)
-                output = compiled_obj.gm(*flat_inps)[0]
+                if not last_train_step:
+                    output = compiled_obj.gm(*flat_inps)[0]
+                else:
+                    # This is the last train step. Call IterGraphModule.forward()
+                    # with the `last_iter` argument and catch the exception in
+                    # case the compiled_obj is not wrapped with IterGraphModule.
+                    try:
+                        output = compiled_obj.gm(*flat_inps, last_iter=last_train_step)[
+                            0
+                        ]
+                    except TypeError as e:
+                        if "last_iter" not in str(e):
+                            raise e
+                        output = compiled_obj.gm(*flat_inps)[0]
+
                 return output
 
         return wrapper

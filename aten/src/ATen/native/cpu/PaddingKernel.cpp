@@ -8,6 +8,8 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
+#include <iostream>
+
 namespace at::native {
 
 namespace {
@@ -28,6 +30,10 @@ struct PaddingParams {
 
   PaddingParams(const Tensor& input, const Tensor& output, IntArrayRef padding) {
     ndim = padding.size() / 2;
+
+    std::cout << "### input shape: " << input.sizes() << "; " << input.strides() << std::endl;
+    std::cout << "### output shape: " << output.sizes() << "; " << output.strides() << std::endl;
+    std::cout << "### padding: " << padding << std::endl;
 
     bool is_batch = input.dim() == ndim + 2;
     nbatch = is_batch ? input.size(0) : 1;

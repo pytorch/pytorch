@@ -80,6 +80,8 @@ void mode_kernel_impl(
     launch_fused_mode_kernel(
         values_transposed, indices_transposed, contiguous, slice_size, slices);
   } else {
+    // [Note: CUDA torch.mode clones self]
+    //
     // If transposed is already contiguous, it will return a tensor with the
     // same storage. So, since we do not want to modify self, we clone it.
     if (transposed.is_same(contiguous)) {

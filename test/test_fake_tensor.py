@@ -76,6 +76,13 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cpu")
             self.assertTrue(isinstance(out, FakeTensor))
 
+    def test_repr(self):
+        with FakeTensorMode():
+            x = torch.empty(2, 2, device="cpu")
+            self.assertEqual(repr(x), 'FakeTensor(..., size=(2, 2))')
+            x = torch.empty(2, 2, device="meta")
+            self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
@@ -825,6 +832,19 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(len(ref_out), len(meta_out))
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
+
+    def test_cross_entropy_loss(self):
+        inp = torch.randn(3, 5)
+        target = torch.randint(5, (3,), dtype=torch.long)
+        fn = torch.nn.functional.cross_entropy
+        ref = fn(inp, target)
+        with FakeTensorMode() as m:
+            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in (inp, target)]
+
+            meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
+
+        self.assertEqual(ref.size(), meta_out.size())
+
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
