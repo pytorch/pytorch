@@ -196,7 +196,7 @@ def normalize_tuple(x):
 
 
 # Define the suffixes for different orders of magnitude
-suffixes = ["", "K", "M", "B", "T"]
+suffixes = ["", "K", "M", "B", "T", "P", "E"]
 # Thanks BingChat!
 def get_suffix_str(number):
     # Find the index of the appropriate suffix based on the number of digits
@@ -287,6 +287,7 @@ class FlopCounterMode(TorchDispatchMode):
                 return grad_outs
 
         return PushState.apply
+
 
     def _create_pre_module(self, name):
         class PopState(torch.autograd.Function):
