@@ -10251,7 +10251,7 @@ class TestConsistency(TestCaseMPS):
         'linalg.vector_norm',
         'addr', 'var_mean',
         'var_mean_unbiased',
-        'acosh', 'asin',
+        'acosh', 'asinh', 'asin',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
