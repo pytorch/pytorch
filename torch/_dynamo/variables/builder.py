@@ -1189,8 +1189,9 @@ def wrap_to_fake_tensor_and_record(
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
                 # NB: both static and dynamic have precedence over
-                automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
-
+                automatic_dynamic = config.automatic_dynamic_shapes and (
+                    curr_sizes is None or curr_sizes[i] is None
+                )
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints

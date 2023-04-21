@@ -69,14 +69,12 @@ def get_observer_kwargs(quant_spec: QuantizationSpec):
 
 
 # In the absence of better name, just winging it with QuantizationConfig
-QuantizationConfig = NamedTuple(
-    "QuantizationConfig",
-    [
-        ("activation", Optional[QuantizationSpec]),
-        ("weight", Optional[QuantizationSpec]),
-        ("bias", Optional[QuantizationSpec]),
-    ],
-)
+@dataclass(eq=True, frozen=True)
+class QuantizationConfig:
+    activation: Optional[QuantizationSpec]
+    weight: Optional[QuantizationSpec]
+    bias: Optional[QuantizationSpec]
+    is_qat: bool = False
 
 OperatorPatternType = List[Callable]
 

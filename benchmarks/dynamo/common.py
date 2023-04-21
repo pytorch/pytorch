@@ -84,6 +84,11 @@ CI_SKIP[CI("eager", training=False)] = [
     "torchrec_dlrm",
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
+    # KeyError: '_ignore_torch_cuda_oom'
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
 ]
 
 CI_SKIP[CI("eager", training=True)] = [
