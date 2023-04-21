@@ -96,8 +96,6 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
-        # RuntimeError: "log_vml_cpu" not implemented for 'Half'
-        'pow': [torch.float16],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
