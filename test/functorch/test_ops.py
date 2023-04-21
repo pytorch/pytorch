@@ -1059,6 +1059,8 @@ class TestOperators(TestCase):
             generator = get_fallback_and_vmap_exhaustive(
                 fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
+                print("@@@ loop_out: ", loop_out)
+                print("@@@ batched_out: ", batched_out)
                 self.assertEqual(loop_out, batched_out)
 
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))

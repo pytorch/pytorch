@@ -9,6 +9,7 @@
 #include <c10/util/irange.h>
 
 #include <iostream>
+#include <ATen/ExpandUtils.h>
 
 namespace at::native {
 
@@ -34,6 +35,8 @@ struct PaddingParams {
     std::cout << "### input shape: " << input.sizes() << "; " << input.strides() << std::endl;
     std::cout << "### output shape: " << output.sizes() << "; " << output.strides() << std::endl;
     std::cout << "### padding: " << padding << std::endl;
+    std::cout << "### input: " << input << std::endl;
+    std::cout << "" << std::endl;
 
     bool is_batch = input.dim() == ndim + 2;
     nbatch = is_batch ? input.size(0) : 1;
