@@ -128,15 +128,25 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
     def test_pointless_convert(self):
-        def fn(x):
+        def fn1(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.float16)
             x = torch.ops.prims.convert_element_type.default(x, torch.float32)
             return x
 
-        gm = torch.fx.symbolic_trace(fn)
+        gm = torch.fx.symbolic_trace(fn1)
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 1)
+
+        def fn2(x):
+            x = torch.ops.prims.convert_element_type.default(x, torch.int32)
+            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+            return x
+
+        gm = torch.fx.symbolic_trace(fn2)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
 
     def test_splitwithsizes_cat(self):
         # Good case

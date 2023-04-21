@@ -60,7 +60,8 @@ def pointless_convert(
     match: Match, graph: torch.fx.Graph, node: torch.fx.Node, arg, dtype1, dtype2
 ):
     """Remove chain of dtype conversions often created by AMP"""
-    if dtype1.is_floating_point and dtype2.is_floating_point:
+    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
+    if dtype1 in allowed and dtype2 in allowed:
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)
         )
