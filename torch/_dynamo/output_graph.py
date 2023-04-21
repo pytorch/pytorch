@@ -42,6 +42,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
+    DefaultDeviceSource,
     DeterministicAlgorithmsSource,
     is_constant_source,
     LocalSource,
@@ -230,6 +231,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 GuardBuilder.DETERMINISTIC_ALGORITHMS
             )
         )
+
+        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
