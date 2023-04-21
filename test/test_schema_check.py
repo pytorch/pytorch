@@ -8,7 +8,7 @@ import unittest
 
 from torch.testing._internal.common_utils import run_tests
 from torch.fx.operator_schemas import normalize_function
-from torch.testing._internal.schema_check_mode import SchemaCheckMode
+from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
