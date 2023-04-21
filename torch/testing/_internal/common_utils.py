@@ -15,6 +15,7 @@ import gc
 import inspect
 import io
 import json
+import logging
 import math
 import operator
 import os
@@ -91,6 +92,7 @@ import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
+log = logging.getLogger(__name__)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -112,13 +114,18 @@ DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
+def maybe_load_json(filename):
+    if os.path.isfile(filename):
+        with open(filename, 'r') as fp:
+            return json.load(fp)
+    log.warning("Attempted to load json file '%s' but it does not exist.", filename)
+    return {}
+
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
 if os.getenv("SLOW_TESTS_FILE", ""):
-    with open(os.getenv("SLOW_TESTS_FILE"), 'r') as fp:
-        slow_tests_dict = json.load(fp)
+    slow_tests_dict = maybe_load_json(os.getenv("SLOW_TESTS_FILE", ""))
 if os.getenv("DISABLED_TESTS_FILE", ""):
-    with open(os.getenv("DISABLED_TESTS_FILE"), 'r') as fp:
-        disabled_tests_dict = json.load(fp)
+    disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 

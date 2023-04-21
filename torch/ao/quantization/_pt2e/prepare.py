@@ -1,6 +1,4 @@
 import torch
-from .quantizer import Quantizer
-from ._propagate_annotation import propagate_annotation
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (
     _maybe_insert_input_observers_for_node,
@@ -87,15 +85,10 @@ def _maybe_insert_input_and_output_observers_for_node(
             _remove_output_observer(node, model, named_modules)
 
 def prepare(
-        model: GraphModule,
-        quantizer: Quantizer,
-        is_qat: bool,
-        node_name_to_scope: Dict[str, Tuple[str, type]],
+    model: GraphModule,
+    node_name_to_scope: Dict[str, Tuple[str, type]],
+    is_qat: bool,
 ) -> GraphModule:
-    quantizer.annotate(model)
-    quantizer.validate(model)
-    propagate_annotation(model)
-
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
