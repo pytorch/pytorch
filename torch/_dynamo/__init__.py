@@ -216,14 +216,14 @@ def _allow_in_graph_einops():
         import einops
 
         try:
-            from einops._torch_specific import (  # requires einops>=0.6.1, torch >= 2.0
+            from einops._torch_specific import (  # requires einops > 0.6.1, torch >= 2.0
                 _ops_were_registered_in_torchdynamo,
             )
 
-            # einops >= 0.6.1 will call the op registration logic as it is imported.
+            # einops > 0.6.1 will call the op registration logic as it is imported.
             pass
         except ImportError:
-            # einops < 0.6.1
+            # einops <= 0.6.1
             allow_in_graph(einops.rearrange)
             allow_in_graph(einops.reduce)
             if hasattr(einops, "repeat"):
