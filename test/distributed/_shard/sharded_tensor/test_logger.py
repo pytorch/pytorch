@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class C10dErrorLoggerTest(TestCase):
+class ShardingSpecLoggerTest(TestCase):
     def test_get_or_create_logger(self):
         logger = _get_or_create_logger()
         self.assertIsNotNone(logger)
