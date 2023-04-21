@@ -161,9 +161,6 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
 
         # Translate callable to FX graph.
         #
-        # TODO(wechi): There are several symbolic tracing mechanisms to convert
-        # nn.Module to FX graph. We should choose the right one after they are
-        # matured.
         graph_module, graph_guard = torch._dynamo.export(wrapped_model, *args, **kwargs)
         del graph_guard  # Unused
         torch._dynamo.reset()

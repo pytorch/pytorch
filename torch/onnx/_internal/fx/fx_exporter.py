@@ -300,7 +300,8 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
     ) -> torch.onnx.ExportOutput:
         # ONNX does not support views and mutations.
         # Functionalize to get a semantically equivalent graph without mutations.
-        # NOTE: Functionalize must run before decomposition and aten graph lowering.
+        # NOTE: Functionalize must run before make_fx (decomposition and aten graph
+        # lowering).
         # https://github.com/pytorch/pytorch/issues/99662
         module = passes.Functionalize(
             fx_module, enable_dynamic_axes=self.options.dynamic_shapes
@@ -316,8 +317,8 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
             enable_dynamic_axes=self.options.dynamic_shapes,
         ).run(*fx_module_args)
 
-        # NOTE: This pass is not needed if functionalize can be applied on decomposed graph.
-        # https://github.com/pytorch/pytorch/issues/99662
+        # FIXME: This pass is not needed if functionalize can be applied on decomposed
+        # graph. https://github.com/pytorch/pytorch/issues/99662
         # This is a workaround to replace inplace variant ops with outplace version.
         # These ops are created by aten graph lowering and decomposition post
         # functionalization. No real mutation is expected as it should have been handled
