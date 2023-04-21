@@ -255,7 +255,8 @@ def load_sharded_optimizer_state_dict(
         sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{i}/cuda:{i}" for i in range(dist.get_world_size())
+                f"rank:{i}/cuda:{i % torch.cuda.device_count()}"
+                for i in range(dist.get_world_size())
             ],
         )
     else:

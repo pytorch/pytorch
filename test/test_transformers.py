@@ -2,6 +2,7 @@
 
 import contextlib
 from functools import partial
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,7 +34,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
-
 
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
@@ -154,6 +154,37 @@ class TestTransformers(NNTestCase):
                 test_eval_bool = encoder(test, src_key_padding_mask=pad_mask)
                 l1_bool = nn.L1Loss()(test_train_bool[:, 0:2, :], test_eval_bool[:, 0:2, :]).item()
                 self.assertTrue(l1_bool < 1e-4, "Eval/Train difference in pad_mask BOOL")
+
+    @parametrize("device", device_list)
+    @parametrize("attn_mask_dim", [2, 3, None])
+    @parametrize("key_padding_mask_dim", [2, None])
+    def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim):
+        with torch.no_grad():
+            B = 2
+            L = 4
+            D = 8
+            H = 4
+
+
+            if attn_mask_dim == 2:
+                attn_mask = torch.randn(L, L, device=device) > 0
+            elif attn_mask_dim == 3:
+                attn_mask = torch.randn(B * H, L, L, device=device) > 0
+            elif attn_mask_dim is None:
+                attn_mask = None
+
+            if key_padding_mask_dim == 2:
+                key_padding_mask = torch.randn(B, L, device=device) > 0
+            elif key_padding_mask_dim is None:
+                key_padding_mask = None
+
+            mha = nn.MultiheadAttention(D, H, batch_first=True, device=device)
+            X = torch.randn(B, L, D, device=device)
+
+            mha.train()  # disable fast path
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+            mha.eval()  # enable fast path
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
 
     @parametrize("device", device_list)
     @parametrize("nhead", [1, 4, 8])
@@ -509,6 +540,120 @@ class TestTransformers(NNTestCase):
                 cm = torch.no_grad()  # transformer fast path requires no grad
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
+    def test_encoder_padding_and_src_mask_bool(self):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=2,
+            dim_feedforward=32,
+            dropout=0.1,
+            activation='relu',
+            batch_first=True,
+        )
+        encoder_norm = nn.LayerNorm(16)
+        encoder = nn.TransformerEncoder(
+            encoder_layer, 2, encoder_norm
+        )
+
+        inputs = torch.randn(2, 3, 16)
+
+        src_mask = torch.ones(3, 3, dtype=torch.bool).triu_(diagonal=1)
+        input_seq_len = torch.tensor([3, 2])
+        padding_mask = (
+            torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
+        )
+
+        with self.assertNoLogs(None):
+            encoder(
+                inputs,
+                mask=src_mask,
+                src_key_padding_mask=padding_mask,
+            )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
+    def test_decoder_padding_and_src_mask_bool(self):
+
+        def transformer_decoder(inputs, input_seq_len, memory):
+            decoder_layer = nn.TransformerDecoderLayer(
+                d_model=16,
+                nhead=2,
+                dim_feedforward=32,
+                dropout=0.1,
+                activation='relu',
+                batch_first=True,
+            )
+            decoder_norm = nn.LayerNorm(16)
+            decoder = nn.TransformerDecoder(
+                decoder_layer, 2, decoder_norm
+            )
+
+            src_mask = torch.ones(
+                inputs.shape[1], inputs.shape[1], dtype=torch.bool
+            ).triu_(diagonal=1)
+            padding_mask = (
+                torch.arange(inputs.shape[1])[None, :].cpu()
+                >= input_seq_len[:, None]
+            )
+
+            return decoder(
+                inputs,
+                memory,
+                tgt_mask=src_mask,
+                tgt_key_padding_mask=padding_mask,
+                memory_key_padding_mask=padding_mask,
+            )
+
+        inputs = torch.randn(2, 3, 16)
+        memory = torch.randn(2, 3, 16)
+        input_seq_len = torch.tensor([3, 2])
+
+        with self.assertNoLogs(None):
+            transformer_decoder(inputs, input_seq_len, memory)
+
+
+    def test_padding_and_src_mask_bool(self):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=2,
+            dim_feedforward=32,
+            dropout=0.1,
+            activation='relu',
+            batch_first=True,
+        )
+        encoder_norm = nn.LayerNorm(16)
+        encoder = nn.TransformerEncoder(
+            encoder_layer, 2, encoder_norm
+        )
+
+        inputs = torch.randn(2, 3, 16)
+
+        src_mask = torch.ones(3, 3, dtype=torch.bool).triu_(diagonal=1)
+        input_seq_len = torch.tensor([3, 2])
+        padding_mask = (
+            torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
+        )
+
+        encoder(
+            inputs,
+            mask=src_mask,
+            src_key_padding_mask=padding_mask,
+        )
+
+
+    def test_encoder_is_causal(self):
+
+        d_model = 3
+        layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
+        layer.eval()
+        x = torch.randn(1, 5, d_model)
+        unmasked_output = layer(x)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
+        is_causal_output = layer(x, src_mask=mask, is_causal=True)
+        masked_output = layer(x, src_mask=mask)
+
+        self.assertEqual(masked_output, is_causal_output)
+
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -999,8 +1144,11 @@ class TestTransformers(NNTestCase):
         encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            inputs.size(1), device=device
+        )
 
-        outputs = encoder(inputs, is_causal=True)
+        outputs = encoder(inputs, mask=mask, is_causal=True)
 
         loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
         loss.backward()
@@ -1009,12 +1157,16 @@ class TestTransformers(NNTestCase):
         # inference with is_causal
         t_qvk = torch.randn((S, L, E), device=device, dtype=torch.float32)
         mha = nn.MultiheadAttention(E, H).to(device)
-        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            S, device=device
+        )
 
-        # Can't give both attn_mask AND is_causal
+        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
+
+        # Can't give only is_causal
         attn_mask = torch.randint(0, 2, size=(L, L), device=device, dtype=torch.bool)
-        with self.assertRaisesRegex(AssertionError, "Only allow causal mask or attn_mask"):
-            _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=attn_mask, is_causal=True)
+        with self.assertRaises(RuntimeError):
+            _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
@@ -1039,6 +1191,9 @@ class TestTransformers(NNTestCase):
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
         mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
         expected = torch.ones(size=(S, L, E)).to(device) * 16
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            qkv.size(1), device=device
+        )
 
         for kernel in kernels:
             with torch.backends.cuda.sdp_kernel(
@@ -1046,14 +1201,17 @@ class TestTransformers(NNTestCase):
                 enable_flash=(kernel == 'flash'),
                 enable_mem_efficient=(kernel == 'meff')
             ):
-                actual, _ = mha(qkv, qkv, qkv, need_weights=False, is_causal=True)
+                actual, _ = mha(qkv, qkv, qkv, attn_mask=mask, need_weights=False, is_causal=True)
                 self.assertTrue(torch.equal(actual, expected))
 
                 if kernel != 'math':
                     # fails with embedding size not multiple of 4
                     with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                         qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
-                        _ = mha_f(qkv_f, qkv_f, qkv_f, need_weights=False, is_causal=True)
+                        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                            qkv_f.size(1), device=device
+                        )
+                        _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")

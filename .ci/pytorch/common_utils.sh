@@ -175,7 +175,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--cudatests"
+  pip install -e .
   popd
   popd
 }
@@ -184,7 +184,6 @@ function test_torch_deploy(){
  pushd ..
  pushd multipy
  ./multipy/runtime/build/test_deploy
- ./multipy/runtime/build/test_deploy_gpu
  popd
  popd
 }
