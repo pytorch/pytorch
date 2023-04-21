@@ -122,12 +122,15 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 class WaitHolder:
+    """
+    WaitHolder is an indirection to the tensor that needs to be waited on.
+
+    It decomples the tensor an AsyncCollectiveTensor wraps from
+    the tensor it needs to use with wait_tensor.
+    """
+
     def __init__(self, lookup_tensor):
         self.lookup_tensor = lookup_tensor
-
-    def lazy_init(self, tensor):
-        if self.lookup_tensor is None:
-            self.lookup_tensor = tensor
 
     def wait_tensor(self):
         if self.lookup_tensor is not None:
