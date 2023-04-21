@@ -731,7 +731,7 @@ class CheckFunctionManager:
             if config.dynamic_shapes:
 
                 def convert(size_or_stride):
-                    converted = []
+                    converted: List[Optional[int]] = []
                     for dim in size_or_stride:
                         if is_concrete_int(dim):
                             converted.append(int(dim))
