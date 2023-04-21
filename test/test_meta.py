@@ -802,7 +802,7 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
-        elif meta_function_expected_failures_conditional.get(func, lambda _: False)(self.dtype, *args, **kwargs):
+        elif meta_function_expected_failures_conditional.get(func, lambda *_, **__: False)(self.dtype, *args, **kwargs):
             test_expect = TestExpect.XFAILURE
         elif not self.inplace and \
                 self.dtype in meta_function_device_expected_failures_only_outplace[self.device_type].get(func, set()):
