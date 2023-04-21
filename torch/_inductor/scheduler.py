@@ -17,12 +17,6 @@ from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
-from .utils import (
-    convert_shape_to_inductor,
-    gather_origins,
-    get_dtype_size,
-    sympy_product,
-)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
