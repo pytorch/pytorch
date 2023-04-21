@@ -637,7 +637,6 @@ def mark_data_parallel_shardings(
             if isinstance(node_strategy, TupleStrategy):
                 # For tuple strategy in the data parallel mode, it should have the same strategy
                 # for all tuple elements, assert that then use the first element's strategy as sharding
-                node_strategy = cast(TupleStrategy, node_strategy)
                 first_strategy = cast(node_strategy.childs[0], DataParallelStrategy)
                 for child_strategy in node_strategy.childs:
                     if isinstance(child_strategy, DataParallelStrategy):
