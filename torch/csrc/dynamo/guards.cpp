@@ -58,27 +58,16 @@ class TensorCheck {
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
-      // Case 1 - both are known, therefore static
-      if (known_size.has_value() && known_stride.has_value()) {
-        if (known_size.value() != sizes[i] ||
-            known_stride.value() != strides[i]) {
+      if (known_size.has_value()) {
+        if (known_size.value() != sizes[i]) {
           return false;
         }
-        // Case 2 - One is dynamic, the other is not (because we skipped case 1)
-      } else if (known_size.has_value() || known_stride.has_value()) {
-        // Size is known, meaning stride is dynamic
-        if (known_size.has_value()) {
-          if (known_size.value() != sizes[i]) {
-            return false;
-          }
-          // Size is not known, stride is known
-        } else {
-          if (known_stride.value() != strides[i]) {
-            return false;
-          }
+      }
+      if (known_stride.has_value()) {
+        if (known_stride.value() != strides[i]) {
+          return false;
         }
       }
-      // Case 3 - neither is known, aka both are static - keep going.
     }
     return true;
   }
@@ -129,7 +118,6 @@ class TensorCheck {
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
-      // Case 1 - both are known, therefore static
       if (known_size.has_value() && (known_size.value() != sizes[i])) {
         fail_reason << "size mismatch at index " << i << ". expected "
                     << known_size.value() << ", actual " << sizes[i];
@@ -187,7 +175,7 @@ static PyObject* TensorGuards_new(
   return (PyObject*)self;
 }
 
-static std::vector<std::optional<int64_t>> c10IntArrayToVecOptInt(
+static std::vector<std::optional<int64_t>> wrapIntegersInOptional(
     const c10::IntArrayRef& intArray) {
   std::vector<std::optional<int64_t>> optVec(intArray.size());
   std::transform(
@@ -206,6 +194,12 @@ static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
       vec.push_back(std::nullopt);
     } else {
       int64_t value = PyLong_AsLongLong(item);
+      if (value == -1 && PyErr_Occurred()) {
+        PyErr_SetString(
+            PyExc_TypeError,
+            "Size or stride list item is not a valid integer.");
+        TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
+      }
       vec.push_back(value);
     }
   }
@@ -269,14 +263,18 @@ static int TensorGuards_init(
     auto tensor = THPVariable_Unpack(item);
     std::vector<std::optional<int64_t>> tensor_dims_size =
         per_tensor_dynamic_dims_sizes.size() == 0
-        ? c10IntArrayToVecOptInt(tensor.sizes())
+        ? wrapIntegersInOptional(tensor.sizes())
         : per_tensor_dynamic_dims_sizes[i];
     std::vector<std::optional<int64_t>> tensor_dims_stride =
-        per_tensor_dynamic_dims_sizes.size() == 0
-        ? c10IntArrayToVecOptInt(tensor.strides())
-        : per_tensor_dynamic_dims_sizes[i];
+        per_tensor_dynamic_dims_strides.size() == 0
+        ? wrapIntegersInOptional(tensor.strides())
+        : per_tensor_dynamic_dims_strides[i];
     checks.emplace_back(
-        state, Py_TYPE(item), tensor, tensor_dims_size, tensor_dims_stride);
+        state,
+        Py_TYPE(item),
+        std::move(tensor),
+        std::move(tensor_dims_size),
+        std::move(tensor_dims_stride));
   }
   return 0;
 }

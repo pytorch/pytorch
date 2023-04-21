@@ -413,8 +413,7 @@ def fx_placeholder_targets(gm):
 # Given a GraphModule and arguments to run it with, evaluate that the guards
 # for its associated ShapeEnv are satisfied by the passed arguments.  This
 # WILL check for duck sizing.
-def eval_guards(gm, *args, **kwargs):
-    ignore_static = kwargs.get("ignore_static", True)
+def eval_guards(gm, *args, ignore_static=True):
     return gm.shape_env.evaluate_guards_for_args(fx_placeholder_vals(gm), args, ignore_static=ignore_static)
 
 def bind_symbols(gm, *args):
@@ -1937,9 +1936,8 @@ class ShapeEnv:
                 # dynamo's check_tensor_fn does that (see guards.cpp).
                 # However, for non tensor sources, we still need to guard here.
                 if ignore_static and isinstance(source, TensorPropertySource):
-                    maybe_static = self._maybe_evaluate_static(expr)
-                    if isinstance(maybe_static, (int, sympy.Integer)):
-                        self.log.debug("Skipping guard %s", f"{source_ref(source)} == {maybe_static}")
+                    if len(expr.free_symbols) == 0:
+                        self.log.debug("Skipping guard %s", f"{source_ref(source)} == {expr}")
                         continue
 
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
