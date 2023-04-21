@@ -490,7 +490,6 @@ def _flatten_optim_state_dict(
                     else:
                         # Move the tensor in the original osd back to CPU to make the
                         # original osd unaffected.
-                        continue
                         unflat_osd_state[fqn][state_name] = unflat_osd_state[fqn][
                             state_name
                         ].cpu()
