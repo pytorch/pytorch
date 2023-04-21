@@ -1352,7 +1352,7 @@ class TestSDPA(NNTestCase):
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
         if PLATFORM_SUPPORTS_FUSED_SDPA:
-            batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
+            batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
             shape = (batch_size, seq_len, num_heads, head_dim)
             device = "cuda"
             make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float16, packed=True)
