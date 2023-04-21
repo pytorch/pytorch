@@ -29,7 +29,17 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   if (lhs.device() != rhs.device()) {
     return false;
   }
-  return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
+  auto type_equal = lhs.options().type_equal(rhs.options());
+  if (!type_equal) {
+    return false;
+  }
+  if (lhs.sizes().equals(rhs.sizes())
+      && lhs.strides().equals(rhs.strides())
+      && lhs.storage().is_alias_of(rhs.storage())
+      && lhs.storage_offset() == rhs.storage_offset()) {
+    return true;
+  }
+  return lhs.equal(rhs);
 }
 
 bool typeListEqual(
