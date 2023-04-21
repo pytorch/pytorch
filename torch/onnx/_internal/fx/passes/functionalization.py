@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+from typing import Dict, Optional
+
 import torch
+import torch._ops
 import torch.func
 import torch.fx
-import torch._ops
 
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
-
-from typing import Dict, Optional
 
 
 class Functionalize(_pass.Transform):
@@ -111,9 +111,18 @@ class RemoveInputMutation(_pass.Transform):
 
 
 class ReplaceInplacePostFunctionalization(_pass.Transform):
-    """
+    """Replace inplace variant ops with outplace version.
 
-    NOTE: This pass is not needed, if functionalize can be applied on decomposed graph.
+    This pass assumes that the graph has been functionalized and decomposed to aten level.
+    No real mutation is expected as it should have been handled by functionalization.
+
+    All inplace variant op nodes are expected to be the last user of its first argument.
+    That is, the input being mutated cannot not be used by another node afterwards.
+    Otherwise, a RuntimeError will be raised.
+
+    This pass only handles ops under "aten" namespace.
+
+    NOTE: This pass is not needed if functionalize can be applied on decomposed graph.
     https://github.com/pytorch/pytorch/issues/99662
     """
 
@@ -186,7 +195,7 @@ class ReplaceInplacePostFunctionalization(_pass.Transform):
                 raise RuntimeError(
                     f"Found inplace op node {node} that is not the last use of its input. "
                     f"Its mutated input is later used by {node_to_last_use[mutated_input]}. "
-                    f"Please run RemoveInputMutation pass before ReplaceInplacePostFunctionalization."
+                    f"Please run Functionalize pass before ReplaceInplacePostFunctionalization."
                 )
 
             outplace_target = self._outplace_target(target)

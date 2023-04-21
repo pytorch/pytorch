@@ -316,6 +316,12 @@ class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
             enable_dynamic_axes=self.options.dynamic_shapes,
         ).run(*fx_module_args)
 
+        # NOTE: This pass is not needed if functionalize can be applied on decomposed graph.
+        # https://github.com/pytorch/pytorch/issues/99662
+        # This is a workaround to replace inplace variant ops with outplace version.
+        # These ops are created by aten graph lowering and decomposition post
+        # functionalization. No real mutation is expected as it should have been handled
+        # by functionalization.
         module = passes.ReplaceInplacePostFunctionalization(module).run(*fx_module_args)
 
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
