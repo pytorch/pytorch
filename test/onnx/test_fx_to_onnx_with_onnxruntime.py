@@ -152,10 +152,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "AssertionError: Expected 1 inputs, got 2"
-        "Captured fx graph does not have any information of the constant input (arg1). "
-        "The constant input is inserted into op.target args directly."
-        "This might be a bug in fx tracer regarding potential break in dynamic shapes."
+        "https://github.com/pytorch/pytorch/issues/99534"
+        "To make it work, convert the float argument into a 0d tensor"
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
