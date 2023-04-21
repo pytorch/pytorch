@@ -792,12 +792,11 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value, local):
+def enum_repr(value):
     enum_name = str(value)
 
     name, val = enum_name.split(".")
-    scope = "L" if local else "G"
-    local_name = f'{scope}["{name}"].{val}'
+    local_name = f'L["{name}"].{val}'
     return local_name
 
 
@@ -809,11 +808,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys, *, local):
+def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -1244,7 +1243,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def run_node(output_graph, node, args, kwargs, nnmodule):
@@ -1279,7 +1278,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     except Exception as e:
         raise RuntimeError(
             f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
-        ) from e
+        ).with_traceback(e.__traceback__) from None
     raise AssertionError(op)
 
 
