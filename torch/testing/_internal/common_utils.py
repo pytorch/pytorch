@@ -1747,7 +1747,7 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if raw_test_name in slow_tests_dict:
+    if raw_test_name in slow_tests_dict.get(os.getenv("BUILD_ENVIRONMENT", ""), {}):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")

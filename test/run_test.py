@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
 )
 from torch.utils import cpp_extension
 
@@ -479,6 +480,7 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        and not TEST_WITH_SLOW
     )
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))

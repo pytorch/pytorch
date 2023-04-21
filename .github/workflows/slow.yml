@@ -1,6 +1,6 @@
 # This workflow is dedicated to host slow jobs that are run only periodically because
 # they are too slow to run in every commit.  The list of slow tests can be found in
-# https://github.com/pytorch/test-infra/blob/generated-stats/stats/slow-tests.json
+# https://github.com/pytorch/test-infra/blob/generated-stats/stats/slow-tests-by-job.json
 name: slow
 
 on:
