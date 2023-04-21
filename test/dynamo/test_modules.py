@@ -1687,6 +1687,72 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
         self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
 
+    def test_module_dict_iter_name(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activations = torch.nn.ModuleDict(
+                    [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
+                )
+
+            def forward(self, x):
+                for activation_name in self.activations:
+                    x = self.activations[activation_name](x)
+                return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # Eager
+        eager_res = MyModule()(torch.ones(10, 10))
+
+        # Compile
+        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        self.assertEqual(eager_res, optim_res)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_dict_iter_keys(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activations = torch.nn.ModuleDict(
+                    [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
+                )
+
+            def forward(self, x):
+                for activation_name in self.activations.keys():
+                    x = self.activations[activation_name](x)
+                return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # Eager
+        eager_res = MyModule()(torch.ones(10, 10))
+
+        # Compile
+        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        self.assertEqual(eager_res, optim_res)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_dict_iter_values(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activations = torch.nn.ModuleDict(
+                    [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
+                )
+
+            def forward(self, x):
+                for activation in self.activations.values():
+                    x = activation(x)
+                return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # Eager
+        eager_res = MyModule()(torch.ones(10, 10))
+
+        # Compile
+        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        self.assertEqual(eager_res, optim_res)
+        self.assertEqual(cnt.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
