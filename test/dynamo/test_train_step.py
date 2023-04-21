@@ -14,6 +14,8 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import PythonKeyTracer, ProxyTorchDispatchMode
 from torch.fx import Graph, GraphModule
+from torch.nn.utils import stateless
+import torch.utils._pytree as pytree
 
 # Limitations:
 #   - initialization cannot refer to external tensors
@@ -34,46 +36,6 @@ def get_deferred_modes():
     fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
     proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode="real")
     return fake_tensor_mode, proxy_mode, fx_tracer
-
-@contextlib.contextmanager
-def deferred_init(f, *args, **kwargs):
-    fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
-    with fake_tensor_mode, proxy_mode:
-        r = f(*args, **kwargs)
-        r._deferred = fx_tracer
-        yield r
-
-def materialize_module(m):
-    # TODO: handle children
-
-    outputs = []
-
-    def mark_for_materialize(tensors):
-        for k, t in tensors.items():
-            if t is None:
-                continue
-            outputs.append(t.proxy.node)
-
-    mark_for_materialize(m._parameters)
-    mark_for_materialize(m._buffers)
-
-    m._deferred.graph.output(outputs)
-    m._deferred.graph.eliminate_dead_code()  # hmmm
-    recomp = GraphModule(m._deferred.root, m._deferred.graph)
-    results = recomp()
-    results_iter = iter(results)
-
-    def replace_results(tensors):
-        for k, t in tensors.items():
-            if t is None:
-                continue
-            tensors[k] = next(results_iter)
-
-    replace_results(m._parameters)
-    replace_results(m._buffers)
-
-    del m._deferred
-
 
 class Seq(torch.nn.Module):
     def __init__(self):
@@ -248,11 +210,28 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [torch.randn((128, 10))]
 
         fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
+
         with fake_tensor_mode, proxy_mode:
             deferred_model = Seq()
             deferred_model.apply(init_weights)
-            deferred_model._deferred = fx_tracer
-            opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
+ 
+        outputs = []
+
+        def mark_for_materialize(tensors):
+            for k, t in tensors.items():
+                if t is None:
+                    continue
+                outputs.append(t.proxy.node)
+        
+        mark_for_materialize(dict(deferred_model.named_parameters()))
+        mark_for_materialize(dict(deferred_model.named_buffers()))
+
+        fx_tracer.graph.output(outputs)
+        fx_tracer.graph.eliminate_dead_code()  # hmmm
+        deferred_model._deferred_init = GraphModule(fx_tracer.root, fx_tracer.graph)
+
+        # TODO need to get deferred init for optimizer too...
+        opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
         
         opt_train_step = torch.compile(
             train_step, backend="train_step_eager", fullgraph=True, fake_mode=fake_tensor_mode

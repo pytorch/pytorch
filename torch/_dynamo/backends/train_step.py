@@ -5,6 +5,7 @@ from unittest import mock
 
 import torch
 from torch._dynamo.utils import assert_no_fake_params_or_buffers, check_all_fake
+from torch.fx.graph_module import GraphModule
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
@@ -17,6 +18,7 @@ from torch.fx.interpreter import Interpreter
 from torch._guards import detect_fake_mode
 from torch.nn.utils import stateless
 
+import torch.utils._pytree as pytree
 
 @contextmanager
 def _rematerialize_optimizer(
@@ -49,6 +51,65 @@ def _rematerialize_optimizer(
     finally:
         param_group["params"] = orig_params
         opt.state.update(orig_states)
+
+
+def materialize_module(m):
+    # TODO: handle children
+
+    outputs = []
+
+    def mark_for_materialize(tensors):
+        for k, t in tensors.items():
+            if t is None:
+                continue
+            outputs.append(t.proxy.node)
+
+    mark_for_materialize(m._parameters)
+    mark_for_materialize(m._buffers)
+
+    m._deferred.graph.output(outputs)
+    m._deferred.graph.eliminate_dead_code()  # hmmm
+    recomp = GraphModule(m._deferred.root, m._deferred.graph)
+    results = recomp()
+    results_iter = iter(results)
+
+    def replace_results(tensors):
+        for k, t in tensors.items():
+            if t is None:
+                continue
+            tensors[k] = next(results_iter)
+
+    replace_results(m._parameters)
+    replace_results(m._buffers)
+
+    del m._deferred
+
+def materialize_params(root, graph, params_flat):
+    # TODO: handle children
+    
+    outputs = []
+    # need to confirm same faketensor used for params_flat as for init graph!
+    def mark_for_materialize(tensors):
+        for t in tensors:
+            if t is None:
+                continue
+            outputs.append(t.proxy.node)
+
+    mark_for_materialize(params_flat)
+
+    graph.output(outputs)
+    graph.eliminate_dead_code()  # hmmm
+    recomp = GraphModule(root, graph)
+    results = recomp()
+    results_iter = iter(results)
+
+    def replace_results(tensors):
+        for i, t in enumerate(tensors):
+            if t is None:
+                continue
+            tensors[i] = next(results_iter)
+
+    replace_results(params_flat)
 
 
 def train_step_compiler(backend_compile_fn):
@@ -205,11 +266,19 @@ def train_step_compiler(backend_compile_fn):
         """
         Step 4: Call the backend compiler
         """
-        
+
+
         """
         Step 5: Make the model 'real' if it was deferred
         """
-        breakpoint()
+        results_iter = iter(mod.model._deferred_init())
+
+        for i, t in enumerate(params_flat):
+            if t is None:
+                continue
+            params_flat[i] = next(results_iter)
+
+        
         """
         Step 6: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo.
