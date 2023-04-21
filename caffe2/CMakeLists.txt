@@ -1176,6 +1176,8 @@ if(BUILD_TEST)
     endif()
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
                      ${CMAKE_BINARY_DIR}/test_lazy)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/aot_inductor
+                     ${CMAKE_BINARY_DIR}/test_aot_inductor)
   endif()
 endif()
 

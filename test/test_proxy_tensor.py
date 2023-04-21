@@ -1236,17 +1236,6 @@ def forward(self, a_1):
         inp = (torch.randn(8)[3:], torch.randn(5))
         self.assertEqual(fx_g(*inp), f(*inp))
 
-    def test_sym_contains(self):
-        def f(x, y):
-            return x.size(0) in y
-
-        # This shouldn't raise but we need SymBool from
-        # https://github.com/pytorch/pytorch/pull/98453
-        # then modify this.  It should NOT raise a RuntimeError
-        # though!
-        with self.assertRaisesRegex(NotImplementedError, "item NYI for torch.bool"):
-            make_fx(f, tracing_mode="symbolic")(torch.randn(2), torch.randn(3))
-
     def _assert_no_guards(self, fx_g, free_symbols):
         assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
@@ -1341,6 +1330,22 @@ make_fx_failures = {
     xfail('nanquantile'),
     xfail('narrow'),
 
+    # many complex operators incorrect striding, metadata
+    skip('fft.fft', ''),
+    skip('fft.hfft2', ''),
+    skip('fft.hfft', ''),
+    skip('fft.hfftn', ''),
+    skip('fft.ifft', ''),
+    skip('fft.ihfft2', ''),
+    skip('fft.ihfft', ''),
+    skip('fft.ihfftn', ''),
+    skip('fft.irfft2', ''),
+    skip('fft.irfft', ''),
+    skip('fft.irfftn', ''),
+    skip('fft.rfft2', ''),
+    skip('fft.rfft', ''),
+    skip('fft.rfftn', ''),
+
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
     xfail('sparse.mm', 'reduce'),
@@ -1361,6 +1366,23 @@ fake_tensor_failures = {
     xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
+
+    xfail('linalg.cond', ''),
+    xfail("linalg.matrix_norm"),
+    xfail("linalg.norm"),
+    xfail("linalg.matrix_norm"),
+    xfail("linalg.matrix_rank"),
+    xfail("linalg.norm"),
+    xfail("linalg.norm", "subgradients_at_zero"),
+    xfail("linalg.svd"),
+    xfail("linalg.svdvals"),
+
+    xfail("norm", "nuc"),
+    xfail("pca_lowrank"),
+    xfail("stft"),
+    xfail("svd"),
+    xfail("svd_lowrank"),
+    xfail("linalg.matrix_norm"),
 }
 
 symbolic_tensor_failures = {

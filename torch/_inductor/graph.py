@@ -691,10 +691,9 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
+            return AotCodeCache.compile(
+                self, code, cuda=(self.get_single_device() == "cuda")
             )
-            return lambda dummy: libpath
         else:
             return self.compile_to_module().call
 

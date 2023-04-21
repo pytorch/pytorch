@@ -1845,6 +1845,26 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "aot_inductor_tests",
+    size = "small",
+    srcs = glob(
+        [
+            "test/cpp/aot_inductor/*.cpp",
+            "test/cpp/aot_inductor/*.h",
+        ],
+    ),
+    linkstatic = True,
+    tags = [
+        "exclusive",
+        "gpu-required",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 # all tests
 test_suite(
     name = "all_tests",
