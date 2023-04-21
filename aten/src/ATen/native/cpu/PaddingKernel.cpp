@@ -8,9 +8,6 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#include <iostream>
-#include <ATen/ExpandUtils.h>
-
 namespace at::native {
 
 namespace {
@@ -31,14 +28,6 @@ struct PaddingParams {
 
   PaddingParams(const Tensor& input, const Tensor& output, IntArrayRef padding) {
     ndim = padding.size() / 2;
-
-    std::cout << "" << std::endl;
-    std::cout << "" << std::endl;
-    std::cout << "### input shape: " << input.sizes() << "; " << input.strides() << std::endl;
-    std::cout << "### output shape: " << output.sizes() << "; " << output.strides() << std::endl;
-    std::cout << "### padding: " << padding << std::endl;
-    std::cout << "### input: " << input << std::endl;
-    std::cout << "### ndim: " << ndim << std::endl;
 
     bool is_batch = input.dim() == ndim + 2;
     nbatch = is_batch ? input.size(0) : 1;
@@ -144,8 +133,6 @@ void cpu_padding(
     const Tensor& input_,
     PaddingParams& p) {
 
-  std::cout << "#### cpu_padding " << std::endl;
-  std::cout << "#### input_: " << input_ << input_.sizes() << input_.strides() << std::endl;
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
@@ -241,7 +228,6 @@ void cpu_padding(
   if (!output_.is_contiguous()) {
     output_.copy_(output);
   }
-  std::cout << "#### output_: " << output_ << output_.sizes() << output_.strides() << std::endl;
 }
 
 template <typename scalar_t, typename PaddingType>
@@ -249,9 +235,6 @@ void cpu_padding_channels_last(
     const Tensor& output_,
     const Tensor& input_,
     PaddingParams& p) {
-
-  std::cout << "#### cpu_padding_channels_last" << std::endl;
-  std::cout << "#### input_: " << input_ << input_.sizes() << input_.strides() << std::endl;
 
   auto memory_format = p.ndim == 2
       ? at::MemoryFormat::ChannelsLast
@@ -323,7 +306,6 @@ void cpu_padding_channels_last(
   if (!output_.is_contiguous(memory_format)) {
     output_.copy_(output);
   }
-  std::cout << "#### output_: " << output_ << output_.sizes() << output_.strides() << std::endl;
 }
 
 template <typename scalar_t, typename PaddingType>

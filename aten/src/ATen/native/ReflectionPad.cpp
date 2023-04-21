@@ -240,7 +240,12 @@ void reflection_pad2d_out_template(
   if (ndim == 3) {
     output.resize_({nplane, output_h, output_w});
   } else {
-    output.resize_({nbatch, nplane, output_h, output_w}, input.suggest_memory_format());
+    if (input.is_quantized()) {
+      // quantized tensor can not be resized with argument `memory_format`
+      output.resize_({nbatch, nplane, output_h, output_w});
+    } else {
+      output.resize_({nbatch, nplane, output_h, output_w}, input.suggest_memory_format());
+    }
   }
   reflection_pad2d_kernel(kCPU, output, input, padding);
 }
@@ -256,7 +261,7 @@ void reflection_pad2d_backward_out_template(
   grad_input.resize_(input.sizes(), input.suggest_memory_format());
   grad_input.zero_();
 
-  reflection_pad2d_backward_kernel(kCPU, grad_input, grad_output, padding); 
+  reflection_pad2d_backward_kernel(kCPU, grad_input, grad_output, padding);
 }
 
 } // namespace
