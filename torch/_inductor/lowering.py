@@ -27,7 +27,6 @@ from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
-from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -40,7 +39,13 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    developer_warning,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -135,16 +140,6 @@ def is_boolean_type(x):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
-
-
-def decode_device(device):
-    if device is None:
-        return torch.tensor(0.0).device  # default device
-    if isinstance(device, str):
-        device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
-    return device
 
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
