@@ -5,9 +5,9 @@ from __future__ import annotations
 import contextlib
 
 import dataclasses
+import gzip
 
 import logging
-import gzip
 
 from typing import Callable, Generator, List, Mapping, Optional, Type, TypeVar
 
@@ -213,7 +213,7 @@ class DiagnosticContext:
             results=[diagnostic.sarif() for diagnostic in self.diagnostics],
         )
 
-    def sarif_log(self) -> sarif.SarifLog:
+    def sarif_log(self) -> sarif.SarifLog:  # type: ignore[name-defined]
         """Returns the SARIF Log object."""
         return sarif.SarifLog(
             version=sarif_version.SARIF_VERSION,

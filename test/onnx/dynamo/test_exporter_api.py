@@ -1,20 +1,20 @@
 # Owner(s): ["module: onnx"]
 import io
 import logging
+import os
 
 import onnx
-import os
 import torch
 from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal import exporter
+from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import (
     _DEFAULT_OPSET_VERSION,
     ExportOutputSerializer,
     ProtobufExportOutputSerializer,
     ResolvedExportOptions,
 )
-from torch.onnx._internal.diagnostics import infra
 
 from torch.testing._internal import common_utils
 
@@ -135,7 +135,9 @@ class TestDynamoExportAPI(common_utils.TestCase):
 
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName() as path:
-            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).diagnostic_context.dump(path)
+            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).diagnostic_context.dump(
+                path
+            )
             self.assertTrue(os.path.exists(path))
 
     def test_save_sarif_log_to_file_with_failed_export(self):

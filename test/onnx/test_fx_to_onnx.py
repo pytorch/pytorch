@@ -12,7 +12,7 @@ from torch.testing._internal import common_utils
 
 
 def assert_has_diagnostics(
-    engine: infra.DiagnosticEngine,
+    engine: diagnostics.ExportDiagnosticEngine,
     rule: infra.Rule,
     level: infra.Level,
     expected_error_node: str,

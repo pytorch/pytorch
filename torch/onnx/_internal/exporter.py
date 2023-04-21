@@ -45,6 +45,7 @@ _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
 """The default path to write the SARIF log to if the export fails."""
 
+
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter."""
 
