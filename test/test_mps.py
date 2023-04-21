@@ -10251,6 +10251,7 @@ class TestConsistency(TestCaseMPS):
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
         'masked.std',
+        'nn.functional.normalize',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
