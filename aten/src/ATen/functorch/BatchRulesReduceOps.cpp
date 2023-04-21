@@ -383,18 +383,18 @@ std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   // BD, B* -> BD, B flat(*)
   if (buckets_bdim.has_value() && self_bdim.has_value()) {
     auto self_ = moveBatchDimToFront(self, self_bdim);
-    self_ = self_logical_rank == 0 ? self_.unsqueeze(-1) : self_.flatten(1);
-    auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
-    result = result.view(self_logical_rank == 0 ? IntArrayRef(self_.sizes().begin(), self_.sizes().end() - 1) : self_.sizes());
+    auto self_view_ = self_logical_rank == 0 ? self_.unsqueeze(-1) : self_.flatten(1);
+    auto result = at::searchsorted(buckets, self_view_, out_int32, right, std::move(side), sorter_);
+    result = self_logical_rank == 0 ? result.squeeze(-1) : result.view(self_.sizes());
     return std::make_tuple(std::move(result), 0);
   }
   // BD, * -> BD, flat(*) -> BD, B flat(*)
   if (buckets_bdim.has_value() && !self_bdim.has_value()) {
     auto bdim_size = buckets.size(*buckets_bdim);
     auto self_ = ensure_has_bdim(self, false, bdim_size);
-    self_ = self_logical_rank == 0 ? self_.unsqueeze(-1) : self_.flatten(1);
-    auto result = at::searchsorted(buckets, self_, out_int32, right, std::move(side), sorter_);
-    result = result.view(self_logical_rank == 0 ? IntArrayRef(self_.sizes().begin(), self_.sizes().end() - 1) : self_.sizes());
+    auto self_view_ = self_logical_rank == 0 ? self_.unsqueeze(-1) : self_.flatten(1);
+    auto result = at::searchsorted(buckets, self_view_, out_int32, right, std::move(side), sorter_);
+    result = self_logical_rank == 0 ? result.squeeze(-1) : result.view(self_.sizes());
     return std::make_tuple(std::move(result), 0);
   }
   // D, B* -> no change
