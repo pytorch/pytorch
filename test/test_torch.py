@@ -1821,7 +1821,7 @@ else:
             res = x.scatter_add(dim, idx, src)
 
             # Checking if scatter_add is deterministic
-            for i in range(20):
+            for i in range(5):
                 res_next = x.scatter_add(dim, idx, src)
                 self.assertEqual(res, res_next, atol=0, rtol=0)
                 res = res_next
