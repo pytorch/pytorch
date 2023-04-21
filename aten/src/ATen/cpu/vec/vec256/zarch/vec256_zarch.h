@@ -1104,12 +1104,18 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_i0e);
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> minimum(const Vectorized<T>& other) const {
-    return {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> maximum(const Vectorized<T>& other) const {
-    return {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
   }
 
   template <
