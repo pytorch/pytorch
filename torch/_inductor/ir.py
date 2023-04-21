@@ -4125,7 +4125,7 @@ class MultiOutputNoSizeAssert(MultiOutput):
         )
 
 
-class ForceInPlace(ExternKernel):
+class InPlaceHint(ExternKernel):
     """
     Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
     Wrap the input of your inplace op to enable this behavior.
@@ -4174,7 +4174,7 @@ class AllReduceCoalesced(ExternKernel):
 
         def wrap_input(var):
             nonlocal res
-            op = ForceInPlace(
+            op = InPlaceHint(
                 FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
             )
             res.append(op)
