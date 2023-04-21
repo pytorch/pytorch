@@ -306,7 +306,7 @@ def is_valid_splitwithsizes_cat(match):
     cat_items_args_order = [
         get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
     ]
-    if cat_items_args_order != list(get_item_args):
+    if cat_items_args_order != list(range(len(split_sizes))):
         return False
 
     return True
