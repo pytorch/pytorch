@@ -1027,6 +1027,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_views5(self):
+        # tensor with shape 0 in any dimension
+        def forward(x):
+            y = x[:, 4:]
+            return y.view(len(y), -1, 4)
+
+        self.common(
+            forward,
+            (torch.randn(4, 4, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -2597,6 +2608,25 @@ class CommonTemplate:
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_complex_fallback(self):
+        def fn(x):
+            return x * x + 10
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+        class ToComplex(nn.Module):
+            def forward(self, x):
+                return (x + x + 12).to(torch.complex64)
+
+        self.common(ToComplex(), (torch.rand([1, 2, 4, 8]),), check_lowp=False)
+
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 

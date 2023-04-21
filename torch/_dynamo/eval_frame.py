@@ -45,7 +45,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, skipfiles, utils
-from .exc import ResetRequired
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -653,7 +653,6 @@ def export(
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
-    tracing_mode: str = "real",
     constraints: List[Constraint] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
@@ -669,10 +668,7 @@ def export(
         If False, exports a graph with Python operators. Default is False.
 
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
-        Required if aten_graph or tracing_mode is specified. Default is None.
-
-        tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
-        If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
+        Required if aten_graph is specified. Default is None.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -680,18 +676,10 @@ def export(
         A tuple of (graph, guards)
         Graph: An FX graph representing the execution of the input PyTorch function with the provided arguments and options.
         Guards: The guards we accumulated during tracing f above
-
-    Raises:
-        AssertionError: If decomposition_table or tracing_mode is specified without setting aten_graph=True,
-        or if graph breaks during tracing in export.
-
-        AssertionError: If Dynamo input and output is not consistent with traced input/output.
-
-    Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None or tracing_mode != "real":
+    if decomposition_table is not None:
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
@@ -767,7 +755,9 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        summarize_dim_constraints=True, specialize_int=True
+        summarize_dim_constraints=True,
+        specialize_int=True,
+        assume_static_by_default=False,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -777,7 +767,7 @@ def export(
             ),
             export=True,
             export_constraints=constraints,
-            dynamic=(tracing_mode == "symbolic"),
+            dynamic=True,
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -843,12 +833,16 @@ def export(
                 return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-                tracing_mode="real",
-                _allow_non_fake_inputs=True,
-            )(*example_fake_inputs)
+            try:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="real",
+                    _allow_non_fake_inputs=True,
+                )(*example_fake_inputs)
+            except CondOpArgsMismatchError as e:
+                # Wrap the internal error to the user-facing error
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
         graph,
