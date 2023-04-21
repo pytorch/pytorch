@@ -16,10 +16,7 @@ from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    is_concrete_int,
-)
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
 
 
@@ -109,12 +106,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                if config.assume_static_by_default:
-                    # The guard produced here must be narrow, because
-                    # we are running with assume_static_by_default
-                    self.assertTrue("L['x'].size()[0] == 6" in guard.code_list)
-                else:
-                    self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -2231,13 +2223,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
         constraints = [dynamic_dim(y, 0)]
-        if config.assume_static_by_default:
-            # The assume_static flag causes this to raise, as
-            # we are now esentially comparing with a constant
-            with self.assertRaises(ConstraintViolationError):
-                torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
-        else:
-            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
+        torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_no_raise(self):
@@ -2303,13 +2289,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
-        if config.assume_static_by_default:
-            # The assume_static flag causes this to raise, as
-            # we are now esentially comparing with a constant
-            with self.assertRaises(ConstraintViolationError):
-                torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
-        else:
-            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
@@ -2528,28 +2508,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             gm, _ = torch._dynamo.export(
                 f, torch.randn(5, 6), aten_graph=True, tracing_mode="symbolic"
             )
-
-    @config.patch(assume_static_by_default=True, dynamic_shapes=True)
-    def test_propagate_assume_static_by_default(self):
-        def f(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        gm, _ = torch._dynamo.export(
-            f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
-        )
-
-        for node in gm.graph.nodes:
-            val = node.meta.get("val", None)
-            if val is not None:
-                shapes = val.shape
-                # there should no symbols
-                for shape in shapes:
-                    self.assertTrue(is_concrete_int(shape))
-
-        # this should be captured as static, as export won't generate any symbols.
-        self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
 
     def test_access_class_method_from_user_class(self):
         class A:
@@ -2844,6 +2802,44 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 aten_graph=True,
                 tracing_mode="symbolic",
             )
+
+    def test_export_defaults_ok(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[: x.size(0) - i, i : x.size(2), i:3])
+                return tuple(results)
+
+        gm, _ = torch._dynamo.export(
+            DynamicSliceExportMod(),
+            torch.randn(5, 5, 5),
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    slice_tensor = torch.ops.aten.slice.Tensor(arg0, 2, 0, 3)
+    sym_size = torch.ops.aten.sym_size(arg0, 0)
+    sub = sym_size - 1
+    slice_tensor_1 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub);  sub = None
+    sym_size_1 = torch.ops.aten.sym_size(arg0, 2)
+    slice_tensor_2 = torch.ops.aten.slice.Tensor(slice_tensor_1, 1, 1, sym_size_1);  slice_tensor_1 = None
+    slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 2, 1, 3);  slice_tensor_2 = None
+    sub_1 = sym_size - 2
+    slice_tensor_4 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_1);  sub_1 = None
+    slice_tensor_5 = torch.ops.aten.slice.Tensor(slice_tensor_4, 1, 2, sym_size_1);  slice_tensor_4 = None
+    slice_tensor_6 = torch.ops.aten.slice.Tensor(slice_tensor_5, 2, 2, 3);  slice_tensor_5 = None
+    sub_2 = sym_size - 3;  sym_size = None
+    slice_tensor_7 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_2);  arg0 = sub_2 = None
+    slice_tensor_8 = torch.ops.aten.slice.Tensor(slice_tensor_7, 1, 3, sym_size_1);  slice_tensor_7 = sym_size_1 = None
+    slice_tensor_9 = torch.ops.aten.slice.Tensor(slice_tensor_8, 2, 3, 3);  slice_tensor_8 = None
+    return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
+        )
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
