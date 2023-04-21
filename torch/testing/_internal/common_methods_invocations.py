@@ -1407,6 +1407,11 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     if torch.cuda.is_available():
         inputs.append(((S,), {'device': 'cuda'}))
 
+    # Set supplied device if it was not defined
+    for i in inputs:
+        assert(isinstance(i[1], dict))
+        i[1].setdefault('device', device)
+
     for shape, kwargs in inputs:
         t = make_tensor(shape, dtype=dtype, device=device,
                         low=None, high=None,
