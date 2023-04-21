@@ -87,6 +87,8 @@ class ExportOptions:
 
 class ResolvedExportOptions:
     diagnostics_context: infra.DiagnosticContext
+    """The diagnostics context for the export. Responsible for recording diagnostics,
+    logging diagnostics, and generating the SARIF log."""
 
     @_beartype.beartype
     def __init__(self, options: Optional[ExportOptions]):
