@@ -1278,7 +1278,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             return node.meta["example_value"]
     except Exception as e:
         raise RuntimeError(
-            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}"
         ).with_traceback(e.__traceback__) from None
     raise AssertionError(op)
 
