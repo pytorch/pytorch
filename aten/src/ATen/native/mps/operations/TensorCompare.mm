@@ -189,32 +189,18 @@ void clamp_scalar_out_mps(const Tensor& input_t,
     // the optional min/max refs could affect how we build the cached graph
     string key = op_name + (has_min ? ("_min:" + to_string(min_scalar)) : "") +
         (has_max ? ("_max:" + to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
-    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      if (has_min)
+        newCachedGraph->minTensor = [mpsGraph
+            constantWithScalar:min_scalar
+                         shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
+      if (has_max)
+        newCachedGraph->maxTensor = [mpsGraph
+            constantWithScalar:max_scalar
+                         shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          if (has_min)
-            newCachedGraph->minTensor = [mpsGraph
-                constantWithScalar:min_scalar
-                             shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
-          if (has_max)
-            newCachedGraph->maxTensor = [mpsGraph
-                constantWithScalar:max_scalar
-                             shape:(mps::getMPSShape(input_t))dataType:(mps::getMPSScalarType(input_t.scalar_type()))];
-
-          clamp_mps_graph(newCachedGraph, input_t);
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      clamp_mps_graph(newCachedGraph, input_t);
+    });
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, output_t);
@@ -291,8 +277,6 @@ Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Te
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   MPSDataType conditionDataType = getMPSScalarType(condition.scalar_type());
   MPSDataType selfDataType = getMPSScalarType(self.scalar_type());
   MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
@@ -313,35 +297,21 @@ Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Te
   @autoreleasepool {
     string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(cond_bool));
+      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, selfDataType, getMPSShape(self));
+      MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, otherDataType, getMPSShape(other));
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+      MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:conditionTensor
+                                                     truePredicateTensor:selfTensor
+                                                    falsePredicateTensor:otherTensor
+                                                                    name:nil];
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphTensor* conditionTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(cond_bool));
-          MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, selfDataType, getMPSShape(self));
-          MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, otherDataType, getMPSShape(other));
-
-          MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:conditionTensor
-                                                         truePredicateTensor:selfTensor
-                                                        falsePredicateTensor:otherTensor
-                                                                        name:nil];
-
-          newCachedGraph->conditionTensor_ = conditionTensor;
-          newCachedGraph->selfTensor_ = selfTensor;
-          newCachedGraph->otherTensor_ = otherTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->conditionTensor_ = conditionTensor;
+      newCachedGraph->selfTensor_ = selfTensor;
+      newCachedGraph->otherTensor_ = otherTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     Placeholder conditionPlaceholder = Placeholder(
         cachedGraph->conditionTensor_, cond_bool, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, conditionDataType);
@@ -435,58 +405,47 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
     MPSGraphTensor* posInfReplacementTensor = nil;
     MPSGraphTensor* negInfReplacementTensor = nil;
   };
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
     string key = "nan_to_num" + getTensorsStringKey({self});
     MPSDataType self_dtype = getMPSScalarType(self.scalar_type());
 
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      newCachedGraph->nanReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
+      newCachedGraph->posInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
+      newCachedGraph->negInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
 
-          newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          newCachedGraph->nanReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
-          newCachedGraph->posInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
-          newCachedGraph->negInfReplacementTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype, @[ @1 ]);
-
-          MPSGraphTensor* nanFreeTensor =
-              [mpsGraph selectWithPredicateTensor:[mpsGraph isNaNWithTensor:newCachedGraph->selfTensor name:nil]
-                              truePredicateTensor:newCachedGraph->nanReplacementTensor
-                             falsePredicateTensor:newCachedGraph->selfTensor
-                                             name:nil];
-          MPSGraphTensor* subZeroTensor = [mpsGraph lessThanWithPrimaryTensor:nanFreeTensor
-                                                              secondaryTensor:[mpsGraph constantWithScalar:0.0
-                                                                                                  dataType:self_dtype]
-                                                                         name:nil];
-          MPSGraphTensor* isInfTensor = [mpsGraph isInfiniteWithTensor:nanFreeTensor name:nil];
-          // workaround for Monterey; On Ventura the output of lessThan() is always Boolean
-          if (subZeroTensor.dataType != MPSDataTypeBool) {
-            subZeroTensor = castMPSTensor(mpsGraph, subZeroTensor, kBool);
-          }
-          if (isInfTensor.dataType != MPSDataTypeBool) {
-            isInfTensor = castMPSTensor(mpsGraph, isInfTensor, kBool);
-          }
-          MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor:subZeroTensor
-                                                                 secondaryTensor:isInfTensor
-                                                                            name:nil];
-          MPSGraphTensor* negInfFreeTensor = [mpsGraph selectWithPredicateTensor:isNegInfTensor
-                                                             truePredicateTensor:newCachedGraph->negInfReplacementTensor
-                                                            falsePredicateTensor:nanFreeTensor
-                                                                            name:nil];
-          newCachedGraph->outputTensor =
-              [mpsGraph selectWithPredicateTensor:[mpsGraph isInfiniteWithTensor:negInfFreeTensor name:nil]
-                              truePredicateTensor:newCachedGraph->posInfReplacementTensor
-                             falsePredicateTensor:negInfFreeTensor
-                                             name:nil];
-        }
-        return newCachedGraph;
-      });
-    }
+      MPSGraphTensor* nanFreeTensor =
+          [mpsGraph selectWithPredicateTensor:[mpsGraph isNaNWithTensor:newCachedGraph->selfTensor name:nil]
+                          truePredicateTensor:newCachedGraph->nanReplacementTensor
+                         falsePredicateTensor:newCachedGraph->selfTensor
+                                         name:nil];
+      MPSGraphTensor* subZeroTensor = [mpsGraph lessThanWithPrimaryTensor:nanFreeTensor
+                                                          secondaryTensor:[mpsGraph constantWithScalar:0.0
+                                                                                              dataType:self_dtype]
+                                                                     name:nil];
+      MPSGraphTensor* isInfTensor = [mpsGraph isInfiniteWithTensor:nanFreeTensor name:nil];
+      // workaround for Monterey; On Ventura the output of lessThan() is always Boolean
+      if (subZeroTensor.dataType != MPSDataTypeBool) {
+        subZeroTensor = castMPSTensor(mpsGraph, subZeroTensor, kBool);
+      }
+      if (isInfTensor.dataType != MPSDataTypeBool) {
+        isInfTensor = castMPSTensor(mpsGraph, isInfTensor, kBool);
+      }
+      MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor:subZeroTensor
+                                                             secondaryTensor:isInfTensor
+                                                                        name:nil];
+      MPSGraphTensor* negInfFreeTensor = [mpsGraph selectWithPredicateTensor:isNegInfTensor
+                                                         truePredicateTensor:newCachedGraph->negInfReplacementTensor
+                                                        falsePredicateTensor:nanFreeTensor
+                                                                        name:nil];
+      newCachedGraph->outputTensor = [mpsGraph selectWithPredicateTensor:[mpsGraph isInfiniteWithTensor:negInfFreeTensor
+                                                                                                   name:nil]
+                                                     truePredicateTensor:newCachedGraph->posInfReplacementTensor
+                                                    falsePredicateTensor:negInfFreeTensor
+                                                                    name:nil];
+    });
     MPSScalar nanReplacementScalar, posInfReplacementScalar, negInfReplacementScalar;
     AT_DISPATCH_FLOATING_TYPES_AND(kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
       scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
