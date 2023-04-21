@@ -39,22 +39,38 @@ struct sdp_params {
   bool is_causal;
 };
 
+inline bool check_requires_grad(sdp_params params, bool debug) {
+  const bool any_inputs_require_grad = params.query.requires_grad() ||
+      params.key.requires_grad() || params.value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  if ((any_inputs_require_grad && gradmode_enabled)) {
+    if (debug) {
+      TORCH_WARN("Flash Attention does not currently support training.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
+
+  constexpr std::array<SDPBackend, num_backends> efficient_first{
+      SDPBackend::efficient_attention,
+      SDPBackend::flash_attention,
+      SDPBackend::math};
   // Logic is taken from xformers
   // FlashAttention parallelizes across "batch_size * num_heads"
   // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
   // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
+
   if (params.query.is_nested() || params.key.is_nested() ||
       params.value.is_nested()) {
     // See check_for_nested_inputs for details
-    return {
-        SDPBackend::efficient_attention,
-        SDPBackend::flash_attention,
-        SDPBackend::math};
+    return efficient_first;
   }
   if (params.query.dim() != 4) {
     return default_order;
@@ -64,14 +80,20 @@ inline std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
       query_lengths{params.query.sym_size(2)},
       head_dim{params.query.sym_size(3)};
   if (batch_size > 0) {
-    const float threads_flash = batch_size * num_heads;
-    if (seq_len / threads_flash > 10 ) {
-      return {
-          SDPBackend::efficient_attention,
-          SDPBackend::flash_attention,
-          SDPBackend::math};
+    const auto threads_flash = batch_size * num_heads;
+    const auto threads_cutlass =
+        threads_flash * (query_lengths / c10::SymInt(64));
+    bool more_threads_cutlass = (threads_cutlass / 2) >= threads_flash;
+    bool small_threads_flash = threads_flash < 60;
+    bool large_head_dim = head_dim.max(params.key.sym_size(3)) == 128;
+
+    // The training heuristic is taken from https://github.com/pytorch/pytorch/pull/99644
+    // Revisit when updated cutlass kernel is upstreamed.
+    if (check_requires_grad(params, false)) {
+      if (6 * threads_flash > query_lengths) return efficient_first;
+    } else if ((small_threads_flash && more_threads_cutlass) || large_head_dim)
+        return efficient_first;
     }
-  }
   return default_order;
 }
 
@@ -245,19 +267,6 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
     }
   }
 
-  return true;
-}
-
-inline bool check_requires_grad(sdp_params params, bool debug) {
-  const bool any_inputs_require_grad = params.query.requires_grad() ||
-      params.key.requires_grad() || params.value.requires_grad();
-  const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((any_inputs_require_grad && gradmode_enabled)) {
-    if (debug) {
-      TORCH_WARN("Flash Attention does not currently support training.");
-    }
-    return false;
-  }
   return true;
 }
 
