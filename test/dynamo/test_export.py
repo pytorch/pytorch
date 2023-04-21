@@ -2523,9 +2523,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             f_pred_traced_as_tensor_var,
             f_pred_complex_expression_traced_as_symnode_var,
         ]:
-            gm, _ = torch._dynamo.export(
-                f, *example_inputs, aten_graph=True
-            )
+            gm, _ = torch._dynamo.export(f, *example_inputs, aten_graph=True)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
     def test_mixed_real_and_fake_inputs(self):
@@ -2588,9 +2586,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.exc.UserError,
             "Expected 4 arguments",
         ):
-            torch._dynamo.export(
-                f, *example_inputs, aten_graph=True
-            )
+            torch._dynamo.export(f, *example_inputs, aten_graph=True)
 
     def test_cond_raise_user_error_on_unsupported_pred(self):
         def f_unsupported_pred(x):
