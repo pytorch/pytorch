@@ -402,7 +402,9 @@ def _flatten_optim_state_dict(
         Dict[str, Any]: The flattened optimizer state dict.
     """
     unflat_osd = optim_state_dict
-    if "state" not in unflat_osd and not (rank0_only and use_orig_params):
+    if "state" not in unflat_osd  and not (
+        rank0_only and use_orig_params
+    ):
         raise ValueError(
             '`optim_state_dict` must have the keys "state"'
             "to be a valid optimizer state dict"
