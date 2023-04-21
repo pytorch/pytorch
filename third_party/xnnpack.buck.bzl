@@ -1968,7 +1968,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "XNNPACK/src/x8-lut-config.c",
             "XNNPACK/src/hardware-config.c",
             "XNNPACK/src/transpose-config.c",
-            "XNNPACK/src/amalgam/scalar.c",
+            "XNNPACK/src/amalgam/gen/scalar.c",
             "XNNPACK/src/operators/post-operation.c",
         ] + LOGGING_SRCS,
         visibility = ["PUBLIC"],
