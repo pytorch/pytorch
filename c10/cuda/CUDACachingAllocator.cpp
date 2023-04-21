@@ -1158,8 +1158,10 @@ static std::string reportProcessMemoryInfo(int device) {
       uuid[14],
       uuid[15]);
   nvmlDevice_t nvml_device;
-  auto x = DriverAPI::get()->nvmlDeviceGetHandleByUUID_(uuid_str, &nvml_device);
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == x);
+  TORCH_INTERNAL_ASSERT(
+      NVML_SUCCESS ==
+      DriverAPI::get()->nvmlDeviceGetHandleByUUID_(uuid_str, &nvml_device));
+
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
   nvmlReturn_t r;
