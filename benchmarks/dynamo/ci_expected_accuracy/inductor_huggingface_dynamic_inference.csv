@@ -1,7 +1,7 @@
 name,accuracy,graph_breaks
 AlbertForMaskedLM,fail_to_run,0
 AlbertForQuestionAnswering,fail_to_run,0
-AllenaiLongformerBase,fail_to_run,0
+AllenaiLongformerBase,pass,152
 BartForCausalLM,fail_to_run,0
 BertForMaskedLM,fail_to_run,0
 BertForQuestionAnswering,fail_to_run,0
