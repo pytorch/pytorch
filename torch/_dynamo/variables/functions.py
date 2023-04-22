@@ -435,7 +435,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
-
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
