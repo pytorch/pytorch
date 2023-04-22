@@ -1054,22 +1054,17 @@ def convert(
 
     # remove deadcode after converting observers to quant/dequant ops
     model.graph.eliminate_dead_code()
-    quantized_model = GraphModule(model, model.graph)
-    # preserve the metadata and type of the original model
-    # TODO: this can be an assert if fx sybmolic tracing also has this by default
-    if hasattr(model, "meta"):
-        quantized_model.meta.update(model.meta)
-    quantized_model.__class__ = type(model)
+    model = GraphModule(model, model.graph)
 
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
-        quantized_model = lower_to_fbgemm(quantized_model, node_name_to_qconfig, node_name_to_scope)
+        model = lower_to_fbgemm(model, node_name_to_qconfig, node_name_to_scope)
 
     # TODO: this looks hacky, we want to check why we need this and see if we can
     # remove this
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
-        _remove_qconfig(quantized_model)
-    quantized_model.delete_all_unused_submodules()
-    quantized_model.meta.pop("_observed_graph_module_attrs", None)
-    return quantized_model
+        _remove_qconfig(model)
+    model.delete_all_unused_submodules()
+    model.meta.pop("_observed_graph_module_attrs", None)
+    return model

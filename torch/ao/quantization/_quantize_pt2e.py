@@ -82,4 +82,10 @@ def prepare_pt2e_quantizer(
 def convert_pt2e(
     model: GraphModule
 ):
-    return _convert_to_reference_decomposed_fx(model)
+    quantized_model = _convert_to_reference_decomposed_fx(model)
+    # preserve the metadata and type of the original model
+    # TODO: this can be an assert if fx sybmolic tracing also has this by default
+    if hasattr(model, "meta"):
+        quantized_model.meta.update(model.meta)
+    quantized_model.__class__ = type(model)
+    return quantized_model
