@@ -164,7 +164,6 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
         # TODO(wechi): There are several symbolic tracing mechanisms to convert
         # nn.Module to FX graph. We should choose the right one after they are
         # matured.
-        # TODO(titaiwang): Set `tracing_mode` according to `self.options.dynamic_shapes`
         graph_module, graph_guard = torch._dynamo.export(
             wrapped_model, *args, aten_graph=True, **kwargs
         )
