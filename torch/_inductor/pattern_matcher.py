@@ -184,14 +184,18 @@ class KeywordArg(PatternExpr):
         return Match(self, kwargs={self.name: node})  # matches anything
 
 
-class CallFunction(PatternExpr):
+class _BaseNodeMatch(PatternExpr):
     """
-    Matches a call_function node in the FX graphs: `fns[i](*args, **kwargs)`
+    Base class for matching a node in a graph
     """
 
+    op = None
+
     def __init__(self, fns, *args, _users=1, **kwargs):
+        if not self.op:
+            raise NotImplementedError("Shouldn't directly use _BaseNodeMatch")
         super().__init__()
-        fns = [fns] if callable(fns) else list(fns)
+        fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in list(fns):
             if isinstance(fn, torch._ops.OpOverloadPacket):
                 fns.extend([getattr(fn, overload) for overload in fn.overloads()])
@@ -243,7 +247,7 @@ class CallFunction(PatternExpr):
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if (
             not isinstance(node, torch.fx.Node)
-            or node.op != "call_function"
+            or node.op != self.op
             or node.target not in self.fns_set
             or len(node.args) != len(self.args)
             or len(node.kwargs) != len(self.kwargs)
@@ -297,11 +301,27 @@ class CallFunction(PatternExpr):
                     for node in other_node.users:
                         if (
                             node not in searched
-                            and node.op == "call_function"
+                            and node.op == self.op
                             and node.target in self.fns_set
                         ):
                             yield node
                             searched.add(node)
+
+
+class CallFunction(_BaseNodeMatch):
+    """
+    Matches a call_function node in the FX graphs: `fns[i](*args, **kwargs)`
+    """
+
+    op = "call_function"
+
+
+class CallMethod(_BaseNodeMatch):
+    """
+    Matches a call_method node in the FX graphs: `fns[i].method(*args, **kwargs)`
+    """
+
+    op = "call_method"
 
 
 class ListOf(PatternExpr):
@@ -605,7 +625,10 @@ class PatternMatcherPass:
             return 0
         count = 0
         for node in reversed(graph.nodes):
-            if node.op == "call_function" and node.target in self.patterns:
+            if (
+                node.op in ["call_function", "call_method"]
+                and node.target in self.patterns
+            ):
                 # conservatively not applying pattern for cpu input,
                 # since some of the patterns induce codegen and split nodes.
                 # Note: we will only skip cpu compute if disable_cpp_codegen=True

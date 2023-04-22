@@ -3,7 +3,14 @@ import logging
 
 import torch
 from torch._dynamo.utils import counters
-from ..pattern_matcher import Arg, CallFunction, get_arg_value, MULTIPLE, PatternEntry
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    CallMethod,
+    get_arg_value,
+    MULTIPLE,
+    PatternEntry,
+)
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +61,9 @@ def _split_cat_init():
             dim=Arg(),
             _users=MULTIPLE,
         ),
+        CallMethod("split", Arg(), Arg(), Arg(), _users=MULTIPLE),
+        CallMethod("split", Arg(), Arg(), dim=Arg(), _users=MULTIPLE),
+        CallMethod("split", Arg(), split_size=Arg(), dim=Arg(), _users=MULTIPLE),
     ]:
         pattern = NormalizeSplit(pattern=pattern, extra_check=lambda arg: True)
         pattern.register(patterns)
