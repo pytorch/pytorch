@@ -221,6 +221,7 @@ def _fill_tensor_meta(
         torch.SymInt,
         torch.SymFloat,
         List[fake_tensor.FakeTensor],
+        Tuple[fake_tensor.FakeTensor, ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""

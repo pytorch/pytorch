@@ -10,7 +10,18 @@ import tempfile
 import unittest
 import warnings
 
-from typing import Any, Callable, Generator, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 import numpy as np
 import onnx_test_common
@@ -24,16 +35,15 @@ from torch import nn
 
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
-from torch.onnx._internal.fx.dynamo_exporter import DynamoOptimizeExporter
 from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
 from torch.testing._internal import common_utils
 from torch.types import Number
-from torch.utils import _pytree as pytree
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
-_InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
+_InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
 _OutputsType = Sequence[_NumericType]
+
 
 try:
     import torchvision
@@ -49,7 +59,7 @@ skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 @_beartype.beartype
 def _run_ort(
     onnx_model: Union[str, torch.onnx.ExportOutput],
-    pytorch_inputs: Union[_InputArgsType, Generator],
+    pytorch_inputs: Sequence[_InputArgsType],
 ) -> _OutputsType:
     if isinstance(onnx_model, torch.onnx.ExportOutput):
         buffer = io.BytesIO()
@@ -61,20 +71,80 @@ def _run_ort(
         ort_model, providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+    if len(input_names) != len(pytorch_inputs):
+        raise AssertionError(
+            f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
+        )
     return session.run(
         None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     )
 
 
 @_beartype.beartype
+def _try_clone_model(model: _ModelType) -> _ModelType:
+    """Used for preserving original model in case forward mutates model states."""
+    try:
+        return copy.deepcopy(model)
+    except Exception:
+        warnings.warn(
+            "Failed to clone model. Model state might be mutated during verification."
+        )
+        return model
+
+
+@_beartype.beartype
+def _try_clone_inputs(input_args, input_kwargs):
+    ref_input_args = copy.deepcopy(input_args)
+    ref_input_kwargs = copy.deepcopy(input_kwargs)
+    return ref_input_args, ref_input_kwargs
+
+
+@_beartype.beartype
+def _compare_pytorch_onnx_with_ort(
+    export_output: torch.onnx.ExportOutput,
+    model: _ModelType,
+    input_args: Sequence[_InputArgsType],
+    input_kwargs: Mapping[str, _InputArgsType],
+    atol: float,
+    rtol: float,
+    has_mutation: bool = False,
+):
+    if has_mutation:
+        ref_model = _try_clone_model(model)
+        ref_input_args, ref_input_kwargs = _try_clone_inputs(input_args, input_kwargs)
+    else:
+        ref_model = model
+        ref_input_args = input_args
+        ref_input_kwargs = input_kwargs
+
+    # Format original model inputs into the format expected by exported ONNX model.
+    onnx_format_args = export_output.adapt_torch_inputs_to_onnx(
+        *input_args, **input_kwargs
+    )
+
+    ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+        ref_model(*ref_input_args, **ref_input_kwargs)
+    )
+    ort_outputs = _run_ort(export_output, onnx_format_args)
+    if len(ref_outputs) != len(ort_outputs):
+        raise AssertionError(
+            f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
+        )
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+        torch.testing.assert_close(
+            ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
+        )
+
+
+@_beartype.beartype
 def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-    test_suite: onnx_test_common._TestONNXRuntime,
+    test_suite: TestFxToOnnxWithOnnxRuntime,
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
-    input_mutation: bool = False,
+    has_mutation: bool = False,
     additional_test_inputs: Optional[Sequence[Sequence[_InputArgsType]]] = None,
     **input_kwargs,
 ):
@@ -86,8 +156,8 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         rtol (float, optional): relative tolerance. Defaults to 1e-3.
         atol (float, optional): absolute tolerance. Defaults to 1e-7.
         opset_version (int, optional): ONNX opset version. Defaults to 18.
-        input_mutation (bool, optional): Whether the model mutates its input.
-            `input_mutation` as `True` incurs extra overhead of cloning the inputs.
+        has_mutation (bool, optional): Whether the model mutates its input or state.
+            `mutation` as `True` incurs extra overhead of cloning the inputs and model.
             Defaults to False.
         additional_test_inputs (Optional[Sequence[_InputArgsType]], optional):
             Test the models with another dataset, which is designed for dynamic axes
@@ -95,86 +165,87 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
 
     """
 
-    @_beartype.beartype
-    def _try_clone_model(model: _ModelType) -> _ModelType:
-        """Used for preserving original model in case forward mutates model states."""
-        try:
-            return copy.deepcopy(model)
-        except Exception:
-            warnings.warn(
-                "Failed to clone model. Model state might be mutated during verification."
-            )
-            return model
-
-    @_beartype.beartype
-    def compare_pytorch_onnx_with_ort(
-        exporter: DynamoOptimizeExporter,
-        export_output: torch.onnx.ExportOutput,
-        model_input_args: Sequence[_InputArgsType],
-    ):
-        if input_mutation:
-            ref_input_args = copy.deepcopy(model_input_args)
-            ref_input_kwargs = copy.deepcopy(input_kwargs)
-        else:
-            ref_input_args = model_input_args
-            ref_input_kwargs = input_kwargs
-        # Bind args and kwargs to the model's signature to
-        # flatten kwargs into positional args since ONNX
-        # model cannot be called with kwargs.
-        bound = exporter.model_signature.bind(*ref_input_args, **ref_input_kwargs)
-        # Fill optional inputs.
-        bound.apply_defaults()
-        assert not bound.kwargs
-
-        pt_cloned_model = _try_clone_model(model)
-        ref_outputs, _ = pytree.tree_flatten(
-            pt_cloned_model(*model_input_args, **input_kwargs)
-        )
-        ort_outputs = _run_ort(export_output, bound.args)
-        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-            torch.testing.assert_close(
-                ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
-            )
+    if has_mutation:
+        ref_model = _try_clone_model(model)
+        ref_input_args, ref_input_kwargs = _try_clone_inputs(input_args, input_kwargs)
+    else:
+        ref_model = model
+        ref_input_args = input_args
+        ref_input_kwargs = input_kwargs
 
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    exporter = DynamoOptimizeExporter(
-        options=torch.onnx.ExportOptions(
+    export_output = torch.onnx.dynamo_export(
+        ref_model,
+        *ref_input_args,
+        **ref_input_kwargs,
+        export_options=torch.onnx.ExportOptions(
             opset_version=opset_version,
-            dynamic_shapes=test_suite.dynamic_shapes,
             op_level_debug=test_suite.op_level_debug,
+            dynamic_shapes=test_suite.dynamic_shapes,
         ),
-        model=model,
-        model_args=input_args,
-        model_kwargs=input_kwargs,
     )
-    export_output = exporter.export()
-    # NOTE: DynamoOptimizeExporter has model signature as properties.
-    compare_pytorch_onnx_with_ort(exporter, export_output, input_args)
+
+    _compare_pytorch_onnx_with_ort(
+        export_output,
+        model,
+        input_args,
+        input_kwargs,
+        atol,
+        rtol,
+        has_mutation=has_mutation,
+    )
     # This confirms the exported mode accepts different input shapes
     # when dynamic shape is enabled.
+    # TODO(titaiwangms): additional input kwargs.
     if additional_test_inputs and test_suite.dynamic_shapes:
         for additional_input_args in additional_test_inputs:
-            compare_pytorch_onnx_with_ort(
-                exporter, export_output, additional_input_args
+            _compare_pytorch_onnx_with_ort(
+                export_output,
+                model,
+                additional_input_args,
+                {},
+                atol,
+                rtol,
+                has_mutation=has_mutation,
             )
 
 
 def _parameterized_class_attrs_and_values():
     input_values = []
-    input_values.extend(itertools.product((True, False), (True, False)))
+    input_values.extend(
+        itertools.product(
+            (True, False),
+            (True, False),
+        )
+    )
     return {
         "attrs": ["op_level_debug", "dynamic_shapes"],
         "input_values": input_values,
     }
 
 
+def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+    """Combine class name with the parameterized arguments.
+
+    This function is passed to `parameterized.parameterized_class` as the
+    `class_name_func` argument.
+    """
+    suffixes = []
+    for k, v in input_dicts.items():
+        suffixes.append(f"{k}_{v}")
+    return f"{cls.__name__}_{'_'.join(suffixes)}"
+
+
 @parameterized.parameterized_class(
     **_parameterized_class_attrs_and_values(),
-    class_name_func=onnx_test_common.parameterize_class_name,
+    class_name_func=_parameterize_class_name,
 )
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
+    op_level_debug: bool
+    dynamic_shapes: bool
+
     def setUp(self):
         super().setUp()
         self.diag_ctx = diagnostics.engine.create_diagnostic_context(
@@ -184,8 +255,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.ort_version = onnxruntime.__version__
 
     def tearDown(self):
+        # TODO(bowbao): Don't dump logs by default. Set as configurable with
+        # `DiagnosticOptions`.
         diagnostics.engine.dump(
-            f"test_report_{self._testMethodName}_op_level_debug_{self.op_level_debug}_dynamic_axes_{self.dynamic_shapes}.sarif",
+            f"test_report_{self._testMethodName}"
+            f"_op_level_debug_{self.op_level_debug}"
+            f"_dynamic_axes_{self.dynamic_shapes}"
+            ".sarif",
             compress=False,
         )
         super().tearDown()
@@ -207,25 +283,35 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
 
+    @pytorch_test_common.xfail(
+        "AssertionError: Dynamo input/output is not consistent with traced input/output. "
+        "Ref: https://github.com/pytorch/pytorch/issues/96379"
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
     )
-    def test_func_with_args_and_kwargs(self):
+    def test_func_with_args_and_tensor_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
-        # removed from input list in Dynamo-traced graph, so we can't
-        # define a function like
+        # removed from input list in Dynamo-traced graph, if its value is not provided
+        # to tracer. So for a function like
         #   def func(x, b=1.0)
-        # here. E.g., if you change the `b` to 1.0 below, it will complain
+        # here. E.g., if you first Dynamo-trace the model with arguments (x,),
+        # and then call the traced graph with arguments (x, b=2.0), it will complain
         # somewhere that model is called with extra args because the modified
         # function is traced into
         #   def forward(self, x : torch.Tensor):
         #     add = x + 1.0;  x = None
         #     relu = add.relu()
         #     return (add, relu)
-        # To summarize, optional kwargs must be tensors; otherwise, they are
-        # treated as in-graph constants in Dynamo.
+        # To summarize, in order to be traced as graph input, the value of optional kwarg
+        # must be provided. Otherwise, they are treated as in-graph constants in Dynamo.
+        # Tensor optional kwargs are an exception. It is always traced as input.
+        # It is unclear if this behavior is intended or not. But in general it is bad
+        # practice to set mutable default values.
+        # `DynamoOptimizeExporter` applies a workaround by binding args and kwargs to
+        # model signature and fill in the default values of unprovided optional arguments.
         def func(x, b=torch.tensor(1.0)):
             y = x + b
             z = y.relu()
@@ -243,6 +329,95 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             self, func, (tensor_x,), b=torch.tensor(5.0)
         )
+
+    # beartype.roar.BeartypeCallHintParamViolation:
+    # @beartyped onnxscript.function_libs.torch_aten.graph_building.TorchScriptGraph.add_input()
+    # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
+    # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
+    # @unittest.expectedFailure
+    @pytorch_test_common.xfail(
+        "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
+        "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
+        "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
+        "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
+        "instance of <protocol 'torch.Tensor'>."
+    )
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_func_with_args_and_kwargs(self):
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
+
+        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
+        # Test with only positional args.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x, 8.0))
+        # Test while specifying optional kwarg.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self, func, (tensor_x,), b=5.0
+        )
+
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_func_with_nested_input_structure(self):
+        def func(
+            x_dict: Dict[str, torch.Tensor],
+            y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
+            z_list: List[List[torch.Tensor]],
+        ):
+            if "a" in x_dict:
+                x = x_dict["a"]
+            elif "b" in x_dict:
+                x = x_dict["b"]
+            else:
+                x = torch.randn(3)
+
+            y1, (y2, y3) = y_tuple
+
+            z = x + y1 + y2 + y3
+            for z_sub_list in z_list:
+                z = z + torch.stack(z_sub_list).sum()
+
+            return z
+
+        x_dict = {"a": torch.randn(3), "c": torch.randn(3)}
+        y_tuple = (torch.randn(3), (torch.randn(3), torch.randn(3)))
+        z_list = [
+            [torch.randn(3), torch.randn(3)],
+            [torch.randn(3), torch.randn(3), torch.randn(3)],
+        ]
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self, func, (x_dict, y_tuple, z_list)
+        )
+
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_func_with_nested_output_structure(self):
+        def func(x, y, z):
+            x = x + y
+            y = y + z
+            z = x + y
+            out1 = (x, (y, z))
+            out2 = [[x, y], [y, z]]
+            out3 = {"z": z, "x": x}
+            return out1, out2, out3
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = torch.randn(3)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (x, y, z))
 
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -293,7 +468,35 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, SigmoidModel(), (x,))
 
-    @unittest.skip(
+    @pytorch_test_common.xfail(
+        "assert len(flattened_torch_outputs) == len(flattened_function_outputs)"
+    )
+    @pytorch_test_common.xfail(
+        "onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : "
+        "10 : INVALID_GRAPH : This is an invalid model. Type Error: Type 'tensor(float)' "
+        "of input parameter (1) of operator (aten_getitem) in node (aten_getitem_4) is "
+        "invalid."
+    )
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_log_sigmoid(self):
+        # This produces op as `torch.ops.aten.log_sigmoid_forward`, instead of the more
+        # conventional `torch.ops.aten.log_sigmoid`.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = torch.nn.LogSigmoid()
+
+            def forward(self, x):
+                return self.m(x)
+
+        input = torch.randn(2)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, Model(), (input,))
+
+    @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "
         "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
         " please report a bug to PyTorch. mutating a non-functional tensor with a "
@@ -360,6 +563,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
+        "while running Expand node. Name:'_0x55b501ebaf10_n2' "
+        "Status Message: invalid expand shape"
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -379,8 +587,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @unittest.skip(
-        "RuntimeError: The two modules have different number of arguments. module: 1, reference_module: 0"
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
     )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
@@ -417,7 +625,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @unittest.skip("torch._dynamo.exc.TorchRuntimeError")
+    @pytorch_test_common.xfail("torch._dynamo.exc.TorchRuntimeError")
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -470,12 +678,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            self, MutationModel(), (torch.randn(12),), input_mutation=True
+            self, MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    @unittest.skip(
-        "RuntimeError: The two modules have different number of arguments. module: 1, reference_module: 0"
-    )
+    @pytorch_test_common.xfail("TypeError: missing a required argument: 'end'")
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -494,7 +700,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @unittest.skip(
+    @pytorch_test_common.xfail(
         "fx.graph: torch._subclasses.fake_tensor.DataDependentOutputException: "
         "aten._local_scalar_dense.default"
     )
@@ -513,7 +719,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @unittest.skip("RuntimeError: Unknown call_function target: aten.copy.default")
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.copy.default"
+    )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -533,6 +741,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
+    )
+    @pytorch_test_common.xfail(
+        "Unknown call_function target: aten.lift_fresh_copy.default"
     )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
@@ -574,6 +785,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "Shapes are assumed static by default by 'dynamo.export'."
+    )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -592,6 +806,24 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
+    def test_none_input(self):
+        class NoneInputModel(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, y: Optional[torch.Tensor], z: torch.Tensor
+            ):
+                if y is None:
+                    return x + z
+                return x + y + z
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            self, NoneInputModel(), (torch.randn(1, 2), None, torch.randn(1, 2))
+        )
+
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
@@ -600,25 +832,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         # Transform input tokens
         inputs = tokenizer("Hello world!", return_tensors="pt")
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
 
-        onnx_model = DynamoOptimizeExporter(
-            options=torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
-                dynamic_shapes=self.dynamic_shapes,
-                op_level_debug=self.op_level_debug,
-            ),
-            model=model,
-            model_args=[],
-            model_kwargs=inputs,
-        ).export()
-        ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
-        assert len(ref_outputs) == len(ort_outputs)
-        assert len(ref_outputs) == 5
-        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-            torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, model, [], **inputs)
 
     @_beartype.beartype
     def _test_large_scale_exporter(
@@ -679,20 +894,18 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
 
-                onnx_model = (
-                    FXSymbolicTraceExporter(
-                        options=torch.onnx.ExportOptions(
-                            opset_version=self.opset_version,
-                            dynamic_shapes=self.dynamic_shapes,
-                            op_level_debug=self.op_level_debug,
-                        ),
-                        model=fake_model,
-                        model_args=fake_args,
-                        model_kwargs={},
-                    )
-                    .export()
-                    .model_proto
-                )
+                export_output = FXSymbolicTraceExporter(
+                    options=torch.onnx.ExportOptions(
+                        opset_version=self.opset_version,
+                        dynamic_shapes=self.dynamic_shapes,
+                        op_level_debug=self.op_level_debug,
+                    ),
+                    model=fake_model,
+                    model_args=fake_args,
+                    model_kwargs={},
+                ).export()
+
+                onnx_model = export_output.model_proto
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -717,9 +930,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             args = create_args()
             kwargs = create_pytorch_only_kwargs()
             # Original outputs.
-            ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
+            ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+                model(*args, **kwargs)
+            )
             # ORT outputs.
-            args_not_none = (arg for arg in args if arg is not None)
+            args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
             ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,

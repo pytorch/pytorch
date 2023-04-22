@@ -1529,6 +1529,12 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def reset(self):
+        from torch._inductor import config
+        if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
+            if self.config.get("triton.cudagraphs", True):
+                from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+                reset_cudagraph_trees()
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1590,8 +1596,6 @@ def compile(model: Optional[Callable] = None, *,
     import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
-    if torch.backends.mps.is_available():
-        backend = "aot_eager"
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":

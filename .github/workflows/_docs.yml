@@ -76,7 +76,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -121,7 +121,7 @@ jobs:
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
             target="${BASH_REMATCH[1]}"
           else
-            target="master"
+            target="main"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
