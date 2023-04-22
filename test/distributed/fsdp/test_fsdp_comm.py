@@ -76,7 +76,7 @@ class TestCommunication(FSDPTest):
 
     def _run_iter(self, fsdp_model, batch, use_no_sync: bool):
         """Runs an iteration inside or outside the ``no_sync()`` context."""
-        context = fsdp_model.no_sync() if use_no_sync else suppress()
+        context = fsdp_model.no_sync() if use_no_sync else suppress()  # noqa: B022
         with context:
             output = fsdp_model(*batch)
             loss = fsdp_model.module.get_loss(batch, output)

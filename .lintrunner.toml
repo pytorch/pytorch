@@ -972,7 +972,26 @@ command = [
 
 [[linter]]
 code = 'RUFF'
-include_patterns = [
+include_patterns = ['**/*.py']
+exclude_patterns = [
+    '.git/**',
+    'build_test_custom_build/**',
+    'build/**',
+    'caffe2/**',
+    'docs/caffe2/**',
+    'docs/cpp/src/**',
+    'docs/src/**',
+    'functorch/docs/**',
+    'functorch/examples/**',
+    'functorch/notebooks/**',
+    'scripts/**',
+    'test/generated_type_hints_smoketest.py',
+    'third_party/**',
+    'torch/include/**',
+    'torch/lib/**',
+    'venv/**',
+    '**/*.pyi',
+    'tools/test/test_selective_build.py',
 ]
 command = [
     'python3',
@@ -981,8 +1000,6 @@ command = [
     '--show-disable',
     '--',
     '@{{PATHSFILE}}'
-]
-exclude_patterns = [
 ]
 init_command = [
     'python3',
