@@ -476,6 +476,8 @@ def fractional_max_pool2d_with_indices(
         raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
+        if len(output_ratio) > 2:
+            raise ValueError("fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints.")
         _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
@@ -2137,6 +2139,16 @@ def embedding(
     and the output is the corresponding word embeddings.
 
     See :class:`torch.nn.Embedding` for more details.
+
+    .. note::
+        Note that the analytical gradients of this function with respect to
+        entries in :attr:`weight` at the row specified by :attr:`padding_idx`
+        are expected to differ from the numerical ones.
+
+    .. note::
+        Note that `:class:`torch.nn.Embedding` differs from this function in
+        that it initializes the row of :attr:`weight` specified by
+        :attr:`padding_idx` to all zeros on construction.
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
@@ -4673,7 +4685,7 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (int): the dimension to reduce. Default: 1
+        dim (int or tuple of ints): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
