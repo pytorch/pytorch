@@ -1839,7 +1839,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]
                 for expected_event_name in EXPECTED_REMOTE_EVENTS + [RPCExecMode.ASYNC.value]:
-                    event_exists = any([expected_event_name in event_name for event_name in event_names])
+                    event_exists = any(expected_event_name in event_name for event_name in event_names)
                     self.assertTrue(event_exists)
 
     @dist_init
@@ -2903,7 +2903,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         def launched_rpc(events):
             expected_name = f"rpc_{RPCExecMode.ASYNC.value}#_rref_typeof_on_owner"
-            return any([e.name.startswith(expected_name) for e in events])
+            return any(e.name.startswith(expected_name) for e in events)
 
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))

@@ -648,13 +648,11 @@ def _rebuild_graph(
                 else:
                     value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
                     if all(
-                        [
-                            isinstance(n.target, torch._ops.OpOverload)
-                            and n.target._schema.name.startswith(
-                                ("aten::_foreach", "aten::_fused_adam")
-                            )
-                            for n in [dtn, node]
-                        ]
+                        isinstance(n.target, torch._ops.OpOverload)
+                        and n.target._schema.name.startswith(
+                            ("aten::_foreach", "aten::_fused_adam")
+                        )
+                        for n in [dtn, node]
                     ):
                         # FIXME(@mrshenli): This is a temporary solution enable
                         # foreach ops. The problem is that foreach ops returns

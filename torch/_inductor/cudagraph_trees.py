@@ -1387,7 +1387,7 @@ def get_block_addrs(pool_id, live_only=True):
 
 
 def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
-    assert all([isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs])
+    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
     gc.collect()
 
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
