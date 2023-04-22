@@ -1018,6 +1018,42 @@ std::tuple<Tensor,optional<int64_t>> masked_fill_scalar_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> index_fill_batch_rule_helper(
+  int64_t batch_size,
+  int64_t self_logical_rank,
+  int64_t index_logical_rank,
+  Tensor & self_,
+  int64_t dim,
+  Tensor & index_,
+  const Scalar & value
+  ){
+  if (self_logical_rank != 0){
+    auto index_offset = at::arange(
+      batch_size,
+      at::TensorOptions().dtype(index_.scalar_type()).device(index_.device())
+    );
+    if (index_logical_rank == 0){
+      index_ = index_.unsqueeze(-1);
+    }
+    index_ = index_.add(index_offset.unsqueeze(-1), self_.size(dim + 1));
+    index_ = reshape_dim_into(0, 0, index_);
+    self_ = reshape_dim_into(0, dim, self_);
+    self_.index_fill_(dim, index_, value);
+    self_ = reshape_dim_outof(dim, batch_size, self_);
+    return std::make_tuple(self_, dim);
+  }
+
+  // If self_logical_rank == 0, the batch dim is certainly 0, and we must apply batched indices to each row.
+  if (index_logical_rank != 0){
+    index_ = reshape_dim_into(0, 0, index_);
+  }
+  self_.unsqueeze_(-1);
+  self_.index_fill_(dim + 1, index_, value);
+  self_.squeeze_(-1);
+
+  return std::make_tuple(self_, 0);
+}
+
 std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
     Tensor & self, optional<int64_t> self_bdim,
     int64_t dim,
@@ -1051,7 +1087,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
 
   if (inplace) {
     // Do for-loop for in-place because we cannot reshape
-    // `self_` having an incompatible stride without copying
+    // `self_` having an incompatible stride without copying.
     for (const auto i : c10::irange(0, batch_size)) {
       const auto& self_slice = self_.select(0, i);
       const auto& index_slice = index_.select(0, i);
@@ -1066,31 +1102,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_scalar_batch_rule_impl(
 
   self_ = self_bdim.has_value() ? self_ : self_.clone();
 
-  if (self_logical_rank != 0){
-    auto index_offset = at::arange(
-      batch_size,
-      at::TensorOptions().dtype(index_.scalar_type()).device(index_.device())
-    );
-    if (index_logical_rank == 0){
-      index_ = index_.unsqueeze(-1);
-    }
-    index_ = index_.add(index_offset.unsqueeze(-1), self_.size(dim + 1));
-    index_ = reshape_dim_into(0, 0, index_);
-    self_ = reshape_dim_into(0, dim, self_);
-    self_.index_fill_(dim, index_, value);
-    self_ = reshape_dim_outof(dim, batch_size, self_);
-    return std::make_tuple(self_, dim);
-  }
-
-  // If self_logical_rank == 0, the batch dim is certainly 0, and we must apply batched indices to each row.
-  if (index_logical_rank != 0){
-    index_ = reshape_dim_into(0, 0, index_);
-  }
-  self_.unsqueeze_(-1);
-  self_.index_fill_(dim + 1, index_, value);
-  self_.squeeze_(-1);
-
-  return std::make_tuple(self_, 0);
+  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
 }
 
 std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
@@ -1100,6 +1112,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
     const Tensor & value, optional<int64_t> value_bdim,
     const bool inplace) {
   const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  const auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
   Tensor self_ = moveBatchDimToFront(self, self_bdim);
   Tensor index_ = moveBatchDimToFront(index, index_bdim);
   Tensor value_ = moveBatchDimToFront(value, value_bdim);
@@ -1123,22 +1136,28 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule_impl(
   auto batch_size = get_bdim_size3(self, self_bdim, index, index_bdim, value, value_bdim);
   self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
   index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
-  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+
+  if (inplace || value_bdim.has_value()) {
+    // Do for-loop for in-place because we cannot reshape
+    // `self_` having an incompatible stride without copying.
+    // If value has a batch dim, we do for-loop as well because
+    // index_fill_ supports 1-element tensor only.
+    for (const auto i : c10::irange(0, batch_size)) {
+      const auto& self_slice = self_.select(0, i);
+      const auto& index_slice = index_.select(0, i);
+      self_slice.index_fill_(
+        dim,
+        index_slice,
+        value_bdim.has_value() ? value_.select(0, i) : value_
+      );
+    }
+    return std::make_tuple(self_, 0);
+  }
 
   self_ = self_bdim.has_value() ? self_ : self_.clone();
 
-  for (const auto i : c10::irange(0, batch_size)) {
-    const auto& self_slice = self_.select(0, i);
-    const auto& index_slice = index_.select(0, i);
-    const auto& value_slice = value_.select(0, i);
-    self_slice.index_fill_(
-      dim,
-      index_slice,
-      value_slice
-    );
-  }
-
-  return std::make_tuple(self_, 0);
+  // calling .item() on value is safe here because value is guaranteed to not be a batched tensor.
+  return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());
 }
 
 void index_fill__int_scalar_batch_rule(
