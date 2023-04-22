@@ -2553,8 +2553,8 @@ def fn():
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
-    def test_cross_entropy_loss_fancy_ctor(self):
-        output = None
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/99726")
+    def test_cross_entropy_loss_fancy_ctor1(self):
         rand_5 = torch.randn(5)
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)
@@ -2569,6 +2569,22 @@ def fn():
         loss = torch.nn.CrossEntropyLoss(
             weight=rand_5, reduce=False, label_smoothing=0.5
         )
+        input = rand_3_5
+        output = loss(input, target)
+
+        self.assertTrue(torch.allclose(dynamo_output, output))
+
+    @requires_static_shapes
+    def test_cross_entropy_loss_fancy_ctor2(self):
+        rand_3_5 = torch.randn(3, 5)
+        target = torch.empty(3, dtype=torch.long).random_(5)
+
+        loss = torch.nn.CrossEntropyLoss(reduce=False, label_smoothing=0.5)
+        opt_loss = torch._dynamo.optimize("eager", nopython=True)(loss)
+        input = rand_3_5
+        dynamo_output = opt_loss(input, target)
+
+        loss = torch.nn.CrossEntropyLoss(reduce=False, label_smoothing=0.5)
         input = rand_3_5
         output = loss(input, target)
 
