@@ -1164,8 +1164,6 @@ def wrap_to_fake_tensor_and_record(
                         if e.size()[i] != dim:
                             curr_sizes[i] = None
 
-        tx.output.frame_state[name] = curr_sizes
-
         # TODO: index export_constraints ahead of time so we don't have to
         # do a linear scan every time here
         t_id = id(e)
@@ -1200,6 +1198,12 @@ def wrap_to_fake_tensor_and_record(
                 automatic_dynamic = config.automatic_dynamic_shapes and (
                     curr_sizes is None or curr_sizes[i] is None
                 )
+
+                # Reflect the user directive in the frame_state
+                # For dynamic, apply None always
+                if marked_dynamic:
+                    curr_sizes[i] = None
+
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints
@@ -1222,6 +1226,8 @@ def wrap_to_fake_tensor_and_record(
                 else:
                     dynamic = DimDynamic.DUCK
                 dynamic_dims.append(dynamic)
+
+        tx.output.frame_state[name] = curr_sizes
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
