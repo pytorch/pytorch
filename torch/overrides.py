@@ -20,6 +20,8 @@ please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
 instructions in the ``README.md`` in that directory.
 """
 
+import __future__  # noqa: F404
+
 import collections
 import functools
 import types
