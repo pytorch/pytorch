@@ -45,7 +45,6 @@ res2next50,pass,8
 resmlp_12_224,pass,8
 resnest101e,pass,8
 rexnet_100,pass,8
-sebotnet33ts_256,fail_accuracy,8
 selecsls42b,pass,8
 spnasnet_100,pass,8
 swin_base_patch4_window7_224,pass,8

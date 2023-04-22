@@ -629,6 +629,13 @@ class VariableBuilder:
             )
 
     def wrap_module(self, value: torch.nn.Module):
+        from ..eval_frame import OptimizedModule
+
+        if istype(value, OptimizedModule):
+            guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+            self.source = AttrSource(self.source, "_orig_mod")
+            return self.wrap_module(value._orig_mod).add_guards(guards)
+
         if (
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
             and not config.allow_rnn
