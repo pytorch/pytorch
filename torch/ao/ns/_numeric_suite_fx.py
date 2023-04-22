@@ -868,7 +868,7 @@ def _prepare_n_shadows_add_loggers_model(
     qconfig_mapping: QConfigMapping,
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
-    """
+    r"""
     Note: this API is not recommended for wide usage, it is only
     provided for customers who need to migrate from the `add_loggers`
     API.
@@ -893,7 +893,7 @@ def _prepare_n_shadows_add_loggers_model(
     .. code::
 
       x0_0 -> op0_0 -> x1_0 -> log -----> op1_0 -> x2_0 -> log
-       \\                        \\                           \\       # noqa: W605
+       \                        \                           \       # noqa: W605
          ---> op0_1 -> x1_1 ----> clog -> op1_0 -> x2_1 ----> clog
 
     Where op0_0 is op0, op0_1 is op0 wrapped in a submodule and quantized
