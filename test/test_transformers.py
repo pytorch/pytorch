@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
+
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
     r"""
@@ -45,7 +46,7 @@ def use_deterministic_algorithims(mode: bool, warn_only: bool):
     previous_warn_only: bool = torch.is_deterministic_algorithms_warn_only_enabled()
     try:
         torch.use_deterministic_algorithms(mode, warn_only=warn_only)
-        yield{}
+        yield {}
     except RuntimeError as err:
         raise err
     finally:
@@ -66,6 +67,7 @@ def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
     # Fill in the nans with the default rtol
     torch.nan_to_num_(deviation, nan=default_rtol[computed_value.dtype])
     return deviation.max().item()
+
 
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -165,7 +167,6 @@ class TestTransformers(NNTestCase):
             L = 4
             D = 8
             H = 4
-
 
             if attn_mask_dim == 2:
                 attn_mask = torch.randn(L, L, device=device) > 0
@@ -612,7 +613,6 @@ class TestTransformers(NNTestCase):
         with self.assertNoLogs(None):
             transformer_decoder(inputs, input_seq_len, memory)
 
-
     def test_encoder_is_causal(self):
 
         d_model = 3
@@ -625,7 +625,6 @@ class TestTransformers(NNTestCase):
         masked_output = layer(x, src_mask=mask)
 
         self.assertEqual(masked_output, is_causal_output)
-
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -692,7 +691,6 @@ class TestTransformers(NNTestCase):
                     src_lengths=src_lengths,
                     return_all_hiddens=False,
                 )[0]
-
 
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
@@ -1018,7 +1016,7 @@ class TestSDPA(NNTestCase):
                     torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
                     for _ in range(batch)])
         else:
-            assert(isinstance(seq_len, int))
+            assert (isinstance(seq_len, int))
             size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
             return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -1445,7 +1443,8 @@ class TestSDPA(NNTestCase):
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
         size = (2, 2, 4, head_dim)
-        q, k, v = make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True)
+        q, k, v = make_tensor(size, requires_grad=True), make_tensor(
+            size, requires_grad=True), make_tensor(size, requires_grad=True)
 
         with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
             math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
@@ -1454,7 +1453,6 @@ class TestSDPA(NNTestCase):
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
             flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
             self.assertEqual(math_ref, flash_ref, atol=1e-3, rtol=1e-3)
-
 
             flash_ref.mean().backward()
             self.assertEqual(math_ref.grad, flash_ref.grad, atol=1e-3, rtol=1e-3)
@@ -1667,7 +1665,8 @@ class TestSDPA(NNTestCase):
                                                                                        is_causal=is_causal, scale=scale))
                 return
             else:
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
@@ -1969,7 +1968,8 @@ class TestSDPA(NNTestCase):
                 result = torch.nested.nested_tensor([t[0] for _ in range(batch)], dtype=torch.float32)
             elif num_heads_broadcasted:
                 # (batch, seq_len, 1, head_dim) -> (batch, seq_len, num_heads, head_dim)
-                result = torch.nested.nested_tensor([x.expand(-1, num_heads, t.size(-1)) for x in t.unbind()], dtype=torch.float32)
+                result = torch.nested.nested_tensor([x.expand(-1, num_heads, t.size(-1))
+                                                    for x in t.unbind()], dtype=torch.float32)
             else:
                 result = t.to(torch.float32)
             return result
@@ -2009,7 +2009,8 @@ class TestSDPA(NNTestCase):
         # (1, 1, num_heads, head_dim) -> (batch, 1, num_heads, head_dim)
         query_expanded = torch.nested.nested_tensor([query.squeeze(0) for _ in range(batch)]).transpose(1, 2)
         # (batch, seq_lens, 1, head_dim) -> (batch, seq_lens, num_heads, head_dim)
-        value_expanded = torch.nested.nested_tensor([t.expand(-1, num_heads, head_dim_v) for t in value.unbind()]).transpose(1, 2)
+        value_expanded = torch.nested.nested_tensor(
+            [t.expand(-1, num_heads, head_dim_v) for t in value.unbind()]).transpose(1, 2)
 
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
@@ -2045,8 +2046,6 @@ class TestSDPA(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-
-
 
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
