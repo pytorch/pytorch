@@ -173,7 +173,7 @@ class QNNPackQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: QuantizationConfig = None
+        self.global_config: QuantizationConfig = None  # noqa
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -345,15 +345,15 @@ class QNNPackQuantizer(Quantizer):
             weight_node = None
             bias_node = None
             for ph in weight_or_bias:
-                weight_or_bias = getattr(gm, ph.target)
-                if weight_or_bias.ndim == 2:
+                weight_or_bias = getattr(gm, ph.target)  # noqa
+                if weight_or_bias.ndim == 2:  # noqa
                     weight_node = ph
-                if weight_or_bias.ndim == 1:
+                if weight_or_bias.ndim == 1:  # noqa
                     bias_node = ph
 
             # bias and output act
-            if _is_annotated([act_node]) == False:
-                act_node.meta["target_dtype_info"] = {
+            if _is_annotated([act_node]) == False:  # noqa
+                act_node.meta["target_dtype_info"] = {  # noqa
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(
                         quantization_config
@@ -362,8 +362,8 @@ class QNNPackQuantizer(Quantizer):
                     "bias_obs_or_fq_ctr": None,
                     "_annotated": True,
                 }
-            if bias_node and _is_annotated([bias_node]) == False:
-                bias_node.meta["target_dtype_info"] = {
+            if bias_node and _is_annotated([bias_node]) == False:  # noqa
+                bias_node.meta["target_dtype_info"] = {  # noqa
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(
                         quantization_config
@@ -372,8 +372,8 @@ class QNNPackQuantizer(Quantizer):
                     "bias_obs_or_fq_ctr": None,
                     "_annotated": True,
                 }
-            if _is_annotated([weight_node]) == False:
-                weight_node.meta["target_dtype_info"] = {
+            if _is_annotated([weight_node]) == False:  # noqa
+                weight_node.meta["target_dtype_info"] = {  # noqa
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(
                         quantization_config
@@ -394,6 +394,8 @@ class QNNPackQuantizer(Quantizer):
                 }
             _mark_nodes_as_annotated(list(match.nodes_map.values()))
 
+    # TODO: move to `_pt2e/_propagate_annotation.py` after we have
+    # decided on the how we want to use pattern matching for annotation
     def _annotate_maxpool2d(
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:

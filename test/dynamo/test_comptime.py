@@ -202,6 +202,14 @@ y = TensorVariable()
                 'code': None,
                 'obj_weakref': None
                 'guarded_class': None
+            }
+-
+            global '' DEFAULT_DEVICE
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
             }""",
         )
 

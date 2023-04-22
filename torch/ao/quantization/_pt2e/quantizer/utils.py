@@ -13,7 +13,7 @@ from torch.ao.quantization.observer import (
 
 
 def create_observer(observer_type, quantization_spec: QuantizationSpec, **extra_kwargs):
-    if quantization_spec == None:
+    if quantization_spec is None:
         return None
     kwargs = get_observer_kwargs(quantization_spec)
     # we will remove is_dynamic from QuantizationSpec because
@@ -62,7 +62,7 @@ def get_weight_obs_or_fq_ctr(quantization_config: QuantizationConfig):
         )
     observer_type = MinMaxObserver
     if quantization_spec.qscheme == torch.per_channel_symmetric:
-        observer_type = PerChannelMinMaxObserver
+        observer_type = PerChannelMinMaxObserver # noqa
     return create_observer(observer_type, quantization_spec, eps=2**-12)
 
 

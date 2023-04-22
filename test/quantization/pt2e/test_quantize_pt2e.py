@@ -452,11 +452,8 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 compute_sqnr(after_prepare_result, after_prepare_result_fx),
                 torch.tensor(float("inf")),
             )
-            # there are slight differences after convert due to different implementations
-            # of quant/dequant
+            self.assertEqual(after_quant_result, after_quant_result_fx)
             self.assertTrue(
-                torch.max(after_quant_result - after_quant_result_fx) < 1e-1
-            )
-            self.assertTrue(
-                compute_sqnr(after_quant_result, after_quant_result_fx) > 35
+                compute_sqnr(after_quant_result, after_quant_result_fx)
+                == torch.tensor(float("inf"))
             )
