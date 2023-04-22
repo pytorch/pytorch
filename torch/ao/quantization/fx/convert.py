@@ -110,8 +110,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     activation_post_process = modules[node.target]
     # skip replacing observers to quant/dequant nodes if the qconfigs of all
     # consumers and producers of this observer are None
-    skip_replacement = all(_has_none_qconfig(n, node_name_to_qconfig) for n in
-        list(node.args) + list(node.users.keys()))
+    skip_replacement = all([
+        _has_none_qconfig(n, node_name_to_qconfig) for n in
+        list(node.args) + list(node.users.keys())])
     if skip_replacement or not _is_conversion_supported(activation_post_process):
         # didn't find corresponding quantize op and info for the activation_post_process
         # so we just remove the observer
@@ -325,8 +326,9 @@ def _replace_observer_with_quantize_dequantize_node(
     activation_post_process = modules[node.target]
     # skip replacing observers to quant/dequant nodes if the qconfigs of all
     # consumers and producers of this observer are None
-    skip_replacement = all(_has_none_qconfig(n, node_name_to_qconfig) for n in
-        list(node.args) + list(node.users.keys()))
+    skip_replacement = all([
+        _has_none_qconfig(n, node_name_to_qconfig) for n in
+        list(node.args) + list(node.users.keys())])
     if skip_replacement or not _is_conversion_supported(activation_post_process):
         # didn't find corresponding quantize op and info for the activation_post_process
         # so we just remove the observer

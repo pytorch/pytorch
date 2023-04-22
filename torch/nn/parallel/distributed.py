@@ -1407,7 +1407,7 @@ class DistributedDataParallel(Module, Joinable):
             # We batch zero_grad for all params by resetting the whole grad
             # buffer when the grad of all params is set to None.
             all_param_grad_none = all(
-                param.grad is None for param in self._delay_all_reduce_params
+                [param.grad is None for param in self._delay_all_reduce_params]
             )
 
             for index, param in enumerate(self._delay_all_reduce_params):

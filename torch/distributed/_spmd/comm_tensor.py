@@ -122,7 +122,7 @@ class CommTensor(torch.Tensor):
 
     @classmethod
     def _is_supported(cls, op_name):
-        return any(comm in op_name for comm in cls._supported_comms)
+        return any([comm in op_name for comm in cls._supported_comms])
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

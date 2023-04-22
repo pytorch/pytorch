@@ -126,8 +126,8 @@ def cond_dense(pred, true_fn, false_fn, operands):
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
-    assert all(not f.requires_grad for f in flat_operands
-                if isinstance(f, torch.Tensor))
+    assert all([not f.requires_grad for f in flat_operands
+                if isinstance(f, torch.Tensor)])
 
     guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU))
     return cond(pred, true_fn, false_fn, *operands)

@@ -207,7 +207,7 @@ def generate_binconstraint_t(constraint, counter):
         if constraint.lhs == Dyn:
             return T(), counter
         elif isinstance(constraint.lhs, TensorType):
-            is_fully_static = all(d != Dyn for d in constraint.lhs.__args__)
+            is_fully_static = all([d != Dyn for d in constraint.lhs.__args__])
             if is_fully_static:
                 return BinConstraintT(constraint.lhs, constraint.rhs, op_eq), counter
             else:
@@ -403,7 +403,7 @@ def generate_calc_product(constraint, counter):
     for p in all_possibilities:
         p = list(p)
         # this tells us there is a dynamic variable
-        contains_dyn = not(all(constraint.op == op_neq for constraint in p))
+        contains_dyn = not(all([constraint.op == op_neq for constraint in p]))
         if contains_dyn:
             mid_var = [Dyn]
             total_constraints = lhs + mid_var + rhs
@@ -438,7 +438,7 @@ def generate_reshape(constraint, counter):
 
     target = constraint.target.__args__
 
-    is_fully_static = all(d != Dyn for d in target)
+    is_fully_static = all([d != Dyn for d in target])
 
     # dynamic tensor
     c1_dyn = BinConstraintT(constraint.src, Dyn, op_eq)
