@@ -1445,7 +1445,7 @@ class TestSDPA(NNTestCase):
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
         size = (2, 2, 4, head_dim)
-        q, k, v = make_tensor(size, requires_grad=True, make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True)
+        q, k, v = make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True)
 
         with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
             math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
