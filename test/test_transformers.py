@@ -1445,26 +1445,19 @@ class TestSDPA(NNTestCase):
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
         size = (2, 2, 4, head_dim)
-        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        q_with_grad = make_tensor(size, requires_grad=True)
-        k_with_grad = make_tensor(size, requires_grad=True)
-        v_with_grad = make_tensor(size, requires_grad=True)
+        q, k, v = make_tensor(size, requires_grad=True, make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True)
 
         with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
             math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
-            math_ref_with_grad = torch.nn.functional.scaled_dot_product_attention(q_with_grad, k_with_grad, v_with_grad, None, 0.0, False)
-            math_ref_with_grad.mean().backward()
-
+            math_ref.mean().backward()
 
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
             flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
             self.assertEqual(math_ref, flash_ref, atol=1e-3, rtol=1e-3)
 
-            flash_ref_with_grad = torch.nn.functional.scaled_dot_product_attention(q_with_grad, k_with_grad, v_with_grad, None, 0.0, False)
-            self.assertEqual(math_ref_with_grad, flash_ref_with_grad, atol=1e-3, rtol=1e-3)
 
-            flash_ref_with_grad.mean().backward()
-            self.assertEqual(math_ref_with_grad.grad, flash_ref_with_grad.grad, atol=1e-3, rtol=1e-3)
+            flash_ref.mean().backward()
+            self.assertEqual(math_ref.grad, flash_ref.grad, atol=1e-3, rtol=1e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused scaled dot product attention")
     def test_dispatch_fails_no_backend(self):
