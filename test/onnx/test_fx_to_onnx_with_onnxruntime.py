@@ -419,11 +419,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(3)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (x, y, z))
 
-    @pytorch_test_common.skip_min_ort_version(
-        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
-        version="1.15",
-        dynamic_only=True,
-    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
