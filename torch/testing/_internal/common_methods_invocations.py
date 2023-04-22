@@ -2792,19 +2792,21 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
     for size, noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
-        input_tensor = make_arg(size, noncontiguous=noncontiguous)
-        if np.product(size) == 0:
-            boundary_tensor = unsorted_tensor
-            sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
-        else:
-            boundary_tensor, sorter = torch.sort(unsorted_tensor)
-        side = "right" if right else "left"
+        input_sizes = ((), (M, M), size) if size == (M,) else (size,)
+        for input_size in input_sizes:
+            input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
+            if np.product(size) == 0:
+                boundary_tensor = unsorted_tensor
+                sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
+            else:
+                boundary_tensor, sorter = torch.sort(unsorted_tensor)
+            side = "right" if right else "left"
 
-        yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, right=right)
-        yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, side=side)
+            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, right=right)
+            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, side=side)
 
-        yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, right=right, sorter=sorter)
-        yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, side=side, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, right=right, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, side=side, sorter=sorter)
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
