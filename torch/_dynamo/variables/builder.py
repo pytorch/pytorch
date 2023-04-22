@@ -1059,6 +1059,7 @@ def wrap_fx_proxy_cls(
         sizes = [ConstantVariable(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
+        proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
             if val is None:
