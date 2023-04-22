@@ -662,12 +662,12 @@ class Operator:
     def any_opinfo_attr(self, attr):
         if not self.has_opinfo():
             raise RuntimeError()
-        return any([getattr(opinfo, attr) for opinfo in self.opinfos])
+        return any(getattr(opinfo, attr) for opinfo in self.opinfos)
 
     def all_opinfo_attr(self, attr):
         if not self.has_opinfo():
             raise RuntimeError()
-        return all([getattr(opinfo, attr) for opinfo in self.opinfos])
+        return all(getattr(opinfo, attr) for opinfo in self.opinfos)
 
     def supports_vjp(self):
         if self.name in FACTORY_FNS:

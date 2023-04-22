@@ -539,13 +539,11 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
         nonempty_tensors.append(t)
     assert len(nonempty_tensors) > 0
     assert all(
-        [
-            symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
-            or symbolic_helper._get_tensor_rank(t) is None
-            or symbolic_helper._get_tensor_rank(t)
-            == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
-            for t in nonempty_tensors
-        ]
+        symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+        or symbolic_helper._get_tensor_rank(t) is None
+        or symbolic_helper._get_tensor_rank(t)
+        == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
+        for t in nonempty_tensors
     )
     tensor_list.node().removeAllInputs()
     for t in nonempty_tensors:
@@ -1499,7 +1497,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     # TODO(justinchuby): Looks like this op is deprecated in torch
     sizes = symbolic_helper._get_tensor_sizes(input)
     dim = sizes[-len(padding) :] if sizes is not None else None
-    if dim is None or any([i is None for i in dim]):
+    if dim is None or any(i is None for i in dim):
         return symbolic_helper._unimplemented(
             "get_pool_ceil_padding", "input size not accessible", input
         )
@@ -1824,7 +1822,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
             # FIXME(justinchuby): Avoid catching Exception.
             # Catch a more specific exception instead.
             dim = None
-        if dim is None or any([i is None for i in dim]):
+        if dim is None or any(i is None for i in dim):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return symbolic_helper._unimplemented(
@@ -2453,7 +2451,7 @@ def _convolution(
         # Catch a more specific exception instead.
         kernel_shape = None
 
-    if kernel_shape is None or any([i is None for i in kernel_shape]):
+    if kernel_shape is None or any(i is None for i in kernel_shape):
         raise errors.SymbolicValueError(
             "Unsupported: ONNX export of convolution for kernel of unknown shape.",
             input,
@@ -6072,7 +6070,7 @@ def dim(g: jit_utils.GraphContext, self):
 def __contains_(g: jit_utils.GraphContext, self, element):
     unpacked_list = symbolic_helper._unpack_list(self)
     if all(
-        [symbolic_helper._is_constant(x) for x in unpacked_list]
+        symbolic_helper._is_constant(x) for x in unpacked_list
     ) and symbolic_helper._is_constant(element):
         return g.op(
             "Constant",
