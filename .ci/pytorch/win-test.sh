@@ -34,8 +34,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-# TODO: Move both of them to Windows AMI
-python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0
+# TODO: Move all of these to Windows AMI
+python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 pytest-resume==0.0.1
 
 run_tests() {
     # Run nvidia-smi if available

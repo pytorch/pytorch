@@ -904,7 +904,13 @@ def get_pytest_args(options, is_cpp_test=False):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", "--sw"]
+        rerun_options = ["-x", "--reruns=2"]
+
+        if IS_CI:
+            # Only use this option in the CI when resuming from the last run test behavior is needed
+            rerun_options.append("--resume")
+        else:
+            rerun_options.append("--sw")
 
     pytest_args = [
         "-vv",
