@@ -27,9 +27,13 @@ required = _RequiredParameter()
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
-        with torch.set_grad_enabled(self.defaults["differentiable"]):
-            return func(self, *args, **kwargs)
-
+        prev_grad = torch.is_grad_enabled()
+        try:
+            torch.set_grad_enabled(self.defaults['differentiable'])
+            ret = func(self, *args, **kwargs)
+        finally:
+            torch.set_grad_enabled(prev_grad)
+        return ret
     return _use_grad
 
 def _get_value(x):
