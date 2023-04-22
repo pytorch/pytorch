@@ -14,12 +14,7 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
     get_weight_obs_or_fq_ctr,
 )
 
-from torch.ao.quantization.observer import (
-    HistogramObserver,
-    MinMaxObserver,
-    PerChannelMinMaxObserver,
-    PlaceholderObserver,
-)
+from torch.ao.quantization.observer import PlaceholderObserver
 from torch.fx import Node
 
 from .quantizer import (
@@ -140,7 +135,7 @@ class QNNPackQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: QuantizationConfig = None
+        self.global_config: QuantizationConfig = None  # noqa
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -325,6 +320,8 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
 
+    # TODO: move to `_pt2e/_propagate_annotation.py` after we have
+    # decided on the how we want to use pattern matching for annotation
     def _annotate_maxpool2d(
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
