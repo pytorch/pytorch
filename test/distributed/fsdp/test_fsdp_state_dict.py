@@ -134,7 +134,7 @@ class TestFSDPStateDict(FSDPTest):
                 self._state_compare(model, model_new, assert_fn)
                 if check_buffers:
                     has_buffers = any(
-                        len(list(m.buffers())) for m in (model, model_new)
+                        [len(list(m.buffers())) for m in (model, model_new)]
                     )
                     if has_buffers:
                         self._state_compare(

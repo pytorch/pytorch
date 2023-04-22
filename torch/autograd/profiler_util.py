@@ -646,7 +646,7 @@ def _filter_stack_entry(entry):
         ("_internal/common_utils", "prof_func_call"),
         ("_internal/common_utils", "prof_meth_call"),
     ]
-    return all(not (f[0] in entry and f[1] in entry) for f in filtered_entries)
+    return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
 MEMORY_EVENT_NAME = "[memory]"
 OUT_OF_MEMORY_EVENT_NAME = "[OutOfMemory]"
@@ -692,10 +692,10 @@ def _build_table(
     if len(events) == 0:
         return ""
 
-    has_cuda_time = any(event.self_cuda_time_total > 0 for event in events)
-    has_cuda_mem = any(event.self_cuda_memory_usage > 0 for event in events)
+    has_cuda_time = any([event.self_cuda_time_total > 0 for event in events])
+    has_cuda_mem = any([event.self_cuda_memory_usage > 0 for event in events])
     has_input_shapes = any(
-        (event.input_shapes is not None and len(event.input_shapes) > 0) for event in events)
+        [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
 
     if sort_by is not None:
         events = EventList(sorted(
@@ -753,7 +753,7 @@ def _build_table(
         '# of Calls'
     )
     # Only append Node ID if any event has a valid (>= 0) Node ID
-    append_node_id = any(evt.node_id != -1 for evt in events)
+    append_node_id = any([evt.node_id != -1 for evt in events])
     if append_node_id:
         headers.append('Node ID')
 

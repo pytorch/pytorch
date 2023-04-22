@@ -1127,7 +1127,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
-            any(i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors)
+            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0
         )
 
@@ -1318,7 +1318,7 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any(check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)))
+        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """

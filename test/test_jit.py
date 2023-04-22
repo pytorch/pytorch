@@ -449,7 +449,7 @@ class TestJit(JitTestCase):
         buf.seek(0)
 
         files = zipfile.ZipFile(buf).filelist
-        self.assertTrue(any('archive/constants.pkl' == f.filename for f in files))
+        self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
 
     def test_script_fn_pkl(self):
         with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
@@ -6125,7 +6125,7 @@ a")
 
         @torch.jit.script
         def test_bool_arith_not(lhs):
-            if not (lhs is None):  # noqa: E714
+            if lhs is not None:
                 return 1
             else:
                 return 2

@@ -578,7 +578,7 @@ class VariableBuilder:
         if (
             istype(value, (tuple, list))
             and all(
-                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
+                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
             )
             and not config.dynamic_shapes
         ):
@@ -1047,7 +1047,7 @@ def wrap_fx_proxy_cls(
         else:
             return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
-        isinstance(x, int) for x in example_value
+        [isinstance(x, int) for x in example_value]
     ):
         sizes = [ConstantVariable(x) for x in example_value]
         return SizeVariable(sizes, **options)

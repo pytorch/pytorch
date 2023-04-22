@@ -73,7 +73,7 @@ def is_consistent(t1, t2):
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
-            all(is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__))
+            all([is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
     else:
         return False
 
@@ -98,7 +98,7 @@ def is_more_precise(t1, t2):
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
         return len(t1.__args__) == len(t2.__args__) and \
-            all(is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__))
+            all([is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.__args__, t2.__args__)])
 
     else:
         return False

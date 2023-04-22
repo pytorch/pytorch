@@ -4994,7 +4994,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 continue
             matched_names.add(node.name)
             # Match preceding dequantize
-            self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
+            self.assertTrue(all([arg.target == "dequantize" for arg in node.args]))
             # Match following quantize with the specific qparams and dtypes
             expected_scale, expected_zp, expected_dtype = node_name_to_expected_quantize_args[node.name]
             for user in node.users.keys():
@@ -6513,7 +6513,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             # Match preceding dequantize
             self.assertTrue(len(node.args) == 1 or len(node.args) == 2)
-            self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
+            self.assertTrue(all([arg.target == "dequantize" for arg in node.args]))
 
             # Match following quantize with the specific dtypes
             self.assertEqual(len(node.users), 1)

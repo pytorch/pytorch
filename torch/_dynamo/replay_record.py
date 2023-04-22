@@ -99,7 +99,7 @@ class ExecutionRecorder:
 
     @classmethod
     def _is_excl(cls, mod):
-        return any(mod.__name__ == excl for excl in cls.MOD_EXCLUDES)
+        return any([mod.__name__ == excl for excl in cls.MOD_EXCLUDES])
 
     # Convert ModuleRecords -> DummyModule tree
     @classmethod
