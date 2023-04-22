@@ -47,6 +47,17 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_basic_forced_memo_only(self):
+        x = torch.empty(2, 2, device="cpu")
+        y = torch.empty(4, 2, 2, device="cpu")
+        with FakeTensorMode() as mode:
+            x_fake = mode.from_tensor(x)
+            x2 = mode.from_tensor(x, memoized_only=True)
+            self.assertTrue(x2 is not None)
+            y = mode.from_tensor(y, memoized_only=True)
+            self.assertIs(y, None)
+
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
