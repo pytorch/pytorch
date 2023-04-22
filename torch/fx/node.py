@@ -12,7 +12,7 @@ from .._ops import ops as _ops
 if TYPE_CHECKING:
     from .graph import Graph
 
-__all__ = ['Node', 'map_arg', 'map_aggregate']
+__all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
 BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
                           torch.Tensor, torch.device, torch.memory_format, torch.layout]
@@ -36,6 +36,13 @@ _side_effectful_functions: Set[Callable] = {
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit}
+
+
+@compatibility(is_backward_compatible=False)
+def has_side_effect(fn: Callable) -> None:
+    _side_effectful_functions.add(fn)
+    return fn
+
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:

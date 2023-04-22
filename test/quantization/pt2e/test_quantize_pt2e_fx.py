@@ -7,7 +7,12 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 from torch._inductor.compile_fx import compile_fx
 from torch.ao.ns.fx.utils import compute_sqnr
-from torch.ao.quantization import get_default_qconfig, observer, QConfigMapping
+from torch.ao.quantization import (
+    get_default_qconfig,
+    observer,
+    QConfigMapping,
+    default_per_channel_symmetric_qnnpack_qconfig,
+)
 from torch.ao.quantization._quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
@@ -23,7 +28,12 @@ from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
     convert_to_reference_fx,
+    _convert_to_reference_decomposed_fx,
     prepare_fx,
+)
+
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -33,8 +43,10 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+import unittest
 
 
+# TODO: remove after quantizer API is more mature
 @skipIfNoQNNPACK
 class TestQuantizePT2EFX(QuantizationTestCase):
     def test_qconfig_none(self):
@@ -57,7 +69,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             qconfig = get_default_qconfig("qnnpack")
@@ -113,7 +124,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             qconfig = get_default_qconfig("qnnpack")
@@ -174,7 +184,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             qconfig = get_default_qconfig("qnnpack")
@@ -228,7 +237,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             node_occurrence = {
@@ -255,6 +263,56 @@ class TestQuantizePT2EFX(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    # TODO(jerryzh168): move all _convert_to_reference_decomposed_fx tests here
+    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
+    def test__convert_to_reference_decomposed_fx_per_channel_quant_module(self):
+        """ Test the result for per channel weight quant for reference modules
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M().eval()
+        qconfig_mapping = QConfigMapping().set_global(default_per_channel_symmetric_qnnpack_qconfig)
+        example_inputs = (torch.randn(1, 3, 10, 10),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
+        m(*example_inputs)
+        m_ref = copy.deepcopy(m)
+        m_ref = convert_to_reference_fx(m_ref, backend_config=get_qnnpack_backend_config())
+        m = _convert_to_reference_decomposed_fx(m, backend_config=get_qnnpack_backend_config())
+        expected_occurrence = {
+            # for input and output activations
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
+            # weight is per channel quantized
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel.default): 1,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 1,
+        }
+        import torch._dynamo as torchdynamo
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        res_ref = m_ref(*example_inputs)
+        res = m(*example_inputs)
+        self.assertEqual(res, res_ref)
+        # check the qmin/qmax for per channel quant
+        for n in m.graph.nodes:
+            if n.op == "call_function" and \
+               n.target == torch.ops.quantized_decomposed.quantize_per_channel.default:
+                _QUANT_MIN_INDEX = 4
+                _QUANT_MAX_INDEX = 5
+                self.assertEqual(n.args[_QUANT_MIN_INDEX], -127)
+                self.assertEqual(n.args[_QUANT_MAX_INDEX], 127)
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
@@ -281,13 +339,10 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
                     example_inputs = (torch.randn(2, 3, 4, 4),)
                     # program capture
-                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
-                    # https://github.com/pytorch/pytorch/issues/96274
                     export_module, guards = torchdynamo.export(
                         m,
                         *copy.deepcopy(example_inputs),
                         aten_graph=True,
-                        tracing_mode="real",
                     )
 
                     qconfig = get_default_qconfig("x86")
@@ -398,7 +453,6 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             backend_config = get_qnnpack_pt2e_backend_config()
@@ -425,7 +479,7 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
                 m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
             )
             after_prepare_result_fx = m_fx(*example_inputs)
-            m_fx = convert_to_reference_fx(m_fx, backend_config=backend_config)
+            m_fx = _convert_to_reference_decomposed_fx(m_fx, backend_config=backend_config)
 
             after_quant_result_fx = m_fx(*example_inputs)
 
@@ -437,9 +491,5 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
             )
             # there are slight differences after convert due to different implementations
             # of quant/dequant
-            self.assertTrue(
-                torch.max(after_quant_result - after_quant_result_fx) < 1e-1
-            )
-            self.assertTrue(
-                compute_sqnr(after_quant_result, after_quant_result_fx) > 35
-            )
+            self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
+            self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
