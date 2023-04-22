@@ -23,6 +23,7 @@ from .common import (
     CppWrapperKernelArgs,
     CSEVariable,
     DeferredIndentedBuffer,
+    DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
@@ -887,7 +888,7 @@ class CppKernel(Kernel):
                 line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
@@ -902,7 +903,6 @@ class CppKernel(Kernel):
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
             self.stores.writelines(
-                None,
                 [
                     f"if ({tmpvar}.value {compare_op} {value}) {{",
                     f"    {tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};",
@@ -918,7 +918,7 @@ class CppKernel(Kernel):
                 f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
             )
             self.stores.writeline(
-                None, f"{reduction_combine(reduction_type, tmpvar, value)};"
+                f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
 
         if name not in V.graph.removed_buffers:
@@ -1054,7 +1054,7 @@ class CppKernel(Kernel):
         prior = (self.loads, self.compute, self.stores, self.cse)
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = DeferredIndentedBuffer()
+        self.stores = IndentedBuffer()
         self.cse = self.cse.clone()
         yield
         self.reduction_suffix.splice(self.loads)
@@ -1129,7 +1129,7 @@ class CppVecKernel(CppKernel):
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
         assert new_index != expanded_index
         line = f"{value}.store({var} + {cexpr(new_index)});"
-        self.stores.writeline(name, line)
+        self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert reduction_type in {"max", "min", "sum"}
@@ -1171,7 +1171,7 @@ class CppVecKernel(CppKernel):
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
-            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+            f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
         reduce_all_body = "{"
@@ -1310,7 +1310,7 @@ class CppTile2DKernel(CppVecKernel):
             )
             # vector store inside the kernel inner loop
             line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
-            self.stores.writeline(name, line)
+            self.stores.writeline(DeferredLine(name, line))
         else:
             new_index = self.scale_index_with_offset(
                 expanded_index,
@@ -1707,7 +1707,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var):
+            def indirect_indexing(index_var, size):
                 self.simd_vec = False
                 return sympy.Symbol(str(index_var))
 

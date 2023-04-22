@@ -6,6 +6,7 @@ import importlib
 import itertools
 import os
 import random
+import subprocess
 import sys
 import typing
 import unittest
@@ -7286,6 +7287,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
                 inps = torch.randn([5, 5])
                 fn_opt(inps)
+
+        def test_indirect_device_assert(self):
+            dir_path = os.path.dirname(os.path.realpath(__file__))
+            test_path = os.path.join(dir_path, "indirect_assert_helper.py")
+            fns = ("first_arg", "store", "second_arg", "same_pm_one", "same_pp_one")
+
+            for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
+                proc = subprocess.Popen(
+                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                stderr = proc.communicate()[1]
+                self.assertTrue(
+                    any(
+                        "index out of bounds" in err.decode("utf-8")
+                        for err in stderr.splitlines()
+                    ),
+                    f"{fn}, {ndims}, {dyn_shape}",
+                )
 
 
 class ExprPrinterTests(TestCase):
