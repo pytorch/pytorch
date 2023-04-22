@@ -296,33 +296,42 @@ test_perf_for_dashboard() {
     # Run accuracy test for inductor with different configs
     # --disable-cudagraphs is the default inductor behavior
     # TODO: update here once cudagraphs is turned on as default
-    if [[ "${TEST_CONFIG}" != *max_autotune* ]]; then
+    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+      # Only run this one config for max-autotune
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+    else
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
       python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+          --dynamic-batch-only --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
     fi
-    # Only test this one config for max-autotune
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
 
     # Run performance test
-    if [[ "${TEST_CONFIG}" != *max_autotune* ]]; then
+    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+      # Only run this one config for max-autotune
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
+    else
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
           --dynamic-batch-only --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
     fi
-    # Only test this one config for max-autotune
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
   done
 }
 
