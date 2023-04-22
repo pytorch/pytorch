@@ -143,10 +143,13 @@ def set_logs(
         over this function, so if it was set, this function does nothing.
 
     A component is a set of related features in PyTorch. All of the log
-    messages emitted from a given component has its own log level setting.
+    messages emitted from a given component have their own log levels. If the
+    log level of a particular message has priority greater than or equal to its
+    component's log level setting, it is emitted. Otherwise, it is supressed.
     This allows you to, for instance, silence large groups of log messages that
     are not relevant to you and increase verbosity of logs for components that
-    are relevant. The expected log level values are:
+    are relevant. The expected log level values, ordered from highest to lowest
+    priority, are:
 
         * ``logging.CRITICAL``
         * ``logging.ERROR``
@@ -158,8 +161,11 @@ def set_logs(
     See documentation for the Python ``logging`` module for more information on
     log levels: `<https://docs.python.org/3/library/logging.html#logging-levels>`_
 
-    An artifact is a particular type of log message within a component.
-    A component can emit many different kinds of artifacts.
+    An artifact is a particular type of log message. Each artifact is assigned
+    to a parent component. A component can emit many different kinds of
+    artifacts. In general, an artifact is emitted if either its corresponding
+    setting in the argument list below is turned on or if its parent component
+    is set to a log level less than or equal to the log level of the artifact.
 
     Keyword args:
         dynamo (:class:`int`):
