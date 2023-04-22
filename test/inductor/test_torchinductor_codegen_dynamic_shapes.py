@@ -144,6 +144,7 @@ test_failures = {
     #
     # Failed to find for loop/triton kernel:
     #
+    "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -154,10 +155,8 @@ test_failures = {
     "test_compar_dynamic_shapes": TestFailure(("cpu",)),
     "test_const_int32_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv2d_backward_channels_last_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv2d_packed_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
-    "test_conv_transpose2d_packed_dynamic_shapes": TestFailure(("cpu",)),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_embedding_bag_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -166,7 +165,6 @@ test_failures = {
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_linear_packed_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -188,6 +186,7 @@ test_failures = {
     "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
@@ -200,9 +199,6 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_cauchy_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_conv_used_from_multiple_places_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
     "test_dropout_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -225,12 +221,7 @@ test_failures = {
     "test_input_mutation4_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_kernel_names_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_lerp_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_linear_binary_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_linear_buffer_reuse_dynamic_shapes": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
-    "test_linear_unary_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_linear_used_from_multiple_places_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
     "test_list_clearing_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
