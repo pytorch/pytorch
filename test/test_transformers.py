@@ -1453,6 +1453,8 @@ class TestSDPA(NNTestCase):
         with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
             math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
             math_ref_with_grad = torch.nn.functional.scaled_dot_product_attention(q_with_grad, k_with_grad, v_with_grad, None, 0.0, False)
+            math_ref_with_grad.mean().backward()
+
 
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
             flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
@@ -1460,6 +1462,9 @@ class TestSDPA(NNTestCase):
 
             flash_ref_with_grad = torch.nn.functional.scaled_dot_product_attention(q_with_grad, k_with_grad, v_with_grad, None, 0.0, False)
             self.assertEqual(math_ref_with_grad, flash_ref_with_grad, atol=1e-3, rtol=1e-3)
+
+            flash_ref_with_grad.mean().backward()
+            self.assertEqual(math_ref_with_grad.grad, flash_ref_with_grad.grad, atol=1e-3, rtol=1e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused scaled dot product attention")
     def test_dispatch_fails_no_backend(self):
