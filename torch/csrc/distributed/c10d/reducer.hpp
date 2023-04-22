@@ -60,25 +60,25 @@ class TORCH_API Reducer {
       std::unordered_map<size_t, std::string> param_names,
       int64_t first_bucket_bytes_cap);
 
-  ~Reducer() noexcept(false);
+  virtual ~Reducer() noexcept(false);
 
   // To (re-)initialize bucket assignment, pass a list of buckets, each of
   // which is specified by a list of indices in the bucket's `variables` list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  virtual void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
-  void autograd_hook(size_t index);
+  virtual void autograd_hook(size_t index);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
-  void prepare_for_backward(const std::vector<at::Tensor>& outputs);
+  virtual void prepare_for_backward(const std::vector<at::Tensor>& outputs);
 
   // Called at the beginning of forward() inside DistributedDataParallel,
   // right now it captures the starting time of forward in each iteration.
-  void prepare_for_forward();
+  virtual void prepare_for_forward();
 
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The
@@ -108,7 +108,7 @@ class TORCH_API Reducer {
       GradBucket& grad_bucket);
 
   // Runs default allreduce hook.
-  c10::intrusive_ptr<c10::ivalue::Future> run_allreduce_hook(
+  virtual c10::intrusive_ptr<c10::ivalue::Future> run_allreduce_hook(
     GradBucket& grad_bucket);
 
   // Returns gradient buckets in sequential order of buckets_. This is the order
@@ -128,7 +128,7 @@ class TORCH_API Reducer {
   // For find_unused_parameters = false case, buckets are only rebuilt once,
   // the performance cost is negligible. Returns true if the buckets were
   // rebuilt.
-  bool rebuild_buckets();
+  virtual bool rebuild_buckets();
 
   // Install futures that should be awaited at end of backwards. Currently these
   // are only used by user-defined custom buffer reduction hooks, but can be generalized
@@ -165,7 +165,7 @@ class TORCH_API Reducer {
   void set_static_graph();
 
   // Delay all reduce to be after all gradients' calculation is complete.
-  void delay_all_reduce();
+  virtual void delay_all_reduce();
 
   void set_mixed_precision_param_dtype(c10::ScalarType dtype);
 
@@ -250,17 +250,17 @@ class TORCH_API Reducer {
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::Work> local_used_work_;
 
-  void mark_variable_ready_dense(size_t variable_index);
+  virtual void mark_variable_ready_dense(size_t variable_index);
 
-  void mark_variable_ready_sparse(size_t variable_index);
+  virtual void mark_variable_ready_sparse(size_t variable_index);
 
-  void mark_variable_ready(size_t variable_index);
+  virtual void mark_variable_ready(size_t variable_index);
 
-  void mark_bucket_ready(size_t bucket_index);
+  virtual void mark_bucket_ready(size_t bucket_index);
 
-  void finalize_bucket_dense(Bucket& bucket);
+  virtual void finalize_bucket_dense(Bucket& bucket);
 
-  void finalize_backward();
+  virtual void finalize_backward();
 
   // Returns list of model parameters corresponding to the given bucket.
   // bucket_index is a key to cache after buckets are rebuilt, after which this
@@ -274,7 +274,7 @@ class TORCH_API Reducer {
 
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
-  void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+  virtual void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
 
   // We'd like to use DistAutogradContext::GradCallback here but dist autograd
   // doesn't exist under Windows. So we just directly use the concrete type but
@@ -289,23 +289,23 @@ class TORCH_API Reducer {
           value,
       "");
 #endif
-  void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
+  virtual void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's
   // gradient into the bucket's flattened `gradients` tensor. Views serve as
   // entry points to `copy_()` each grad's data in/out of the flattened
   // `gradients` tensor.
-  void initialize_bucket_views(Bucket& bucket);
+  virtual void initialize_bucket_views(Bucket& bucket);
 
   // This function is called inside `finalize_backward`, it happens only if
   // DDP communication hook was registered to recreate just bucket_views_out
   // with the result of `future_work`.
-  void populate_bucket_views_out(Bucket& bucket, at::Tensor& tensor);
+  virtual void populate_bucket_views_out(Bucket& bucket, at::Tensor& tensor);
 
   // If gradient_as_bucket_view_ is false, after allreduce buckets,
   // copy bucket results back to grads.
-  void copy_bucket_to_grad(
+  virtual void copy_bucket_to_grad(
       at::Tensor& variable,
       Reducer::Bucket& bucket,
       size_t intra_bucket_index,
@@ -472,7 +472,7 @@ class TORCH_API Reducer {
   // grad as ready for communication. Map will change after 1st iteration to
   // track a grad is ready for communication or not.
   std::unordered_map<size_t, int> numGradHooksTriggeredMapPerIteration_;
-
+ protected:
   // reset counting for buckets before backward starts
   void reset_bucket_counting();
   // search unused parameters beore backward starts
@@ -483,7 +483,7 @@ class TORCH_API Reducer {
   void all_reduce_bucket(Bucket& bucket);
   // kick off all reduce to local used map, it can help find global unused
   // parameters
-  void all_reduce_local_used_map();
+  virtual void all_reduce_local_used_map();
   // initialize locally used parameter maps
   void initialize_local_used_map();
   // get current cuda stream
