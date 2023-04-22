@@ -69,7 +69,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             qconfig = get_default_qconfig("qnnpack")
@@ -125,7 +124,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             qconfig = get_default_qconfig("qnnpack")
@@ -186,7 +184,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             qconfig = get_default_qconfig("qnnpack")
@@ -240,7 +237,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             node_occurrence = {
@@ -301,7 +297,6 @@ class TestQuantizePT2EFX(QuantizationTestCase):
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
-            tracing_mode="real",
         )
         self.checkGraphModuleNodes(
             m,
@@ -344,13 +339,10 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
                     example_inputs = (torch.randn(2, 3, 4, 4),)
                     # program capture
-                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
-                    # https://github.com/pytorch/pytorch/issues/96274
                     export_module, guards = torchdynamo.export(
                         m,
                         *copy.deepcopy(example_inputs),
                         aten_graph=True,
-                        tracing_mode="real",
                     )
 
                     qconfig = get_default_qconfig("x86")
@@ -461,7 +453,6 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             backend_config = get_qnnpack_pt2e_backend_config()
