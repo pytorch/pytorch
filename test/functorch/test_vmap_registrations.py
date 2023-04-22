@@ -172,8 +172,6 @@ xfail_not_implemented = {
     "aten::matrix_exp_backward",
     "aten::max.names_dim",
     "aten::max.names_dim_max",
-    "aten::max_pool1d",
-    "aten::max_pool3d",
     "aten::mean.names_dim",
     "aten::median.names_dim",
     "aten::median.names_dim_values",

@@ -20,6 +20,7 @@ import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
+    get_report_path,
     IS_CI,
     is_slow_gradcheck_env,
     parser as common_parser,
@@ -54,6 +55,8 @@ except ImportError:
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+CPP_TEST_PREFIX = "cpp"
+CPP_TEST_PATH = "build/bin"
 
 
 # Note [ROCm parallel CI testing]
@@ -84,12 +87,15 @@ def strtobool(s):
 
 def discover_tests(
     base_dir: Optional[pathlib.Path] = None,
+    cpp_tests_dir: Optional[pathlib.Path] = None,
     blocklisted_patterns: Optional[List[str]] = None,
     blocklisted_tests: Optional[List[str]] = None,
     extra_tests: Optional[List[str]] = None,
 ) -> List[str]:
     """
-    Searches for all python files starting with test_ excluding one specified by patterns
+    Searches for all python files starting with test_ excluding one specified by patterns.
+    If cpp_tests_dir is provided, also scan for all C++ tests under that directory. They
+    are usually found in build/bin
     """
 
     def skip_test_p(name: str) -> bool:
@@ -105,7 +111,25 @@ def discover_tests(
     all_py_files = [
         pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)
     ]
+
+    cpp_tests_dir = (
+        f"{cwd.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
+    )
+    # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
+    # are just binaries and could have any name, i.e. basic or atest
+    all_cpp_files = [
+        pathlib.Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
+    ]
+
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
+    # Add the cpp prefix for C++ tests so that we can tell them apart
+    rc.extend(
+        [
+            f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
+            for fname in all_cpp_files
+        ]
+    )
+
     # Invert slashes on Windows
     if sys.platform == "win32":
         rc = [name.replace("\\", "/") for name in rc]
@@ -124,7 +148,7 @@ TESTS = discover_tests(
         "fx",  # executed by test_fx.py
         "jit",  # executed by test_jit.py
         "mobile",
-        "onnx",
+        "onnx_caffe2",
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
@@ -151,6 +175,20 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "onnx/test_pytorch_onnx_onnxruntime_cuda",
+        "onnx/test_models",
+        # These are not C++ tests
+        f"{CPP_TEST_PREFIX}/CMakeFiles",
+        f"{CPP_TEST_PREFIX}/CTestTestfile.cmake",
+        f"{CPP_TEST_PREFIX}/Makefile",
+        f"{CPP_TEST_PREFIX}/cmake_install.cmake",
+        f"{CPP_TEST_PREFIX}/c10_intrusive_ptr_benchmark",
+        f"{CPP_TEST_PREFIX}/example_allreduce",
+        f"{CPP_TEST_PREFIX}/parallel_benchmark",
+        f"{CPP_TEST_PREFIX}/protoc",
+        f"{CPP_TEST_PREFIX}/protoc-3.13.0.0",
+        f"{CPP_TEST_PREFIX}/torch_shm_manager",
+        f"{CPP_TEST_PREFIX}/tutorial_tensorexpr",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -237,6 +275,7 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ]
 
+# The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
@@ -253,12 +292,15 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
+# Test files that should always be run serially with other test files,
+# but it's okay if the tests inside them are run in parallel with each other.
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
     "test_cpp_api_parity",
     "test_reductions",
     "test_cuda",
+    "test_cuda_expandable_segments",
     "test_jit_cuda_fuser",  # OOM on test_issue_1785, also profiling?
     "test_indexing",
     "test_fx_backends",
@@ -290,6 +332,14 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+]
+# A subset of onnx tests that cannot run in parallel due to high memory usage.
+ONNX_SERIAL_LIST = [
+    "onnx/test_models",
+    "onnx/test_models_quantized_onnxruntime",
+    "onnx/test_models_onnxruntime",
+    "onnx/test_custom_ops",
+    "onnx/test_utility_funs",
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -359,6 +409,8 @@ JIT_EXECUTOR_TESTS = [
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
+CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -388,11 +440,19 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, disable_coverage=False):
+def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     if options.coverage and not disable_coverage:
-        executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
+        if not is_cpp_test:
+            executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
+        else:
+            # TODO: C++ with coverage is not yet supported
+            executable = []
     else:
-        executable = [sys.executable, "-bb"]
+        if not is_cpp_test:
+            executable = [sys.executable, "-bb"]
+        else:
+            executable = ["pytest"]
+
     return executable
 
 
@@ -405,9 +465,11 @@ def run_test(
     env=None,
 ) -> int:
     maybe_set_hip_visible_devies()
+
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module
     if isinstance(test_file, ShardedTest):
+        # C++ tests work with pytest sharding
         unittest_args.extend(
             [
                 f"--shard-id={test_module.shard - 1}",
@@ -418,24 +480,30 @@ def run_test(
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
+
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
             arg for arg in unittest_args if not arg.startswith("--run-parallel")
         ]
+
     if extra_unittest_args:
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
 
+    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
-        unittest_args.extend(get_pytest_args(options))
+        unittest_args.extend(get_pytest_args(options, is_cpp_test=is_cpp_test))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    if IS_CI:
+
+    # TODO: These features are not available for C++ test yet
+    if IS_CI and not is_cpp_test:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
+
     if test_file in PYTEST_SKIP_RETRIES:
         if not options.pytest:
             raise RuntimeError(
@@ -445,11 +513,25 @@ def run_test(
         unittest_args = [arg for arg in unittest_args if "--reruns" not in arg]
 
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(options)
+    executable = get_executable_command(options, is_cpp_test=is_cpp_test)
+    if not executable:
+        # If there is no eligible executable returning here, it means an unsupported
+        # case such as coverage for C++ test. So just returning ok makes sense
+        return 0
 
-    # Can't call `python -m unittest test_*` here because it doesn't run code
-    # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_file + ".py"] + unittest_args
+    if test_file.startswith(CPP_TEST_PREFIX):
+        # C++ tests are in CPP_TEST_PATH, not the regular test directory
+        argv = [
+            os.path.join(
+                pathlib.Path(test_directory).parent,
+                CPP_TEST_PATH,
+                test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
+            )
+        ] + unittest_args
+    else:
+        # Can't call `python -m unittest test_*` here because it doesn't run code
+        # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
+        argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(
@@ -458,6 +540,7 @@ def run_test(
         suffix=".log",
     )
     os.close(log_fd)
+
     command = (launcher_cmd or []) + executable + argv
     should_file_rerun = (
         "--subprocess" not in command
@@ -467,6 +550,7 @@ def run_test(
     )
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+
     with open(log_path, "w") as f:
         ret_code = retry_shell(
             command,
@@ -478,8 +562,18 @@ def run_test(
             retries=1 if should_file_rerun else 0,
         )
 
+        # Pytest return code 5 means no test is collected. This is needed
+        # here as we use pytest directly when running C++ tests. Return
+        # code 4 is ok too as this happens when the binary is not a C++
+        # test executable. All binary files under build/bin that are not
+        # C++ test at the time of this writing have been excluded, but we
+        # can accept code 4 too just in case a new non-test binary file
+        # comes up in the future.
+        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
+
     return ret_code
 
 
@@ -799,7 +893,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def get_pytest_args(options):
+def get_pytest_args(options, is_cpp_test=False):
     if RERUN_DISABLED_TESTS:
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -813,12 +907,23 @@ def get_pytest_args(options):
         rerun_options = ["-x", "--reruns=2", "--sw"]
 
     pytest_args = [
-        "--use-pytest",
         "-vv",
         "-rfEX",
         "-p",
         "no:xdist",
     ]
+    if not is_cpp_test:
+        # C++ tests need to be run with pytest directly, not via python
+        pytest_args.append("--use-pytest")
+    else:
+        # NB: Use --junit-xml to generate the C++ test report for now in
+        # pytest format. Note that this format is different than the one
+        # used by unittest via --junit-xml-reruns. But this is ok as we
+        # only need to deal with this later to support disable flaky and
+        # slow C++ tests
+        test_report_path = get_report_path(pytest=True)
+        pytest_args.extend(["--junit-xml", test_report_path])
+
     pytest_args.extend(rerun_options)
     return pytest_args
 
@@ -901,11 +1006,26 @@ def parse_args():
         help=("If this flag is present, we will only run test_mps and test_metal"),
     )
     parser.add_argument(
+        "--cpp",
+        "--cpp",
+        action="store_true",
+        help=("If this flag is present, we will only run C++ tests"),
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
         help="Only run core tests, or tests that validate PyTorch's ops, modules,"
         "and autograd. They are defined by CORE_TEST_LIST.",
+    )
+    parser.add_argument(
+        "--onnx",
+        "--onnx",
+        action="store_true",
+        help=(
+            "Only run ONNX tests, or tests that validate PyTorch's ONNX export. "
+            "If this flag is not present, we will exclude ONNX tests."
+        ),
     )
     parser.add_argument(
         "-pt",
@@ -1099,6 +1219,7 @@ def must_serial(file: str) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in JIT_EXECUTOR_TESTS
+        or file in ONNX_SERIAL_LIST
     )
 
 
@@ -1130,11 +1251,26 @@ def get_selected_tests(options):
     if options.functorch:
         selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
 
+    if options.cpp:
+        selected_tests = [tname for tname in selected_tests if tname in CPP_TESTS]
+    else:
+        # Exclude all C++ tests otherwise as they are still handled differently
+        # than Python test at the moment
+        options.exclude.extend(CPP_TESTS)
+
     if options.mps:
         selected_tests = ["test_mps", "test_metal"]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
+
+    # Filter to only run onnx tests when --onnx option is specified
+    onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
+    if options.onnx:
+        selected_tests = onnx_tests
+    else:
+        # Exclude all onnx tests otherwise
+        options.exclude.extend(onnx_tests)
 
     # process reordering
     if options.bring_to_front:
@@ -1318,14 +1454,17 @@ def main():
     )
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
-    def success_callback(err_message):
+    def handle_error_messages(err_message):
         if err_message is None:
-            return True
+            return False
         failure_messages.append(err_message)
         print_to_stderr(err_message)
-        if not options.continue_through_error:
+        return True
+
+    def parallel_test_completion_callback(err_message):
+        test_failed = handle_error_messages(err_message)
+        if test_failed and not options.continue_through_error:
             pool.terminate()
-        return False
 
     try:
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
@@ -1336,7 +1475,7 @@ def main():
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
-                callback=success_callback,
+                callback=parallel_test_completion_callback,
             )
         pool.close()
         pool.join()
@@ -1356,12 +1495,9 @@ def main():
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
-            if err_message is None:
-                continue
-            failure_messages.append(err_message)
-            if not options_clone.continue_through_error:
+            test_failed = handle_error_messages(err_message)
+            if test_failed and not options.continue_through_error:
                 raise RuntimeError(err_message)
-            print_to_stderr(err_message)
     finally:
         pool.terminate()
         pool.join()

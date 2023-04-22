@@ -1,4 +1,4 @@
-merge_base_with = "origin/master"
+merge_base_with = "origin/main"
 
 [[linter]]
 code = 'FLAKE8'
@@ -174,6 +174,8 @@ include_patterns = [
     'torch/_dynamo/optimizations/__init__.py',
     'torch/_dynamo/optimizations/backends.py',
     'torch/_dynamo/optimizations/training.py',
+    'torch/_dynamo/debug_utils.py',
+    'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/graph.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
@@ -623,6 +625,7 @@ include_patterns = [
 exclude_patterns = [
     'aten/src/ATen/test/**',
     'c10/cuda/CUDAFunctions.h',
+    'c10/cuda/CUDACachingAllocator.cpp',
 ]
 command = [
     'python3',
@@ -657,8 +660,8 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=cudaSetDevice',
-    '--pattern=cudaGetDevice',
+    '--pattern=cudaSetDevice(',
+    '--pattern=cudaGetDevice(',
     '--linter-name=RAWCUDADEVICE',
     '--error-name=raw CUDA API usage',
     """--error-description=\
