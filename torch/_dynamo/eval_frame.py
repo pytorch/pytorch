@@ -15,6 +15,7 @@ import types
 import warnings
 import weakref
 from enum import Enum
+from os.path import dirname, join
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
@@ -26,7 +27,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
-from ..onnx._internal.fx.dynamo_exporter import _wrap_model_with_output_adapter
 from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
@@ -79,7 +79,7 @@ most_recent_backend: Optional[CompilerFn] = None
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
-    inspect.getsourcefile(_wrap_model_with_output_adapter),
+    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_exporter.py"),
 }
 
 
