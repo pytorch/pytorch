@@ -1052,6 +1052,7 @@ def wrap_fx_proxy_cls(
         sizes = [ConstantVariable(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
+        proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
             if val is None:
@@ -1183,7 +1184,9 @@ def wrap_to_fake_tensor_and_record(
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
                 # NB: both static and dynamic have precedence over
-                automatic_dynamic = curr_sizes is None or curr_sizes[i] is None
+                automatic_dynamic = config.automatic_dynamic_shapes and (
+                    curr_sizes is None or curr_sizes[i] is None
+                )
 
                 # Reflect the user directive in the frame_state
                 # For dynamic, apply None always
