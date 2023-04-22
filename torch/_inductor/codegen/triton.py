@@ -685,7 +685,7 @@ class TritonKernel(Kernel):
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
         last_numel = self.numels[-1]
-        if config.dynamic_shapes:
+        if dynamo_config.dynamic_shapes:
             if not isinstance(last_numel, (int, sympy.Integer)):
                 # Not static
                 return False
