@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: serialization"]
 
 import torch
@@ -926,7 +927,7 @@ class TestSerialization(TestCase, SerializationMixin):
             test(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with (TemporaryDirectoryName(suffix='中文路径测试') as dname,
+            with (TemporaryDirectoryName(suffix='非ASCIIパス') as dname,
                   TemporaryFileName(dir=dname) as fname):
                 test(fname)
 
