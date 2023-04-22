@@ -1,10 +1,11 @@
 from contextlib import contextmanager
-from copy import copy
+from copy import copy, deepcopy
 from typing import Any, Dict, List
 from unittest import mock
 
 import torch
 from torch._dynamo.utils import assert_no_fake_params_or_buffers, check_all_fake
+from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 import torch.utils._pytree as pytree
 from torch import fx
@@ -13,7 +14,7 @@ from torch._dynamo.backends.registry import lookup_backend
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 from torch.func import functionalize
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, PythonKeyTracer, make_fx
 from torch.fx.interpreter import Interpreter
 from torch._guards import detect_fake_mode
 from torch.nn.utils import stateless
@@ -52,64 +53,13 @@ def _rematerialize_optimizer(
         param_group["params"] = orig_params
         opt.state.update(orig_states)
 
-
-def materialize_module(m):
-    # TODO: handle children
-
-    outputs = []
-
-    def mark_for_materialize(tensors):
-        for k, t in tensors.items():
-            if t is None:
-                continue
-            outputs.append(t.proxy.node)
-
-    mark_for_materialize(m._parameters)
-    mark_for_materialize(m._buffers)
-
-    m._deferred.graph.output(outputs)
-    m._deferred.graph.eliminate_dead_code()  # hmmm
-    recomp = GraphModule(m._deferred.root, m._deferred.graph)
-    results = recomp()
-    results_iter = iter(results)
-
-    def replace_results(tensors):
-        for k, t in tensors.items():
-            if t is None:
-                continue
-            tensors[k] = next(results_iter)
-
-    replace_results(m._parameters)
-    replace_results(m._buffers)
-
-    del m._deferred
-
-def materialize_params(root, graph, params_flat):
-    # TODO: handle children
-    
-    outputs = []
-    # need to confirm same faketensor used for params_flat as for init graph!
-    def mark_for_materialize(tensors):
-        for t in tensors:
-            if t is None:
-                continue
-            outputs.append(t.proxy.node)
-
-    mark_for_materialize(params_flat)
-
-    graph.output(outputs)
-    graph.eliminate_dead_code()  # hmmm
-    recomp = GraphModule(root, graph)
-    results = recomp()
-    results_iter = iter(results)
-
-    def replace_results(tensors):
-        for i, t in enumerate(tensors):
-            if t is None:
-                continue
-            tensors[i] = next(results_iter)
-
-    replace_results(params_flat)
+def get_deferred_modes():
+    fx_tracer = PythonKeyTracer()
+    fx_tracer.graph = Graph(fx_tracer)
+    fx_tracer.root = torch.nn.Module()
+    fx_tracer.tensor_attrs = {}
+    proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode="real")
+    return proxy_mode, fx_tracer
 
 
 def train_step_compiler(backend_compile_fn):
@@ -211,33 +161,50 @@ def train_step_compiler(backend_compile_fn):
             opt = optimizers["__optimizer_0"]
             dev = params_flat[0].device
 
-            # allow_non_fake_inputs
-            #
-            # the reason for allow_non_fake_inputs is that we are initializing optimizer states implicitly
-            # on the first invocation, and the _init_group function creates size-0 tensors with real values
-            # which upset FakeTensor otherwise.
+            # In order to trace optimizer _init_group, param grads must exist.
+            # But if I run the train_step graph to make param grads exist, it also initializes the optimizer
+            # which prevents re-initializing the optimizer during optimizer tracing.
+            with fake_mode:
+                for param in fake_params_flat:
+                    param.grad = torch.empty_like(param)
 
-            # In practice, the adam optimizer sets its state_dict["step"] values to real tensors
-            # which i'm afraid means we aren't quite tracing the program correctly unless we can
-            # restore it, which we attempt below with .zero_()
+            optimizer_proxy_mode, optimizer_fx_tracer = get_deferred_modes()
+            with fake_mode, optimizer_proxy_mode:
+                breakpoint()
+                for group in opt.param_groups:
+                    params_with_grad = []
+                    grads = []
+                    exp_avgs = []
+                    exp_avg_sqs = []
+                    max_exp_avg_sqs = []
+                    state_steps = []
 
-            # Question: can we enforce that 'capturable' is true for the param_groups? this codepath
-            # looks like it would avoid this problem entirely but I'm not sure how to set it.
-            with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
-                # This adds fake state tensors to the previously empty optimizer state dicts.
-                _ = functional_call(*fake_params_flat + fake_inputs)
+                    opt._init_group(
+                        group,
+                        params_with_grad,
+                        grads,
+                        exp_avgs,
+                        exp_avg_sqs,
+                        max_exp_avg_sqs,
+                        state_steps)
+                # Convert the fake optimizer states to real
+                outputs = []
+                for param in fake_params_flat:
+                    assert param in opt.state, "all params expected handled by one optimizer, multi-opt NYI"
+                    for name, state in opt.state[param].items():
+                        if hasattr(state, "proxy"):
+                            print(f"Has proxy: {name} {state}")
+                            outputs.append(state.proxy.node) 
+                        else:
+                            print(f"Missing proxy: {name} {state}")
 
-            # Convert the fake optimizer states to real
-            for fake_param, state_dict in opt.state.items():
-                for name, state in state_dict.items():
-                    if isinstance(state, FakeTensor):
-                        # we assume always init with zeros, which is lame: can we trace init separately?
-                        state_dict[name] = torch.zeros(
-                            state.shape, dtype=state.dtype, device=dev
-                        )
-                    else:
-                        # some of the states are singleton cpu tensors, e.g. 'step'...
-                        state_dict[name].zero_()
+                optimizer_fx_tracer.graph.output(outputs)
+                optimizer_fx_tracer.graph.eliminate_dead_code()  # hmmm
+                opt_deferred_init = GraphModule(optimizer_fx_tracer.root, optimizer_fx_tracer.graph)
+                results = opt_deferred_init()
+                breakpoint()
+                print()
+
 
             # Build a mapping to use for reparametrizing the optimizer during tracing
             named_states = {}

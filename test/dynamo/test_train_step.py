@@ -16,6 +16,7 @@ from torch.fx.experimental.proxy_tensor import PythonKeyTracer, ProxyTorchDispat
 from torch.fx import Graph, GraphModule
 from torch.nn.utils import stateless
 import torch.utils._pytree as pytree
+from torch._dynamo.backends.train_step import get_deferred_modes
 
 # Limitations:
 #   - initialization cannot refer to external tensors
@@ -28,14 +29,7 @@ import torch.utils._pytree as pytree
 #   - no version counter safety to guard against input mutation
 
 
-def get_deferred_modes():
-    fx_tracer = PythonKeyTracer()
-    fx_tracer.graph = Graph(fx_tracer)
-    fx_tracer.root = torch.nn.Module()
-    fx_tracer.tensor_attrs = {}
-    fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
-    proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode="real")
-    return fake_tensor_mode, proxy_mode, fx_tracer
+
 
 class Seq(torch.nn.Module):
     def __init__(self):
@@ -209,9 +203,15 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
         inputs = [torch.randn((128, 10))]
 
-        fake_tensor_mode, proxy_mode, fx_tracer = get_deferred_modes()
+        fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+        
+        """
+        Grab an init graph for the model, make it a GM that returns real params,
+        stash it on the model for train_step compiler to use later
+        """
+        model_proxy_mode, model_fx_tracer = get_deferred_modes()
 
-        with fake_tensor_mode, proxy_mode:
+        with fake_tensor_mode, model_proxy_mode:
             deferred_model = Seq()
             deferred_model.apply(init_weights)
  
@@ -226,13 +226,15 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         mark_for_materialize(dict(deferred_model.named_parameters()))
         mark_for_materialize(dict(deferred_model.named_buffers()))
 
-        fx_tracer.graph.output(outputs)
-        fx_tracer.graph.eliminate_dead_code()  # hmmm
-        deferred_model._deferred_init = GraphModule(fx_tracer.root, fx_tracer.graph)
+        model_fx_tracer.graph.output(outputs)
+        model_fx_tracer.graph.eliminate_dead_code()  # hmmm
+        deferred_model._deferred_init = GraphModule(model_fx_tracer.root, model_fx_tracer.graph)
 
-        # TODO need to get deferred init for optimizer too...
+        """
+        Same thing for the optimizer, but do it in train_step compile so that params have grads set
+        """
         opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
-        
+ 
         opt_train_step = torch.compile(
             train_step, backend="train_step_eager", fullgraph=True, fake_mode=fake_tensor_mode
         )
