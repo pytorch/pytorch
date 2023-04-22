@@ -2688,6 +2688,15 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 aten_graph=True,
             )
 
+    def test_multiple_outputs_op_with_evaluator(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, x):
+                values, _ = torch.topk(x, 3)
+                return torch.sum(values)
+
+        x = torch.arange(1.0, 6.0, requires_grad=True)
+        torch._dynamo.export(TopKModel(), x)
+
     def test_cond_raise_user_error_on_mismatch_return_length(self):
         def true_fn(x):
             return x

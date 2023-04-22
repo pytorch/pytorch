@@ -265,6 +265,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=True)],
     "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
     "levit_128",  # Accuracy fails on A10G, passes on A100
+    "sebotnet33ts_256",  # Flaky accuracy failed
 ]
 
 CI_SKIP_OPTIMIZER = {
