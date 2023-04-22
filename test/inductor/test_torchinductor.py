@@ -1027,6 +1027,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_views5(self):
+        # tensor with shape 0 in any dimension
+        def forward(x):
+            y = x[:, 4:]
+            return y.view(len(y), -1, 4)
+
+        self.common(
+            forward,
+            (torch.randn(4, 4, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -4598,6 +4609,36 @@ class CommonTemplate:
             return torch.rand_like(x), torch.randn_like(x)
 
         self.common(fn, [torch.zeros([20, 20])])
+
+    def test_like_rands2(self):
+        # rand_like with kwargs `device` of str type
+        d = self.device
+        assert isinstance(d, str)
+
+        @torch.compile
+        def fn(x):
+            return torch.rand_like(x, device=d)
+
+        x = torch.ones(10, device=self.device, dtype=torch.float32)
+        a0 = fn(x).clone()
+        a1 = fn(x).clone()
+        self.assertFalse(torch.allclose(a0, a1))
+
+    @requires_cuda()
+    def test_like_rands3(self):
+        # rand_like with `device` which is different from `x.device`
+        def test_like_rands_on_different_device(device1, device2):
+            @torch.compile
+            def fn(x, device):
+                return torch.rand_like(x, device=device)
+
+            x = torch.ones(10, device=device1, dtype=torch.float32)
+            return fn(x, device2).clone()
+
+        a0 = test_like_rands_on_different_device("cpu", "cuda")
+        a1 = test_like_rands_on_different_device("cuda", "cpu")
+        self.assertTrue(a0.device.type == "cuda")
+        self.assertTrue(a1.device.type == "cpu")
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):

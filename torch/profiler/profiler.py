@@ -245,7 +245,10 @@ class _KinetoProfile:
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
 
         # Depending on the file suffix, save the data as json.gz or json.
-        if path.endswith('.gz'):
+        # For html, we can embed the image into an HTML file.
+        if path.endswith('.html'):
+            self.mem_tl.export_memory_timeline_html(path, device)
+        elif path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
             self.mem_tl.export_memory_timeline(fp.name, device)

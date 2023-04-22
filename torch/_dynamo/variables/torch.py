@@ -9,9 +9,10 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value
+from torch._dynamo.utils import get_fake_value, get_real_value
 from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
+from torch.utils import _pytree as pytree
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -20,6 +21,7 @@ from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    deepcopy_to_fake_tensor,
     HAS_NUMPY,
     istype,
     np,
@@ -1078,6 +1080,25 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
+        elif self.value.__name__ == "executorch_call_delegate":
+            # This is operator for delegation within Executorch which calls a
+            # specific function in the given lowered module with the given
+            # operators. The actual operator is defined in the Executorch codebase.
+            # This is a bad hierarchical violation since
+            # executorch_call_delegate sits at a higher level than dynamo, but
+            # there's no real solution to this issue yet.
+            lowered_module = tx.output.get_submodule(args[0].module_key)
+
+            lowered_node = make_attr(args[0].module_key)
+
+            p_args = tuple(arg.as_proxy() for arg in args[1:])
+            real_sub_args = pytree.tree_map_only(
+                torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
+            )
+            example_res = lowered_module.original_module(*real_sub_args)
+            example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
+
+            p_args = (lowered_node,) + p_args
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
