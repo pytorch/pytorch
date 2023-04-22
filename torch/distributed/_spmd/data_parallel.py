@@ -205,7 +205,7 @@ class BatchDimAnalyzer:
         # if we reach here, it means we failed to find the batch dim
         raise RuntimeError(f"batch dim analysis failed on node: {node}!")
 
-    def get_batch_dim_shard_spec(
+    def compute_batch_dim_shard_spec(
         self, node: fx.Node, mesh: DeviceMesh, input_full_reduction: bool = False
     ) -> Tuple[DTensorSpec, bool]:
         """
@@ -413,11 +413,11 @@ def build_data_parallel_strategies(
                         NodeType.GRAD, [partial_sig]
                     )
                 elif arg_node_type == NodeType.ACT:
-                    arg_node_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
+                    arg_node_spec, _ = batch_dim_analyzer.compute_batch_dim_shard_spec(
                         input_nodes[0], mesh
                     )
 
-                    output_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
+                    output_spec, _ = batch_dim_analyzer.compute_batch_dim_shard_spec(
                         node, mesh, input_full_reduction
                     )
 
@@ -452,7 +452,7 @@ def build_data_parallel_strategies(
                     if arg_node_type == NodeType.ACT:
                         # activation sharded
                         has_activation = True
-                        act_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
+                        act_spec, _ = batch_dim_analyzer.compute_batch_dim_shard_spec(
                             arg, mesh
                         )
 
@@ -476,7 +476,10 @@ def build_data_parallel_strategies(
                         node_type = arg_strategy.node_type
                         if node_type == NodeType.ACT:
                             # activation must stay sharded
-                            act_spec, _ = batch_dim_analyzer.get_batch_dim_shard_spec(
+                            (
+                                act_spec,
+                                _,
+                            ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
                                 arg, mesh
                             )
 
@@ -494,7 +497,7 @@ def build_data_parallel_strategies(
                     (
                         output_spec,
                         reduction_over_batch,
-                    ) = batch_dim_analyzer.get_batch_dim_shard_spec(node, mesh)
+                    ) = batch_dim_analyzer.compute_batch_dim_shard_spec(node, mesh)
 
                     shard_strategy = PlacementStrategy(
                         output_spec=output_spec, input_specs=input_specs
