@@ -1625,7 +1625,7 @@ except RuntimeError as e:
             'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
             'Device-side assertion'  # ROCm
         ]
-        self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
+        self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
     @slowTest
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")

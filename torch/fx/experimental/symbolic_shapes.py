@@ -2593,7 +2593,7 @@ class ShapeEnv:
         if not expr.has(sympy.Mod):
             try:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
-                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:

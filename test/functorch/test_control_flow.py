@@ -131,7 +131,7 @@ class TestControlFlowTraced(TestCase):
             if node.op == "call_function":
                 all_ops_in_true_branch.append(node.target)
 
-        self.assertFalse(any([op._schema.is_mutable for op in all_ops_in_true_branch]))
+        self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
 
         graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
@@ -188,7 +188,7 @@ class TestControlFlowTraced(TestCase):
             if node.op == "call_function":
                 all_ops.append(node.target)
 
-        self.assertFalse(any([op._schema.is_mutable for op in all_ops]))
+        self.assertFalse(any(op._schema.is_mutable for op in all_ops))
 
     def test_cond_functionalized_data_dependent_pred(self):
         def true_fn(x):

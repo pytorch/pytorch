@@ -1373,7 +1373,7 @@ class FunctionSchema:
             len(mutable_returns) == 0 or len(immutable_returns) == 0
         ), f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
         for ret in mutable_returns:
-            assert any([ret.annotation == arg.annotation for arg in out_and_self]), (
+            assert any(ret.annotation == arg.annotation for arg in out_and_self), (
                 'All mutable returns must be aliased either to a keyword argument, or to "self". '
                 "Did you forget to mark an out argument as keyword-only?"
             )

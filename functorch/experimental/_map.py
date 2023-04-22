@@ -70,8 +70,8 @@ def map_cpu(f, xs, *args):
 def map_autograd(f, xs, *args):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([f, xs, args])
-    assert all([not f.requires_grad for f in flat_operands
-                if isinstance(f, torch.Tensor)])
+    assert all(not f.requires_grad for f in flat_operands
+                if isinstance(f, torch.Tensor))
 
     _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU))
     return map(f, xs, *args)
