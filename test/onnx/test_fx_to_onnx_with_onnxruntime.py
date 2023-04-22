@@ -419,12 +419,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(3)
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (x, y, z))
 
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
     def test_mnist(self):
-        class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
-                self.conv2 = nn.Conv2d(32, 64, 3, 2, bias=True)
+                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
                 self.fc1 = nn.Linear(9216, 128, bias=True)
                 self.fc2 = nn.Linear(128, 10, bias=True)
 
@@ -433,10 +437,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 tensor_x = self.conv2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
+                tensor_x = torch.max_pool2d(tensor_x, 2)
                 tensor_x = torch.flatten(tensor_x, 1)
                 tensor_x = self.fc1(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                output = self.fc2(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                output = torch.log_softmax(tensor_x, dim=1)
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
