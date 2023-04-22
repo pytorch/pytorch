@@ -453,7 +453,7 @@ def main() -> None:
             try:
                 for lint_message in future.result():
                     lint_message.display()
-            except Exception:
+            except Exception:  # Catch all exceptions for lintrunner
                 logging.critical('Failed at "%s".', futures[future])
                 raise
 
