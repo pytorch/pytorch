@@ -43,7 +43,7 @@ class TensorParallelAPITests(DTensorTestBase):
         return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
 
     @with_comms
-    def test_creat_1d_device_mesh(self):
+    def test_create_1d_device_mesh(self):
         dim_one_size = 2
         mesh_shape = (
             torch.arange(self.world_size)
@@ -58,30 +58,22 @@ class TensorParallelAPITests(DTensorTestBase):
         one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
         pg = mesh.get_dim_groups()[1]
         new_mesh = _create_1d_device_mesh(mesh, 1)
-        expected_mesh = DeviceMesh(
-            self.device_type,
-            one_dimention_mesh_shape,
-            _init_process_groups=False
-        )
-        expected_mesh._dim_groups = [pg]
+        expected_mesh = one_dimention_mesh_shape
 
-        self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
-        self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
+        self.assertEqual(new_mesh.mesh, expected_mesh)
+        self.assertEqual(new_mesh.device_type, self.device_type)
+        self.assertEqual(new_mesh.get_dim_groups(), [pg])
         # When 1D dim is 0.
         one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
         pg = mesh.get_dim_groups()[0]
         new_mesh = _create_1d_device_mesh(mesh, 0)
-        expected_mesh = DeviceMesh(
-            self.device_type,
-            one_dimention_mesh_shape,
-            _init_process_groups=False
-        )
-        expected_mesh._dim_groups = [pg]
-        self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
-        self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
+        expected_mesh = one_dimention_mesh_shape
+        self.assertEqual(new_mesh.mesh, expected_mesh)
+        self.assertEqual(new_mesh.device_type, self.device_type)
+        self.assertEqual(new_mesh.get_dim_groups(), [pg])
 
     @with_comms
-    def test_creat_1d_device_mesh_error(self):
+    def test_create_1d_device_mesh_error(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         with self.assertRaisesRegex(
             AssertionError,
