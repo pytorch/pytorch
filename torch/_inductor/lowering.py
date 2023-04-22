@@ -22,11 +22,11 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
-from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -39,7 +39,13 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    developer_warning,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -134,16 +140,6 @@ def is_boolean_type(x):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
-
-
-def decode_device(device):
-    if device is None:
-        return torch.tensor(0.0).device  # default device
-    if isinstance(device, str):
-        device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
-    return device
 
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
@@ -1107,9 +1103,22 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn:
-        developer_warning(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+    if get_decompositions([kernel]) and warn and IS_CI:
+        # Note: 'warn' is holdover from when this was a warning, but for ops that previously
+        # set warn=False we do not want a CI error.
+        # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
+        # likely to be triggered preferentially on one CI config over another.
+        if torch._dynamo.config.suppress_errors:
+            torch._dynamo.config.suppress_errors = False
+            log.warning(
+                "A make_fallback error occured in suppress_errors config,"
+                " and suppress_errors is being disabled to surface it."
+            )
+        raise AssertionError(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
+            " or inductor_decompositions, and delete the corresponding `make_fallback` line."
+            " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
         )
 
     add_needs_realized_inputs(kernel)
@@ -1480,6 +1489,9 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+# fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
+make_fallback(aten.exponential.default, warn=False)
 
 
 @register_lowering(aten.clone)
