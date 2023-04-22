@@ -768,6 +768,7 @@ def _worker_compile(source_code, cc, device):
 
 
 def _load_kernel(source_code):
+    print(source_code)
     kernel = TritonCodeCache.load(source_code)
     kernel.precompile()
     return kernel

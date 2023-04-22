@@ -1596,6 +1596,13 @@ class ForeachKernel(Kernel):
             int(sympy_product(layout.size)) for layout in layouts
         ]
         self.block_size = 1024
+        self.grid = (
+            ForeachKernel._compute_num_blocks(self.tensor_elem_counts, self.block_size),
+            1,
+            1,
+        )
+        self.num_warps = 32
+        self.num_stages = 4
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -1617,7 +1624,15 @@ class ForeachKernel(Kernel):
         upper_bound_pid = block_ind + num_blocks
         last_block_elem_count = block_size - (num_blocks * block_size - num_elems)
 
-        code.splice(f"if pid >= {block_ind} and pid < {upper_bound_pid}:")
+        if block_ind == 0:
+            cond = "if"
+            # initialize tile ptrs
+            for name in arg_names:
+                code.splice(f"{self.arg_name_to_list_var[name]}_tile_ptr = {name}")
+        else:
+            cond = "elif"
+
+        code.splice(f"{cond} pid >= {block_ind} and pid < {upper_bound_pid}:")
         with code.indent():
             code.splice(f"elem_ind_offset = (pid - {block_ind}) * BLOCK_SIZE")
             for name in arg_names:
@@ -1629,6 +1644,19 @@ class ForeachKernel(Kernel):
                 code.splice(f"elem_count = {last_block_elem_count}")
 
         return block_ind + num_blocks
+
+    def jit_line(self):
+        _, _, signature = self.args.python_argdefs()
+        triton_meta = {
+            "signature": dict(enumerate(map(signature_of, signature))),
+            "device": V.graph.scheduler.current_device.index,
+            "constants": {},
+        }
+        triton_meta["configs"] = [config_of(signature)]
+        return (
+            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            + "@triton.jit"
+        )
 
     def load(self, list_name: str, _):
         if list_name not in self.list_name_to_var_name:
@@ -1669,10 +1697,12 @@ class ForeachKernel(Kernel):
             """
                 import triton
                 import triton.language as tl
+                from torch._inductor.triton_heuristics import template
+                from torch._inductor.utils import instance_descriptor
             """
         )
-        argdefs, _, signature = self.args.python_argdefs()
-        code.writeline("@triton.jit")
+        argdefs, _, _ = self.args.python_argdefs()
+        code.writeline(self.jit_line())
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         if config.benchmark_kernel:
             code.splice(
@@ -1680,7 +1710,8 @@ class ForeachKernel(Kernel):
                     from torch._dynamo.testing import rand_strided
                     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                     import torch
-                    from torch._inductor.triton_heuristics import grid
+                    from torch._inductor.triton_heuristics import grid, template
+                    from torch._inductor.utils import instance_descriptor
                 """
             )
 
@@ -1696,15 +1727,12 @@ class ForeachKernel(Kernel):
             ]
 
             code.splice("pid = tl.program_id(0)")
-            code.splice(f"BLOCK_SIZE = {self.block_size}")
+            code.splice(f"BLOCK_SIZE: tl.constexpr = {self.block_size}")
+            code.splice(f"elem_count = {self.block_size}")
 
             for elem_count, arg_names in zip(self.tensor_elem_counts, zip(*arg_lists)):
                 block_ind = self._gen_tile_ptrs(
-                    arg_names,
-                    block_ind,
-                    elem_count,
-                    self.block_size,
-                    code,
+                    arg_names, block_ind, elem_count, self.block_size, code
                 )
 
             code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
@@ -1712,7 +1740,6 @@ class ForeachKernel(Kernel):
             code.splice(self.compute)
             code.splice(self.stores)
 
-        print(code.getrawvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
@@ -1721,7 +1748,7 @@ class ForeachKernel(Kernel):
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-        grid = []
+        grid = [self.grid]
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name, call_args, V.graph.scheduler.current_device.index
@@ -1733,7 +1760,7 @@ class ForeachKernel(Kernel):
                 V.graph.scheduler.current_device.index
             )
             code.writeline(
-                f"{name}.run({call_args_str}, grid=grid({', '.join(grid)}), stream={stream_name})"
+                f"{name}.run({call_args_str}, grid=({self.grid}), stream={stream_name})"
             )
 
 
@@ -2080,10 +2107,7 @@ class TritonScheduling:
         if isinstance(foreach_node.node, ir.ListElemBuffer):
             return
 
-        if isinstance(foreach_node, scheduler.FusedSchedulerNode):
-            node_schedule = foreach_node.snodes
-        else:
-            node_schedule = [foreach_node]
+        node_schedule = foreach_node.get_nodes()
 
         kernel = ForeachKernel(node_schedule[0].node.get_layouts())
 
@@ -2093,7 +2117,8 @@ class TritonScheduling:
                 node.codegen()
             src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, [foreach_node])
-        # self.scheduler.free_buffers()
+        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+        self.scheduler.free_buffers()
 
     @staticmethod
     @functools.lru_cache(32)

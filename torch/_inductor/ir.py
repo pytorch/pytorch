@@ -2193,7 +2193,7 @@ class ListElemBuffer(Buffer):
         self.index = index
 
     def should_allocate(self):
-        return False
+        return True
 
     def simplify_and_reorder(self):
         return (

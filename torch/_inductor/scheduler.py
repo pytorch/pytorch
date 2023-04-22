@@ -577,9 +577,16 @@ class ForeachKernelSchedulerNode(BaseSchedulerNode):
         super().__init__(scheduler, node)
         self.group = (node.get_device(), 0)
         self.node = node
+        self.origins = node.origins
 
     def mark_run(self):
-        pass
+        if isinstance(self.node, ir.ListElemBuffer):
+            self.allocate()
+        else:
+            for node in [
+                self.scheduler.name_to_node[n.name] for n in self.read_writes.writes
+            ]:
+                node.mark_run()
 
     def codegen(self):
         self.node.get_store_function()(self.node.make_loader()())

@@ -263,11 +263,20 @@ def cache_on_self(fn):
     return wrapper
 
 
-def get_fused_kernel_name(node_schedule):
-    all_origins = functools.reduce(
+def aggregate_origins(node_schedule):
+    return functools.reduce(
         operator.or_,
-        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+        [
+            node.node.origins
+            for node in node_schedule
+            if hasattr(node, "node") and node.node
+        ],
+        set(),
     )
+
+
+def get_fused_kernel_name(node_schedule):
+    all_origins = aggregate_origins(node_schedule)
     if config.triton.descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
@@ -297,10 +306,7 @@ def get_fused_kernel_name(node_schedule):
 
 
 def get_kernel_metadata(node_schedule):
-    all_origins = functools.reduce(
-        operator.or_,
-        [node.node.origins for node in node_schedule if hasattr(node, "node")],
-    )
+    all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
