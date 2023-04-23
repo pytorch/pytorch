@@ -344,7 +344,7 @@ void take_kernel(
 
 namespace {
 
-__global__ void masked_scatter_size_check(int64_t *mask_exclusive_sum, bool *mask, int64_t srcSize) {
+__global__ void masked_scatter_size_check(const int64_t *mask_exclusive_sum, const bool *mask, int64_t srcSize) {
   // Convert exclusive sum to inclusive sum
   auto totalElements = *mask_exclusive_sum + *mask;
   CUDA_KERNEL_ASSERT(totalElements <= srcSize);
@@ -360,8 +360,8 @@ void launch_masked_scatter_kernel(
   auto mask_numel = mask.numel();
 
   // Use a prefix sum to determine the output locations of the masked elements
-  auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
-  auto mask_data = mask_cont.data_ptr<bool>();
+  auto maskPrefixSum_data = maskPrefixSum.mutable_data_ptr<int64_t>();
+  auto mask_data = mask_cont.const_data_ptr<bool>();
 
   at::cuda::cub::mask_exclusive_sum(
       mask_data, maskPrefixSum_data, mask_numel);
@@ -393,7 +393,7 @@ void launch_masked_scatter_kernel(
       self.scalar_type(),
       "masked_scatter_",
       [&]() {
-        auto source_ptr = source_contig.data_ptr<scalar_t>();
+        auto source_ptr = source_contig.const_data_ptr<scalar_t>();
         gpu_kernel(
             iter, [=] GPU_LAMBDA(scalar_t a, bool mask, int64_t maskPrefixSum) -> scalar_t {
               if (mask) {
