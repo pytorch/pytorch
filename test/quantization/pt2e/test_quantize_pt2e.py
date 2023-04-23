@@ -96,7 +96,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
-            tracing_mode="real",
         )
         m = prepare_pt2e_quantizer(m, BackendAQuantizer())
         m(*example_inputs)
@@ -138,7 +137,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
-            tracing_mode="real",
         )
 
         m = prepare_pt2e_quantizer(m, quantizer)
@@ -189,7 +187,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
-            tracing_mode="real",
         )
 
         m = prepare_pt2e_quantizer(m, quantizer)
@@ -245,7 +242,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
-            tracing_mode="real",
         )
 
         m = prepare_qat_pt2e_quantizer(m, quantizer)
@@ -339,7 +335,6 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 m,
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
-                tracing_mode="real",
             )
 
             before_fusion_result = m(*example_inputs)
@@ -407,7 +402,6 @@ class TestX86InductorQuantizePT2E(QuantizationTestCase):
                     m,
                     *copy.deepcopy(example_inputs),
                     aten_graph=True,
-                    tracing_mode="real",
                 )
 
                 before_fusion_result = m(*example_inputs)
