@@ -79,8 +79,9 @@ def hash_storage(storage):
         torch._dynamo.mark_dynamic(x, 0)
         # We run the 32-bit hash five times with differing parameters to
         # reduce chance of collision
-        cs = [kernel(x).item() for _ in range(5)]
-        return struct.pack(">iiiii", *cs).hex()
+        ITER = 5
+        cs = [kernel(x).item() for _ in range(ITER)]
+        return struct.pack(">" + "i" * ITER, *cs).hex()
 
 
 class ContentStoreWriter:
