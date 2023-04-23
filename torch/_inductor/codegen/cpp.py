@@ -30,6 +30,7 @@ from .common import (
     CSE,
     data_type_propagation,
     DeferredLine,
+    dtype_agnostic_ops,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
@@ -2067,7 +2068,7 @@ class CppKernelProxy(CppKernel):
             for _node in sub_block.graph.nodes:
                 # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
                 # the data type as well.
-                if _node.target in ["ops", "get_index", "index_expr"]:
+                if _node.target in dtype_agnostic_ops():
                     continue
 
                 # Fast path if all operations can support bf16 without converting to fp32
@@ -2080,11 +2081,12 @@ class CppKernelProxy(CppKernel):
                 ] and _node.op not in ["placeholder", "output"]:
                     return False
 
-                assert _node.meta
-                assert OptimizationContext.key in _node.meta
-                opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
-                assert opt_ctx.dtype
-                if opt_ctx.dtype is not torch.bfloat16:
+                if hasattr(_node, "meta") and _node.meta:
+                    assert OptimizationContext.key in _node.meta
+                    opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                    if not opt_ctx.dtype or opt_ctx.dtype is not torch.bfloat16:
+                        return False
+                else:
                     return False
 
         sch_node.is_bf16 = True
