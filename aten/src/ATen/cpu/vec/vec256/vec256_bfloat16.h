@@ -274,12 +274,7 @@ public:
     return cvt_from_fp32<T>(o1, o2);
   }
   Vectorized<T> abs() const {
-    __m256 lo, hi;
-    cvt_to_fp32<T>(values, lo, hi);
-    const auto mask = _mm256_set1_ps(-0.f);
-    const auto o1 = _mm256_andnot_ps(mask, lo);
-    const auto o2 = _mm256_andnot_ps(mask, hi);
-    return cvt_from_fp32<T>(o1, o2);
+    return _mm256_andnot_si256(values, _mm256_set1_epi16(0x8000));
   }
   Vectorized<T> angle() const {
     __m256 lo, hi;

@@ -994,6 +994,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, ifdyn(13, 11))
 
+    def test_module_in_skipfiles(self):
+        model = nn.Linear(10, 10)
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(model, backend=cnt, fullgraph=True)(torch.randn([5, 10]))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
+    def test_function_in_skipfiles(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(torch.sin, backend=cnt, fullgraph=True)(torch.randn([5, 10]))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+
     def test_slicing_dynamic_shape(self):
         def fn(y):
             x = torch.ones(8)
@@ -2706,9 +2719,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 5)
 
-        gm, _ = torch._dynamo.export(
-            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
-        )
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
     @torch._dynamo.config.patch("specialize_int", False)
@@ -2869,7 +2880,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch.zeros(6, 4),
             torch.tensor(1),
             aten_graph=True,
-            tracing_mode="symbolic",
         )
         self.assertEqual(
             f(torch.zeros(6, 4), torch.tensor(1)),
@@ -2973,7 +2983,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f,
             torch.zeros(6, 4),
             aten_graph=True,
-            tracing_mode="symbolic",
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
