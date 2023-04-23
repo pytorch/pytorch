@@ -96,6 +96,7 @@ For example after installing `ONNX Runtime <https://www.onnxruntime.ai>`_, you c
 load and run the model::
 
     import onnxruntime as ort
+    import numpy as np
 
     ort_session = ort.InferenceSession("alexnet.onnx")
 
