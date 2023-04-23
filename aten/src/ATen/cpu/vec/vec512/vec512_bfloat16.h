@@ -354,7 +354,7 @@ public:
   }
   #pragma clang diagnostic pop
   Vectorized<T> abs() const {
-    return _mm512_andnot_si512(values, _mm512_set1_epi16(0x8000));
+    return _mm512_andnot_si512(_mm512_set1_epi16(0x8000), values);
   }
   Vectorized<T> angle() const {
     __m512 lo, hi;
