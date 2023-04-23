@@ -70,56 +70,43 @@ void grid_sampler_2d_mps_impl(Tensor& output,
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" + std::to_string(interpolation_mode) +
         ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      MPSGraphTensor* gridTensor = mpsGraphRankedPlaceHolder(mpsGraph, grid);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-          MPSGraphTensor* gridTensor = mpsGraphRankedPlaceHolder(mpsGraph, grid);
+      MPSGraphTensor* outputTensor = nil;
+      if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Nearest) {
+        outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
+                                           coordinateTensor:gridTensor
+                                                     layout:inputTensorLayout
+                                       normalizeCoordinates:TRUE
+                                        relativeCoordinates:FALSE
+                                               alignCorners:align_corners
+                                                paddingMode:paddingMode
+                                        nearestRoundingMode:MPSGraphResizeNearestRoundingModeRoundToEven
+                                              constantValue:0.0f
+                                                       name:nil];
+      } else {
+        outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
+                                           coordinateTensor:gridTensor
+                                                     layout:inputTensorLayout
+                                       normalizeCoordinates:TRUE
+                                        relativeCoordinates:FALSE
+                                               alignCorners:align_corners
+                                                paddingMode:paddingMode
+                                               samplingMode:samplingMode
+                                              constantValue:0.0f
+                                                       name:nil];
+      }
 
-          MPSGraphTensor* outputTensor = nil;
-          if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Nearest) {
-            outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
-                                               coordinateTensor:gridTensor
-                                                         layout:inputTensorLayout
-                                           normalizeCoordinates:TRUE
-                                            relativeCoordinates:FALSE
-                                                   alignCorners:align_corners
-                                                    paddingMode:paddingMode
-                                            nearestRoundingMode:MPSGraphResizeNearestRoundingModeRoundToEven
-                                                  constantValue:0.0f
-                                                           name:nil];
-          } else {
-            outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
-                                               coordinateTensor:gridTensor
-                                                         layout:inputTensorLayout
-                                           normalizeCoordinates:TRUE
-                                            relativeCoordinates:FALSE
-                                                   alignCorners:align_corners
-                                                    paddingMode:paddingMode
-                                                   samplingMode:samplingMode
-                                                  constantValue:0.0f
-                                                           name:nil];
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->gridTensor_ = gridTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->gridTensor_ = gridTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
     Placeholder gridPlaceholder = Placeholder(cachedGraph->gridTensor_, grid);
