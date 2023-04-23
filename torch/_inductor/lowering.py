@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import warnings
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -21,11 +22,11 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
-from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -38,7 +39,13 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    developer_warning,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -133,16 +140,6 @@ def is_boolean_type(x):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
-
-
-def decode_device(device):
-    if device is None:
-        return torch.tensor(0.0).device  # default device
-    if isinstance(device, str):
-        device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
-    return device
 
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
@@ -683,9 +680,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(start + dim_size, 0)):
         start = 0
-    if end < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(end + dim_size, 0)):
         end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
@@ -1049,8 +1046,26 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
+@functools.lru_cache(None)
+def _warn_complex_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    )
+
+
+# There are some types (CPU) which we accept as input but not as
+# output.
+def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
+    "Do not support reading or writing to this tensor"
+    if t.is_complex():
+        _warn_complex_not_supported()
+        return True
+    return False
+
+
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
-    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+    "Do not support writing tensor but can read from it"
+    if unsupported_input_tensor(t):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1070,12 +1085,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             if is_output:
                 if unsupported_output_tensor(meta):
                     return True
+            else:
+                if unsupported_input_tensor(meta):
+                    return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, is_output=(False or not allow_cpu_inputs)):
+        if check_skip_condition(arg, is_output=False):
             return True
 
     return check_skip_condition(node, is_output=True)
@@ -1085,9 +1103,22 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn:
-        developer_warning(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+    if get_decompositions([kernel]) and warn and IS_CI:
+        # Note: 'warn' is holdover from when this was a warning, but for ops that previously
+        # set warn=False we do not want a CI error.
+        # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
+        # likely to be triggered preferentially on one CI config over another.
+        if torch._dynamo.config.suppress_errors:
+            torch._dynamo.config.suppress_errors = False
+            log.warning(
+                "A make_fallback error occured in suppress_errors config,"
+                " and suppress_errors is being disabled to surface it."
+            )
+        raise AssertionError(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
+            " or inductor_decompositions, and delete the corresponding `make_fallback` line."
+            " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
         )
 
     add_needs_realized_inputs(kernel)
@@ -1458,6 +1489,9 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+# fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
+make_fallback(aten.exponential.default, warn=False)
 
 
 @register_lowering(aten.clone)

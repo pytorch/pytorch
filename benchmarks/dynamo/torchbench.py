@@ -282,6 +282,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
             batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
 
+        # See https://github.com/pytorch/benchmark/issues/1560
+        if model_name == "speech_transformer":
+            batch_size = 10
+
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
         extra_args = []
@@ -317,6 +321,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # the right example_inputs
         if model_name == "yolov3":
             example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
+        # See https://github.com/pytorch/benchmark/issues/1561
+        if model_name == "maml_omniglot":
+            batch_size = 5
+            assert example_inputs[0].shape[0] == batch_size
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
