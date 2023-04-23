@@ -435,7 +435,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
-
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
@@ -491,8 +490,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.wraps_source:
             codegen.load_import_from("functools", "wraps")
             codegen(self.wraps_source)
-            codegen.extend_output(create_call_function(1, False))
+            codegen.extend_output(create_call_function(1, True))
             codegen.extend_output(create_rot_n(2))
-            codegen.extend_output(create_call_function(1, False))
+            codegen.extend_output(create_call_function(1, True))
 
         return []
