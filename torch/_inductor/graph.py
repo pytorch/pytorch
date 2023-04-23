@@ -112,7 +112,7 @@ class GraphLowering(torch.fx.Interpreter):
             # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
-                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
             (
                 size,
