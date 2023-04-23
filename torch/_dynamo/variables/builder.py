@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import logging
 import operator
 import re
 import types
@@ -104,6 +105,9 @@ from .torch import (
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+
+log = logging.getLogger(__name__)
 
 
 DimList = List
@@ -625,6 +629,13 @@ class VariableBuilder:
             )
 
     def wrap_module(self, value: torch.nn.Module):
+        from ..eval_frame import OptimizedModule
+
+        if istype(value, OptimizedModule):
+            guards = self.make_guards(GuardBuilder.TYPE_MATCH)
+            self.source = AttrSource(self.source, "_orig_mod")
+            return self.wrap_module(value._orig_mod).add_guards(guards)
+
         if (
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
             and not config.allow_rnn
@@ -1153,8 +1164,6 @@ def wrap_to_fake_tensor_and_record(
                         if e.size()[i] != dim:
                             curr_sizes[i] = None
 
-        tx.output.frame_state[name] = curr_sizes
-
         # TODO: index export_constraints ahead of time so we don't have to
         # do a linear scan every time here
         t_id = id(e)
@@ -1183,12 +1192,21 @@ def wrap_to_fake_tensor_and_record(
             for i in range(e.dim()):
                 # NB: mark dynamic has precedence over static
                 marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+                marked_weak_dynamic = i in getattr(
+                    e, "_dynamo_weak_dynamic_indices", set()
+                )
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
                 # NB: both static and dynamic have precedence over
                 automatic_dynamic = config.automatic_dynamic_shapes and (
                     curr_sizes is None or curr_sizes[i] is None
                 )
+
+                # Reflect the user directive in the frame_state
+                # For dynamic, apply None always
+                if marked_dynamic:
+                    curr_sizes[i] = None
+
                 # We will process constraints first, as they will imply that we
                 # have a dynamic dimension
                 # Precedence: export constraints > eager constraints
@@ -1201,7 +1219,7 @@ def wrap_to_fake_tensor_and_record(
                 constraint_dims.append(constraint)
 
                 # Now, figure out if the dim is dynamic/duck/static
-                if constraint is not None or marked_dynamic:
+                if constraint is not None or marked_dynamic or marked_weak_dynamic:
                     # NB: We could assert static_shapes is False here, but it
                     # seems better to allow the user to override policy in this
                     # case
@@ -1212,6 +1230,15 @@ def wrap_to_fake_tensor_and_record(
                     dynamic = DimDynamic.DUCK
                 dynamic_dims.append(dynamic)
 
+        tx.output.frame_state[name] = curr_sizes
+
+        log.debug(
+            "wrap_to_fake %s %s %s %s",
+            source.name(),
+            tuple(e.shape),
+            dynamic_dims,
+            constraint_dims,
+        )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
