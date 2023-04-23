@@ -175,7 +175,9 @@ class MetaConverter:
             from torch._dynamo.source import ConstantSource
 
             # TODO: make a dedicated UnknownSource for this?
-            source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+            source = ConstantSource(
+                f"__meta_utils_unknown_tensor{len(self.tensor_memo)}"
+            )
 
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
