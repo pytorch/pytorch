@@ -182,7 +182,7 @@ void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer,
 
 void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
-  endKernelCoalescing();
+    endKernelCoalescing();
 #if USE_COMMIT_AND_CONTINUE
     [mpsGraph encodeToCommandBuffer:commandBuffer()
                               feeds:feeds

@@ -210,7 +210,7 @@ void handle_tensor_scalar_binary_op(const Tensor& self,
     return;
   }
   dispatch_sync(stream->queue(), ^() {
-    id<MTLComputeCommandEncoder> commandEncoder  = stream->commandEncoder();
+    id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
 
     id<MTLBuffer> outBuf = __builtin_bit_cast(id<MTLBuffer>, output.storage().data());
     id<MTLBuffer> selfBuf = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
