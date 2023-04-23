@@ -60,6 +60,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::clamp": ops.core.aten_clamp,
     "aten::clone": ops.core.aten_clone,
     "aten::convolution": ops.core.aten_convolution,
+    "aten::copy": ops.core.aten_copy,
     "aten::cos": ops.core.aten_cos,
     "aten::cosh": ops.core.aten_cosh,
     "aten::cumsum": ops.core.aten_cumsum,
@@ -86,6 +87,8 @@ _ATENLIB_FUNCTIONS = {
     "aten::le": ops.core.aten_le,
     "aten::leaky_relu": ops.nn.aten_leaky_relu,
     "aten::linear": ops.nn.aten_linear,
+    "aten::log_sigmoid": ops.nn.aten_log_sigmoid,
+    "aten::log_sigmoid_forward": ops.nn.aten_log_sigmoid,
     "aten::log_softmax": ops.special.aten_special_log_softmax,
     "aten::log": ops.core.aten_log,
     "aten::log10": ops.core.aten_log10,
@@ -95,7 +98,6 @@ _ATENLIB_FUNCTIONS = {
     "aten::logaddexp2": ops.core.aten_logaddexp2,
     "aten::logcumsumexp": ops.core.aten_logcumsumexp,
     "aten::logdet": ops.core.aten_logdet,
-    "aten::logsigmoid": ops.nn.aten_log_sigmoid,
     "aten::logsumexp": ops.core.aten_logsumexp,
     "aten::lt": ops.core.aten_lt,
     "aten::masked_fill": ops.core.aten_masked_fill,
@@ -122,6 +124,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::round": ops.core.aten_round,
     "aten::rsqrt": ops.core.aten_rsqrt,
     "aten::rsub": ops.core.aten_rsub,
+    "aten::scalar_tensor": ops.core.aten_scalar_tensor,
     "aten::select": ops.core.aten_select,
     "aten::selu": ops.core.aten_selu,
     "aten::sigmoid": ops.core.aten_sigmoid,
@@ -159,8 +162,19 @@ def _create_op_overload_to_exporter_key_table() -> (
     # TODO(justinchuby): Improve how the table is constructed.
     table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
 
+    # Some ops in `torch.ops.aten` are not discoverable through `dir(torch.ops.aten)`,
+    # but retrievable via explicit lookup.
+    # https://github.com/pytorch/pytorch/issues/99681
+    # This is a workaround to make sure we register ONNX symbolic functions for these.
+    onnx_supported_aten_lookup_table = [
+        k.split("::")[1] for k in _ATENLIB_FUNCTIONS.keys() if k.startswith("aten::")
+    ]
+
     for op_namespace in (torch.ops.aten, torch.ops.prims):
-        for attr_name in dir(op_namespace):
+        attr_names = dir(op_namespace)
+        if op_namespace is torch.ops.aten:
+            attr_names += onnx_supported_aten_lookup_table
+        for attr_name in attr_names:
             op_overload_packet = getattr(op_namespace, attr_name)
             if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
                 continue
@@ -181,8 +195,6 @@ def _create_op_overload_to_exporter_key_table() -> (
                 # different exporter keys.
 
                 table[op_overload] = op_overload_packet._qualified_op_name
-    # NOTE: Below are not in torch.ops.aten/torch.ops.prim
-    table[torch.ops.aten.sym_size.int] = "aten::sym_size"
     return table
 
 
@@ -203,8 +215,10 @@ def _create_onnx_friendly_decomposition_table() -> (
 ):
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
     for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
-        # Skip decomposition into "prim::*" ops, because they are not generally supported by ONNX.
-        # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX exporter.
+        # Skip decomposition into "prim::*" ops (defined in 'torch._refs'), because they
+        # are not generally supported by ONNX.
+        # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX
+        # symbolic function.
         if (
             "torch._refs" in decomp_fn.__module__
             or op_overload in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
