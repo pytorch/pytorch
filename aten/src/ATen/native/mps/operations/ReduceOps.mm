@@ -18,6 +18,7 @@
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
+#include <ATen/ops/linalg_vector_norm_native.h>
 #include <ATen/ops/max_native.h>
 #include <ATen/ops/mean_native.h>
 #include <ATen/ops/median.h>
@@ -26,7 +27,6 @@
 #include <ATen/ops/prod_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sum_native.h>
-#include <ATen/ops/linalg_vector_norm_native.h>
 #endif
 
 namespace at::native {
@@ -279,7 +279,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
     return;
   }
 
-
   auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
   auto in_dtype = opt_dtype.value_or(input_tensor.scalar_type());
   auto mps_input_dtype = getMPSDataType(in_dtype);
@@ -360,6 +359,7 @@ void impl_func_norm_mps(const Tensor& input_tensor,
 
       MPSGraphTensor* outputTensor;
 
+<<<<<<< HEAD
       if (pIsZero) {
               MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
               MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
@@ -378,6 +378,24 @@ void impl_func_norm_mps(const Tensor& input_tensor,
         outputTensor = [mpsGraph reductionMinimumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
       } else {
         MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+=======
+          if (pIsZero) {
+            MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
+            MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
+            MPSGraphTensor* nonZeros = [mpsGraph selectWithPredicateTensor:inputTensor
+                                                       truePredicateTensor:ones
+                                                      falsePredicateTensor:zeros
+                                                                      name:nil];
+            outputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
+          } else if (pIsPosInf) {
+            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+            outputTensor = [mpsGraph reductionMaximumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
+          } else if (pIsNegInf) {
+            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+            outputTensor = [mpsGraph reductionMinimumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
+          } else {
+            MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+>>>>>>> 7f61951ea30 (Fix lintrunner)
 
         MPSGraphTensor* powerValTensor = [mpsGraph constantWithScalar:p dataType:mps_input_dtype];
 
@@ -398,8 +416,17 @@ void impl_func_norm_mps(const Tensor& input_tensor,
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:mps::getMPSShape(output_t) name:nil];
       }
 
+<<<<<<< HEAD
           newCachedGraph->outputTensor_ = castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
     });
+=======
+          newCachedGraph->outputTensor_ =
+              castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
+        }
+        return newCachedGraph;
+      });
+    }
+>>>>>>> 7f61951ea30 (Fix lintrunner)
 
     auto otherPlaceholder = Placeholder();
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
@@ -1054,7 +1081,8 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
  bool keepdim,
  c10::optional<ScalarType> opt_dtype,
  const Tensor& result) {
-  mps::impl_func_norm_mps(self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
+  mps::impl_func_norm_mps(
+      self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 }
 
 Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
