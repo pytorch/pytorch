@@ -2809,5 +2809,36 @@ class TestCreateTensorNoProcessGroupMode(TestCase):
             no_process_group_mode=True,
         )
 
+    def test_non_contiguous_local_shards(self):
+        st_metadata: ShardedTensorMetadata = ShardedTensorMetadata(
+            shards_metadata=[
+                ShardMetadata(
+                    shard_offsets=[0, 0], shard_sizes=[2, 2], placement="rank:0/cpu"
+                ),
+                ShardMetadata(
+                    shard_offsets=[2, 0], shard_sizes=[2, 2], placement="rank:1/cpu"
+                ),
+            ],
+            size=torch.Size([4, 2]),
+        )
+        st_local_shards: List[Shard] = []
+        src = torch.randn(4, 2)
+        for shard_metadata in st_metadata.shards_metadata:
+            offsets = shard_metadata.shard_offsets
+            sizes = shard_metadata.shard_sizes
+            st_local_shards.append(
+                Shard(
+                    tensor=src[offsets[0]:offsets[0] + sizes[0], offsets[1]:offsets[1] + sizes[1]],
+                    metadata=shard_metadata,
+                )
+            )
+
+        ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards=st_local_shards,
+            sharded_tensor_metadata=st_metadata,
+            process_group=None,
+            no_process_group_mode=True,
+        )
+
 if __name__ == '__main__':
     run_tests()

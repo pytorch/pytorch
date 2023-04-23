@@ -931,7 +931,7 @@ class ShardedTensor(ShardedTensorBase):
         sharded_tensor = super(
             ShardedTensor, cls
         )._init_from_local_shards_and_global_metadata(
-            local_shards, sharded_tensor_metadata, sharding_spec=sharding_spec
+            local_shards, sharded_tensor_metadata, sharding_spec=sharding_spec, no_process_group_mode=no_process_group_mode
         )
         sharded_tensor._prepare_init(
             process_group=process_group, init_rrefs=init_rrefs, no_process_group_mode=no_process_group_mode)
