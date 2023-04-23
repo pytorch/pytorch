@@ -13,76 +13,6 @@ from torch.onnx._internal.fx import fx_exporter
 from torch.utils import _pytree as pytree
 
 
-class DynamoOptimizeExporter(fx_exporter.FXGraphModuleExporter):
-    def export(self) -> torch.onnx.ExportOutput:
-        self._input_adapter = exporter.InputAdapter()
-        self._output_adapter = exporter.OutputAdapter()
-
-        # Fill in default values for optional args and kwargs. The goal is to preserve
-        # them as inputs in `dynamo.optimize` produced FX graph. Otherwise, they will
-        # be traced as constants.
-        _, named_args = self._apply_input_adapt_step(
-            fx_exporter.BindInputStep,
-            self.model_args,
-            self.model_kwargs,
-            step_init_args=(self.model_signature,),
-        )
-        model_args, _ = self._apply_input_adapt_step(
-            fx_exporter.MergeKwargsIntoArgsStep,
-            [],
-            named_args,
-        )
-
-        # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-        model_args = copy.deepcopy(model_args)
-        # Translate callable to FX graph.
-        #
-        # TODO(wechi): There are several symbolic tracing mechanisms to convert
-        # nn.Module to FX graph. We should choose the right one after they are
-        # matured.
-
-        class GraphCaptureCompiler:
-            def __init__(self):
-                self.captured_graph: Optional[torch.fx.GraphModule] = None
-                self.captured_graph_count = 0
-
-            def compile(self, graph_module: torch.fx.GraphModule, _):
-                assert self.captured_graph_count == 0
-                self.captured_graph = graph_module
-                self.captured_graph_count += 1
-                return graph_module
-
-        compiler = GraphCaptureCompiler()
-        torch._dynamo.reset()
-        # TODO(titaiwang): Set `dynamic` according to `self.options.dynamic_shapes`
-        torch._dynamo.optimize(compiler.compile, nopython=True)(self.model)(*model_args)
-        torch._dynamo.reset()
-        assert compiler.captured_graph
-
-        # Outputs are flattened by `dynamo.optimize`.
-        # Apply and record this output adapt step.
-        self._output_adapter.append_step(DynamoFlattenOutputStep())
-        # TODO: `dynamo.optimize` does not capture non computation part of the graph.
-        # Hence any tensor that is returned multiple times will only appear once
-        # in the return statement of `dynamo.optimize` traced graph. A specialized
-        # output adapter is required to map this gap between PyTorch model.
-
-        # Export FX graph to ONNX ModelProto.
-        #
-        # Apply and record the following input adapt steps.
-        # `args` and `kwargs` are merged and flattened by `dynamo.optimize`.
-        model_args, _ = self._apply_input_adapt_step(
-            fx_exporter.FlattenInputWithTreeSpecValidationStep, model_args, {}
-        )
-        # `None` inputs are removed by `dynamo.optimize`.
-        model_args, _ = self._apply_input_adapt_step(
-            fx_exporter.RemoveNoneInputStep, model_args, {}
-        )
-        # TODO: needs additional input adapt step to remove unused arguments.
-        # `dynamo.optimize` drops unused arguments.
-        return self.export_fx_to_onnx(compiler.captured_graph, model_args)
-
-
 class _PyTreeExtensionContext:
     """Context manager to register PyTree extension."""
 
@@ -234,7 +164,6 @@ class DynamoExporter(fx_exporter.FXGraphModuleExporter):
         # TODO(wechi): There are several symbolic tracing mechanisms to convert
         # nn.Module to FX graph. We should choose the right one after they are
         # matured.
-        # TODO(titaiwang): Set `tracing_mode` according to `self.options.dynamic_shapes`
         graph_module, graph_guard = torch._dynamo.export(
             wrapped_model, *args, aten_graph=True, **kwargs
         )
