@@ -64,6 +64,21 @@ class FakeTensorTest(TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
+    def test_parameter_instantiation_consistency(self):
+        x = torch.rand([4])
+        y = torch.nn.parameter.Parameter(x)
+        with FakeTensorMode() as mode:
+            tensor_collision_set = set()
+            y2 = mode.from_tensor(y)
+            tensor_collision_set.add(y2)
+            y3 = mode.from_tensor(y)
+            tensor_collision_set.add(y3)
+            y4 = mode.from_tensor(y)
+            tensor_collision_set.add(y4)
+            self.assertEqual(len(tensor_collision_set), 1)
+
+            
+
     def test_non_parameter_grad(self):
         mode = FakeTensorMode()
         t = torch.rand([4], requires_grad=True)
