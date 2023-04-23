@@ -98,7 +98,7 @@ class NegativeBinomial(Distribution):
 
         log_unnormalized_prob = (self.total_count * F.logsigmoid(-self.logits) +
                                  value * F.logsigmoid(self.logits))
-        
+
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
                              torch.lgamma(self.total_count))
         # The case self.total_count == 0 and value == 0 has probability 1 but
