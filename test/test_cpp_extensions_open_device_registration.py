@@ -230,6 +230,32 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             z2 = z2.foo()
             self.assertFalse(self.module.custom_add_called())
             self.assertTrue(z2.is_foo)
+        
+        def test_open_device_storage_pin_memory(self):
+            torch.utils.rename_privateuse1_backend('foo')
+            with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
+                torch.utils.generate_methods_for_privateuse1_backend(for_tensor=False, for_module=False, for_storage=True)
+            # Check if the pin_memory is functioning properly on custom device
+            cpu_tensor = torch.empty(3)
+            self.assertFalse(cpu_tensor.is_foo)
+            self.assertFalse(cpu_tensor.is_pinned("foo"))
+            cpu_tensor_pin = cpu_tensor.pin_memory("foo")
+            self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
+            # Test storage pin_memory on custom device
+            cpu_storage = cpu_tensor.storage()
+            self.assertFalse(cpu_storage.is_pinned("foo"))
+            cpu_storage_pin = cpu_storage.pin_memory("foo")
+            self.assertFalse(cpu_storage.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin.is_pinned("foo"))
+            cpu_storage_pin_already = cpu_storage_pin.pin_memory("foo")
+            self.assertTrue(cpu_storage_pin.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin_already.is_pinned("foo"))
+            # Test storage pin_memory on error device
+            self.assertFalse(cpu_storage.is_pinned("foo"))
+            with self.assertRaisesRegex(TypeError, "cannot pin CPU memory to hpu device, please check the target device."):
+                cpu_storage_pin = cpu_storage.pin_memory("hpu")
+            self.assertFalse(cpu_storage.is_pinned("hpu"))
+            self.assertFalse(cpu_storage.is_pinned())
 
         def test_open_device_serialization():
             storage = torch.UntypedStorage(4, device=torch.device('foo'))
@@ -246,6 +272,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_random()
         test_open_device_tensor()
         test_open_device_storage()
+        test_open_device_storage_pin_memory()
         test_open_device_serialization()
 
 if __name__ == "__main__":
