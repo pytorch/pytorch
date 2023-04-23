@@ -45,7 +45,12 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 
 
 def _data_type_propagation(sub_graph: torch.fx.Graph):
+    visited_nodes = []
+
     def propagate_node(node: torch.fx.Node):
+        if node in visited_nodes:
+            return
+
         _node: torch.fx.Node = node
         ops_to_bool = [
             "is_inf",
@@ -68,13 +73,14 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
         }
         ops_without_dtype = ["ops", "get_index"]
         if _node.target in ops_without_dtype:
-            return False
+            visited_nodes.append(_node)
+            return
+
         if OptimizationContext.key in _node.meta:
             opt_ctx = _node.meta[OptimizationContext.key]
         else:
             opt_ctx = OptimizationContext()
-        if opt_ctx.dtype is not None:
-            return False
+
         if _node.target in ops_to_bool:
             opt_ctx.dtype = torch.bool
         elif _node.target in ops_with_dtype_arg:
@@ -90,7 +96,8 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
                 f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}"
             )
             _node.meta[OptimizationContext.key] = opt_ctx
-            return True
+            visited_nodes.append(_node)
+            return
 
         # node.target not belong to any ops which can directly get the dtype
         # need propogate dtype with it's input node
@@ -102,14 +109,17 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             if isinstance(n, torch.fx.node.Node) and n.target not in ops_without_dtype
         ]
         if len(input_nodes) == 0:
-            return False
+            visited_nodes.append(_node)
+            return
+
         all_input_nodes_propogated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
         if not all_input_nodes_propogated:
-            return False
+            return
+
         # all input nodes have propogated dtype, we will promot to dtype with highest precision
         dtype = functools.reduce(
             torch.promote_types,
@@ -124,13 +134,13 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             )
         data_type_logger(msg + input_msg)
         _node.meta[OptimizationContext.key] = opt_ctx
-        return True
+        visited_nodes.append(_node)
 
-    new_node_propogated = False
     for node in sub_graph.nodes:
-        new_node_propogated = propagate_node(node) or new_node_propogated
+        propagate_node(node)
 
-    if new_node_propogated:
+    if len(visited_nodes) != len(sub_graph.nodes):
+        assert len(sub_graph.nodes) > len(visited_nodes)
         _data_type_propagation(sub_graph)
 
 

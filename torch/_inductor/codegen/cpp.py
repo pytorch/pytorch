@@ -2035,6 +2035,36 @@ class CppKernelProxy(CppKernel):
             assert isinstance(_node, SchedulerNode)
             data_type_propagation(_node)
 
+    # Check if all the nodes of a given fx graph can support BF16
+    def is_bf16_sch(self, sch_node: SchedulerNode):
+        if not isinstance(sch_node._body, ir.LoopBody):
+            return True
+
+        sch_node.is_bf16 = False
+
+        # Propagate the dtype to check if all the fx node is bf16
+        data_type_propagation(sch_node)
+
+        sub_blocks = [sch_node._body.root_block] + list(
+            sch_node._body.subblocks.values()
+        )
+        for sub_block in sub_blocks:
+            for _node in sub_block.graph.nodes:
+                # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
+                # the data type as well.
+                if _node.target in ["ops", "get_index", "index_expr"]:
+                    continue
+
+                assert _node.meta
+                assert OptimizationContext.key in _node.meta
+                opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                assert opt_ctx.dtype
+                if opt_ctx.dtype is not torch.bfloat16:
+                    return False
+
+        sch_node.is_bf16 = True
+        return True
+
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_bf16_mem_copy(node: torch.fx.Node):
@@ -2170,6 +2200,27 @@ class CppKernelProxy(CppKernel):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
+
+        if all(
+            isinstance(_node, SchedulerNode) and self.is_bf16_sch(_node)
+            for _node in nodes
+        ):
+            # Mark the load node to load bf16
+            for _node in nodes:
+                sub_blocks = [_node._body.root_block] + list(
+                    _node._body.subblocks.values()
+                )
+                for sub_block in sub_blocks:
+                    for fx_node in sub_block.graph.nodes:
+                        if fx_node.target in ["load", "constant", "store"]:
+                            assert fx_node.meta
+                            assert OptimizationContext.key in fx_node.meta
+                            opt_ctx: OptimizationContext = fx_node.meta[
+                                OptimizationContext.key
+                            ]
+                            assert opt_ctx.dtype is torch.bfloat16
+                            opt_ctx.is_bf16_mem_copy = True
+            return
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)

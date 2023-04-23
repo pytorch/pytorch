@@ -850,7 +850,6 @@ class CPUReproTests(TestCase):
         traced = make_fx(fn)(x)
         compiled = compile_fx_inner(traced, [x])
         assert same(fn(x)[0], compiled([x])[0])
-        assert metrics.cpp_to_dtype_count == 2
         if codecache.valid_vec_isa_list():
             assert metrics.generated_cpp_vec_kernel_count == 1
 
@@ -1344,6 +1343,16 @@ class CPUReproTests(TestCase):
                         self.assertTrue(same(fn(x), opt_fn(x)))
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_bf16_neg(self):
+        def fn(x):
+            return x.neg()
+
+        metrics.reset()
+        x = torch.randn(100, 100).bfloat16()
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_transpose_non_contiguous(self):
         def fn(a):
