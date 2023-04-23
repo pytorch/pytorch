@@ -1161,11 +1161,18 @@ class CppKernel(Kernel):
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
-    def __init__(self, args, num_threads, tiling_factor=0, tiling_idx=-1):
+    def __init__(
+        self,
+        args,
+        num_threads,
+        tiling_factor=0,
+        tiling_idx=-1,
+        tiling_dtype=torch.float,
+    ):
         super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
-            tiling_factor = codecache.pick_vec_isa().nelements()
+            tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
         self.reduction_omp_dec: Dict[str, str] = {}
@@ -1202,8 +1209,14 @@ class CppVecKernel(CppKernel):
             if opt_ctx.is_load_bf16_as_fp32:
                 line = f"load_bf16_as_float({loadbuf})"
             else:
+                # Fast path for the loop body that can support bf16 fully
                 assert opt_ctx.is_bf16_mem_copy
-                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+                line = (
+                    f"{self.tiling_factor} == at::vec::Vectorized<bfloat16>::size() ? "
+                    f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}) "
+                    ": "
+                    f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+                )
         else:
             line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
@@ -1380,8 +1393,10 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices):
-        super().__init__(args, num_threads, tiling_factor, tiling_indices[1])
+    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
+        super().__init__(
+            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
+        )
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
@@ -2234,6 +2249,12 @@ class CppKernelProxy(CppKernel):
         self.legalize_bf16(nodes)
         self.data_type_propagation(nodes)
 
+        vec_dtype = (
+            torch.bfloat16
+            if all(hasattr(_node, "is_bf16") and _node.is_bf16 for _node in nodes)
+            else torch.float
+        )
+
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
@@ -2317,9 +2338,9 @@ class CppKernelProxy(CppKernel):
                 -1:
             ]
 
-        def select_tiling():
+        def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
-            tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+            tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
                 with CppVecKernelChecker(
@@ -2341,14 +2362,16 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling()
+            tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
                 tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
@@ -2372,10 +2395,14 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(CppTile2DKernel, tiling_factors[0], tiling_indices)
+                    codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                    )
                 )
                 inner_tail_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
 
     def codegen_loops(self, code, worksharing):
