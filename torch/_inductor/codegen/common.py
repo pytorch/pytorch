@@ -44,6 +44,11 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
+@functools.lru_cache(None)
+def dtype_agnostic_ops():
+    return ["ops", "get_index", "index_expr", "output"]
+
+
 def _data_type_propagation(sub_graph: torch.fx.Graph):
     visited_nodes = []
 
@@ -71,7 +76,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "argmin": torch.int64,
             "argmax": torch.int64,
         }
-        ops_without_dtype = ["ops", "get_index", "index_expr"]
+        ops_without_dtype = dtype_agnostic_ops()
         if _node.target in ops_without_dtype:
             visited_nodes.append(_node)
             return
