@@ -677,6 +677,11 @@ class Reduction(Loops):
             def combine_fn(a, b):
                 return ops.add(a, b)
 
+        elif reduction_type == "xor_sum":
+
+            def combine_fn(a, b):
+                return ops.bitwise_xor(a, b)
+
         elif reduction_type == "min":
 
             def combine_fn(a, b):
@@ -769,6 +774,7 @@ class Reduction(Loops):
 
             rtypes_to_inits = {
                 "sum": py_cnst(0),
+                "xor_sum": py_cnst(0),
                 "prod": py_cnst(1),
                 "any": py_cnst(0),
                 # "all" is desugared to `!any(!val)`
@@ -905,6 +911,7 @@ class Reduction(Loops):
 
         return {
             "sum": 0,
+            "xor_sum": 0,
             "any": 0,
         }[reduction_type]
 
