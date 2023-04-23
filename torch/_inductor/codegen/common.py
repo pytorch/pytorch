@@ -71,7 +71,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "argmin": torch.int64,
             "argmax": torch.int64,
         }
-        ops_without_dtype = ["ops", "get_index"]
+        ops_without_dtype = ["ops", "get_index", "index_expr"]
         if _node.target in ops_without_dtype:
             visited_nodes.append(_node)
             return
