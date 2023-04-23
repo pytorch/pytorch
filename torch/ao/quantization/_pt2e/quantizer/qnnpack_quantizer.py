@@ -81,7 +81,8 @@ def get_symmetric_quantization_config(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
-        qscheme=torch.per_tensor_symmetric,
+        # TODO: we won't need this once https://github.com/pytorch/pytorch/pull/99845/ lands
+        qscheme=torch.per_tensor_affine,
         is_dynamic=False,
     )
     qscheme = (
