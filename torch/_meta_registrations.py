@@ -88,6 +88,26 @@ def meta_take(self, index, *, out=None):
     return result
 
 
+@register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
+@out_wrapper()
+def linalg_cross(self, other, *, dim=-1):
+    x_d = self.ndim
+    y_d = other.ndim
+    check(
+        x_d == y_d,
+        lambda: "linalg.cross: inputs must have the same number of dimensions.",
+    )
+    check(
+        self.size(dim) == 3 and other.size(dim) == 3,
+        lambda: (
+            f"linalg.cross: inputs dimension {dim} must have length 3. "
+            f"Got {self.size(dim)} and {other.size(dim)}"
+        ),
+    )
+    out_shape = _broadcast_shapes(self.shape, other.shape)
+    return self.new_empty(out_shape)
+
+
 @register_meta(
     [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
 )
@@ -3027,6 +3047,37 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return self.new_empty(result_size)
 
 
+@register_meta([aten._fused_adam.default])
+def meta__fused_adam(
+    params,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    def empty_like_list(tensor_list):
+        return [torch.empty_like(t) for t in tensor_list]
+
+    return (
+        empty_like_list(params),
+        empty_like_list(grads),
+        empty_like_list(exp_avgs),
+        empty_like_list(exp_avg_sqs),
+        empty_like_list(state_steps),
+    )
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -3089,30 +3140,6 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
-
-
-@register_meta(aten.all_reduce)
-def all_reduce_meta(self, reduceOp, tag, rankset, group_size):
-    return torch.empty_like(self)
-
-
-@register_meta(aten.all_gather_into_tensor)
-def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
-    out_size = list(shard.size())
-    out_size[0] *= group_size
-    return shard.new_empty(out_size)
-
-
-@register_meta(aten.reduce_scatter_tensor)
-def reduce_scatter_tensor_meta(input, reduce_op, scatter_dim, tag, rankset, group_size):
-    out_size = list(input.size())
-    out_size[scatter_dim] //= group_size
-    return input.new_empty(out_size)
-
-
-@register_meta(aten.wait_tensor)
-def wait_tensor_meta(self):
-    return torch.empty_like(self)
 
 
 activate_meta()
