@@ -544,6 +544,7 @@ test_libtorch() {
     fi
 
     if [[ "${BUILD_ENVIRONMENT}" == *sm86* ]]; then
+      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
       "LD_LIBRARY_PATH=$TORCH_LIB_DIR $BUILD_BIN_DIR"/test_aot_inductor --gtest_output=xml:$TEST_REPORTS_DIR/test_aot_inductor.xml
     fi
     assert_git_not_dirty
