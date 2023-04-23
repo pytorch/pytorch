@@ -104,13 +104,12 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
       string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
-      auto cachedGraph = static_cast<RangeCachedGraph*>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
       if (!cachedGraph) {
-        auto* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
           auto mpsGraph = make_mps_graph();
           return new RangeCachedGraph(mpsGraph, mpsDataType, size);
         });
-        cachedGraph = static_cast<RangeCachedGraph*>(tmpCachedGraph);
       }
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
@@ -174,13 +173,12 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
       string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
-      auto cachedGraph = static_cast<RangeCachedGraph*>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
       if (!cachedGraph) {
-        auto* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
           auto mpsGraph = make_mps_graph();
           return new RangeCachedGraph(mpsGraph, mpsDataType, size);
         });
-        cachedGraph = static_cast<RangeCachedGraph*>(tmpCachedGraph);
       }
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
@@ -226,10 +224,10 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     @autoreleasepool {
       string key =
           "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps) + to_string(start_less_end);
-      RangeCachedGraph* cachedGraph = static_cast<RangeCachedGraph*>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
 
       if (!cachedGraph) {
-        MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
           RangeCachedGraph* newCachedGraph = nil;
 
           @autoreleasepool {
@@ -244,7 +242,6 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
           }
           return newCachedGraph;
         });
-        cachedGraph = static_cast<RangeCachedGraph*>(tmpCachedGraph);
       }
 
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
