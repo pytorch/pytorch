@@ -84,6 +84,37 @@ class CPUReproTests(TestCase):
 
             self.assertTrue(conv_seen)
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv2d_bn_mixed_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    3,
+                    16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                    dtype=torch.bfloat16,
+                )
+                self.bn = torch.nn.BatchNorm2d(
+                    16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        v = torch.randn(1, 3, 64, 64, dtype=torch.bfloat16)
+        mod = Model().eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
