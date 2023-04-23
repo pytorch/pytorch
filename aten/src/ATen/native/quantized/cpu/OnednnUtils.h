@@ -151,6 +151,13 @@ enum PostOps {
   Tanh,
 };
 
+static std::unordered_map<std::string, PostOps> POST_OP_TABLE = {
+  {"none", NoPostOp},
+  {"relu", Relu},
+  {"leaky_relu", LeakyRelu},
+  {"tanh", Tanh}
+};
+
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
       std::unique_ptr<ideep::tensor> weight,
@@ -201,6 +208,14 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       at::Tensor weight,
       c10::optional<at::Tensor> bias);
 
+  LinearPrimitiveCache& get_cache() {
+    return prim_cache;
+  }
+
+  std::unique_ptr<c10::once_flag>& get_cache_initialized_flag() {
+    return cache_initialized_flag;
+  }
+
  private:
   LinearPrimitiveCache prim_cache;
   std::unique_ptr<c10::once_flag> cache_initialized_flag;
@@ -214,10 +229,6 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
 
   template <bool ReluFused>
   at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
-
-  LinearPrimitiveCache& get_cache() {
-    return prim_cache;
-  }
 };
 
 template <int kSpatialDim = 2>

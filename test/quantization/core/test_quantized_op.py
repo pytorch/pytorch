@@ -4041,12 +4041,13 @@ class TestQuantizedLinear(TestCase):
         Prepack
         - input: weight is an int8 tensor from CPU backend
         - output: packed weight and bias as MKLDNN tensors
+
         Linear
         - inputs: packed weight and bias as MKLDNN tensors
         - output: linear result as an int8 tensor from CPU backend
         These ops are used for Inductor quantization
         '''
-        qlinear_prepack = torch.ops.quantized.linear_prepack_cpu_tensor
+        qlinear_prepack = torch.ops.quantized.linear_prepack_mkldnn
         qlinear = torch.ops.quantized.linear_with_mkldnn_weight_bias
         qlinear_prepack_ref = torch.ops.quantized.linear_prepack
         post_op_to_qlinear_ref_dict = {
@@ -4065,6 +4066,7 @@ class TestQuantizedLinear(TestCase):
         w_zp = 0
         y_scale = 4.7
         y_zp = 2
+        post_op_args = []
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
             supported_post_ops, weight_quant_per_channel_list)
@@ -4091,7 +4093,7 @@ class TestQuantizedLinear(TestCase):
                 qw_cpu = qw.int_repr()
                 qw_packed, b_packed = qlinear_prepack(qw_cpu, w_scales, x.shape, x_scale, x_zp, b)
                 qy_cpu = qlinear(qx_cpu, x_scale, x_zp, qw_packed, 1 / w_scales, w_zps,
-                                 b_packed, post_op, y_scale, y_zp)
+                                 b_packed, post_op, post_op_args, y_scale, y_zp)
 
                 # Reference
                 qw_packed_ref = qlinear_prepack_ref(qw, b)
