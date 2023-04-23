@@ -187,8 +187,7 @@ void computeRepeatIndices(index_t* repeat_ptr,
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLComputePipelineState> pipelineState = getPipelineState(MPSDevice::getInstance()->device(), scalar_type);
 
       [computeEncoder setComputePipelineState:pipelineState];
@@ -204,8 +203,6 @@ void computeRepeatIndices(index_t* repeat_ptr,
       MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
 
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
-      [computeEncoder endEncoding];
-      mpsStream->synchronize(SyncType::COMMIT_AND_CONTINUE);
     }
   });
 }
