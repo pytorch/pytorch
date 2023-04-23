@@ -26,6 +26,7 @@
 #include <ATen/ops/prod_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sum_native.h>
+#include <ATen/ops/linalg_vector_norm_native.h>
 #endif
 
 namespace at::native {
@@ -349,8 +350,13 @@ void impl_func_norm_mps(const Tensor& input_tensor,
           : newCachedGraph->inputTensor_;
 
           if (opt_dtype.has_value() || castInputData) {
+<<<<<<< HEAD
             inputTensor = [mpsGraph castTensor:inputTensor
       }
+=======
+            inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
+          }
+>>>>>>> 0fbb8d6620a (Fix build failures)
 
       MPSGraphTensor* outputTensor;
 
@@ -414,16 +420,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
   }
 }
 
-}
-
-TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
-(const Tensor& self,
- const Scalar& scalar_ord,
- OptionalIntArrayRef opt_dim,
- bool keepdim,
- c10::optional<ScalarType> opt_dtype,
- const Tensor& result) {
-  impl_func_norm_mps(self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 Tensor std_var_common_impl_mps(const Tensor& input_t,
                                at::OptionalIntArrayRef dim,
                                const c10::optional<Scalar>& correction,
@@ -1049,6 +1045,16 @@ TORCH_IMPL_FUNC(norm_dtype_out_mps)
  ScalarType dtype,
  const Tensor& result) {
   mps::impl_func_norm_mps(self, self, opt_p, dim, keepdim, dtype, result, /*cdist=*/false);
+}
+
+TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
+(const Tensor& self,
+ const Scalar& scalar_ord,
+ OptionalIntArrayRef opt_dim,
+ bool keepdim,
+ c10::optional<ScalarType> opt_dtype,
+ const Tensor& result) {
+  mps::impl_func_norm_mps(self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 }
 
 Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
