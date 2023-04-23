@@ -31,6 +31,7 @@ static void check_max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
       "max_pool1d() Expected 2D or 3D input tensor, but got ", self.sizes());
