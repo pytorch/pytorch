@@ -534,6 +534,9 @@ class MetaConverter:
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
                     )
+                # TODO: this is suspicious, now that we have callback argument
+                if type(t) is torch.nn.Parameter:
+                    r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause
