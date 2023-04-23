@@ -23,7 +23,8 @@ namespace at::native {
 
 namespace {
 
-template <typename T>
+template <typename T,
+          typename std::enable_if_t<!is_reduced_floating_point_v<T>, int> = 0>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -84,7 +85,7 @@ void LayerNormKernelImplInternal(
 }
 
 template <typename T, typename param_t,
-          typename std::enable_if<is_reduced_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 void layer_norm_kernel_mixed_type(
     const Tensor& X,
     const Tensor& gamma,
@@ -154,7 +155,7 @@ void layer_norm_kernel_mixed_type(
 }
 
 template <typename T,
-          typename std::enable_if<is_reduced_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
@@ -308,7 +309,7 @@ void layer_norm_backward_frame(
 }
 
 template <typename T, typename T2, typename opmath_t,
-          typename std::enable_if<is_reduced_floating_point<T>::value && std::is_same<T2, float>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<T> && std::is_same<T2, float>::value, int> = 0>
 void layer_norm_backward_frame(
     const T* dY_data,
     const T* X_data,

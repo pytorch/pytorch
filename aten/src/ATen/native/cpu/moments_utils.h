@@ -56,7 +56,7 @@ C10_ALWAYS_INLINE void AddMomentsVec(
 }
 
 template <typename T,
-          typename std::enable_if<!is_reduced_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<!is_reduced_floating_point_v<T>, int> = 0>
 inline void UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
@@ -79,7 +79,7 @@ inline void UpdateMomentsVec(
 // each bfloat16/half vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
 template <typename T,
-          typename std::enable_if<is_reduced_floating_point<T>::value, int>::type = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
 inline void UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
