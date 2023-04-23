@@ -3,6 +3,7 @@
 #include <structmember.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_types.h>
@@ -28,6 +29,10 @@ PyObject* THPDtype_is_floating_point(THPDtype* self, PyObject* noargs) {
   } else {
     Py_RETURN_FALSE;
   }
+}
+
+PyObject* THPDtype_itemsize(THPDtype* self, PyObject* noargs) {
+  return THPUtils_packInt64(scalarTypeToTypeMeta(self->scalar_type).itemsize());
 }
 
 PyObject* THPDtype_is_complex(THPDtype* self, PyObject* noargs) {
@@ -68,6 +73,7 @@ static struct PyGetSetDef THPDtype_properties[] = {
      nullptr},
     {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
     {"is_signed", (getter)THPDtype_is_signed, nullptr, nullptr, nullptr},
+    {"itemsize", (getter)THPDtype_itemsize, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)

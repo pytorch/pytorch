@@ -1,5 +1,6 @@
 import copy
 import functools
+import itertools
 import logging
 import os
 import shutil
@@ -10,8 +11,8 @@ from importlib import import_module
 from tempfile import TemporaryFile
 
 import torch
+import torch._prims_common as utils
 import torch.fx as fx
-
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -24,6 +25,10 @@ from torch._dynamo.debug_utils import (
     NNModuleToString,
     TEST_REPLACEABLE_COMMENT,
 )
+from torch._dynamo.testing import rand_strided
+from torch.multiprocessing.reductions import StorageWeakRef
+
+from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from .. import config
 
@@ -163,6 +168,164 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                       REPRO SUPPORT CODE
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+def _stride_or_default(stride, *, shape):
+    return stride if stride is not None else utils.make_contiguous_strides_for(shape)
+
+
+def _dtype_or_default(dtype):
+    return dtype if dtype is not None else torch.float32
+
+
+def _device_or_default(device):
+    return device if device is not None else torch.device("cpu")
+
+
+def _storage_offset_or_default(storage_offset):
+    return storage_offset if storage_offset is not None else 0
+
+
+# TODO: Support bundling the entire repro into a zip file for ease of
+# transferring around
+class InputReader:
+    def __init__(self, save_dir=None):
+        # If None, we will generate random data instead
+        if save_dir is None:
+            log.warning("no save_dir specified, will generate random data")
+        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        device = _device_or_default(device)
+        dtype_hint = _dtype_or_default(dtype_hint)
+        if self.store is not None:
+            try:
+                storage = self.store.read_storage(storage_hash)
+            except FileNotFoundError:
+                pass
+            else:
+                if device != storage.device:
+                    log.warning("device mismatch: %s != %s", device, storage.device)
+                    # TODO: transfer it to the right device?  But failing this
+                    # way would be very mysterious!  Would have been better
+                    # not to store device in the serialized format...
+                return storage
+        log.warning("could not load %s, generating random data instead", storage_hash)
+        shape = (nbytes // dtype_hint.itemsize,)
+        stride = _stride_or_default(None, shape=shape)
+        return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
+
+    def tensor(
+        self,
+        storage,
+        shape,
+        stride=None,
+        *,
+        storage_offset=None,
+        dtype=None,
+        **metadata,
+    ):
+        stride = _stride_or_default(stride, shape=shape)
+        storage_offset = _storage_offset_or_default(storage_offset)
+        dtype = _dtype_or_default(dtype)
+        t = torch.tensor([], dtype=dtype, device=storage.device)
+        t.set_(storage, storage_offset, shape, stride)
+        torch._utils.set_tensor_metadata(t, metadata)
+        return t
+
+    def symint(self, val):
+        return val
+
+
+# Here is our writer strategy:
+#  1. We will stream all of the inputs to disk
+#  2. You can now deterministically randomize the inputs, or reload
+#     the inputs from disk
+#  3. You can YOLO run the script without the inputs, in which case
+#     we'll fill the inputs with random data and pray
+#  4. We could offer an in process "check if the randomized thing
+#     works too" but this is delicate so we don't do it
+
+
+class InputWriter:
+    def __init__(self, save_dir, *, stable_hash=False):
+        self.lines = [
+            "import torch._dynamo.repro.after_aot",
+            f"reader = torch._dynamo.repro.after_aot.InputReader(save_dir={save_dir!r})",
+        ]
+        # TODO: consider ensuring tensor and storage counters line up?
+        self.tensor_counter = itertools.count()
+        self.symint_counter = itertools.count()
+        self.storage_counter = itertools.count()
+        self.store = (
+            ContentStoreWriter(save_dir, stable_hash=stable_hash)
+            if save_dir is not None
+            else None
+        )
+        self.seen_storages = {}
+
+    # Storages are untyped, but we need to initialize them with data if
+    # we don't have the real data, so we give a hint saying what kind
+    # of initialization may be appropriate
+    def storage(self, untyped_storage, *, dtype_hint=None) -> str:
+        ws = StorageWeakRef(untyped_storage)
+        v = self.seen_storages.get(ws)
+        if v is not None:
+            return v
+        v = f"buf{next(self.storage_counter)}"
+        maybe_dtype_hint = ""
+        if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
+            maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
+        # TODO: being optional on device is kind of pointless as the default
+        # is CPU but most repros we care about are CUDA
+        maybe_device = ""
+        if _device_or_default(None) != untyped_storage.device:
+            maybe_device = f", device={untyped_storage.device!r}"
+        nbytes = untyped_storage.nbytes()
+        storage_hash = None
+        if self.store is not None:
+            storage_hash = self.store.write_storage(untyped_storage)
+        self.lines.append(
+            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
+        )
+        return v
+
+    def tensor(self, t) -> str:
+        storage = self.storage(t.untyped_storage(), dtype_hint=t.dtype)
+        maybe_stride = ""
+        if _stride_or_default(None, shape=t.shape) != t.stride():
+            maybe_stride = f", {tuple(t.stride())}"
+        maybe_dtype = ""
+        if _dtype_or_default(None) != t.dtype:
+            maybe_dtype = f", dtype={t.dtype!r}"
+        maybe_storage_offset = ""
+        if _storage_offset_or_default(None) != t.storage_offset():
+            maybe_storage_offset = f", storage_offset={t.storage_offset()!r}"
+        maybe_tensor_metadata = ""
+        tensor_metadata = torch._utils.get_tensor_metadata(t)
+        if tensor_metadata:
+            maybe_tensor_metadata = ", " + ", ".join(
+                f"{k}={v!r}" for k, v in tensor_metadata.items()
+            )
+        v = f"t{next(self.tensor_counter)}"
+        self.lines.append(
+            f"{v} = reader.tensor({storage}, {tuple(t.shape)}"
+            f"{maybe_stride}{maybe_storage_offset}{maybe_dtype}{maybe_tensor_metadata})"
+        )
+        return v
+
+    # TODO: this doesn't actually symint atm
+    def symint(self, val) -> str:
+        if isinstance(val, torch.SymInt):
+            val = val.node.hint
+        v = f"s{next(self.symint_counter)}"
+        self.lines.append(f"{v} = reader.symint({val!r})")
+        return v
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           DUMP REPROS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
@@ -183,7 +346,7 @@ COMPILER_REPRO_OPTIONS = {
 }
 
 
-def generate_compiler_repro_string(gm, args, *, stable_output=False):
+def generate_compiler_repro_string(gm, args, *, stable_output=False, save_dir=None):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -210,25 +373,23 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     model_str += NNModuleToString.convert(gm)
 
-    model_str += "args = []\n"
-
     # get hint shape/stride when dynamic shape enabled
     def hint_if_symint(x):
         return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
 
-    for arg in args:
-        if isinstance(arg, int):
-            model_str += f"args.append({arg})\n"
-        elif isinstance(arg, torch.SymInt):
-            model_str += f"args.append({arg.node.hint})  # {arg}\n"
+    writer = InputWriter(save_dir)
+    wargs = []
+    for i, arg in enumerate(args):
+        if isinstance(arg, (int, torch.SymInt)):
+            wargs.append(writer.symint(arg))
         elif isinstance(arg, torch.Tensor):
-            model_str += (
-                "args.append(rand_strided"
-                + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
-                + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
-            )
+            # TODO: improve these names with FQN
+            wargs.append(writer.tensor(arg))
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+
+    model_str += "\n".join(writer.lines) + "\n"
+    model_str += f"args = [{', '.join(wargs)}]\n"
 
     # TODO: fake may be better for performance here
     tracing_mode = "real"
@@ -238,7 +399,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
     return model_str
 
 
-def save_graph_repro(fd, gm, args, compiler_name, *, stable_output=False):
+def save_graph_repro(
+    fd, gm, args, compiler_name, *, stable_output=False, save_dir=None
+):
     sync_line = ""
     for arg in args:
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -247,7 +410,11 @@ def save_graph_repro(fd, gm, args, compiler_name, *, stable_output=False):
 
     if "inductor" in compiler_name:
         fd.write("import torch._inductor.overrides\n")
-    fd.write(generate_compiler_repro_string(gm, args, stable_output=stable_output))
+    fd.write(
+        generate_compiler_repro_string(
+            gm, args, stable_output=stable_output, save_dir=save_dir
+        )
+    )
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
         fd.write(
@@ -282,7 +449,7 @@ def dump_compiler_graph_state(gm, args, compiler_name):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
-        save_graph_repro(fd, gm, args, compiler_name)
+        save_graph_repro(fd, gm, args, compiler_name, save_dir=subdir)
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
     try:

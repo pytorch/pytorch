@@ -27,6 +27,8 @@
 # map to the same (padded) storage.  We think this will be immaterial for most
 # users.
 
+import ctypes
+import hashlib
 import os.path
 import struct
 from typing import Optional
@@ -67,7 +69,9 @@ def hash_storage(storage):
         # by the length of tensor as well
         return prims.xor_sum((a * x + b).int(), [0])
 
-    with torch.random.fork_rng([storage.device] if storage.device.type != "cpu" else []):
+    with torch.random.fork_rng(
+        [storage.device] if storage.device.type != "cpu" else []
+    ):
         torch.manual_seed(0)  # this can be anything, just needs to be fixed
         x = torch.empty(0, dtype=torch.uint8, device=storage.device).set_(storage)
         # The dtype-casting view cannot be compiled, and so the
@@ -92,12 +96,24 @@ class ContentStoreWriter:
     #       0000..00
     #   tensors/
     #     name
-    def __init__(self, loc):
+    def __init__(self, loc, stable_hash=False):
         self.loc = loc
         self.seen_storage_hashes = set()
+        self.stable_hash = stable_hash
 
     def write_storage(self, storage):
-        h = hash_storage(storage)
+        if self.stable_hash:
+            cpu_storage = storage.cpu()
+            # TODO: make storage support buffer protocol so this isn't
+            # necessary
+            buf = (ctypes.c_byte * cpu_storage.nbytes()).from_address(
+                cpu_storage.data_ptr()
+            )
+            sha1 = hashlib.sha1()
+            sha1.update(buf)
+            h = sha1.hexdigest()
+        else:
+            h = hash_storage(storage)
         if h in self.seen_storage_hashes:
             return h
         # TODO: consider not using torch.save for this; we don't actually

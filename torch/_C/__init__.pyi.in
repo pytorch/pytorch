@@ -99,6 +99,7 @@ class dtype:
     is_floating_point: _bool
     is_complex: _bool
     is_signed: _bool
+    itemsize: _int
 
 # Defined in torch/csrc/TypeInfo.cpp
 class iinfo:

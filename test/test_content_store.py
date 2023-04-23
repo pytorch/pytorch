@@ -4,15 +4,15 @@ import tempfile
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.common_cuda import SM70OrLater
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 
 class TestContentStore(TestCase):
     def test_basic(self, device):
-        if device == 'cuda' and not SM70OrLater:
+        if device == "cuda" and not SM70OrLater:
             self.skipTest("Does not support Triton")
         # setup test data
         x = torch.randn(4, device=device)
