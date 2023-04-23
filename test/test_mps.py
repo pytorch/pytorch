@@ -124,6 +124,7 @@ def mps_ops_grad_modifier(ops):
         'fmod': [torch.float16],
         
         'nn.functional.normalize': [torch.float16],
+        'round': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -10256,6 +10257,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
+        'round',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
