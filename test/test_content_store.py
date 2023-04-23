@@ -4,9 +4,7 @@ import tempfile
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 

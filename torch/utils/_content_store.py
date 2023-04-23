@@ -29,6 +29,7 @@
 
 import os.path
 import struct
+from typing import Optional
 
 import torch
 import torch._prims as prims
@@ -117,7 +118,7 @@ class ContentStoreWriter:
             t.storage_offset(),
             tuple(t.shape),
             t.stride(),
-            torch._C._get_tensor_metadata(t),
+            torch._utils.get_tensor_metadata(t),
         )
         subfolder = os.path.join(self.loc, "tensors")
         os.makedirs(subfolder, exist_ok=True)
@@ -131,6 +132,7 @@ class ContentStoreReader:
 
     def read_storage(self, h):
         ws = self.storage_cache.get(h)
+        s: Optional[torch.UntypedStorage]
         if ws is not None:
             s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
             if s is not None:
