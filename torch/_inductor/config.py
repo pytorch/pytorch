@@ -201,6 +201,8 @@ class cpp:
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = True
 
+    max_horizontal_fusion_size = max_fusion_size
+
 
 # config specific to codegen/triton.py
 class triton:
