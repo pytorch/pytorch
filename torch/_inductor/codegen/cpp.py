@@ -2055,6 +2055,16 @@ class CppKernelProxy(CppKernel):
                 if _node.target in ["ops", "get_index", "index_expr"]:
                     continue
 
+                # Fast path if all operations can support bf16 without converting to fp32
+                if _node.target not in [
+                    "load",
+                    "constant",
+                    "store",
+                    "abs",
+                    "neg",
+                ] and _node.op not in ["placeholder", "output"]:
+                    return False
+
                 assert _node.meta
                 assert OptimizationContext.key in _node.meta
                 opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
@@ -2220,6 +2230,8 @@ class CppKernelProxy(CppKernel):
                             ]
                             assert opt_ctx.dtype is torch.bfloat16
                             opt_ctx.is_bf16_mem_copy = True
+
+            # Bypass the legalization as the kernel can run with bf16 directly
             return
 
         for _node in nodes:

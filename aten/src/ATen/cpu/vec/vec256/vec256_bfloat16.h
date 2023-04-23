@@ -274,7 +274,7 @@ public:
     return cvt_from_fp32<T>(o1, o2);
   }
   Vectorized<T> abs() const {
-    return _mm256_andnot_si256(values, _mm256_set1_epi16(0x8000));
+    return _mm256_andnot_si256(_mm256_set1_epi16(0x8000), values);
   }
   Vectorized<T> angle() const {
     __m256 lo, hi;
