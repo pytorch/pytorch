@@ -2053,6 +2053,8 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+        if not args.dynamic_batch_only:
+            torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
