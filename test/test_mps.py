@@ -122,7 +122,7 @@ def mps_ops_grad_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
-        
+
         'nn.functional.normalize': [torch.float16],
         'round': [torch.float16],
     }
@@ -656,6 +656,8 @@ def mps_ops_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        'round': [torch.float16],
     }
 
     UNDEFINED_XFAILLIST = {
