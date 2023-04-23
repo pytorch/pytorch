@@ -77,20 +77,6 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16]
 
 
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-# avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
-@functools.lru_cache(maxsize=None)
-def has_bf16_support():
-    import sys
-
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
-
-
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
@@ -1041,6 +1027,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_views5(self):
+        # tensor with shape 0 in any dimension
+        def forward(x):
+            y = x[:, 4:]
+            return y.view(len(y), -1, 4)
+
+        self.common(
+            forward,
+            (torch.randn(4, 4, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -1768,89 +1765,6 @@ class CommonTemplate:
                 (v1, v2),
             )
 
-    def test_conv2d_packed(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv2d packed test")
-
-        x_shape = (1, 3, 56, 56)
-        for mode_train in [True, False]:
-            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
-                mode=mode_train
-            )
-            v = torch.randn(x_shape, dtype=torch.float32)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    def test_conv_used_from_multiple_places(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv/linear fusion test")
-
-        class M(torch.nn.Module):
-            def __init__(self, conv_in_channel, conv_out_channel) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
-
-            def forward(self, x):
-                res = self.conv(x)
-                res = F.relu(res)
-                res = self.conv(res)
-                return res
-
-        with torch.no_grad():
-            m = M(3, 3).eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(1, 3, 224, 224)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
-
-    def test_linear_used_from_multiple_places(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv/linear fusion test")
-
-        class M(torch.nn.Module):
-            def __init__(self, in_channel, out_channel) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(in_channel, out_channel)
-
-            def forward(self, x):
-                res = self.linear(x)
-                res = F.relu(res)
-                res = self.linear(res)
-                return res
-
-        if has_bf16_support():
-            with torch.no_grad():
-                m = M(224, 224).bfloat16().eval()
-                m_opt = torch.compile(m)
-                x = torch.randn(224, 224, dtype=torch.bfloat16)
-                m_opt(x)
-                self.assertEqual(m(x), m_opt(x))
-
-    def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
-        for input_shape, bias in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], 30, bias=bias)
-            ).eval()
-
-            v = torch.randn(input_shape)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-            if has_bf16_support() and len(input_shape) > 1:
-                mod = mod.to(torch.bfloat16)
-                v = v.to(torch.bfloat16)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
-
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1880,19 +1794,6 @@ class CommonTemplate:
             code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
-
-    def test_conv_transpose2d_packed(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv_transpose2d packed test")
-
-        x_shape = (1, 3, 28, 28)
-        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
-        v = torch.randn(x_shape, dtype=torch.float32)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
 
     def test_view_detach(self):
         def fn(a):
@@ -2707,6 +2608,25 @@ class CommonTemplate:
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_complex_fallback(self):
+        def fn(x):
+            return x * x + 10
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+        class ToComplex(nn.Module):
+            def forward(self, x):
+                return (x + x + 12).to(torch.complex64)
+
+        self.common(ToComplex(), (torch.rand([1, 2, 4, 8]),), check_lowp=False)
+
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -4690,6 +4610,36 @@ class CommonTemplate:
 
         self.common(fn, [torch.zeros([20, 20])])
 
+    def test_like_rands2(self):
+        # rand_like with kwargs `device` of str type
+        d = self.device
+        assert isinstance(d, str)
+
+        @torch.compile
+        def fn(x):
+            return torch.rand_like(x, device=d)
+
+        x = torch.ones(10, device=self.device, dtype=torch.float32)
+        a0 = fn(x).clone()
+        a1 = fn(x).clone()
+        self.assertFalse(torch.allclose(a0, a1))
+
+    @requires_cuda()
+    def test_like_rands3(self):
+        # rand_like with `device` which is different from `x.device`
+        def test_like_rands_on_different_device(device1, device2):
+            @torch.compile
+            def fn(x, device):
+                return torch.rand_like(x, device=device)
+
+            x = torch.ones(10, device=device1, dtype=torch.float32)
+            return fn(x, device2).clone()
+
+        a0 = test_like_rands_on_different_device("cpu", "cuda")
+        a1 = test_like_rands_on_different_device("cuda", "cpu")
+        self.assertTrue(a0.device.type == "cuda")
+        self.assertTrue(a1.device.type == "cpu")
+
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -5459,6 +5409,33 @@ class CommonTemplate:
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_sqrt_dynamic_shapes(self):
+        # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
+        # TODO: support cuda path.
+        if self.device == "cuda":
+            raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                B, N, C = x.shape
+                return self.get_rel_indices(N)
+
+            def get_rel_indices(self, num_patches: int) -> torch.Tensor:
+                img_size = int(num_patches**0.5)
+                ind = torch.arange(img_size)
+                return ind
+
+        self.common(
+            Model(),
+            [
+                torch.randn(8, 4, 4),
+            ],
+        )
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_index_dynamic_shapes(self):
         if self.device == "cuda":
             raise unittest.SkipTest("index dynamic shapes only supports cpu")
@@ -5816,6 +5793,52 @@ class CommonTemplate:
         self.assertEqual(get_data_type(bitwise_or), torch.bool)
         self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
 
+    def test_AllenaiLongformerBase_repro(self):
+        def fn(query, scores, window_overlap):
+            batch_size, seq_len, num_heads, _ = query.size()
+            chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
+            diagonal_attention_scores = scores.new_zeros(
+                (
+                    batch_size * num_heads,
+                    chunks_count + 1,
+                    window_overlap,
+                    window_overlap * 2 + 1,
+                )
+            )
+            diagonal_attention_scores[:, :-1, :, window_overlap:] = scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
+            input_tensor = diagonal_attention_scores.view(
+                batch_size, num_heads, seq_len, 2 * window_overlap + 1
+            ).transpose(2, 1)
+            beginning_input = input_tensor[:, :window_overlap, :, : window_overlap + 1]
+            input_tensor[:, :window_overlap, :, : window_overlap + 1] = torch.full_like(
+                beginning_input, -float("inf")
+            )
+            return input_tensor
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                args = [
+                    ((4, 1024, 12, 64), (768, 3072, 64, 1), torch.float32, "cpu"),
+                    ((48, 3, 512, 513), (787968, 262656, 513, 1), torch.float32, "cpu"),
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(*args, 256), opt_fn(*args, 256))
+
+    def test_slice(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x, 2), opt_fn(x, 2))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -6143,9 +6166,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     ),
                     f"{fn}, {ndims}, {dyn_shape}",
                 )
-
-
-if HAS_CUDA and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
