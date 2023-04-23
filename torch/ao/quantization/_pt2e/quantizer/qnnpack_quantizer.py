@@ -81,17 +81,17 @@ def get_symmetric_quantization_config(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
-        qscheme=torch.per_tensor_symmetric,
+        qscheme=torch.per_tensor_affine,
         is_dynamic=False,
     )
-    qscheme = (
+    weight_qscheme = (
         torch.per_channel_symmetric if is_per_channel else torch.per_tensor_symmetric
     )
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-127,
         quant_max=127,
-        qscheme=qscheme,
+        qscheme=weight_qscheme,
         ch_axis=1,
         is_dynamic=False,
     )
