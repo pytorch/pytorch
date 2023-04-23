@@ -3047,6 +3047,37 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return self.new_empty(result_size)
 
 
+@register_meta([aten._fused_adam.default])
+def meta__fused_adam(
+    params,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    def empty_like_list(tensor_list):
+        return [torch.empty_like(t) for t in tensor_list]
+
+    return (
+        empty_like_list(params),
+        empty_like_list(grads),
+        empty_like_list(exp_avgs),
+        empty_like_list(exp_avg_sqs),
+        empty_like_list(state_steps),
+    )
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
