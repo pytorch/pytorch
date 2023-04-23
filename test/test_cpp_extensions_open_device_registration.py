@@ -230,7 +230,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             z2 = z2.foo()
             self.assertFalse(self.module.custom_add_called())
             self.assertTrue(z2.is_foo)
-        
+
         def test_open_device_storage_pin_memory(self):
             torch.utils.rename_privateuse1_backend('foo')
             with self.assertRaisesRegex(RuntimeError, "The custom device module of"):
