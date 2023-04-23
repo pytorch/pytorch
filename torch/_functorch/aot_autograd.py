@@ -2932,8 +2932,6 @@ def aot_function(
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
     num_params_buffers: int = 0,
-    hasher_type=None,  # deprecated
-    static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
     inference_compiler: Optional[Callable] = None,
     *,
@@ -2992,10 +2990,6 @@ def aot_function(
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
     """
-    if static_argnums is not None:
-        raise RuntimeError(
-            "static_argnums has been deprecated - manually wrap your function or use torchdynamo."
-        )
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -3127,8 +3121,6 @@ def aot_module_simplified(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
-    hasher_type=None,
-    static_argnums=None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
@@ -3175,6 +3167,7 @@ def aot_module_simplified(
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
+
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
@@ -3193,7 +3186,6 @@ def aot_module_simplified(
             )
         return out
 
-    assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:

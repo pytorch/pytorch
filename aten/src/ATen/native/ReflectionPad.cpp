@@ -160,12 +160,12 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
       ") is too small."
       " Calculated output D: ", output_d, " H: ", output_h, " W: ", output_w);
 
+  const auto memory_format = input.suggest_memory_format();
+  const auto options = input.options().memory_format(memory_format);
   if (batch_mode) {
-    const auto memory_format = input.suggest_memory_format();
-    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {},
-        input.options().memory_format(memory_format));
+    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {}, options);
   } else {
-    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, input.options());
+    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, options);
   }
 }
 

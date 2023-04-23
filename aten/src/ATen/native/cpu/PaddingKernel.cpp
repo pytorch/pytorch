@@ -473,6 +473,11 @@ void cpu_padding_backward_channels_last(
   }
 }
 
+// non-batch mode 4d input will be considered as Contiguous in format of CDHW
+at::MemoryFormat padding_memory_format_3d(const Tensor& input) {
+  return input.dim() == 4 ? at::MemoryFormat::Contiguous : input.suggest_memory_format();
+}
+
 // reflection padding
 void reflection_pad1d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
@@ -498,22 +503,11 @@ void reflection_pad1d_backward_kernel_impl(
 void reflection_pad2d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
   if (input.is_quantized()) {
-    switch (input.suggest_memory_format()) {
-      case at::MemoryFormat::Contiguous: {
-        AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
-          cpu_padding<scalar_t, ReflectionPad>(output, input, param);
-        });
-        break;
-      }
-      case at::MemoryFormat::ChannelsLast: {
-        AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d_channels_last", [&]{
-          cpu_padding_channels_last<scalar_t, ReflectionPad>(output, input, param);
-        });
-        break;
-      }
-      default:
-        TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-    }
+    // original quantized impl doesn't have channels last support,
+    // if this is intended, make a switch here.
+    AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
+      cpu_padding<scalar_t, ReflectionPad>(output, input, param);
+    });
   } else {
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::Contiguous: {
@@ -557,7 +551,7 @@ void reflection_pad2d_backward_kernel_impl(
 
 void reflection_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  switch (input.suggest_memory_format()) {
+  switch (padding_memory_format_3d(input)) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
           "reflection_pad3d", [&] {
@@ -580,7 +574,7 @@ void reflection_pad3d_kernel_impl(const Tensor& output, const Tensor& input, Int
 void reflection_pad3d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  switch (grad_output.suggest_memory_format()) {
+  switch (padding_memory_format_3d(grad_output)) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
           "reflection_pad3d_backward", [&] {
@@ -659,7 +653,7 @@ void replication_pad2d_backward_kernel_impl(
 
 void replication_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  switch (input.suggest_memory_format()) {
+  switch (padding_memory_format_3d(input)) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d", [&] {
         cpu_padding<scalar_t, ReplicationPad>(output, input, param);
@@ -680,7 +674,7 @@ void replication_pad3d_kernel_impl(const Tensor& output, const Tensor& input, In
 void replication_pad3d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  switch (grad_output.suggest_memory_format()) {
+  switch (padding_memory_format_3d(grad_output)) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad3d_backward", [&] {
         cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);

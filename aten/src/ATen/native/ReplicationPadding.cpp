@@ -162,12 +162,12 @@ TORCH_META_FUNC(replication_pad3d) (
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
 
   /* resize output */
+  const auto memory_format = input.suggest_memory_format();
+  const auto options = input.options().memory_format(memory_format);
   if (ndim == 4) {
-    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
+    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, options);
   } else {
-    const auto memory_format = input.suggest_memory_format();
-    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {},
-        input.options().memory_format(memory_format));
+    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, options);
   }
 }
 
