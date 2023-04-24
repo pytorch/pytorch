@@ -37,7 +37,7 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   NSError* error = nil;
   if (!_mtl_indexing_library) {
     MTLCompileOptions* options = [MTLCompileOptions new];
-    [options setLanguageVersion: getMetalLanguageVersion(_mtl_device, isMacOS13Plus(MacOSVersion::MACOS_VER_13_0_PLUS))];
+    [options setLanguageVersion:getMetalLanguageVersion(_mtl_device, isMacOS13Plus(MacOSVersion::MACOS_VER_13_0_PLUS))];
     [options setFastMathEnabled:YES];
     _mtl_indexing_library = [_mtl_device newLibraryWithSource:[NSString stringWithCString:mps::indexing_metal_shaders
                                                                                  encoding:NSASCIIStringEncoding]
@@ -58,7 +58,8 @@ id<MTLComputePipelineState> MPSDevice::metalIndexingFunction(const std::string& 
     return state;
   }
 
-  id<MTLFunction> indexFunction = [[indexing_lib newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]] autorelease];
+  id<MTLFunction> indexFunction =
+      [[indexing_lib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]] autorelease];
   TORCH_CHECK(indexFunction,
               "Failed to create specialized function state object: ",
               kernel,
