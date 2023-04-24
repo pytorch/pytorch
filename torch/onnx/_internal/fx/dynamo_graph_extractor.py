@@ -52,7 +52,7 @@ class DynamoOptimize(exporter.FXGraphExtractor):
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: exporter._ResolvedExportOptions,
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
@@ -152,7 +152,7 @@ class DynamoExport(exporter.FXGraphExtractor):
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
+        options: exporter._ResolvedExportOptions,
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
