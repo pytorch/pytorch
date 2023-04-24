@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 def aot_autograd(**kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
+        print(gm.code)
         # Hack to get around circular import problems with aot_eager_decomp_partition
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()

@@ -788,5 +788,16 @@ class _Ops(types.ModuleType):
         self.loaded_libraries.add(path)
 
 
+# Testing-only higher order operator
+class Wrap(HigherOrderOperator):
+    def __init__(self):
+        super().__init__('wrap')
+
+    def __call__(self, func, *args):
+        return func(*args)
+
+wrap = Wrap()
+
+
 # The ops "namespace"
 ops = _Ops()

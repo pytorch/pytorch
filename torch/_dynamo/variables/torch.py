@@ -833,40 +833,21 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
-            if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
-                # closure vars other than 'self' are not in scope of generated code, so error early
-                # TODO(avik): we should eventually support this.
-                # (Feature request tracked here: https://github.com/pytorch/pytorch/issues/99401)
-                closure_vars = [
-                    var.name
-                    for var in f.closure.items
-                    if isinstance(var, ClosureVariable) and var.name != "self"
-                ]
-                if closure_vars:
-                    code = f.get_code()
-                    raise torch._dynamo.exc.UserError(
-                        torch._dynamo.exc.UserErrorType.ANTI_PATTERN,
-                        f"Cannot create subgraph for nested function '{code.co_name}' "
-                        f"at {code.co_filename}:{code.co_firstlineno} because "
-                        f"it closes over variables {closure_vars}. Please rewrite "
-                        f"'{code.co_name}' to take {closure_vars} as additional args.",
-                    )
-
             # Setup the subgraph we're going to capture into
-            tx.output.graph = torch.fx.Graph()
-            tx.output.input_name_to_proxy.clear()
+            original_output = tx.output
+            tx.output = original_output.new_subgraph()
 
             args = []
             # One argument to graph per sub_args
             for a in sub_args:
                 if isinstance(a, TensorVariable):
-                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    tx.output.create_graph_input(a.as_proxy().node.name, recurse=False)
                     args.append(a)
                 else:
                     # call_function() needs a TensorVariable, therefore we construct
                     # one with inner graph proxy.
                     assert isinstance(a, torch.Tensor)
-                    proxy = tx.output.create_graph_input("arg")
+                    proxy = tx.output.create_graph_input("arg", recurse=False)
                     args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
                 # NB: we don't bother populating graphargs, as
                 # they won't actually get used by anything
@@ -890,8 +871,9 @@ class TorchHigherOrderOperator(VariableTracker):
 
             comparable_state = get_comparable_state(state)
             graph = tx.output.graph
-            tx.output.graph = graph_checkpoint
-            tx.restore_graphstate(checkpoint)
+            lifted_freevars = tx.output.freevars
+
+            tx.output = original_output
 
             return (
                 output,
@@ -899,6 +881,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 guards,
                 nn_modules,
                 comparable_state,
+                lifted_freevars,
             )
 
         if self.value.__name__ == "cond":
@@ -1042,6 +1025,36 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
+        elif self.value.__name__ == "wrap":
+            checkpoint = tx.copy_graphstate()
+            (
+                body_r,
+                body_graph,
+                body_guards,
+                body_nn_modules,
+                body_cmp,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                args[0],
+                [
+                    *args[1:],
+                ],
+                tx.output.graph,
+                checkpoint,
+            )
+
+            body_name = add_subgraph(
+                "body", torch.fx.GraphModule(body_nn_modules, body_graph)
+            )
+
+
+            # Add guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+
+            body_node = make_attr(body_name)
+            p_args = (body_node, *(arg.as_proxy() for arg in args[1:]), *(arg for arg in body_lifted_freevars))
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 

@@ -197,9 +197,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         export: bool,
         export_constraints,
         frame_state,
+        parent=None,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
+        self.parent = parent
+        self.freevars = set({})
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -265,6 +268,21 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
         self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+
+        self.proxies = set({})
+
+    def new_subgraph(self):
+        result = OutputGraph(
+            self.root_globals,
+            self.code_options,
+            self.compiler_fn,
+            self.root_tx,
+            True,  # Export
+            self.export_constraints,
+            self.frame_state,
+            self)
+        result.side_effects = self.side_effects
+        return result
 
     @property
     def output(self):
@@ -335,6 +353,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         log.debug("restore_graphstate: removed %s nodes", removed_nodes)
 
     def add_symbol_bindings(self, arg: GraphArg):
+        if self.parent is not None:
+            # Needs to be done at the root OutputGraph
+            return self.parent.add_symbol_bindings(arg)
+
         # Insert implicit size vars as necessary.  With dynamic shapes, we
         # maintain the invariant that every sizevar gets a direct SymInt input
         # into the graph.  This means downstream graph transforms can assume
@@ -388,13 +410,31 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 obj = getattr(obj, k)
         return obj
 
+    def has_var(self, name):
+        if name in self.input_name_to_proxy:
+            return True
+        for proxy in self.proxies:
+            if proxy.node.name == name:
+                return True
+        return False
+
+    def lift_var(self, proxy):
+        self.create_graph_input(proxy.node.name, recurse=False)
+        self.freevars.add(proxy)
+
+        if self.parent is not None and not self.parent.has_var(proxy.node.name):
+            self.parent.lift_var(proxy)
+
     # when before=True, we will insert this input before the most recent
     # inserted proxy.  This is a hack to get around an ordering problem,
     # where we first insert a tensor argument, and then insert bindings
     # for SymInts that may occur in the tensor argument.
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
-    def create_graph_input(self, name, type_expr=None, before=False):
+    def create_graph_input(self, name, type_expr=None, before=False, recurse=True):
+        if recurse and self.parent is not None:
+            return self.parent.create_graph_input(name, type_expr, before)
+
         # unique
         if name in self.input_name_to_proxy:
             for i in itertools.count():
@@ -925,6 +965,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         type_expr=None,
         proxy_factory_fn=None,
     ):
+        # If there are any freevars, lift them to being inputs
+        # Needs to happen before we create proxies, because name collisions.
+        if self.parent is not None:
+            for arg in args:
+                if arg in self.proxies:
+                    continue
+                if not hasattr(arg, 'node'):
+                    continue
+                if arg.node.name in self.input_name_to_proxy:
+                    continue
+                self.lift_var(arg)
+
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
@@ -952,6 +1004,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
         rv.node.stack_trace = "".join(msgs)
+
+        self.proxies.add(rv)
 
         return rv
 

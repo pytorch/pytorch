@@ -1,6 +1,7 @@
 # Owner(s): ["module: functorch"]
 import unittest
 
+import re
 import torch
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
@@ -8,6 +9,7 @@ from functorch.experimental.control_flow import UnsupportedAliasMutationExceptio
 from torch.fx.experimental.proxy_tensor import make_fx
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._ops import HigherOrderOperator
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -761,6 +763,231 @@ class TestControlFlowTraced(TestCase):
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
         x = torch.ones(4, 3, 2)
         self.assertEqual(foo(x), gm(x))
+
+
+class MockBackend:
+    def __init__(self):
+        self.graphs = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        return gm.forward
+
+
+class Wrap(HigherOrderOperator):
+    def __init__(self):
+        super().__init__('wrap')
+
+    def __call__(self, func, *args):
+        result = func(*args)
+        return result
+
+wrap = Wrap()
+global_var = torch.randn(3)
+global_num = 3.14
+
+class TestDynamoHigherOrderOperator(TestCase):
+    def test_no_freevars(self):
+        mock = MockBackend()
+
+        def f(x):
+            return wrap(lambda x: torch.sin(x), x)
+
+        x = torch.randn(3)
+        expected = f(x)
+        result = torch.compile(f, backend=mock)(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(mock.graphs), 1)
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+\);', mock.graphs[0].code))
+
+    def test_capture_untracked_global(self):
+        mock = MockBackend()
+
+        def f(x):
+            return wrap(lambda x: x + global_var, x)
+
+        x = torch.randn(3)
+        expected = f(x)
+        result = torch.compile(f, backend=mock)(x)
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(mock.graphs), 1)
+        # wrap(fn, x, global_var)
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', mock.graphs[0].code))
+
+    def test_capture_untracked_global_nested(self):
+        mock = MockBackend()
+
+        @torch.compile(backend=mock)
+        def f(x):
+            return wrap(lambda x: wrap(lambda x: x + global_var, x), x)
+
+        x = torch.randn(3)
+        result = f(x)
+
+        self.assertEqual(result, x + global_var)
+        self.assertEqual(len(mock.graphs), 1)
+        gm = mock.graphs[0]
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', gm.code))
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', gm.cond_body_0.code))
+
+    def test_capture_untracked_nonlocal(self):
+        mock = MockBackend()
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            @torch.compile(backend=mock)
+            def g(x):
+                return wrap(lambda x: x + y, x)
+            return g(x)
+
+        result = f(x, y)
+        expected = x + y
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(mock.graphs), 1)
+        # wrap(fn, x, y)
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', mock.graphs[0].code))
+
+    def test_capture_tracked(self):
+        mock = MockBackend()
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        @torch.compile(backend=mock)
+        def f(x, y):
+            return wrap(lambda x: x + y, x)
+
+        result = f(x, y)
+
+        self.assertEqual(result, x + y)
+        self.assertEqual(len(mock.graphs), 1)
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', mock.graphs[0].code))
+
+    def test_capture_value_created_in_subgraph(self):
+        mock = MockBackend()
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def inner(x, y):
+            z = x + y
+            return wrap(lambda x: wrap(lambda x: x + z, x), x)
+
+        @torch.compile(backend=mock)
+        def f(x, y):
+            return wrap(inner, x, y)
+
+        result = f(x, y)
+
+        self.assertEqual(result, x + y + x)
+        self.assertEqual(len(mock.graphs), 1)
+        gm = mock.graphs[0]
+        # Two inputs: no lifting
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', gm.code))
+        # z should have been lifted to input
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+, \w+\);', gm.cond_body_0.code))
+
+    def test_capture_global_num(self):
+        mock = MockBackend()
+        x = torch.zeros([])
+
+        @torch.compile(backend=mock)
+        def f(x):
+            return wrap(lambda x: x + global_num, x)
+
+        global global_num
+        result = f(x)
+        self.assertEqual(result, x + global_num)
+        self.assertEqual(len(mock.graphs), 1)
+        gm = mock.graphs[0]
+        # Numbers don't get lifted
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+\);', gm.code))
+
+        # Check that we still guard on the number
+        global_num = torch.randn([]).item()
+        result = f(x)
+        self.assertEqual(result, x + global_num)
+
+    def test_capture_input_num(self):
+        mock = MockBackend()
+        x = torch.zeros([])
+        y = 3.14
+
+        @torch.compile(backend=mock)
+        def f(x, y):
+            return wrap(lambda x: x + y, x)
+
+        result = f(x, y)
+        self.assertEqual(result, x + y)
+        self.assertEqual(len(mock.graphs), 1)
+        gm = mock.graphs[0]
+        # Numbers don't get lifted
+        self.assertIsNotNone(re.search(r'wrap\(\w+, \w+\);', gm.code))
+
+    def test_fallback_on_graph_break_simple(self):
+        # In the future, there should be a per-HigherOrderOperator switch
+        # on whether or not to fallback or raise a loud error.
+        # For now we just fallback by default.
+        mock = MockBackend()
+        x = torch.randn([])
+
+        def inner(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            z = y.sin()
+            return z
+
+        @torch.compile(backend=mock)
+        def f(x):
+            return wrap(inner, x)
+
+        result = f(x)
+        self.assertEqual(result, inner(x))
+        self.assertEqual(len(mock.graphs), 0)
+
+    def test_fallback_on_graph_break_complicated(self):
+        mock = MockBackend()
+        x = torch.randn([])
+
+        def inner(x):
+            y = x.sin()
+            y = y * global_var
+            torch._dynamo.graph_break()
+            z = y.sin()
+            return z
+
+        @torch.compile(backend=mock)
+        def f(x):
+            x = x.clone()
+            result = wrap(inner, x)
+            return result.clone()
+
+        result = f(x)
+        self.assertEqual(result, inner(x))
+        # One for each clone()
+        self.assertEqual(len(mock.graphs), 2)
+
+    @unittest.expectedFailure
+    def test_capture_module(self):
+        mock = MockBackend()
+        mod = torch.nn.Linear(3, 3)
+        x = torch.randn(3, 3)
+
+        @torch.compile(backend=mock)
+        def f(x):
+            return wrap(lambda x: mod(x), x)
+
+        result = f(x)
+
+        self.assertEqual(result, mod(x))
+        self.assertEqual(len(mock.graphs), 1)
+        
+
 
 if __name__ == '__main__':
     run_tests()
