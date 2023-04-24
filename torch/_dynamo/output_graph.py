@@ -277,7 +277,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.code_options,
             self.compiler_fn,
             self.root_tx,
-            True,  # Export
+            self.export,
             self.export_constraints,
             self.frame_state,
             self)
@@ -609,6 +609,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         Automatically restore live variables.
         """
         assert reason is not None
+
+        if self.parent is not None:
+            unimplemented("Graph breaks inside HigherOrderOperator")
 
         from .eval_frame import disable
 
@@ -991,6 +994,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
         elif kind == "call_module":
+            if self.parent is not None:
+                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
             # For modules we store the class
             rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
