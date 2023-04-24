@@ -60,7 +60,7 @@ class TestConvolutionNN(NNTestCase):
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
     def test_invalid_conv1d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
+        for dtype in [torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
             input = torch.randn(1, 3, 4).to(dtype)
             with self.assertRaisesRegex(RuntimeError,
@@ -100,7 +100,7 @@ class TestConvolutionNN(NNTestCase):
             self.assertEqual(y.sum(), 4186112.)
 
     def test_invalid_conv2d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
+        for dtype in [torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
             input = torch.empty(1, 1, 4, 4).to(dtype)
             self.assertRaises(RuntimeError, lambda: module(input))
@@ -125,7 +125,7 @@ class TestConvolutionNN(NNTestCase):
                 module(input)
 
     def test_invalid_conv3d(self):
-        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
+        for dtype in [torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
             input = torch.empty(1, 1, 4, 4, 4).to(dtype)
             self.assertRaises(RuntimeError, lambda: module(input))
@@ -379,7 +379,7 @@ class TestConvolutionNN(NNTestCase):
 
 
     def test_conv_modules_raise_error_on_incorrect_input_size(self):
-        for dtype in [torch.bfloat16, torch.double, torch.float]:
+        for dtype in [torch.half, torch.bfloat16, torch.double, torch.float]:
             modules = [nn.Conv1d(3, 8, 3).to(dtype), nn.ConvTranspose1d(3, 8, 3).to(dtype),
                        nn.Conv2d(3, 8, 3).to(dtype), nn.ConvTranspose2d(3, 8, 3).to(dtype),
                        nn.Conv3d(3, 8, 3).to(dtype), nn.ConvTranspose3d(3, 8, 3).to(dtype)]
@@ -402,7 +402,7 @@ class TestConvolutionNN(NNTestCase):
                 # just run it to ensure no exception raised.
                 module(input)
 
-        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
+        for dtype in [torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             # Conv1d
             test(True, nn.Conv1d(1, 1, 3).to(dtype), (1, 2), dtype)
             test(True, nn.Conv1d(1, 1, 3, stride=2).to(dtype), (1, 2), dtype)
@@ -1780,7 +1780,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCPU
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
-        for dtype in [torch.float, torch.bfloat16]:
+        for dtype in [torch.float, torch.bfloat16, torch.half]:
             conv = nn.Conv2d(
                 1,
                 128,
@@ -1806,7 +1806,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCPU
     def test_conv_ic1_channels_last_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
-        for dtype in [torch.float, torch.bfloat16]:
+        for dtype in [torch.float, torch.bfloat16, torch.half]:
             conv = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), padding=(1, 1), bias=False)
             conv = conv.to(memory_format=torch.channels_last).to(dtype=dtype)
             x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
