@@ -363,7 +363,7 @@ inline Tensor wrap_tensor_node(
                   // for a certain tensor
                   if (tensor_node.children(i).numel() > 0) {
                     memcpy(
-                        nt_buffer.data_ptr<scalar_t>() + start_offsets[i],
+                        nt_buffer.mutable_data_ptr<scalar_t>() + start_offsets[i],
                         tensor_node.children(i).data_ptr<scalar_t>(),
                         tensor_node.children(i).numel() * sizeof(scalar_t));
                   }

@@ -924,7 +924,7 @@ class MultiheadAttention(Module):
     function, for speeding up Inference, MHA will use
     fastpath inference with support for Nested Tensors, iff:
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor.
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor).
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
@@ -1258,20 +1258,27 @@ class MultiheadAttention(Module):
         mask_type: Optional[int] = None
         merged_mask: Optional[Tensor] = None
 
-        if attn_mask is not None:
-            mask_type = 0
-            merged_mask = attn_mask
         if key_padding_mask is not None:
             mask_type = 1
             merged_mask = key_padding_mask
-        if (attn_mask is not None) and (key_padding_mask is not None):
+
+        if attn_mask is not None:
             # In this branch query can't be a nested tensor, so it has a shape
             batch_size, seq_len, _ = query.shape
             mask_type = 2
-            key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len) \
-                                                        .expand(-1, self.num_heads, -1, -1)
-            attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
-            merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+            # Always expands attn_mask to 4D
+            if attn_mask.dim() == 3:
+                attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
+            else:  # attn_mask.dim() == 2:
+                attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
+            merged_mask = attn_mask_expanded
+
+            if key_padding_mask is not None:
+                key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
+                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+        # no attn_mask and no key_padding_mask, returns None, None
         return merged_mask, mask_type
 
 

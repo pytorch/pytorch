@@ -1,5 +1,15 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/maximum.h>
+#include <ATen/ops/minimum.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -170,8 +180,7 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -225,9 +234,6 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
 
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
-
-      [computeEncoder endEncoding];
-      mpsStream->commit(true);
     }
   });
 }
