@@ -8,9 +8,9 @@ export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache
 export SCCACHE_IGNORE_SERVER_IO_ERROR=1
-export VC_YEAR=2022
+export VC_YEAR=2019
 
-if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
+if [[ "${DESIRED_CUDA}" =~ cu1[1-2][0-9] ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 

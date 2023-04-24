@@ -115,6 +115,8 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
+_DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
+
 # note: the following default target dtype info dicts are temporary,
 # should be moved to the new programmable API class soon
 _DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO = {
@@ -497,8 +499,11 @@ def _get_arg_target_dtype_as_output(
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
         output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
     else:
-        output_act_obs_or_fq_ctr = \
-            arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+        if "target_dtype_info" in arg.meta:
+            output_act_obs_or_fq_ctr = \
+                arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
+        else:
+            output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
     output_act_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
     # TODO: should support is_dynamic here as well
     return output_act_dtype
@@ -628,6 +633,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 # input etc.
                 arg_as_input_target_is_dynamic and arg is node.args[0]
             )
+        # if node.meta["target_dtype_info"]["weight_obs_or_fq_ctr"] == None
+        # or node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr"] == None
+        needs_obs = needs_obs and (act_post_process_ctr is not None)
 
     else:
         assert qconfig is not None
@@ -958,7 +966,7 @@ def propagate_dtypes_for_known_nodes(
                     arg_list = [arg]
 
                 for cur_arg in arg_list:
-                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propgated
+                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propagated
                     if isinstance(cur_arg, torch.fx.node.Node):
                         _maybe_propagate_dtype_for_node(
                             cur_arg, arg_type, node_name_to_match_result_with_qconfig)
@@ -1151,7 +1159,7 @@ def insert_observers_for_model(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
     processed_nodes: Set[Node] = set()
-    # initalize target_dtype_info
+    # initialize target_dtype_info
     for node in model.graph.nodes:
         node.meta["target_dtype_info"] = copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 

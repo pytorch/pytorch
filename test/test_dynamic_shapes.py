@@ -1,26 +1,43 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
-from torch._C import _disabled_torch_function_impl
+import contextlib
+import copy
+import itertools
+import math
+import operator
+
+import sympy
+import torch
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, \
-    parametrize, instantiate_parametrized_tests
-import torch
-import operator
-import itertools
-import contextlib
-import math
-import copy
-import sympy
-from torch.utils._pytree import tree_map
+from torch import sym_int, SymBool, SymFloat, SymInt
+from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import SymNode, \
-    FloorDiv, ShapeEnv, sym_sqrt, sym_float, to_node, GuardOnDataDependentSymNode, \
-    guard_bool, guard_int, guard_float, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraints,
+    DimDynamic,
+    FloorDiv,
+    guard_bool,
+    guard_float,
+    guard_int,
+    GuardOnDataDependentSymNode,
+    ShapeEnv,
+    sym_float,
+    sym_sqrt,
+    SymNode,
+    to_node,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch import SymBool, SymInt, SymFloat, sym_int
+from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 
@@ -815,6 +832,945 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
+
+
+class TestDimConstraints(TestCase):
+    def test_dim_constraints_reduce_congruences_simple(self):
+        from sympy import Symbol
+        from torch.fx.experimental.symbolic_shapes import DimConstraints
+
+        s = Symbol("s", positive=True, integer=True)
+        dim_constraints = DimConstraints({}, {})
+        dim_constraints._congruences[s] = {
+            (s / 2) % 2,
+            (s / 2) % 8,
+            (s / 2) % 4,
+            s % 2,
+            ((s / 16) + 2) % 4,
+        }
+        congruences = dim_constraints.reduce_congruences()
+        self.assertEqual(congruences[s], {(s + 32) % 64})
+
+    def test_dim_constraints_reduce_inequalities_simple(self):
+        from sympy import Eq, Interval, Ne, Symbol
+        from sympy.solvers.inequalities import reduce_inequalities
+
+        s = Symbol("s", positive=True, integer=True)
+        exprs = {
+            s >= 2,
+            Ne(8 * s, 16),
+            Ne(s / 2, 1),
+            Ne(16 * s, 32),
+            s < 16,
+            Ne(s, 2),
+            s / 2 < 16,
+            s / 2 > 1,
+            s / 2 >= 2,
+            Ne(3 * s / 2, 3),
+        }
+        solution = reduce_inequalities(exprs, s).as_set()
+        self.assertEqual(solution, Interval.Ropen(4, 16))
+
+        exprs.add(Eq(s / 2, 4))
+        solution = reduce_inequalities(exprs, s).as_set()
+        self.assertEqual(solution, {8})
+
+    def test_dim_constraints_solve_full(self):
+        from sympy import Eq, Integer, Mod, Ne, Symbol
+        from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
+
+        src0 = TensorPropertySource(
+            base=LocalSource(local_name="x0"), prop=TensorProperty.SIZE, idx=0
+        )
+        src2 = TensorPropertySource(
+            base=LocalSource(local_name="x2"), prop=TensorProperty.SIZE, idx=0
+        )
+        src3 = TensorPropertySource(
+            base=LocalSource(local_name="x3"), prop=TensorProperty.SIZE, idx=0
+        )
+        src4 = TensorPropertySource(
+            base=LocalSource(local_name="x4"), prop=TensorProperty.SIZE, idx=0
+        )
+
+        src1 = TensorPropertySource(
+            base=LocalSource(local_name="x1"), prop=TensorProperty.SIZE, idx=2
+        )
+        src7 = TensorPropertySource(
+            base=LocalSource(local_name="x7"), prop=TensorProperty.SIZE, idx=3
+        )
+
+        src5 = TensorPropertySource(
+            base=LocalSource(local_name="x5"), prop=TensorProperty.SIZE, idx=1
+        )
+        src8 = TensorPropertySource(
+            base=LocalSource(local_name="x8"), prop=TensorProperty.SIZE, idx=1
+        )
+
+        src6 = TensorPropertySource(
+            base=LocalSource(local_name="x6"), prop=TensorProperty.SIZE, idx=1
+        )
+        src9 = TensorPropertySource(
+            base=LocalSource(local_name="x9"), prop=TensorProperty.SIZE, idx=1
+        )
+        src10 = TensorPropertySource(
+            base=LocalSource(local_name="x10"), prop=TensorProperty.SIZE, idx=1
+        )
+
+        src11 = TensorPropertySource(
+            base=LocalSource(local_name="x11"), prop=TensorProperty.SIZE, idx=1
+        )
+        src12 = TensorPropertySource(
+            base=LocalSource(local_name="x12"), prop=TensorProperty.SIZE, idx=2
+        )
+
+        s0 = Symbol("s0", positive=True, integer=True)
+        s1 = Symbol("s1", positive=True, integer=True)
+        s5 = Symbol("s5", positive=True, integer=True)
+        s6 = Symbol("s6", positive=True, integer=True)
+        symbol_to_source = {
+            s0: [src0, src2, src3, src4],
+            s1: [src1, src7],
+            s5: [src5, src8],
+            s6: [src6, src9, src10],
+        }
+        var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
+        dim_constraints = DimConstraints(symbol_to_source, var_to_val)
+        dim_constraints.add_equality(src2, s0)
+        dim_constraints.add_equality(src3, s0)
+        dim_constraints.add_equality(src4, s0)
+        dim_constraints.add_equality(src7, s1)
+        dim_constraints.add_equality(src8, s5)
+        dim_constraints.add_equality(src9, s6)
+        dim_constraints.add_equality(src10, s6)
+        dim_constraints.add_equality(src11, Integer(1))
+        dim_constraints.add_equality(src12, Integer(3))
+
+        dim_constraints.add(s1**2 <= 2147483647)
+        dim_constraints.add(32 * s1**2 <= 2147483647)
+        dim_constraints.add(s0 < 16)
+        dim_constraints.add(Eq(Mod(s1, 2), 0))
+        dim_constraints.add(Ne(FloorDiv(s1, 2), 1))
+        dim_constraints.add(Ne((FloorDiv(s1, 2)) ** 2, 1))
+        dim_constraints.add(32 * (FloorDiv(s1, 2)) ** 2 <= 2147483647)
+        dim_constraints.add((FloorDiv(s1, 2)) ** 2 > 1)
+        dim_constraints.add(Ne(FloorDiv(s1, 2), 1))
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 2)) ** 2
+            + 128 * (FloorDiv((FloorDiv(s1, 2) - 1), 2))
+            + 64
+            <= 2147483647
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 2) + 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 2)) ** 2
+                + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 2))
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 2) + 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 2)) ** 2
+            + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 2))
+            + 1
+            > 1
+        )
+        dim_constraints.add(
+            128 * (FloorDiv((FloorDiv(s1, 2) - 1), 4)) ** 2
+            + 256 * (FloorDiv((FloorDiv(s1, 2) - 1), 4))
+            + 128
+            <= 2147483647
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 4) + 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 4)) ** 2
+                + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 4))
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 4) + 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 4)) ** 2
+            + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 4))
+            + 1
+            > 1
+        )
+        dim_constraints.add(
+            256 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            + 512 * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+            + 256
+            <= 2147483647
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            + 2 * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+            + 1
+            > 1
+        )
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1 >= 3)
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            <= 2147483647
+        )
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1 >= 0)
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1 >= 1)
+        dim_constraints.add(
+            Ne(
+                60 * s0 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * s0 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * s0,
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+                1,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+                0,
+            )
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+            >= 0
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 0))
+        dim_constraints.add(
+            1
+            < 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, -1))
+        dim_constraints.add(
+            Ne(
+                60 * s0 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * s0 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * s0,
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            > 0
+        )
+        dim_constraints.add(
+            Eq(
+                60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2 * (Mod(s0, 2))
+                - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8) * Mod(s0, 2)
+                + 60 * (Mod(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                60
+                * (FloorDiv(s0, 2))
+                * (FloorDiv(s0, (FloorDiv(s0, 2))))
+                * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120
+                * FloorDiv(s0, 2)
+                * FloorDiv(s0, (FloorDiv(s0, 2)))
+                * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2)))),
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv(s0, 2), 1))
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60,
+                0,
+            )
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            >= 0
+        )
+        dim_constraints.add(
+            1
+            < 60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+        )
+        dim_constraints.add(Ne(16 * s0, 32))
+        dim_constraints.add(Eq(16 * (Mod(s0, 2)), 0))
+        dim_constraints.add(Ne(16 * s0, 32))
+        dim_constraints.add(Eq(16 * (Mod(s0, 2)), 0))
+        dim_constraints.add(FloorDiv(s0, 2) >= 2)
+        dim_constraints.add(Ne(FloorDiv(s0, 2), 1))
+        dim_constraints.add(1 < FloorDiv(s0, 2))
+        dim_constraints.add(Ne(s0, 2))
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            >= 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+        )
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, 2))
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120
+            * FloorDiv(s0, 2)
+            * FloorDiv(s0, (FloorDiv(s0, 2)))
+            * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            > 0
+        )
+        dim_constraints.add(
+            Ne(
+                60
+                * (FloorDiv(s0, 2))
+                * (FloorDiv(s0, (FloorDiv(s0, 2))))
+                * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120
+                * FloorDiv(s0, 2)
+                * FloorDiv(s0, (FloorDiv(s0, 2)))
+                * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2)))),
+                3 * (FloorDiv(s0, 2)) * (FloorDiv(s0, (FloorDiv(s0, 2)))),
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 20,
+                0,
+            )
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 0
+        )
+        dim_constraints.add(
+            Ne(
+                20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 20,
+                20,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                20
+                * (
+                    Mod(
+                        1,
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 1,
+                    )
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                20
+                * (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+                * (
+                    Mod(
+                        1,
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        - 2
+                        * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                    )
+                )
+                - 20
+                * Mod(
+                    1,
+                    (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    - 2
+                    * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 1))
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+            >= 1
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 0
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 1
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            >= 2
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            > 1
+        )
+        dim_constraints.add(
+            20 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 40 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 20
+            < 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60,
+                60,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1,
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8))
+                * (
+                    Mod(
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        - 2
+                        * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                        + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                        1,
+                    )
+                )
+                - Mod(
+                    (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    - 2
+                    * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                    / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1)
+                    + 1 / (FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1),
+                    1,
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 1,
+                FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1,
+            )
+        )
+        dim_constraints.add(Ne(8 * s0, 16))
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            >= (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+        )
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            <= 2147483647
+        )
+        dim_constraints.add(
+            90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+            <= 2147483647
+        )
+        dim_constraints.add(FloorDiv(s0, 2) < 16)
+        dim_constraints.add(FloorDiv(s0, 2) > 1)
+        dim_constraints.add(
+            Ne(
+                90 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 180 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 90 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 2 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 1
+            > 1
+        )
+        dim_constraints.add(
+            60
+            * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, (FloorDiv(s0, 2))) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, (FloorDiv(s0, 2))))
+            > 1
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+            > 1
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            > 1
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 120 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 60 * (FloorDiv(s0, 2)),
+                3 * (FloorDiv(s0, 2)),
+            )
+        )
+        dim_constraints.add(
+            60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60 * (FloorDiv(s0, 2))
+            > 0
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            > 0
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                6,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            > 0
+        )
+        dim_constraints.add(
+            Ne(
+                120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 120,
+                0,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            <= 2147483647
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            <= 20480
+        )
+        dim_constraints.add(
+            Ne(
+                90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 90,
+                0,
+            )
+        )
+        dim_constraints.add(
+            120 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 240 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 120
+            > 1
+        )
+        dim_constraints.add(
+            90 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 180 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 90
+            <= 20480
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 120 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 60
+            <= 20480
+        )
+        dim_constraints.add(
+            Ne(
+                240 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 480 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 240,
+                0,
+            )
+        )
+        dim_constraints.add(Eq(6 * s5, 132))
+        dim_constraints.add(Eq(4, FloorDiv(s0, 2)))
+        dim_constraints.add(Eq(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1, 4))
+        dim_constraints.add(
+            Ne(
+                64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 128 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 64 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 128 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 64
+        )
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 128 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 64
+            <= 2147483647
+        )
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 128 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 64
+            > 1
+        )
+        dim_constraints.add(
+            62 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 124 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 62
+            <= 2147483647
+        )
+        dim_constraints.add(
+            Ne(
+                62 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 124 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 62 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 62 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 124 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 62
+        )
+        dim_constraints.add(Ne(3 * (FloorDiv(s0, 2)), 3))
+        dim_constraints.add(Ne(3 * (FloorDiv(s0, 2)), 3))
+        dim_constraints.add(Eq(FloorDiv(s0, 2), 4))
+        dim_constraints.add(Eq(4, FloorDiv(s0, 2)))
+        dim_constraints.add(Eq(FloorDiv(s0, 2), 4))
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 1 >= 3)
+        dim_constraints.add(
+            64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 384 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 576
+            <= 2147483647
+        )
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3 >= 0)
+        dim_constraints.add(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3 >= 1)
+        dim_constraints.add(
+            Ne(
+                64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 384 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 576 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3, 1))
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 9,
+                1,
+            )
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 9,
+                0,
+            )
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            >= 0
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3, 0))
+        dim_constraints.add(
+            1
+            < 64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 384 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 576
+        )
+        dim_constraints.add(Ne(FloorDiv((FloorDiv(s1, 2) - 1), 8) - 3, 1))
+        dim_constraints.add(
+            Ne(
+                64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 384 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 576 * (FloorDiv(s0, 2)),
+                256,
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                64
+                * (
+                    Mod(
+                        (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 9 * (FloorDiv(s0, 2)),
+                        4,
+                    )
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                FloorDiv(s0, 2),
+                FloorDiv(
+                    (
+                        (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 9 * (FloorDiv(s0, 2))
+                    ),
+                    4,
+                ),
+            )
+        )
+        dim_constraints.add(
+            Eq(
+                FloorDiv(
+                    (
+                        (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 9 * (FloorDiv(s0, 2))
+                    ),
+                    4,
+                ),
+                FloorDiv(s0, 2),
+            )
+        )
+        dim_constraints.add(Ne(64 * (Mod(FloorDiv((FloorDiv(s1, 2) - 1), 8) + 1, 4)), 0))
+        dim_constraints.add(
+            Eq(
+                64
+                * (
+                    Mod(
+                        (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                        - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                        + 1,
+                        4,
+                    )
+                ),
+                0,
+            )
+        )
+        dim_constraints.add(
+            64 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 384 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 576 * (FloorDiv(s0, 2))
+            > 0
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            >= 1
+        )
+        dim_constraints.add(
+            Eq(
+                64 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 384 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 576,
+                256,
+            )
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 360 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 540
+            <= 2147483647
+        )
+        dim_constraints.add(
+            Ne(
+                60 * (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 360 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 540 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < 60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 360 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 540
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            <= 2147483647
+        )
+        dim_constraints.add(
+            Ne(
+                (FloorDiv(s0, 2)) * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+                - 6 * FloorDiv(s0, 2) * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+                + 9 * (FloorDiv(s0, 2)),
+                0,
+            )
+        )
+        dim_constraints.add(
+            1
+            < (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+        )
+        dim_constraints.add(
+            (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 6 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 9
+            > 1
+        )
+        dim_constraints.add(
+            60 * (FloorDiv((FloorDiv(s1, 2) - 1), 8)) ** 2
+            - 360 * FloorDiv((FloorDiv(s1, 2) - 1), 8)
+            + 540
+            > 1
+        )
+        dim_constraints.add(s0 >= 2)
+        dim_constraints.add(s1 >= 2)
+        dim_constraints.add(s6 >= 2)
+        dim_constraints.add(s5 >= 2)
+
+        dim_constraints.solve()
+        self.assertEqual(dim_constraints._static_results, {
+            "L['x3'].size()[0] == 8",
+            "L['x4'].size()[0] == 8",
+            "L['x1'].size()[2] = 96",
+            "L['x11'].size()[1] == 1",
+            "L['x7'].size()[3] == 96",
+            "L['x12'].size()[2] == 3",
+            "L['x8'].size()[1] == 22",
+            "L['x2'].size()[0] == 8",
+            "L['x5'].size()[1] = 22",
+            "L['x0'].size()[0] = 8",
+        })
+        self.assertEqual(dim_constraints._dynamic_results, {
+            "dynamic_dim(L['x10'], 1) == dynamic_dim(L['x6'], 1)",
+            "2 <= dynamic_dim(L['x6'], 1)",
+            "dynamic_dim(L['x9'], 1) == dynamic_dim(L['x6'], 1)",
+        })
+
+
 
 if __name__ == '__main__':
     run_tests()
