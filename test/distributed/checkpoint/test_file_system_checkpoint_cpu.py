@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import fsspec
 import sys
 import tempfile
 from typing import Dict
