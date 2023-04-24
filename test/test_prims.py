@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
+from torch._prims_common import CUDARngStateHelper
 from torch._prims.executor import make_traced
 import torch._refs as refs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1094,6 +1095,34 @@ class TestPrims(TestCase):
         result_refs = refs.view(a, *new_shape)
         self.assertEqual(result_eager, result_refs)
 
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_philox_rand(self, device, dtype):
+        sizes = (1000, 1000000)  # offsets of 4 and 8
+        repeats = 2  # Checks multiple rand calls results with multiple philox_rand calls
+        for size in sizes:
+            torch.cuda.manual_seed(123)
+            references = []
+            results = []
+            rng_states = []
+            for _ in range(repeats):
+                rng_states.append(CUDARngStateHelper.get_torch_state_as_tuple())
+                references.append(torch.rand(size, device=device, dtype=dtype))
+
+            torch.cuda.manual_seed(123)
+            for idx in range(repeats):
+                seed, offset = rng_states[idx]
+                result = torch.ops.rngprims.philox_rand((size,),
+                                                        seed=seed,
+                                                        offset=offset,
+                                                        stride=None,
+                                                        device=device,
+                                                        dtype=dtype)
+                results.append(result)
+
+            for a, b in zip(references, results):
+                self.assertEqual(a, b)
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):

@@ -8,7 +8,6 @@ import warnings
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
-import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
@@ -30,6 +29,7 @@ from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
+from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .utils import (
     developer_warning,
@@ -654,9 +654,7 @@ def compile_fx(
 
         # Since handle_dynamo_export_graph will trigger compile_fx again,
         # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_, example_inputs_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -666,8 +664,6 @@ def compile_fx(
         )
 
     assert not config._raise_error_for_testing
-    functorch.compile.config.use_functionalize = True
-    functorch.compile.config.use_fake_tensor = True
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes

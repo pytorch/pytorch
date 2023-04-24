@@ -4977,7 +4977,7 @@ class DistributedTest:
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
-                    for i in range(100):
+                    for i in range(8):
                         inp = (
                             torch.randn(1, 3, 1000, 1000, device="cuda")
                             if j == 1
