@@ -677,6 +677,11 @@ class Reduction(Loops):
             def combine_fn(a, b):
                 return ops.add(a, b)
 
+        elif reduction_type == "prod":
+
+            def combine_fn(a, b):
+                return ops.mul(a, b)
+
         elif reduction_type == "min":
 
             def combine_fn(a, b):
@@ -905,6 +910,7 @@ class Reduction(Loops):
 
         return {
             "sum": 0,
+            "prod": 1,
             "any": 0,
         }[reduction_type]
 
@@ -1327,11 +1333,21 @@ class View(BaseView):
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
-        if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
+        if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
+        if 0 in new_size and is_storage_and_layout(x):
+            storage, old_layout = as_storage_and_layout(x, freeze=False)
+            new_layout = FixedLayout(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                FlexibleLayout.contiguous_strides(new_size),
+                old_layout.offset,
+            )
+            return ReinterpretView(storage, new_layout)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        if is_contiguous_storage_and_layout(x) and not isinstance(
+        elif is_contiguous_storage_and_layout(x) and not isinstance(
             x.data, ExternKernelAlloc
         ):
             storage, old_layout = as_contiguous_storage_and_layout(x)
@@ -1870,7 +1886,7 @@ class AliasedLayout(Layout):
             return True
         from .compile_fx import ALIGNMENT
 
-        return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
+        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
 
 class MutationLayout(Layout):
@@ -3858,6 +3874,8 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
+        self.indirect_max_sizes = []
+        self.indirect_new = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
@@ -3893,16 +3911,18 @@ class LoopBody:
         self.submodules[name] = block
         return name
 
-    def add_indirect(self):
+    def add_indirect(self, size):
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
         self.indirect_vars.append(var)
+        self.indirect_max_sizes.append(size)
         return var
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
+        self.indirect_new[old] = new
         self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def get_index(self, name):
@@ -3981,16 +4001,18 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy):
+            def indirect_indexing(index_proxy, size):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
                 """
 
                 def set_indirect(new_var):
-                    self.body.replace_indirect(var, V.ops.indirect_indexing(new_var))
+                    self.body.replace_indirect(
+                        var, V.ops.indirect_indexing(new_var, size)
+                    )
 
-                var = self.body.add_indirect()
+                var = self.body.add_indirect(size)
                 tracer.create_proxy(
                     "call_module",
                     self.body.add_submodule(set_indirect, f"set_{var}"),
