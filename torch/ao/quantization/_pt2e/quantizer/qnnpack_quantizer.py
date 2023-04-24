@@ -173,7 +173,7 @@ class QNNPackQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: QuantizationConfig = None  # noqa
+        self.global_config: QuantizationConfig = None  # type: ignore[assignment]
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -345,15 +345,15 @@ class QNNPackQuantizer(Quantizer):
             weight_node = None
             bias_node = None
             for ph in weight_or_bias:
-                weight_or_bias = getattr(gm, ph.target)  # noqa
-                if weight_or_bias.ndim == 2:  # noqa
+                weight_or_bias = getattr(gm, ph.target)  # type: ignore[arg-type]
+                if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
                     weight_node = ph
-                if weight_or_bias.ndim == 1:  # noqa
+                if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
                     bias_node = ph
 
             # bias and output act
-            if _is_annotated([act_node]) == False:  # noqa
-                act_node.meta["target_dtype_info"] = {  # noqa
+            if _is_annotated([act_node]) is False:  # type: ignore[list-item]
+                act_node.meta["target_dtype_info"] = {  # type: ignore[union-attr]
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(
                         quantization_config
@@ -362,8 +362,8 @@ class QNNPackQuantizer(Quantizer):
                     "bias_obs_or_fq_ctr": None,
                     "_annotated": True,
                 }
-            if bias_node and _is_annotated([bias_node]) == False:  # noqa
-                bias_node.meta["target_dtype_info"] = {  # noqa
+            if bias_node and _is_annotated([bias_node]) is False:
+                bias_node.meta["target_dtype_info"] = {
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(
                         quantization_config
@@ -372,8 +372,8 @@ class QNNPackQuantizer(Quantizer):
                     "bias_obs_or_fq_ctr": None,
                     "_annotated": True,
                 }
-            if _is_annotated([weight_node]) == False:  # noqa
-                weight_node.meta["target_dtype_info"] = {  # noqa
+            if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
+                weight_node.meta["target_dtype_info"] = {  # type: ignore[union-attr]
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(
                         quantization_config
@@ -382,7 +382,7 @@ class QNNPackQuantizer(Quantizer):
                     "bias_obs_or_fq_ctr": None,
                     "_annotated": True,
                 }
-            if _is_annotated([output_node]) == False:
+            if _is_annotated([output_node]) is False:
                 output_node.meta["target_dtype_info"] = {
                     "input_act_obs_or_fq_ctr": None,
                     "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(
