@@ -1,6 +1,7 @@
 #ifndef THP_STREAM_INC
 #define THP_STREAM_INC
 
+#include <c10/macros/Export.h>
 #include <torch/csrc/python_headers.h>
 
 struct THPStream {
@@ -8,7 +9,7 @@ struct THPStream {
   int64_t device_type;
   int64_t device_index;
 };
-extern PyTypeObject* THPStreamClass;
+extern TORCH_API PyTypeObject* THPStreamClass;
 
 void THPStream_init(PyObject* module);
 

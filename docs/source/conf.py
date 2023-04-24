@@ -98,7 +98,6 @@ coverage_ignore_functions = [
     "cudart",
     "is_bf16_supported",
     # torch.cuda._sanitizer
-    "format_log_message",
     "zip_arguments",
     "zip_by_key",
     # torch.distributed.autograd
@@ -239,6 +238,7 @@ coverage_ignore_classes = [
     "StaticModule",
     "StringType",
     "SymIntType",
+    "SymBoolType",
     "ThroughputBenchmark",
     "TracingState",
     "TupleType",

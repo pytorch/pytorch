@@ -80,6 +80,16 @@ c10::intrusive_ptr<Work> send_cuda(
       ->send(tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
 }
 
+c10::intrusive_ptr<c10d::Work> send_privateuse1(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t dstRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
+      ->send(tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+}
+
 c10::intrusive_ptr<Work> recv_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -100,6 +110,16 @@ c10::intrusive_ptr<Work> recv_cuda_(
       ->recv(tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
 }
 
+c10::intrusive_ptr<c10d::Work> recv_privateuse1_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
+      ->recv(tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
 c10::intrusive_ptr<Work> recv_any_source_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -115,6 +135,15 @@ c10::intrusive_ptr<Work> recv_any_source_cuda_(
     int64_t tag) {
   auto tensor_vec = tensors.vec();
   return process_group->getBackend(c10::DeviceType::CUDA)
+      ->recvAnysource(tensor_vec, static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<c10d::Work> recv_any_source_privateuse1_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
       ->recvAnysource(tensor_vec, static_cast<int>(tag));
 }
 
@@ -154,6 +183,24 @@ c10::intrusive_ptr<Work> reduce_cuda_(
               std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<c10d::Work> reduce_privateuse1_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const c10::intrusive_ptr<c10d::ReduceOp>& reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
+      ->reduce(
+          tensor_vec,
+          c10d::ReduceOptions{
+              *reduce_op.get(),
+              root_rank,
+              root_tensor,
+              std::chrono::milliseconds(timeout)});
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -187,6 +234,25 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_cuda_(
                   root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(tensor_vec), work);
+}
+
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>
+broadcast_privateuse1_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->broadcast(
+              tensor_vec,
+              c10d::BroadcastOptions{
+                  root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>(
       std::move(tensor_vec), work);
 }
 
@@ -230,6 +296,27 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cuda_(
       std::move(tensor_vec), work);
 }
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>
+allreduce_privateuse1_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const c10::intrusive_ptr<c10d::ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->allreduce(
+              tensor_vec,
+              c10d::AllreduceOptions{
+                  *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  // Return input tensors as output tensors to make inplace allreduce look like
+  // a functional API, so that make_fx can correctly build the dependencies in
+  // the graph later.
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>(
+      std::move(tensor_vec), work);
+}
+
 c10::intrusive_ptr<Work> allreduce_coalesced_cpu_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -255,6 +342,20 @@ c10::intrusive_ptr<Work> allreduce_coalesced_cuda_(
   opts.timeout = std::chrono::milliseconds(timeout);
 
   return process_group->getBackend(c10::DeviceType::CUDA)
+      ->allreduce_coalesced(tensor_vec, opts);
+}
+
+c10::intrusive_ptr<c10d::Work> allreduce_coalesced_privateuse1_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const c10::intrusive_ptr<c10d::ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  c10d::AllreduceCoalescedOptions opts = c10d::AllreduceCoalescedOptions{};
+  opts.reduceOp = *reduce_op.get();
+  opts.timeout = std::chrono::milliseconds(timeout);
+
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
       ->allreduce_coalesced(tensor_vec, opts);
 }
 
@@ -300,6 +401,27 @@ allgather_cuda_(
           output_tensors, work);
 }
 
+std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<c10d::Work>>
+allgather_privateuse1_(
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    at::TensorList input_tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t timeout) {
+  auto input_tensors_vec = input_tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->allgather(
+              const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+              input_tensors_vec,
+              c10d::AllgatherOptions{std::chrono::milliseconds(timeout)});
+
+  // Copy output tensors (not storage) so that this can be used in a functional
+  // manner
+  return std::tuple<
+      std::vector<std::vector<at::Tensor>>,
+      c10::intrusive_ptr<c10d::Work>>(output_tensors, work);
+}
+
 std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_cpu_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
@@ -320,6 +442,18 @@ std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_cuda_(
   return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
+std::tuple<at::Tensor, c10::intrusive_ptr<c10d::Work>>
+_allgather_base_privateuse1_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group) {
+  auto work = process_group->getBackend(c10::DeviceType::PrivateUse1)
+                  ->_allgather_base(output_tensor, input_tensor);
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<c10d::Work>>(
+      output_tensor, work);
+}
+
 c10::intrusive_ptr<Work> allgather_coalesced_cpu_(
     const std::vector<std::vector<at::Tensor>>& output_lists,
     const at::TensorList& input_list,
@@ -337,6 +471,17 @@ c10::intrusive_ptr<Work> allgather_coalesced_cuda_(
     const c10::intrusive_ptr<ProcessGroup>& process_group) {
   auto input_list_vec = input_list.vec();
   return process_group->getBackend(c10::DeviceType::CUDA)
+      ->allgather_coalesced(
+          const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
+          input_list_vec);
+}
+
+c10::intrusive_ptr<c10d::Work> allgather_coalesced_privateuse1_(
+    const std::vector<std::vector<at::Tensor>>& output_lists,
+    const at::TensorList& input_list,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group) {
+  auto input_list_vec = input_list.vec();
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
       ->allgather_coalesced(
           const_cast<std::vector<std::vector<at::Tensor>>&>(output_lists),
           input_list_vec);
@@ -382,6 +527,26 @@ reduce_scatter_cuda_(
       output_tensors_vec, work);
 }
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>
+reduce_scatter_privateuse1_(
+    const at::TensorList& output_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const c10::intrusive_ptr<c10d::ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto output_tensors_vec = output_tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->reduce_scatter(
+              output_tensors_vec,
+              const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+              c10d::ReduceScatterOptions{
+                  *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>(
+      output_tensors_vec, work);
+}
+
 std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _reduce_scatter_base_cpu_(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
@@ -416,6 +581,25 @@ std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _reduce_scatter_base_cuda_(
   return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(output_tensor, work);
 }
 
+std::tuple<at::Tensor, c10::intrusive_ptr<c10d::Work>>
+_reduce_scatter_base_privateuse1_(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const c10::intrusive_ptr<c10d::ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->_reduce_scatter_base(
+              output_tensor,
+              input_tensor,
+              c10d::ReduceScatterOptions{
+                  *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  return std::tuple<at::Tensor, c10::intrusive_ptr<c10d::Work>>(
+      output_tensor, work);
+}
+
 c10::intrusive_ptr<Work> gather_cpu_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const at::TensorList& input_tensors,
@@ -441,6 +625,20 @@ c10::intrusive_ptr<Work> gather_cuda_(
           const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
           input_tensors_vec,
           GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<c10d::Work> gather_privateuse1_(
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const at::TensorList& input_tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t timeout) {
+  auto input_tensors_vec = input_tensors.vec();
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
+      ->gather(
+          const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+          input_tensors_vec,
+          c10d::GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cpu_(
@@ -479,6 +677,26 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cuda_(
       std::move(output_tensors_vec), work);
 }
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>
+scatter_privateuse1_(
+    const at::TensorList& output_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t timeout) {
+  auto output_tensors_vec = output_tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->scatter(
+              output_tensors_vec,
+              const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+              c10d::ScatterOptions{
+                  root_rank, std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>(
+      std::move(output_tensors_vec), work);
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_cpu_(
     const at::TensorList& output_tensors,
     const at::TensorList& input_tensors,
@@ -508,6 +726,24 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> alltoall_cuda_(
                       input_tensors_vec,
                       AllToAllOptions{std::chrono::milliseconds(timeout)});
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(output_tensors_vec), work);
+}
+
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>
+alltoall_privateuse1_(
+    const at::TensorList& output_tensors,
+    const at::TensorList& input_tensors,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    int64_t timeout) {
+  auto output_tensors_vec = output_tensors.vec();
+  auto input_tensors_vec = input_tensors.vec();
+  auto work =
+      process_group->getBackend(c10::DeviceType::PrivateUse1)
+          ->alltoall(
+              output_tensors_vec,
+              input_tensors_vec,
+              c10d::AllToAllOptions{std::chrono::milliseconds(timeout)});
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<c10d::Work>>(
       std::move(output_tensors_vec), work);
 }
 
@@ -543,6 +779,22 @@ c10::intrusive_ptr<Work> alltoall_base_cuda_(
           AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<c10d::Work> alltoall_base_privateuse1_(
+    at::Tensor& output,
+    at::Tensor& input,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    int64_t timeout) {
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
+      ->alltoall_base(
+          output,
+          input,
+          output_split_sizes,
+          input_split_sizes,
+          c10d::AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
 c10::intrusive_ptr<Work> barrier_cpu(
     at::Tensor /* unused */,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -559,6 +811,16 @@ c10::intrusive_ptr<Work> barrier_cuda(
     int64_t timeout) {
   return process_group->getBackend(c10::DeviceType::CUDA)
       ->barrier(BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<c10d::Work> barrier_privateuse1(
+    at::Tensor /* unused */,
+    const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout) {
+  return process_group->getBackend(c10::DeviceType::PrivateUse1)
+      ->barrier(
+          c10d::BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
 void monitored_barrier_cpu_(
@@ -583,12 +845,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("send", send_cuda);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("send", send_privateuse1);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("recv_", recv_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("recv_", recv_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("recv_", recv_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -599,6 +869,10 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("recv_any_source_", recv_any_source_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("recv_any_source_", recv_any_source_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("reduce_", reduce_cpu_);
 }
@@ -607,12 +881,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_", reduce_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("reduce_", reduce_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("broadcast_", broadcast_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("broadcast_", broadcast_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("broadcast_", broadcast_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -633,12 +915,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("allreduce_", allreduce_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("allreduce_", allreduce_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("allreduce_coalesced_", allreduce_coalesced_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("allreduce_coalesced_", allreduce_coalesced_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("allreduce_coalesced_", allreduce_coalesced_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -649,12 +939,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("allgather_", allgather_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("allgather_", allgather_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("_allgather_base_", _allgather_base_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("_allgather_base_", _allgather_base_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("_allgather_base_", _allgather_base_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -665,12 +963,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("allgather_coalesced_", allgather_coalesced_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("allgather_coalesced_", allgather_coalesced_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("reduce_scatter_", reduce_scatter_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_scatter_", reduce_scatter_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("reduce_scatter_", reduce_scatter_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -681,12 +987,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("_reduce_scatter_base_", _reduce_scatter_base_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("_reduce_scatter_base_", _reduce_scatter_base_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("gather_", gather_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("gather_", gather_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("gather_", gather_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -697,12 +1011,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("scatter_", scatter_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("scatter_", scatter_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("alltoall_", alltoall_cpu_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("alltoall_", alltoall_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("alltoall_", alltoall_privateuse1_);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -713,12 +1035,20 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("alltoall_base_", alltoall_base_cuda_);
 }
 
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("alltoall_base_", alltoall_base_privateuse1_);
+}
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("barrier", barrier_cpu);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("barrier", barrier_cuda);
+}
+
+TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
+  m.impl("barrier", barrier_privateuse1);
 }
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {

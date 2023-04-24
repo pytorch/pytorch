@@ -1,6 +1,15 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/gather_native.h>
+#include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_native.h>
+#endif
 
 namespace at::native {
 
@@ -338,8 +347,8 @@ TORCH_IMPL_FUNC(scatter_src_out_mps)
 
 TORCH_IMPL_FUNC(scatter_value_out_mps)
 (const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value, const Tensor& output) {
-  Tensor src = at::native::empty_mps(
-      index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
+  Tensor src =
+      at::empty(index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
   src.fill_(value);
   scatter_mps_general(self, dim, index, const_cast<Tensor&>(src), output, "scatter_value_out_mps", "set");
 }
@@ -361,8 +370,8 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out_mps)
  const Scalar& value,
  const c10::string_view reduce,
  const Tensor& output) {
-  Tensor src = at::native::empty_mps(
-      index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
+  Tensor src =
+      at::empty(index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
   src.fill_(value);
   scatter_mps_general(self, dim, index, const_cast<Tensor&>(src), output, "scatter_value_reduce_out_mps", reduce);
 }

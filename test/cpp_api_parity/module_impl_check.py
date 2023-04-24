@@ -172,7 +172,7 @@ def test_forward_backward(unit_test_class, test_params):
                     param_name = key[:-len(suffix)]
                     break
             assert param_name is not None
-            sparsity_str = 'sparse' if key.endswith('_grad_indices') or key.endswith('_grad_values') else 'dense'
+            sparsity_str = 'sparse' if key.endswith(('_grad_indices', '_grad_values')) else 'dense'
 
             unit_test_class.assertTrue(
                 key in cpp_grad_dict,

@@ -46,7 +46,7 @@ struct C10_API InferenceMode {
   //
   // 3. Why does setting InferenceMode also set GradMode?
   //
-  //    This is required since InferenceMode is a faster and more restricive
+  //    This is required since InferenceMode is a faster and more restrictive
   //    version of NoGradGuard. All runtime checks using GradMode::is_enabled()
   //    are applicable to InferenceMode as well, e.g.
   //    `tensorTypeInCurrentExecutionContext` in interpreter.cpp.

@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_list.h>
+#include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 
 #include <ATen/ScalarOps.h>
 
@@ -86,6 +87,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         } else if (torch::is_symfloat(py::handle(obj))) {
           save_symint = true;
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
+        } else if (torch::is_symbool(py::handle(obj))) {
+          save_symint = true;
+          scalar = at::Scalar(true);
         } else {
           throw py::cast_error(
               c10::str("Unable to cast ", py::str(obj), " to Tensor"));
@@ -170,6 +174,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<c10::SymFloat>(obj);
       }
       return py::cast<double>(obj);
+    case TypeKind::SymBoolType:
+      if (torch::is_symbool(obj.ptr())) {
+        return py::cast<c10::SymBool>(obj);
+      }
+      return py::cast<bool>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
@@ -282,6 +291,21 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             return listToIValue<c10::SymFloat>(obj);
           } else {
             return listToIValue<double>(obj);
+          }
+        }
+        case TypeKind::SymBoolType: {
+          bool is_symbolic = false;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            if (torch::is_symbool(elm)) {
+              is_symbolic = true;
+              break;
+            }
+          }
+          if (is_symbolic) {
+            return listToIValue<c10::SymBool>(obj);
+          } else {
+            return listToIValue<bool>(obj);
           }
         }
         case TypeKind::FloatType:
@@ -450,6 +474,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<c10::SymInt>(obj);
       } else if (torch::is_symfloat(obj)) {
         return py::cast<c10::SymFloat>(obj);
+      } else if (torch::is_symbool(obj)) {
+        return py::cast<c10::SymBool>(obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
@@ -555,7 +581,13 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isBool()) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
-    return py::cast(std::move(ivalue).toStringRef());
+    if (getUTF8DecodingIgnore()) {
+      std::string s = std::move(ivalue).toStringRef();
+      PyObject* pyObj = PyUnicode_DecodeUTF8(s.data(), s.length(), "ignore");
+      return py::reinterpret_steal<py::object>(pyObj);
+    } else {
+      return py::cast(std::move(ivalue).toStringRef());
+    }
   } else if (ivalue.isList()) {
     auto list = std::move(ivalue).toList();
     py::list t{list.size()};
@@ -668,6 +700,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toSymInt());
   } else if (ivalue.isSymFloat()) {
     return py::cast(std::move(ivalue).toSymFloat());
+  } else if (ivalue.isSymBool()) {
+    return py::cast(std::move(ivalue).toSymBool());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

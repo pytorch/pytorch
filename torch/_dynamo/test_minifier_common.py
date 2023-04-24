@@ -45,6 +45,8 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         proc = subprocess.run(
             ["python3", "-c", code], capture_output=True, cwd=self.DEBUG_DIR
         )
+        print("stdout:", proc.stdout.decode("utf-8"))
+        print("stderr:", proc.stderr.decode("utf-8"))
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )

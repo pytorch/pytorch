@@ -46,6 +46,7 @@ using c10::optional;
 
 namespace VariableType {
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allXPUTypes();
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
   at::Tensor & unpack(Tensor & t, const char * name, int pos);

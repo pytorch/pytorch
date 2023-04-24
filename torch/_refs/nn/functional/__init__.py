@@ -82,7 +82,6 @@ def _dropout_helper(
 def alpha_dropout(
     self: TensorLikeType, p: float = 0.5, training: bool = False, inplace: bool = False
 ) -> TensorLikeType:
-
     if inplace:
         raise NotImplementedError
 
@@ -178,7 +177,6 @@ def celu(
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
 ) -> TensorLikeType:
-
     if inplace:
         raise NotImplementedError
 

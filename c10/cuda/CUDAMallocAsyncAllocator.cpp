@@ -330,6 +330,18 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
 
   std::lock_guard<std::mutex> lk(general_mutex);
 
+  if (!capture_underway &&
+      ungraphed_ptrs_defer_free_until_no_capture.size() > 0) {
+    // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
+    for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
+      auto it = ptr_info.find(ptr);
+      TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
+      free_impl(it);
+    }
+
+    ungraphed_ptrs_defer_free_until_no_capture.clear();
+  }
+
   lazy_init_device(device);
 
   // Defensively checks for preexisting CUDA error state.
@@ -399,7 +411,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
       mallocAsync(&r, device, size, cuda::getCurrentCUDAStream(device));
@@ -739,9 +751,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   // CUDAGraph interactions
-  void notifyCaptureBegin(
+  void beginAllocateStreamToPool(
       int device,
-      CaptureId_t graph_id,
+      cudaStream_t stream,
       MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
@@ -752,7 +764,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
+  void endAllocateStreamToPool(int device, cudaStream_t) override {
     assertValidDevice(device);
 
     std::lock_guard<std::mutex> lk(general_mutex);
@@ -779,30 +791,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     capture_free_streams.clear();
-  }
-
-  void notifyCaptureEnded(int device, CaptureId_t graph_id) override {
-    assertValidDevice(device);
-
-    std::lock_guard<std::mutex> lk(general_mutex);
-
     TORCH_CHECK(
         capture_underway,
         "CudaMallocAsync::notifyCaptureEnded called, "
         "but CudaMallocAsync::capture_underway is false.");
     capture_underway = false;
-
-    // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
-    for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
-      auto it = ptr_info.find(ptr);
-      TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
-      free_impl(it);
-    }
-
-    ungraphed_ptrs_defer_free_until_no_capture.clear();
   }
 
-  void notifyCaptureDestroy(int device, MempoolId_t mempool_id) override {
+  void releasePool(int device, MempoolId_t mempool_id) override {
     // Q: Do we need to do anything special here, like clear long-lived
     //    pointers created during the original capture (for example,
     //    tensors intended as the graph's I/O surface) that might still
@@ -822,7 +818,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
@@ -833,7 +829,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, stream);
     return r;
@@ -841,8 +837,33 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void raw_delete(void* ptr) override {
     freeAsync(ptr);
   }
-  bool needsPoolSpecificPeerAccess() override {
-    return true;
+  void enablePeerAccess(int dev, int dev_to_access) override {
+    // Double-checks allocator backend hasn't changed, which would definitely be
+    // an error. cudaMallocAsync pools are unaffected by
+    // cudaDeviceEnablePeerAccess. We need pool-specific enablement. See
+    // https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-2/
+    c10::cuda::CUDAGuard device_guard(dev);
+    cudaMemPool_t mempool;
+    C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev_to_access));
+    cudaMemAccessDesc desc = {};
+    desc.location.type = cudaMemLocationTypeDevice;
+    desc.location.id = dev;
+    desc.flags = cudaMemAccessFlagsProtReadWrite;
+    C10_CUDA_CHECK(cudaMemPoolSetAccess(mempool, &desc, 1 /* numDescs */));
+  }
+  virtual cudaError_t memcpyAsync(
+      void* dst,
+      int dstDevice,
+      const void* src,
+      int srcDevice,
+      size_t count,
+      cudaStream_t stream,
+      bool p2p_enabled) override {
+    if (p2p_enabled || dstDevice == srcDevice) {
+      return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
+    } else {
+      return cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);
+    }
   }
   std::string name() override {
     return "cudaMallocAsync";

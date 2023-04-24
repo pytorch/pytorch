@@ -146,6 +146,7 @@ def _allowed_function_ids():
             "torch._C.inductor.",
             "torch.fx.",
             "torch.distributed.fsdp.",
+            "torch.distributed._functional_collectives.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -253,6 +254,14 @@ def is_allowed(obj):
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
+    if obj in (
+        torch.distributed._functional_collectives.all_reduce,
+        torch.distributed._functional_collectives._expand_group,
+        torch.distributed._functional_collectives._maybe_wrap_tensor,
+        torch.distributed._functional_collectives._are_we_tracing,
+    ):
+        return False
+
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),

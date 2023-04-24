@@ -231,11 +231,14 @@ void THPStorage_writeFileRaw(
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
   if (self->device_type() == at::kCPU) {
-    data = self->data<uint8_t>();
+    // We are using a mutable pointer here because we're ultimately
+    // calling into a Python API that requires that, even though it
+    // won't mutate the data.
+    data = static_cast<uint8_t*>(self->mutable_data());
   } else {
     // Here we use a tensor.to() to impl D2H for all non-CPU device.
     auto device_tensor = at::from_blob(
-        self->data<void>(),
+        self->mutable_data(),
         {size_bytes},
         {1},
         NULL,
@@ -343,7 +346,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
 
   uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
-    data = storage->data<uint8_t>();
+    data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
     cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
     data = (uint8_t*)cpu_data.get();
@@ -392,7 +395,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     auto cpu_tensor = at::from_blob(
         (void*)data, {nbytes}, at::device(at::kCPU).dtype(c10::kByte));
     auto device_tensor = at::from_blob(
-        storage->data<void>(),
+        storage->mutable_data(),
         {nbytes},
         {1},
         NULL,
