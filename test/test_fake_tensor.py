@@ -47,6 +47,17 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_basic_forced_memo_only(self):
+        x = torch.empty(2, 2, device="cpu")
+        y = torch.empty(4, 2, 2, device="cpu")
+        with FakeTensorMode() as mode:
+            x_fake = mode.from_tensor(x)
+            x2 = mode.from_tensor(x, memoized_only=True)
+            self.assertTrue(x2 is not None)
+            y = mode.from_tensor(y, memoized_only=True)
+            self.assertIs(y, None)
+
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
@@ -836,14 +847,16 @@ class FakeTensorOperatorInvariants(TestCase):
     def test_cross_entropy_loss(self):
         inp = torch.randn(3, 5)
         target = torch.randint(5, (3,), dtype=torch.long)
+        weight = torch.rand(5)
         fn = torch.nn.functional.cross_entropy
-        ref = fn(inp, target)
-        with FakeTensorMode() as m:
-            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in (inp, target)]
+        for w in (weight, None):
+            args = (inp, target, w)
+            ref = fn(*args)
+            with FakeTensorMode() as m:
+                meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+                meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
 
-            meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
-
-        self.assertEqual(ref.size(), meta_out.size())
+            self.assertEqual(ref.size(), meta_out.size())
 
 
     @skipIfRocm
