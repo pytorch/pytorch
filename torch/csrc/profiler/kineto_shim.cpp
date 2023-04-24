@@ -323,7 +323,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::PYTHON_FUNCTION:
-//    case libkineto::ActivityType::CUDA_DRIVER:
+    case libkineto::ActivityType::CUDA_DRIVER:
       return c10::DeviceType::CPU;
     default: {
       TORCH_WARN(
