@@ -696,12 +696,15 @@ class TritonKernel(Kernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
-        if dynamo_config.dynamic_shapes:
-            return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
-        hint = V.graph.sizevars.size_hint(self.numels[-1])
+        last_numel = self.numels[-1]
+        if dynamo_config.dynamic_shapes:
+            if not isinstance(last_numel, (int, sympy.Integer)):
+                # Not static
+                return False
+        hint = V.graph.sizevars.size_hint(last_numel)
         if hint > threshold:
             return False
         # will need to recompile if we cross a larger power of 2 boundary
