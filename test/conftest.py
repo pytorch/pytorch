@@ -25,14 +25,14 @@ def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("general")
     group.addoption(
         "--scs",
-        action="store_true",
-        default=False,
+        action="store",
+        default=None,
         dest="stepcurrent_skip",
     )
     group.addoption(
         "--sc",
-        action="store_true",
-        default=False,
+        action="store",
+        default=None,
         dest="stepcurrent",
     )
 
@@ -96,7 +96,9 @@ def pytest_configure(config: Config) -> None:
             config.getini("junit_log_passing_tests_reruns"),
         )
         config.pluginmanager.register(config.stash[xml_key])
-    if config.getoption("stepcurrent") or config.getoption("stepcurrent_skip"):
+    if config.getoption("stepcurrent_skip"):
+        config.option.stepcurrent = config.getoption("stepcurrent_skip")
+    if config.getoption("stepcurrent"):
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
 
 
@@ -212,12 +214,6 @@ def pytest_report_teststatus(report, config):
         )
 
 
-def pytest_sessionfinish(session: pytest.Session) -> None:
-    if not session.config.getoption("stepcurrent") and not session.config.getoption("stepcurrent_skip"):
-        assert session.config.cache is not None
-        session.config.cache.set(STEPCURRENT_CACHE_DIR, [])
-
-
 class StepcurrentPlugin:
     # Modified fromo _pytest/stepwise.py in order to save the currently running
     # test instead of the last failed test
@@ -226,7 +222,8 @@ class StepcurrentPlugin:
         self.report_status = ""
         assert config.cache is not None
         self.cache: pytest.Cache = config.cache
-        self.lastrun: Optional[str] = self.cache.get(STEPCURRENT_CACHE_DIR, None)
+        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun: Optional[str] = self.cache.get(self.directory, None)
         self.skip: bool = config.getoption("stepcurrent_skip")
 
     def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
@@ -260,4 +257,4 @@ class StepcurrentPlugin:
 
     def pytest_runtest_logreport(self, report: TestReport) -> None:
         self.lastrun = report.nodeid
-        self.cache.set(STEPCURRENT_CACHE_DIR, self.lastrun)
+        self.cache.set(self.directory, self.lastrun)
