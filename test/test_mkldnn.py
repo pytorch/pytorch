@@ -427,6 +427,16 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
+    def test_conv_transposed2d_ic1_nhwc(self):
+        x = torch.ones([1, 1, 2, 2]).contiguous(memory_format=torch.channels_last)
+        model = torch.nn.ConvTranspose2d(in_channels=1, out_channels=2, kernel_size=[5, 5]).eval()
+        model.weight.data = torch.ones([1, 2, 5, 5]).contiguous(memory_format=torch.channels_last)
+        with torch.no_grad():
+            y = model(x)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = model(x)
+            self.assertEqual(y, y_ref)
+
     def test_conv2d_legacy_jit_model(self):
         """
         MKLDNN integration used to serialize models with 5d weight for grouped
