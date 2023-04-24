@@ -125,6 +125,7 @@ if COLLECT_EXPECT:
 
 inductor_skips = defaultdict(dict)
 
+
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
@@ -208,6 +209,14 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sparse.sampled_addmm": {f32, f64},
     ("sparse.mm", "reduce"): {bf16, f32, f64},
     "stft": {f32, f64},
+    "svd": {f32, f64},
+    "svd_lowrank": {f32, f64},
+    "linalg.cond": {f32, f64},
+    "linalg.svd": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "linalg.matrix_rank": {f32, f64},
+    "pca_lowrank": {f32, f64},
+    ("norm", "nuc"): {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
@@ -238,8 +247,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
+    "fft.rfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.rfftn": {b8, f16, f32, f64, i32, i64},
     # These return complex tensors
     "cdouble": {b8, i32, i64, f16, f32, f64},
     "cfloat": {b8, i32, i64, f16, f32, f64},
@@ -271,6 +280,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
+    "linalg.householder_product": {f32, f64},
     "linalg.lstsq": {f32, f64},
     ("linalg.lstsq", "grad_oriented"): {f32, f64},
     "masked_scatter": {f16, f32, f64},
@@ -320,6 +330,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     # (including _linalg_svd), possibly we should have something similar here
     "linalg.cond": {f32, f64},
     "linalg.svdvals": {f32, f64},
+    "linalg.matrix_rank": {f32, f64},
+    "linalg.svd": {f32, f64},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
+    "svd": {f32, f64},
     ("norm", "nuc"): {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
@@ -339,8 +354,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
+    "fft.rfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.rfftn": {b8, f16, f32, f64, i32, i64},
     # These return complex tensors
     "cdouble": {b8, i32, i64, f16, f32, f64},
     "cfloat": {b8, i32, i64, f16, f32, f64},
