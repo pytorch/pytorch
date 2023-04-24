@@ -47,6 +47,17 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_basic_forced_memo_only(self):
+        x = torch.empty(2, 2, device="cpu")
+        y = torch.empty(4, 2, 2, device="cpu")
+        with FakeTensorMode() as mode:
+            x_fake = mode.from_tensor(x)
+            x2 = mode.from_tensor(x, memoized_only=True)
+            self.assertTrue(x2 is not None)
+            y = mode.from_tensor(y, memoized_only=True)
+            self.assertIs(y, None)
+
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
@@ -75,6 +86,13 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.shape, (8, 8))
             self.assertEqual(out.device.type, "cpu")
             self.assertTrue(isinstance(out, FakeTensor))
+
+    def test_repr(self):
+        with FakeTensorMode():
+            x = torch.empty(2, 2, device="cpu")
+            self.assertEqual(repr(x), 'FakeTensor(..., size=(2, 2))')
+            x = torch.empty(2, 2, device="meta")
+            self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
@@ -499,6 +517,34 @@ class FakeTensorTest(TestCase):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
 
+    def test_mixed_real_and_fake_inputs(self):
+        class _TestPattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(1)
+
+            def forward(self, input):
+                running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+                scale_factor = self.bn.weight / running_std
+                weight_shape = [1] * len(self.conv.weight.shape)
+                weight_shape[0] = -1
+                bias_shape = [1] * len(self.conv.weight.shape)
+                bias_shape[1] = -1
+                scaled_weight = self.conv.weight * scale_factor.reshape(weight_shape)
+                zero_bias = torch.zeros_like(self.conv.bias, dtype=input.dtype)
+                conv = self.conv._conv_forward(input, scaled_weight, zero_bias)
+                conv_orig = conv / scale_factor.reshape(bias_shape)
+                conv_orig = conv_orig + self.conv.bias.reshape(bias_shape)
+                conv = self.bn(conv_orig)
+                return conv
+
+        example_inputs = (torch.randn(1, 1, 3, 3),)
+        mod = _TestPattern()
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            out = mod(torch.randn(1, 1, 3, 3))
+        self.checkType(out, "cpu", (1, 1, 3, 3))
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -797,6 +843,21 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(len(ref_out), len(meta_out))
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
+
+    def test_cross_entropy_loss(self):
+        inp = torch.randn(3, 5)
+        target = torch.randint(5, (3,), dtype=torch.long)
+        weight = torch.rand(5)
+        fn = torch.nn.functional.cross_entropy
+        for w in (weight, None):
+            args = (inp, target, w)
+            ref = fn(*args)
+            with FakeTensorMode() as m:
+                meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+                meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
+
+            self.assertEqual(ref.size(), meta_out.size())
+
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

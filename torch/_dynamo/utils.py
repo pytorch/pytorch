@@ -526,6 +526,8 @@ def clone_input(x):
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
 
     with torch.no_grad():
@@ -555,6 +557,8 @@ def clone_input(x):
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return result
 
 
@@ -792,11 +796,12 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value):
+def enum_repr(value, local):
     enum_name = str(value)
 
     name, val = enum_name.split(".")
-    local_name = f'L["{name}"].{val}'
+    scope = "L" if local else "G"
+    local_name = f'{scope}["{name}"].{val}'
     return local_name
 
 
@@ -808,11 +813,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys):
+def dict_const_keys_repr(const_keys, *, local):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -1193,6 +1198,10 @@ def get_fake_value(node, tx):
     kwargs = tree_map(fake_wrapper, kwargs)
 
     nnmodule = None
+    if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
+        # If the first argument is nn.Module, should copy to fake mode.
+        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
@@ -1390,6 +1399,7 @@ class TensorStaticReason(enum.Enum):
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
+    NN_MODULE_PROPERTY = 5
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
@@ -1399,11 +1409,13 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
         return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
+    if reason == TensorStaticReason.NN_MODULE_PROPERTY:
+        return "tensor is static because it is nn module associated."
     raise AssertionError(f"Illegal reason {reason}")
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool, guard_source: "GuardSource"
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
@@ -1422,6 +1434,8 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
+    if guard_source.is_nn_module():
+        return True, TensorStaticReason.NN_MODULE_PROPERTY
     return False, None
 
 

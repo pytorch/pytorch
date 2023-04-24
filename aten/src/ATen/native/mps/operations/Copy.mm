@@ -1,5 +1,5 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -50,7 +50,6 @@ void copy_cast_mps(at::Tensor& dst,
   using CachedGraph = MPSUnaryCachedGraph;
 
   MPSStream* stream = getCurrentMPSStream();
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSDataType dstDType = getMPSDataType(dst);
   MPSDataType srcDType = getMPSDataType(src);
@@ -59,29 +58,17 @@ void copy_cast_mps(at::Tensor& dst,
 
   @autoreleasepool {
     string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
+      MPSGraphTensor* inputCastTensor = inputTensor;
+      if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
+        inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+      }
+      MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
-          MPSGraphTensor* inputCastTensor = inputTensor;
-          if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
-            inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
-          }
-          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
     MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc] initWithMTLBuffer:sourceBuffer
                                                                            shape:srcShape
                                                                         dataType:srcDType] autorelease];
@@ -148,7 +135,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
         needsBlit = false;
         tmpBuffer = destBuffer;
       } else if (src.element_size() < dst.element_size()) {
-        tmp = at::native::empty_mps(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS);
+        tmp = at::empty(dst.sizes(), dst.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
         tmpBuffer = getMTLBufferStorage(tmp);
       }
     }
@@ -284,7 +271,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset);
   } else {
     if (dst_byte_offset) {
-      auto tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
+      auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
       auto tmpBuffer = getMTLBufferStorage(tmp);
       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
       stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset);

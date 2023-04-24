@@ -1,8 +1,18 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_unique2.h>
+#include <ATen/ops/slice.h>
+#include <ATen/ops/unique_consecutive.h>
+#include <ATen/ops/unique_dim_consecutive.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -169,37 +179,21 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self,
                                          const bool return_counts,
                                          const bool consecutive,
                                          c10::optional<int64_t> dim) {
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string key = getUniqueKey(self.scalar_type(), self.sizes(), return_inverse, return_counts, consecutive, dim);
-    UniqueCachedGraph* cachedGraph = static_cast<UniqueCachedGraph*>(cache_->LookUp(key));
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        UniqueCachedGraph* newCachedGraph = nil;
+    return LookUpOrCreateCachedGraph<UniqueCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      // Workaround for MPSShaderLibrary bug
+      // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+      auto inputType = getMPSScalarType(self.scalar_type());
+      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self.sizes()));
 
-        @autoreleasepool {
-          // Initialize graph
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new UniqueCachedGraph(mpsGraph);
+      auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
 
-          // Workaround for MPSShaderLibrary bug
-          // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
-          auto inputType = getMPSScalarType(self.scalar_type());
-          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self.sizes()));
-
-          auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
-
-          newCachedGraph->outputTensor_ = outputTensors[0];
-          newCachedGraph->inverseIndicesTensor_ = outputTensors[1];
-          newCachedGraph->countsTensor_ = outputTensors[2];
-          newCachedGraph->lengthTensor_ = outputTensors[3];
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<UniqueCachedGraph*>(tmpCachedGraph);
-    }
-    return cachedGraph;
+      newCachedGraph->outputTensor_ = outputTensors[0];
+      newCachedGraph->inverseIndicesTensor_ = outputTensors[1];
+      newCachedGraph->countsTensor_ = outputTensors[2];
+      newCachedGraph->lengthTensor_ = outputTensors[3];
+    });
   }
 }
 
@@ -263,10 +257,11 @@ std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   if (!return_counts)
     countsShape = {};
 
-  Tensor output = at::native::empty_mps(outputShape, input.scalar_type(), c10::nullopt, kMPS);
-  Tensor inverse_indices = at::native::empty_mps(inverseIndicesShape, ScalarType::Long, c10::nullopt, kMPS);
-  Tensor counts = at::native::empty_mps(countsShape, ScalarType::Long, c10::nullopt, kMPS);
-  Tensor length = at::native::empty_mps({1}, ScalarType::Int, c10::nullopt, kMPS);
+  Tensor output = at::empty(outputShape, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor inverse_indices =
+      at::empty(inverseIndicesShape, ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor counts = at::empty(countsShape, ScalarType::Long, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor length = at::empty({1}, ScalarType::Int, c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   if (input.numel() == 0) {
     return std::make_tuple(output, inverse_indices, counts);

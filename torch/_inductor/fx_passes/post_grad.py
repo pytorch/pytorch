@@ -5,10 +5,11 @@ import operator
 
 import torch
 import torch._inductor as inductor
-from .. import config, ir
+from .. import config, ir, pattern_matcher
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
+    _return_true,
     Arg,
     CallFunction,
     filter_nodes,
@@ -18,9 +19,7 @@ from ..pattern_matcher import (
     ListOf,
     Match,
     MULTIPLE,
-    pass_patterns,
-    register_lowering_pattern,
-    reorder_for_locality,
+    PatternMatcherPass,
 )
 from ..virtualized import V
 
@@ -28,8 +27,21 @@ from ..virtualized import V
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
+# First pass_patterns[0] are applied, then [1], then [2]
+pass_patterns = [
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+]
+
 
 def post_grad_passes(gm: torch.fx.GraphModule):
+    """
+    Passes that run on after grad.  This is called once on the forwards
+    graph and once on the backwards graph.
+
+    The IR here has been normalized and functionalized.
+    """
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -39,10 +51,45 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
+        lazy_init()
+
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
 
     gm.graph.lint()
+
+
+@functools.lru_cache(None)
+def lazy_init():
+    if torch._C.has_mkldnn:
+        from .mkldnn_fusion import _mkldnn_fusion_init
+
+        _mkldnn_fusion_init()
+
+
+def reorder_for_locality(graph: torch.fx.Graph):
+    def visit(other_node):
+        if (
+            other_node.op == "call_function"
+            and other_node.target != operator.getitem
+            and all((n in seen_nodes) for n in other_node.users)
+        ):
+            # move node's producers right before it
+            node.prepend(other_node)
+
+    seen_nodes = set()
+    for node in reversed(graph.nodes):
+        seen_nodes.add(node)
+        torch.fx.map_arg((node.args, node.kwargs), visit)
+
+
+def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
+    """
+    Register an aten to inductor IR replacement pattern
+    """
+    return pattern_matcher.register_lowering_pattern(
+        pattern, extra_check, pass_dict=pass_patterns[pass_number]
+    )
 
 
 ################################################################################
@@ -253,6 +300,15 @@ def is_valid_splitwithsizes_cat(match):
     # All parts of split should be included in the cat
     if get_item_args != set(range(len(split_sizes))):
         return False
+    # The order of get_item_args should same with cat_node used.
+    # For example, if the split_node like split_with_sizes(input, [2, 2, 3], 1),
+    # the cat node should be like cat([get_item(0), get_item(1), get_item(2)], 1).
+    cat_items_args_order = [
+        get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
+    ]
+    if cat_items_args_order != list(range(len(split_sizes))):
+        return False
+
     return True
 
 
@@ -279,26 +335,3 @@ def is_valid_splitwithsizes_cat(match):
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
-
-
-# This slows things down:
-"""
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.bmm, Arg(), Arg()),
-        KeywordArg("added"),
-    ),
-    pass_number=3
-)
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("added"),
-        CallFunction(aten.bmm, Arg(), Arg()),
-    ),
-    pass_number=3
-)
-def baddbmm(mat1, mat2, added):
-    return aten.baddbmm(added, mat1, mat2)
-"""

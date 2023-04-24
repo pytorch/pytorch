@@ -107,11 +107,12 @@ rewrite_assert_with_torch_assert = True
 # Show a warning on every graph break
 print_graph_breaks = False
 
-# Print guards
-print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
-
 # Show a warning for every specialization
 print_specializations = False
+
+# Simplify guards, summarizing static and dynamic constraints on dimensions.
+# NOTE: This only has an effect when dynamic_shapes=True.
+summarize_dim_constraints = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -234,11 +235,6 @@ elif is_fbcode():
     debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
 else:
     debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
-
-
-# this is to resolve a import problem in fbcode, we will be deleting
-# this very shortly
-DO_NOT_USE_legacy_non_fake_example_inputs = False
 
 
 _save_config_ignore = {

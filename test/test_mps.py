@@ -576,9 +576,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'view_as_complex': None,
-        'segment_reduce': None,
         'segment_reduce_': None,
-        '_segment_reduce_lengths': None,
         '_upsample_bilinear2d_aa': None,
         'geometric' : None,
         'geometric_': None,
@@ -3013,8 +3011,9 @@ class TestMPS(TestCaseMPS):
 
     def test_repeat_interleave(self, device="mps"):
         x = torch.tensor([0, 1, 2, 3], device=device)
-        expected = torch.tensor([1, 2, 2, 3, 3, 3], dtype=torch.int32, device=device)
-        self.assertEqual(torch.repeat_interleave(x), expected)
+        expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
+        # Prior to macos 13.3, input of dtype=torch.int64 returns dtype=torch.int32
+        self.assertEqual(torch.repeat_interleave(x), expected, exact_dtype=product_version >= 13.3)
 
         with self.assertRaises(RuntimeError):
             torch.repeat_interleave(torch.arange(4, device=device).reshape(2, 2))
