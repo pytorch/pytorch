@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def is_floating(x):
     if isinstance(x, tl.constexpr):
@@ -44,3 +45,41 @@ def min(a, dim):
 @triton.jit
 def max(a, dim):
     return tl.reduce(a, dim, maximum)
+
+
+@triton.jit
+def minimum_with_index(a_value, a_index, b_value, b_index):
+    mask = a_value < b_value
+    if is_floating(a_value):
+        # Consider NaN as equal
+        equal = not (a_value < b_value) and not (a_value > b_value)
+    else:
+        equal = a_value == b_value
+
+    # Prefer lowest index if values are equal
+    mask |= equal & (a_index < b_index)
+    return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
+
+
+@triton.jit
+def maximum_with_index(a_value, a_index, b_value, b_index):
+    mask = a_value > b_value
+    if is_floating(a_value):
+        # Consider NaN as equal
+        equal = not (a_value < b_value) and not (a_value > b_value)
+    else:
+        equal = a_value == b_value
+
+    # Prefer lowest index if values are equal
+    mask |= equal & (a_index < b_index)
+    return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
+
+
+@triton.jit
+def min_with_index(value, index, dim):
+    return tl.reduce((value, index), dim, minimum_with_index)
+
+
+@triton.jit
+def max_with_index(value, index, dim):
+    return tl.reduce((value, index), dim, maximum_with_index)

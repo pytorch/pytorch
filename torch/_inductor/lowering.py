@@ -3822,12 +3822,7 @@ def reduce_min(x, dim=None, keepdim=False):
 @register_lowering(aten.amax)
 def reduce_amax(x, dim=None, keepdim=False):
     x_dtype = x.get_dtype()
-    if is_float_dtype(x_dtype):
-        combine_fn = ops_wrapper("maximum")
-    elif is_boolean_dtype(x_dtype):
-        combine_fn = ops_wrapper("logical_or")
-    else:
-        combine_fn = ops_wrapper("int_maximum")
+    combine_fn = ops_wrapper("maximum")
 
     reduce_fn = make_reduction("max", combine_fn=combine_fn)
     return reduce_fn(x, axis=dim, keepdims=keepdim)
@@ -3836,12 +3831,7 @@ def reduce_amax(x, dim=None, keepdim=False):
 @register_lowering(aten.amin)
 def reduce_amin(x, dim=None, keepdim=False):
     x_dtype = x.get_dtype()
-    if is_float_dtype(x_dtype):
-        combine_fn = ops_wrapper("minimum")
-    elif is_boolean_dtype(x_dtype):
-        combine_fn = ops_wrapper("logical_or")
-    else:
-        combine_fn = ops_wrapper("int_minimum")
+    combine_fn = ops_wrapper("minimum")
 
     reduce_fn = make_reduction("min", combine_fn=combine_fn)
     return reduce_fn(x, axis=dim, keepdims=keepdim)
