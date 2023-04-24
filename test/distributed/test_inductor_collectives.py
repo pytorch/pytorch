@@ -341,6 +341,39 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 2
         assert same(out, correct)
 
+    def test_dynamo_trace_all_gather_tensor(self):
+
+        def func(inp, *, tag, ranks, group_size):
+            ar = _functional_collectives.all_gather_tensor(inp, 0, ranks, tag)
+            return ar
+
+        inputs = torch.ones(4, 4, device="cuda")
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+
+        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+        assert counter.op_count == 2
+        assert same(out, correct)
+
+    def test_dynamo_trace_reduce_scatter_tensor(self):
+
+        def func(inp, *, tag, ranks, group_size):
+            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, ranks, tag)
+            return ar
+
+        inputs = torch.ones(4, 4, device="cuda")
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+
+        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+        assert counter.op_count == 2
+        assert same(out, correct)
     def test_backwards(self):
         """
         It's probably not that common to need backwards support for collectives.

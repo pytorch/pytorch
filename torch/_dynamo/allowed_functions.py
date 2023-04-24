@@ -256,6 +256,8 @@ def is_allowed(obj):
     # in those cases
     if obj in (
         torch.distributed._functional_collectives.all_reduce,
+        torch.distributed._functional_collectives.all_gather_tensor,
+        torch.distributed._functional_collectives.reduce_scatter_tensor,
         torch.distributed._functional_collectives._expand_group,
         torch.distributed._functional_collectives._maybe_wrap_tensor,
         torch.distributed._functional_collectives._are_we_tracing,

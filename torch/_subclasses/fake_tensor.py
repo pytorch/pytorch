@@ -1332,12 +1332,10 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal flat_arg_fake_tensors
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
-                    breakpoint()
                     raise Exception(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {func}(*{args}, **{kwargs})"
                     )
                 if not self.allow_non_fake_inputs:
-                    breakpoint()
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
