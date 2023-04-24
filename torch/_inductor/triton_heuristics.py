@@ -105,11 +105,7 @@ class CachingAutotuner(KernelInterface):
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
-
-        if torch.version.hip is None:
-            compile_meta["debug"] = config.triton.assert_indirect_indexing
-        else:
-            compile_meta["debug"] = False
+        compile_meta["debug"] = config.triton.assert_indirect_indexing and torch.version.hip is None
 
         if warm_cache_only_with_cc:
             triton.compile(
