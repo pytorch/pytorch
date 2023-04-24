@@ -1113,7 +1113,7 @@ def _get_param_id_to_param_from_optim_input(
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
     def module_fn(module, prefix, tree_level, flat_param_to_fqn):
         for param_name, param in _named_parameters_with_duplicates(
-            module, remove_duplicate=False
+            module, recurse=False
         ):
             if type(param) is not FlatParameter:
                 continue
