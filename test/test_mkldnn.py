@@ -280,15 +280,17 @@ class TestMkldnn(TestCase):
                                     bias=bias,
                                     groups=groups).float()
             x_lower = x.to(dtype=dtype)
-            if has_bf16_support():
+            if has_bf16_support() or torch.ops.mkldnn._is_mkldnn_fp16_supported():
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
                 mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
                 y = mkldnn_conv(x.to_mkldnn()).to_dense()
                 y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_lower, atol=1e-1, rtol=1e-3)
+                print("assert true")
             else:
-                msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
-                with self.assertRaisesRegex(RuntimeError, msg):
+                msg = {torch.bfloat16 : r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq",
+                       torch.half : r"fp16 path needs the cpu support avx512fp16"}
+                with self.assertRaisesRegex(RuntimeError, msg[dtype]):
                     mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
                     y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
 
@@ -355,8 +357,9 @@ class TestMkldnn(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_lower_precision(self):
-        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
-        if has_bf16_support():
+        # when has_bf16_support() or torch.ops.mkldnn._is_mkldnn_fp16_supported() returns false,
+        # bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support() or torch.ops.mkldnn._is_mkldnn_fp16_supported():
             self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
             self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.half)
@@ -368,8 +371,9 @@ class TestMkldnn(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv_transpose2d_nhwc_lower_precision(self):
-        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
-        if has_bf16_support():
+        # when has_bf16_support() or torch.ops.mkldnn._is_mkldnn_fp16_supported() returns false,
+        # bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support() or torch.ops.mkldnn._is_mkldnn_fp16_supported():
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half)
