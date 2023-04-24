@@ -1178,10 +1178,14 @@ class TritonKernel(Kernel):
                 )
 
             updated = value
-            if reduction_type in {"min", "argmin"}:
+            if reduction_type == "argmin":
                 masks.append(f"({accumulator} > {value})")
-            elif reduction_type in {"max", "argmax"}:
+            elif reduction_type == "argmax":
                 masks.append(f"({accumulator} < {value})")
+            elif reduction_type == "min":
+                updated = f"triton_helpers.minimum({accumulator}, {value})"
+            elif reduction_type == "max":
+                updated = f"triton_helpers.maximum({accumulator}, {value})"
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
             elif reduction_type == "prod":

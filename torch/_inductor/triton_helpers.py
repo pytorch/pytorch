@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def is_floating(x):
     if isinstance(x, tl.constexpr):
