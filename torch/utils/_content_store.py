@@ -67,7 +67,9 @@ def hash_storage(storage):
         # by the length of tensor as well
         return prims.xor_sum((a * x + b).int(), [0])
 
-    with torch.random.fork_rng([storage.device] if storage.device.type != "cpu" else []):
+    with torch.random.fork_rng(
+        [storage.device] if storage.device.type != "cpu" else []
+    ):
         torch.manual_seed(0)  # this can be anything, just needs to be fixed
         x = torch.empty(0, dtype=torch.uint8, device=storage.device).set_(storage)
         # The dtype-casting view cannot be compiled, and so the
