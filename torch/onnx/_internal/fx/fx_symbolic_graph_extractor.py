@@ -201,7 +201,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
 
     def generate_fx(
         self,
-        options: exporter._ResolvedExportOptions,
+        options: exporter.ResolvedExportOptions,
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],

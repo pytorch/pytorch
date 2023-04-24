@@ -68,18 +68,16 @@ class ExportOptions:
         *,
         opset_version: Optional[int] = None,
         dynamic_shapes: Optional[bool] = None,
-        decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
-        self.decomposition_table = decomposition_table
         self.op_level_debug = op_level_debug
         self.logger = logger
 
 
-class _ResolvedExportOptions(ExportOptions):
+class ResolvedExportOptions(ExportOptions):
     """Consolidates `ExportOptions` with default values.
 
     All unspecified options from `ExportOptions` are assigned a default value.
@@ -122,12 +120,8 @@ class _ResolvedExportOptions(ExportOptions):
             function_dispatcher,
         )
 
-        self.fx_tracer = dynamo_graph_extractor.DynamoOptimize()
-
-        self.decomposition_table = resolve(
-            options.decomposition_table,
-            function_dispatcher._DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE,
-        )
+        self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+        self.decomposition_table = function_dispatcher._DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE
         self.op_level_debug = resolve(options.op_level_debug, False)
         self.logger = resolve(
             options.logger, lambda: logging.getLogger().getChild("torch.onnx")
@@ -351,7 +345,7 @@ class FXGraphExtractor(abc.ABC):
     @_beartype.beartype
     def _export_fx_to_onnx(
         self,
-        options: _ResolvedExportOptions,
+        options: ResolvedExportOptions,
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
@@ -452,7 +446,7 @@ class FXGraphExtractor(abc.ABC):
     @abc.abstractmethod
     def generate_fx(
         self,
-        options: _ResolvedExportOptions,
+        options: ResolvedExportOptions,
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
@@ -479,15 +473,15 @@ class Exporter:
     @_beartype.beartype
     def __init__(
         self,
-        options: Union[ExportOptions, _ResolvedExportOptions],
+        options: Union[ExportOptions, ResolvedExportOptions],
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
-        if isinstance(options, _ResolvedExportOptions):
+        if isinstance(options, ResolvedExportOptions):
             self.options = options
         elif isinstance(options, ExportOptions):
-            self.options = _ResolvedExportOptions(options)
+            self.options = ResolvedExportOptions(options)
         assert self.options is not None
 
         self.model = model
@@ -523,7 +517,7 @@ class UnsatisfiedDependencyError(RuntimeError):
 
 
 @_beartype.beartype
-def _assert_dependencies(export_options: _ResolvedExportOptions):
+def _assert_dependencies(export_options: ResolvedExportOptions):
     logger = export_options.logger
     opset_version = export_options.opset_version
 
@@ -601,8 +595,8 @@ def dynamo_export(
 
     resolved_export_options = (
         export_options
-        if isinstance(export_options, _ResolvedExportOptions)
-        else _ResolvedExportOptions(export_options)
+        if isinstance(export_options, ResolvedExportOptions)
+        else ResolvedExportOptions(export_options)
     )
 
     _assert_dependencies(resolved_export_options)
