@@ -88,11 +88,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymIntType::Kind:
-        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // TODO: Can this really show up though? :think:
+        TORCH_CHECK(!w.value.toSymInt().is_heap_allocated());
         // no op, there is nothing to tag
         break;
       case c10::SymFloatType::Kind:
         TORCH_CHECK(!w.value.toSymFloat().is_symbolic());
+        // no op, there is nothing to tag
+        break;
+      case c10::SymBoolType::Kind:
+        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:
@@ -345,6 +350,10 @@ PickleOpCode Unpickler::readInstruction() {
       uint32_t length = from_le32(read<uint32_t>());
       stack_.emplace_back(readBytes(length));
     } break;
+    case PickleOpCode::BINUNICODE8: {
+      int64_t length = from_le64(read<int64_t>());
+      stack_.emplace_back(readBytes(length));
+    } break;
     case PickleOpCode::BINFLOAT:
       stack_.emplace_back(readFloat());
       break;
@@ -570,11 +579,13 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu()) {
+          device.is_hpu() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
-            "supported devices include CPU, CUDA and HPU, however got ",
+            "supported devices include CPU, CUDA, HPU and ",
+            c10::get_privateuse1_backend(),
+            " however got ",
             DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));

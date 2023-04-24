@@ -88,6 +88,26 @@ def meta_take(self, index, *, out=None):
     return result
 
 
+@register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
+@out_wrapper()
+def linalg_cross(self, other, *, dim=-1):
+    x_d = self.ndim
+    y_d = other.ndim
+    check(
+        x_d == y_d,
+        lambda: "linalg.cross: inputs must have the same number of dimensions.",
+    )
+    check(
+        self.size(dim) == 3 and other.size(dim) == 3,
+        lambda: (
+            f"linalg.cross: inputs dimension {dim} must have length 3. "
+            f"Got {self.size(dim)} and {other.size(dim)}"
+        ),
+    )
+    out_shape = _broadcast_shapes(self.shape, other.shape)
+    return self.new_empty(out_shape)
+
+
 @register_meta(
     [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
 )
@@ -728,16 +748,6 @@ if torch._C.has_mkldnn:
         "mkldnn", "IMPL", "Meta"
     )
 
-    def pick_mkldnn_conv_memory_format(input_tensor, weight):
-        if weight.is_mkldnn:
-            return torch.channels_last
-        if is_channels_last(input_tensor) or is_channels_last(weight):
-            return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
-
     @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
     def meta_mkldnn_convolution_default(
         input_tensor,
@@ -759,54 +769,11 @@ if torch._C.has_mkldnn:
         out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
         return out
 
-    @register_meta(torch.ops.mkldnn._convolution_pointwise.binary)
-    def meta_mkldnn_convolution_binary(
-        input_tensor,
-        other,
-        weight,
-        bias,
-        padding,
-        stride,
-        dilation,
-        groups,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        out = input_tensor.new_empty(other.size())
-        out = out.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
-        return out
-
-    @register_meta(torch.ops.mkldnn._convolution_pointwise_.binary)
-    def meta_mkldnn_convolution_binary_inplace(
-        input_tensor,
-        other,
-        weight,
-        bias,
-        padding,
-        stride,
-        dilation,
-        groups,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        return other
-
     @register_meta(torch.ops.mkldnn._linear_pointwise.default)
     def meta_linear_pointwise_default(
         input_tensor, weight, bias, attr, scalars, algorithm
     ):
         return input_tensor.new_empty((*input_tensor.shape[:-1], weight.shape[0]))
-
-    @register_meta(torch.ops.mkldnn._linear_pointwise.binary)
-    def meta_linear_pointwise_binary(input_tensor, other, weight, bias, attr):
-        out = input_tensor.new_empty(other.size())
-        return out
 
     if torch._C.has_mkl:
         _meta_lib_dont_use_me_use_register_meta_for_mkl = torch.library.Library(
@@ -1108,6 +1075,11 @@ def vdot(self, other):
 
     dot_check(self, other)
     return self.new_empty(())
+
+
+@register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
+def nonzero_static(self, *, size: int, fill_value: int = -1):
+    return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
 # Leaving this function around because a python implementation
@@ -3073,6 +3045,37 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     result_size = list(self.size())
     return self.new_empty(result_size)
+
+
+@register_meta([aten._fused_adam.default])
+def meta__fused_adam(
+    params,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    def empty_like_list(tensor_list):
+        return [torch.empty_like(t) for t in tensor_list]
+
+    return (
+        empty_like_list(params),
+        empty_like_list(grads),
+        empty_like_list(exp_avgs),
+        empty_like_list(exp_avg_sqs),
+        empty_like_list(state_steps),
+    )
 
 
 # We must also trigger meta registrations from PrimTorch ref

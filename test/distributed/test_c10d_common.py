@@ -13,6 +13,7 @@ from datetime import timedelta
 from itertools import product
 from sys import platform
 from typing import Callable, Dict, Optional
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -34,6 +35,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    retry_on_connect_failures,
     TestCase,
     load_tests,
     run_tests,
@@ -128,6 +130,51 @@ class AbstractTimeoutTest:
             else:
                 raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
 
+
+class TimeoutTest(TestCase):
+    @retry_on_connect_failures
+    def test_store_based_barrier(self):
+        f = tempfile.NamedTemporaryFile()
+        port = common.find_free_port()
+
+        def thread_work(timeout, init_type, world_size, rank, error_list):
+            # we need to create a seperate store just for the store barrier test
+            if init_type == "file":
+                barrier_store = dist.FileStore(f.name)
+            elif init_type == "tcp":
+                barrier_store = dist.TCPStore("localhost", port, world_size, is_master=rank == 0, wait_for_workers=False)
+            elif init_type == "hash":
+                barrier_store = dist.HashStore()
+            try:
+                # 1 missing worker will cause it to timeout
+                if rank != world_size - 1:
+                    c10d._store_based_barrier(rank, barrier_store, timeout, logging_interval=timeout / 2)
+            except RuntimeError as e:
+                error_list.append(e)
+
+        world_size = 4
+        error_list = []
+        threads = []
+        for init_type in ["file", "tcp", "hash"]:
+            # mock get_world_size() in _store_based_barrier so we don't need to initialize a default process group
+            with mock.patch('torch.distributed.distributed_c10d.get_world_size') as mock_get_world_size:
+                mock_get_world_size.return_value = world_size
+                for rank in range(world_size):
+                    t = threading.Thread(
+                        target=thread_work, args=(timedelta(seconds=3), init_type, world_size, rank, error_list,)
+                    )
+                    threads.append(t)
+                    t.start()
+
+                for i, thread in enumerate(threads):
+                    thread.join()
+
+                # we expect the world_size-1 threads to have failed
+                self.assertEqual(len(error_list), world_size - 1)
+                for error in error_list:
+                    self.assertTrue("Timed out initializing process group in store based barrier" in error.args[0])
+                error_list = []
+                threads = []
 
 class Net(nn.Module):
     def __init__(self):

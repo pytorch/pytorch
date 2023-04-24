@@ -46,6 +46,8 @@ at::DeprecatedTypeProperties* get_type_properties(
     backend = at::Backend::MPS;
   } else if (device_type == at::DeviceType::Meta) {
     backend = at::Backend::Undefined;
+  } else if (device_type == at::DeviceType::PrivateUse1) {
+    backend = at::Backend::PrivateUse1;
   } else {
     TORCH_CHECK(false, "Invalid device for storage: ", device_type);
   }

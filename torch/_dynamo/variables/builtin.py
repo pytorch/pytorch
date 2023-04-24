@@ -50,12 +50,10 @@ class BuiltinVariable(VariableTracker):
             bool,
             callable,
             chr,
-            dict,
             divmod,
             float,
             int,
             len,
-            list,
             max,
             min,
             ord,
@@ -66,7 +64,6 @@ class BuiltinVariable(VariableTracker):
             str,
             str.format,
             sum,
-            tuple,
             type,
             operator.pos,
             operator.neg,
@@ -479,6 +476,16 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
 
+                if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                    # Standard indexing will force specialization due to
+                    # __index__.  Rewrite as a regular torch op which will
+                    # trace fine
+                    fn, args = torch.select, [
+                        args[0],
+                        variables.ConstantVariable(0),
+                        args[1],
+                    ]
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -786,6 +793,14 @@ class BuiltinVariable(VariableTracker):
             )
         )
 
+    def call_callable(self, tx, arg):
+        from .functions import BaseUserFunctionVariable
+
+        if isinstance(
+            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+        ):
+            return variables.ConstantVariable(True).add_options(arg)
+
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
         if arg is None:
@@ -815,9 +830,21 @@ class BuiltinVariable(VariableTracker):
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 
-    def call_dict(self, tx, obj=None):
-        if self.is_supported_call_dict_arg(tx, obj):
-            return self.call_dict_helper(tx, dict, obj)
+    def call_dict(self, tx, *args, **kwargs):
+        if not (args or kwargs):
+            return self.call_dict_helper(tx, dict, None)
+        elif (
+            not kwargs
+            and len(args) == 1
+            and self.is_supported_call_dict_arg(tx, args[0])
+        ):
+            return self.call_dict_helper(tx, dict, args[0])
+        elif not args and kwargs:
+            return variables.ConstDictVariable(
+                dict(kwargs), user_cls=dict, mutable_local=MutableLocal()
+            )
+        else:
+            unimplemented(f"dict(): {args} {kwargs}")
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
@@ -1068,6 +1095,9 @@ class BuiltinVariable(VariableTracker):
             )
         elif isinstance(obj, variables.NNModuleVariable):
             obj.convert_to_unspecialized(tx)
+
+    def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
+        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder

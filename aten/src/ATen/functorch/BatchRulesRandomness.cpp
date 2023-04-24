@@ -279,8 +279,8 @@ struct RandomBatchRuleHelper<F, Func, typelist<T1, T...>> {
 };
 
 template <typename F, F Func, typename... T>
-Tensor rand_int_wrapper(SymIntArrayRef shape, int64_t high, T... extra_args) {
-  return Func(high, shape, std::forward<T>(extra_args)...);
+Tensor rand_int_wrapper(SymIntArrayRef shape, c10::SymInt high, T... extra_args) {
+  return Func(high, std::move(shape), std::forward<T>(extra_args)...);
 }
 
 template <typename A, A a, typename C>
@@ -298,10 +298,10 @@ struct RandIntBatchRuleHelper;
 
 template <typename F, F Func, typename T1, typename T2, typename... T>
 struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
-  static Tensor apply(int64_t high, SymIntArrayRef shape, T... extra_args) {
+  static Tensor apply(c10::SymInt high, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_wrapper<F, Func, T...>),
                                 &rand_int_wrapper<F, Func, T...>,
-                                int64_t, T...>(shape, high, std::forward<T>(extra_args)...);
+                                c10::SymInt, T...>(shape, std::move(high), std::forward<T>(extra_args)...);
   }
 };
 
@@ -318,7 +318,7 @@ struct RandTwoLeadingScalarsBatchRuleHelper<F, Func, typelist<T0, T1, T2, T...>>
   static Tensor apply(T0 scalar0, T1 scalar1, SymIntArrayRef shape, T... extra_args) {
     return random_batching_rule<decltype(&rand_int_low_wrapper<F, Func, T0, T1, T...>),
                                 &rand_int_low_wrapper<F, Func, T0, T1, T...>,
-                                int64_t, int64_t, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
+                                T0, T1, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
   }
 };
 

@@ -453,7 +453,7 @@ def pick_vec_isa():
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determin the vectroization length automatically
+    # If the simdlen is None, it indicates determin the vectorization length automatically
     if config.cpp.simdlen is None:
         assert _valid_vec_isa_list
         return _valid_vec_isa_list[0]
@@ -715,6 +715,7 @@ class PyCodeCache:
                 mod.__file__ = path
                 mod.key = key
                 exec(code, mod.__dict__, mod.__dict__)
+                sys.modules[mod.__name__] = mod
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
                 # unzip into separate lines/nodes lists

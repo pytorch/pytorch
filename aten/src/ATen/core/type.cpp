@@ -350,6 +350,11 @@ SymFloatTypePtr SymFloatType::get() {
   return value;
 }
 
+SymBoolTypePtr SymBoolType::get() {
+  static SymBoolTypePtr value(new SymBoolType());
+  return value;
+}
+
 c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(*t2)) {
