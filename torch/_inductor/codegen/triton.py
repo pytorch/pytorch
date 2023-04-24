@@ -1170,52 +1170,53 @@ class TritonKernel(Kernel):
             self.body.writeline(
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
             )
-            accumulator_index = None
-            if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = f"_{result_var}_index"
-                self.body.writeline(
-                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
-                )
-
-            updated = value
-            if reduction_type == "argmin":
-                masks.append(f"({accumulator} > {value})")
-            elif reduction_type == "argmax":
-                masks.append(f"({accumulator} < {value})")
-            elif reduction_type == "min":
-                updated = f"triton_helpers.minimum({accumulator}, {value})"
-            elif reduction_type == "max":
-                updated = f"triton_helpers.maximum({accumulator}, {value})"
-            elif reduction_type == "sum":
-                updated = f"{accumulator} + {value}"
-            elif reduction_type == "prod":
-                updated = f"{accumulator} * {value}"
-            else:
-                raise NotImplementedError(f"reduction_type {reduction_type}")
 
             cond = " & ".join(masks)
 
-            if accumulator_index:
-                # argmax or argmin
-                self.compute.writeline(
-                    f"{accumulator_index} = tl.where({cond},  {reduction_range_prefix}index, {accumulator_index})",
+            if reduction_type in {"argmax", "argmin"}:
+                accumulator_index = f"_{result_var}_index"
+                long_max = torch.iinfo(torch.int64).max
+                self.body.writeline(
+                    f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
                 )
-            self.compute.writeline(
-                f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
-            )
+                root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
+
+                self.compute.splice(
+                    f"""
+                {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
+                    {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
+                )
+                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
+                """
+                )
+            else:
+                updated = value
+                if reduction_type == "min":
+                    updated = "triton_helpers.minimum({accumulator}, {value})"
+                elif reduction_type == "max":
+                    updated = "triton_helpers.maximum({accumulator}, {value})"
+                elif reduction_type == "sum":
+                    updated = f"{accumulator} + {value}"
+                elif reduction_type == "prod":
+                    updated = f"{accumulator} * {value}"
+                else:
+                    raise NotImplementedError(f"reduction_type {reduction_type}")
+
+                self.compute.writeline(
+                    f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
+                )
 
             if accumulator_index:
                 # argmax, argmin
                 idx_dtype = self.index_dtype
-                self.suffix.writelines(
-                    [
-                        f"{accumulator_index}_reduce = "
-                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
-                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
-                        f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
-                        f"{result_var} = tl.sum("
-                        f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
-                    ]
+                self.suffix.splice(
+                    f"""
+                _, {result_var}_tmp = triton_helpers.{root_op}_with_index(
+                    {accumulator}, {accumulator_index}, {dim}
+                )
+                {result_var} = {result_var}_tmp[{', '.join(sizes)}]
+                """
                 )
             else:
                 self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
