@@ -88,6 +88,8 @@ class DataParallel(ParallelMode):
         else:
             raise RuntimeError(f"Unknown parallel style: {parallel_style}")
 
+        # TODO: what if user passes in a incorrect `input_batch_dim`, how should we
+        # detect that and do proper error handling?
         self.input_batch_dim = input_batch_dim
 
         if custom_passes is not None:

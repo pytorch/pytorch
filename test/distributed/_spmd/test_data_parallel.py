@@ -234,5 +234,6 @@ class TestDataParallel(DTensorTestBase):
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
         )
 
+
 if __name__ == "__main__":
     run_tests()
