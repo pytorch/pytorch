@@ -953,7 +953,9 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
 def get_pytest_args(
     options, stepcurrent_key, is_cpp_test=False, is_distributed_test=False
 ):
-    if RERUN_DISABLED_TESTS:
+    if int(options.runs) > 1:
+        rerun_options = ["--flake-finder", f"--flake-runs={options.runs}"]
+    elif RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
         # test every 2 weeks to satisfy the Rockset query (15 x 14 = 210). The same logic applies
@@ -1130,7 +1132,12 @@ def parse_args():
     )
     parser.add_argument(
         "--filter",
-        help="PyTest filter to apply to the test suite. "
+        help="PyTest filter to apply to the test suite."
+    )
+    parser.add_argument(
+        "--runs",
+        help="Run the tests the specified number of times. ",
+        default=1
     )
     parser.add_argument(
         "-f",
