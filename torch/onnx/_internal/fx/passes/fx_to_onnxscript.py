@@ -200,7 +200,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             continue
         if key == "dtype":
             if value is None:
-                filtered["dtype"] = -1
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
             else:
                 filtered["dtype"] = int(
                     _type_utils.JitScalarType.from_dtype(value).onnx_type()
