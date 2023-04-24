@@ -2,6 +2,7 @@
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
+from dataclasses import dataclass, field
 
 import torch
 from torch import _VF
@@ -4748,13 +4749,38 @@ def fold(
 # multihead attention
 #
 
+@dataclass
+class KeyValueCache:
+    r"""Cache of a multi_head_attention keys and values projection. Used for incremental inference only.
+
+    Args:
+        keys: projected keys.
+        values: projected values.
+
+    Shape:
+        - keys: :math:`(L, N, E)` where L is the sequence length, N is the batch size, E is
+          the embedding dimension.
+        - values: :math:`(L, N, E)` where L is the sequence length, N is the batch size, E is
+          the embedding dimension.
+
+    """
+
+    keys: Tensor = field(default_factory=lambda: torch.empty((0,)))
+    values: Tensor = field(default_factory=lambda: torch.empty((0,)))
+
+    @property
+    def empty(self) -> bool:
+        return self.keys.nelement() == 0 and self.values.nelement() == 0
+
+
 def _in_projection_packed(
     q: Tensor,
     k: Tensor,
     v: Tensor,
     w: Tensor,
-    b: Optional[Tensor] = None,
-) -> List[Tensor]:
+    b: Optional[Tensor],
+    cache: Optional[KeyValueCache],
+) -> Tuple[Tensor, Tensor, Tensor]:
     r"""
     Performs the in-projection step of the attention operation, using packed weights.
     Output is a triple containing projection tensors for query, key and value.
@@ -4769,12 +4795,17 @@ def _in_projection_packed(
             are packed along dimension 0, in q, k, v order.
         b: optional projection biases for q, k and v, packed into a single tensor
             in q, k, v order.
+        cache: TODO
+
 
     Shape:
         Inputs:
-        - q: :math:`(..., E)` where E is the embedding dimension
-        - k: :math:`(..., E)` where E is the embedding dimension
-        - v: :math:`(..., E)` where E is the embedding dimension
+        - q: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - k: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - v: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
         - w: :math:`(E * 3, E)` where E is the embedding dimension
         - b: :math:`E * 3` where E is the embedding dimension
 
@@ -4786,10 +4817,26 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            proj = linear(q, w, b)
-            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
-            proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
-            return proj[0], proj[1], proj[2]
+            if not cache or cache.empty:
+                proj = linear(q, w, b)
+                # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+                proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+                return proj[0], proj[1], proj[2]
+            else:
+                for input, cached, name in zip((k, v), (cache.keys, cache.values), ("keys", "values")):
+                    expected_shape = (input.shape[0] - 1, *input.shape[1:])
+                    assert cached.shape == expected_shape, f"expecting cached {name} shape of {expected_shape}, but got {cached.shape}"
+                w_q, w_k, w_v = w.chunk(3)
+                if b is None:
+                    b_q = b_k = b_v = None
+                else:
+                    b_q, b_k, b_v = b.chunk(3)
+                q_proj = linear(q, w_q, b_q)
+                # the last token is the only one that was not decoded before
+                last_token = q[-1:]
+                k_proj = torch.cat([cache.keys, linear(last_token, w_k, b_k)])
+                v_proj = torch.cat([cache.values, linear(last_token, w_v, b_v)])
+                return q_proj, k_proj, v_proj
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4798,9 +4845,14 @@ def _in_projection_packed(
             else:
                 b_q, b_kv = b.split([E, E * 2])
             q_proj = linear(q, w_q, b_q)
-            kv_proj = linear(k, w_kv, b_kv)
-            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
-            kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            if cache is None or cache.empty:
+                kv_proj = linear(k, w_kv, b_kv)
+                # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
+                kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            else:
+                assert cache.keys.shape == k.shape, f"expecting cached keys shape of {k.shape}, but got {cache.keys.shape}"
+                assert cache.values.shape == v.shape, f"expecting cached values shape of {v.shape}, but got {cache.values.shape}"
+                kv_proj = (cache.keys, cache.values)
             return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
@@ -4821,6 +4873,7 @@ def _in_projection(
     b_q: Optional[Tensor] = None,
     b_k: Optional[Tensor] = None,
     b_v: Optional[Tensor] = None,
+    cache: Optional[KeyValueCache] = None,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     r"""
     Performs the in-projection step of the attention operation. This is simply
@@ -4832,6 +4885,7 @@ def _in_projection(
         q, k, v: query, key and value tensors to be projected.
         w_q, w_k, w_v: weights for q, k and v, respectively.
         b_q, b_k, b_v: optional biases for q, k and v, respectively.
+        cache: TODO: mention that only the encoder-decoder cache can be used here
 
     Shape:
         Inputs:
@@ -4861,6 +4915,11 @@ def _in_projection(
     assert b_q is None or b_q.shape == (Eq,), f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
     assert b_k is None or b_k.shape == (Eq,), f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
+    if cache is not None and not cache.empty:
+        for cached, input, name in zip((cache.keys, cache.values), (k, v), ("key", "value")):
+            expected_shape = (*input[:-1].shape, Eq)
+            assert cached.shape == expected_shape, f"expecting cached {name} shape of {expected_shape}, but got {cached.shape}"
+        return linear(q, w_q, b_q), cache.keys, cache.values
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 scaled_dot_product_attention = _add_docstr(
@@ -5067,6 +5126,7 @@ def multi_head_attention_forward(
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
+    cache: Optional[KeyValueCache] = None,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -5082,7 +5142,7 @@ def multi_head_attention_forward(
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
+            be ignored by the attention. This is a binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
             Default: `True`
@@ -5097,7 +5157,7 @@ def multi_head_attention_forward(
             Default: ``False``.
             .. warning::
                 is_causal is provides a hint that the attn_mask is the
-                causal mask.Providing incorrect hints can result in
+                causal mask. Providing incorrect hints can result in
                 incorrect execution, including forward and backward
                 compatibility.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
@@ -5108,6 +5168,7 @@ def multi_head_attention_forward(
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across heads.
             Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an effect
             when ``need_weights=True.``. Default: True
+        cache: TODO
 
 
     Shape:
@@ -5142,7 +5203,9 @@ def multi_head_attention_forward(
           :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
-    tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)
+    cached_keys = cache.keys if cache else None
+    cached_values = cache.values if cache else None
+    tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias, cached_keys, cached_values)
     if has_torch_function(tens_ops):
         return handle_torch_function(
             multi_head_attention_forward,
@@ -5172,6 +5235,7 @@ def multi_head_attention_forward(
             static_k=static_k,
             static_v=static_v,
             average_attn_weights=average_attn_weights,
+            cache=cache
         )
 
     is_batched = _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads)
@@ -5186,6 +5250,9 @@ def multi_head_attention_forward(
         value = value.unsqueeze(1)
         if key_padding_mask is not None:
             key_padding_mask = key_padding_mask.unsqueeze(0)
+        if cache is not None:
+            cache.keys = cache.keys.unsqueeze(1)
+            cache.values = cache.values.unsqueeze(1)
 
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
@@ -5247,7 +5314,7 @@ def multi_head_attention_forward(
     #
     if not use_separate_proj_weight:
         assert in_proj_weight is not None, "use_separate_proj_weight is False but in_proj_weight is None"
-        q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+        q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias, cache)
     else:
         assert q_proj_weight is not None, "use_separate_proj_weight is True but q_proj_weight is None"
         assert k_proj_weight is not None, "use_separate_proj_weight is True but k_proj_weight is None"
@@ -5256,7 +5323,13 @@ def multi_head_attention_forward(
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = in_proj_bias.chunk(3)
-        q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
+        q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v, cache)
+    
+
+    # update cache
+    if cache:
+        cache.keys = k
+        cache.values = v
 
     # prep attention mask
 

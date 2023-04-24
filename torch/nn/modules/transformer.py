@@ -1,5 +1,7 @@
 import copy
-from typing import Optional, Any, Union, Callable
+from typing import Optional, Any, Union, Callable, List
+
+from dataclasses import dataclass, field
 
 import torch
 from torch import Tensor
@@ -12,7 +14,23 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
-__all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'TransformerEncoderLayer', 'TransformerDecoderLayer']
+__all__ = ['Transformer', 'TransformerEncoder', 'TransformerIncrementalDecoder', 'TransformerEncoderLayer', 'TransformerIncrementalDecoderLayer']
+
+
+
+@dataclass
+class TransformerIncrementalDecoderLayerCache:
+    """Cache of a TransformerIncrementalDecoderLayer. Used for inference only.
+
+    Each layer has two attention layers, one for self-attention,
+    that must be updated at each timestep ; the other for cross-attention,
+    that is updated only at the first timestep, because it caches the encoder
+    keys and values which are the same for each timestep.
+    """
+
+    self_attention: F.KeyValueCache = field(default_factory=F.KeyValueCache)
+    cross_attention: F.KeyValueCache = field(default_factory=F.KeyValueCache)
+
 
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architecture
@@ -70,11 +88,11 @@ class Transformer(Module):
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
-            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
+            decoder_layer = TransformerIncrementalDecoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                     activation, layer_norm_eps, batch_first, norm_first,
                                                     **factory_kwargs)
             decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
-            self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
+            self.decoder = TransformerIncrementalDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
 
@@ -85,7 +103,8 @@ class Transformer(Module):
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None, 
+                cache: Optional[List[TransformerIncrementalDecoderLayerCache]] = None) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -97,6 +116,7 @@ class Transformer(Module):
             src_key_padding_mask: the Tensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
+            cache: TODO
 
         Shape:
             - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
@@ -109,6 +129,7 @@ class Transformer(Module):
             - src_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
+            - cache: TODO
 
             Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
             positions. If a BoolTensor is provided, positions with ``True``
@@ -142,8 +163,15 @@ class Transformer(Module):
         if src.size(-1) != self.d_model or tgt.size(-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
-        memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
-        output = self.decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
+        if cache is None:
+            memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        else: # cache contains the mapped memory
+            assert len(cache) == self.decoder.num_layers, \
+                ("cache is expected to have as many elements as there are "
+                 f"layers in the decoder, expecting {self.decoder.num_layers}, got {len(cache)}")
+            memory = None
+        
+        output = self.decoder(tgt, memory, cache, tgt_mask=tgt_mask, memory_mask=memory_mask,
                               tgt_key_padding_mask=tgt_key_padding_mask,
                               memory_key_padding_mask=memory_key_padding_mask)
         return output
@@ -323,17 +351,17 @@ class TransformerEncoder(Module):
         return output
 
 
-class TransformerDecoder(Module):
-    r"""TransformerDecoder is a stack of N decoder layers
+class TransformerIncrementalDecoder(Module):
+    r"""TransformerIncrementalDecoder is a stack of N decoder layers
 
     Args:
-        decoder_layer: an instance of the TransformerDecoderLayer() class (required).
+        decoder_layer: an instance of the TransformerIncrementalDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
 
     Examples::
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
-        >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6)
+        >>> decoder_layer = nn.TransformerIncrementalDecoderLayer(d_model=512, nhead=8)
+        >>> transformer_decoder = nn.TransformerIncrementalDecoder(decoder_layer, num_layers=6)
         >>> memory = torch.rand(10, 32, 512)
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = transformer_decoder(tgt, memory)
@@ -347,10 +375,10 @@ class TransformerDecoder(Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
+    def forward(self, tgt: Tensor, memory: Optional[Tensor], tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: bool = False,
-                memory_is_causal: bool = False) -> Tensor:
+                memory_is_causal: bool = False, cache: Optional[List[TransformerIncrementalDecoderLayerCache]] = None) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -364,24 +392,27 @@ class TransformerDecoder(Module):
                 Mutually exclusive with providing tgt_mask. Default: ``False``.
             memory_is_causal: If specified, applies a causal mask as memory mask.
                 Mutually exclusive with providing memory_mask. Default: ``False``.
+            cache: TODO
 
         Shape:
             see the docs in Transformer class.
         """
         output = tgt
 
-        for mod in self.layers:
+        for layer_rank, mod in enumerate(self.layers):
+            layer_cache = cache[layer_rank] if cache is not None else None
             output = mod(output, memory, tgt_mask=tgt_mask,
                          memory_mask=memory_mask,
                          tgt_key_padding_mask=tgt_key_padding_mask,
                          memory_key_padding_mask=memory_key_padding_mask,
                          tgt_is_causal=tgt_is_causal,
-                         memory_is_causal=memory_is_causal)
+                         memory_is_causal=memory_is_causal, cache=layer_cache)
 
         if self.norm is not None:
             output = self.norm(output)
 
         return output
+
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
@@ -615,8 +646,8 @@ class TransformerEncoderLayer(Module):
         return self.dropout2(x)
 
 
-class TransformerDecoderLayer(Module):
-    r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
+class TransformerIncrementalDecoderLayer(Module):
+    r"""TransformerIncrementalDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
     This standard decoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
@@ -638,13 +669,13 @@ class TransformerDecoderLayer(Module):
             Default: ``False`` (after).
 
     Examples::
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
+        >>> decoder_layer = nn.TransformerIncrementalDecoderLayer(d_model=512, nhead=8)
         >>> memory = torch.rand(10, 32, 512)
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = decoder_layer(tgt, memory)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> decoder_layer = nn.TransformerIncrementalDecoderLayer(d_model=512, nhead=8, batch_first=True)
         >>> memory = torch.rand(32, 10, 512)
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
@@ -695,6 +726,7 @@ class TransformerDecoderLayer(Module):
         memory_key_padding_mask: Optional[Tensor] = None,
         tgt_is_causal: bool = False,
         memory_is_causal: bool = False,
+        cache: Optional[TransformerIncrementalDecoderLayerCache] = None
     ) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
@@ -709,41 +741,45 @@ class TransformerDecoderLayer(Module):
                 Mutually exclusive with providing tgt_mask. Default: ``False``.
             memory_is_causal: If specified, applies a causal mask as memory mask.
                 Mutually exclusive with providing memory_mask. Default: ``False``.
+            cache: TODO
         Shape:
             see the docs in Transformer class.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
+        sa_cache = cache.self_attention if cache else None
+        mha_cache = cache.cross_attention if cache else None
+
         x = tgt
         if self.norm_first:
-            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal)
-            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask, memory_is_causal)
+            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask, tgt_is_causal, sa_cache)
+            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask, memory_is_causal, mha_cache)
             x = x + self._ff_block(self.norm3(x))
         else:
-            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal))
-            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask, memory_is_causal))
+            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask, tgt_is_causal, sa_cache))
+            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask, memory_is_causal, mha_cache))
             x = self.norm3(x + self._ff_block(x))
 
         return x
 
     # self-attention block
     def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool, cache: Optional[F.KeyValueCache]) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
                            is_causal=is_causal,
-                           need_weights=False)[0]
+                           need_weights=False, cache=cache)[0]
         return self.dropout1(x)
 
     # multihead attention block
     def _mha_block(self, x: Tensor, mem: Tensor,
-                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
+                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool, cache: Optional[F.KeyValueCache]) -> Tensor:
         x = self.multihead_attn(x, mem, mem,
                                 attn_mask=attn_mask,
                                 key_padding_mask=key_padding_mask,
                                 is_causal=is_causal,
-                                need_weights=False)[0]
+                                need_weights=False, cache=cache)[0]
         return self.dropout2(x)
 
     # feed forward block

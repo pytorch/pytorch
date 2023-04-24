@@ -905,6 +905,7 @@ def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
     return True
 
 
+
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces as described in the paper:
@@ -1046,7 +1047,8 @@ class MultiheadAttention(Module):
             need_weights: bool = True,
             attn_mask: Optional[Tensor] = None,
             average_attn_weights: bool = True,
-            is_causal : bool = False) -> Tuple[Tensor, Optional[Tensor]]:
+            is_causal : bool = False, 
+            cache: Optional[F.KeyValueCache] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
@@ -1087,6 +1089,7 @@ class MultiheadAttention(Module):
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
+        cache: TODO
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1193,6 +1196,7 @@ class MultiheadAttention(Module):
                         need_weights,
                         average_attn_weights,
                         mask_type)
+                        # , cache) TODO: implement in CPP later
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1222,7 +1226,7 @@ class MultiheadAttention(Module):
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
                 v_proj_weight=self.v_proj_weight,
                 average_attn_weights=average_attn_weights,
-                is_causal=is_causal)
+                is_causal=is_causal, cache=cache)
         else:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
@@ -1234,7 +1238,8 @@ class MultiheadAttention(Module):
                 need_weights=need_weights,
                 attn_mask=attn_mask,
                 average_attn_weights=average_attn_weights,
-                is_causal=is_causal)
+                is_causal=is_causal, cache=cache)
+        
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
