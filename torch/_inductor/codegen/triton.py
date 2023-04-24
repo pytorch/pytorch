@@ -1121,7 +1121,11 @@ class TritonKernel(Kernel):
             load_buffer = self.loads
 
         # Assert that the loaded indices will not read garbage
-        if indirect_indexing and config.triton.assert_indirect_indexing and torch.version.hip is None:
+        if (
+            indirect_indexing
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        ):
             self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
 
         result_var = self.cse.generate(load_buffer, line)
@@ -1142,8 +1146,11 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
 
-        if indirect_indexing and config.triton.assert_indirect_indexing and torch.version.hip is None:
-            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
+        if (
+            indirect_indexing
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        ):            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
