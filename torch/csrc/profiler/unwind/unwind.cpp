@@ -311,42 +311,78 @@ std::vector<void*> unwind() {
   return frames;
 }
 
-#ifdef FBCODE_CAFFE2
-// in CUDA binaries, we have to use the internal symbolizer because
-// addr2line seems to hang.
-__attribute__((weak))
-#endif
-std::vector<Frame>
-symbolize(const std::vector<void*>& frames) {
-  // we need to make sure we don't write more than 64k bytes to
-  // a pipe before reading the results. Otherwise the buffer may
-  // get filled and block before we read the results.
-  // Each line is < 32 characters,
-  // so this limits us to < 32k bytes before we read rules.
-  constexpr int BLOCK = 1024;
+struct Symbolizer {
+  static std::lock_guard<std::mutex> guard() {
+    static std::mutex mutex;
+    return std::lock_guard<std::mutex>(mutex);
+  }
+  static Symbolizer& get() {
+    static Symbolizer singleton;
+    return singleton;
+  }
+  void request(void* addr) {
+    if (frame_map_.count(addr)) {
+      return;
+    }
+    auto maybe_library =
+        addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
+    if (!maybe_library) {
+      frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
+      return;
+    }
+    has_pending_results_ = true;
+    auto& entry = getOrCreate(maybe_library->name());
+    entry.queried.push_back(addr);
+    auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
+    entry.comm->out() << (void*)libaddress << "\n";
+    // we need to make sure we don't write more than 64k bytes to
+    // a pipe before reading the results. Otherwise the buffer may
+    // get filled and block before we read the results.
+    // Each line is < 32 characters,
+    // so this limits us to < 32k bytes before we read rules.
+    if (entry.queried.size() - entry.completed > BLOCK) {
+      entry.comm->out().flush();
+      readPendingResults(entry);
+    }
+  }
+  const Frame& lookup(void* addr) {
+    if (has_pending_results_) {
+      for (auto& kv : entries_) {
+        kv.second.comm->out().flush();
+      }
+      for (auto& kv : entries_) {
+        readPendingResults(kv.second);
+      }
+      has_pending_results_ = false;
+    }
+    return frame_map_.at(addr);
+  }
+
+ private:
+  static constexpr int BLOCK = 1024;
   struct Entry {
-    const LibraryInfo* lib;
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
     size_t completed = 0;
   };
-  std::vector<Entry> entries;
-  auto get_or_create = [&](const LibraryInfo& info) -> Entry& {
-    for (auto& e : entries) {
-      if (e.lib->load_bias() == info.load_bias()) {
-        return e;
-      }
+  ska::flat_hash_map<std::string, Entry> entries_;
+  ska::flat_hash_map<void*, Frame> frame_map_;
+  bool has_pending_results_ = true;
+
+  Entry& getOrCreate(const std::string& name) {
+    auto it = entries_.find(name);
+    if (it == entries_.end()) {
+      const char* args[] = {
+          "addr2line", "-C", "-f", "-e", name.c_str(), nullptr};
+      it = entries_
+               .insert_or_assign(
+                   name,
+                   Entry{std::make_unique<Communicate>("addr2line", args), {}})
+               .first;
     }
-    const char* args[] = {
-        "addr2line", "-C", "-f", "-e", info.name().c_str(), nullptr};
-    entries.emplace_back(
-        Entry{&info, std::make_unique<Communicate>("addr2line", args), {}});
-    return entries.back();
-  };
-
-  std::unordered_map<void*, Frame> results_map;
-
-  auto read_pending_results = [&](Entry& e) {
+    return it->second;
+  }
+  void readPendingResults(Entry& e) {
     size_t N = e.queried.size();
     for (; e.completed < N; ++e.completed) {
       Frame frame;
@@ -357,36 +393,26 @@ symbolize(const std::vector<void*>& frames) {
       frame.filename = filename_lineno.substr(0, colon);
       std::string lineno_str = filename_lineno.substr(colon + 1);
       frame.lineno = lineno_str == "?" ? 0 : std::stoi(lineno_str);
-      results_map[e.queried[e.completed]] = std::move(frame);
+      frame_map_[e.queried[e.completed]] = std::move(frame);
     }
   };
+};
+
+#ifdef FBCODE_CAFFE2
+// in CUDA binaries, we have to use the internal symbolizer because
+// addr2line seems to hang.
+__attribute__((weak))
+#endif
+std::vector<Frame>
+symbolize(const std::vector<void*>& frames) {
+  auto guard = Symbolizer::guard();
+  Symbolizer& s = Symbolizer::get();
   for (auto f : frames) {
-    auto maybe_library = f ? unwind_cache.findLibraryFor((uint64_t)f) : nullptr;
-    if (!maybe_library) {
-      results_map[f] = Frame{"??", "<unwind unsupported>", 0};
-      continue;
-    }
-    auto& entry = get_or_create(*maybe_library);
-    entry.queried.push_back(f);
-    auto libaddress = ((uint64_t)f - entry.lib->load_bias() - 1);
-    entry.comm->out() << (void*)libaddress << "\n";
-    if (entry.queried.size() - entry.completed > BLOCK) {
-      entry.comm->out().flush();
-      read_pending_results(entry);
-    }
+    s.request(f);
   }
-
-  for (auto& e : entries) {
-    e.comm->out().flush();
-  }
-
-  for (auto& e : entries) {
-    read_pending_results(e);
-  }
-
   std::vector<Frame> results;
   for (auto f : frames) {
-    results.emplace_back(results_map.at(f));
+    results.emplace_back(s.lookup(f));
   }
   return results;
 }

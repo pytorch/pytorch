@@ -27,7 +27,6 @@ from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
-from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -40,7 +39,13 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    developer_warning,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -135,16 +140,6 @@ def is_boolean_type(x):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
-
-
-def decode_device(device):
-    if device is None:
-        return torch.tensor(0.0).device  # default device
-    if isinstance(device, str):
-        device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
-    return device
 
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
@@ -685,9 +680,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(start + dim_size, 0)):
         start = 0
-    if end < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(end + dim_size, 0)):
         end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
@@ -1132,7 +1127,6 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
-@register_lowering(torch.ops.rngprims.philox_rand_offset, type_promotion_kind=None)
 def philox_rand_offset(shape):
     """
     TorchInductor offset calculation differs from PyTorch eager offset
@@ -1173,12 +1167,15 @@ def philox_rand(size, seed, offset, stride, device, dtype):
             dtype,
         )
 
-    return Pointwise.create(
+    random_values_node = Pointwise.create(
         device=device,
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=list(size),
     )
+
+    offset_node = philox_rand_offset(size)
+    return random_values_node, offset_node
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
@@ -1466,7 +1463,6 @@ make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
-make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
@@ -3843,6 +3839,17 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         dtype = torch.int64
 
     fn = make_reduction("sum", override_return_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
+@register_lowering(aten.prod)
+def prod(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    fn = make_reduction("prod", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
 

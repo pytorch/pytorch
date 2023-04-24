@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
@@ -1775,21 +1776,14 @@ def clone_preserve_strides(x):
 
 class CUDARngStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple(fake_mode=None):
+    def get_torch_state_as_tuple(fake_mode=nullcontext()):
         if not torch.cuda.is_available():
-            seed = torch.tensor(0)
-            offset = torch.tensor(0)
-            if fake_mode:
-                seed = fake_mode.from_tensor(seed)
-                offset = fake_mode.from_tensor(offset)
-            return seed, offset
+            raise RuntimeError("CUDA not available")
 
-        seed = torch.tensor(torch.cuda.initial_seed())
-        offset = torch.tensor(torch.cuda._get_rng_state_offset())
-        if fake_mode:
-            seed = fake_mode.from_tensor(seed)
-            offset = fake_mode.from_tensor(offset)
-        return seed, offset
+        with fake_mode:
+            seed = torch.tensor(torch.cuda.initial_seed())
+            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            return seed, offset
 
     @staticmethod
     def set_torch_state_tensor(seed, offset):
