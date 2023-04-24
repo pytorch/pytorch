@@ -9,14 +9,14 @@ from typing import Optional as _Optional
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
 # lets us keep those builtins small and re-usable.
-def _no_grad_uniform_(tensor, a, b):
+def _no_grad_uniform_(tensor, a, b, generator=None):
     with torch.no_grad():
-        return tensor.uniform_(a, b)
+        return tensor.uniform_(a, b, generator=generator)
 
 
-def _no_grad_normal_(tensor, mean, std):
+def _no_grad_normal_(tensor, mean, std, generator=None):
     with torch.no_grad():
-        return tensor.normal_(mean, std)
+        return tensor.normal_(mean, std, generator=generator)
 
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=None):
@@ -119,7 +119,7 @@ def calculate_gain(nonlinearity, param=None):
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
-def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
+def uniform_(tensor: Tensor, a: float = 0., b: float = 1., generator: _Optional[torch.Generator] = None) -> Tensor:
     r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
 
@@ -134,10 +134,10 @@ def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
     """
     if torch.overrides.has_torch_function_variadic(tensor):
         return torch.overrides.handle_torch_function(uniform_, (tensor,), tensor=tensor, a=a, b=b)
-    return _no_grad_uniform_(tensor, a, b)
+    return _no_grad_uniform_(tensor, a, b, generator=generator)
 
 
-def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
+def normal_(tensor: Tensor, mean: float = 0., std: float = 1., generator: _Optional[torch.Generator] = None) -> Tensor:
     r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
 
@@ -152,7 +152,7 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
     """
     if torch.overrides.has_torch_function_variadic(tensor):
         return torch.overrides.handle_torch_function(normal_, (tensor,), tensor=tensor, mean=mean, std=std)
-    return _no_grad_normal_(tensor, mean, std)
+    return _no_grad_normal_(tensor, mean, std, generator=generator)
 
 def trunc_normal_(
     tensor: Tensor,
@@ -307,7 +307,7 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
+def xavier_uniform_(tensor: Tensor, gain: float = 1., generator: _Optional[torch.Generator] = None) -> Tensor:
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
@@ -331,10 +331,10 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
 
-    return _no_grad_uniform_(tensor, -a, a)
+    return _no_grad_uniform_(tensor, -a, a, generator=generator)
 
 
-def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
+def xavier_normal_(tensor: Tensor, gain: float = 1., generator: _Optional[torch.Generator] = None) -> Tensor:
     r"""Fills the input `Tensor` with values according to the method
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
@@ -357,7 +357,7 @@ def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
 
-    return _no_grad_normal_(tensor, 0., std)
+    return _no_grad_normal_(tensor, 0., std, generator=generator)
 
 
 def _calculate_correct_fan(tensor, mode):
@@ -371,7 +371,11 @@ def _calculate_correct_fan(tensor, mode):
 
 
 def kaiming_uniform_(
-    tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
+    tensor: Tensor,
+    a: float = 0,
+    mode: str = 'fan_in',
+    nonlinearity: str = 'leaky_relu',
+    generator: _Optional[torch.Generator] = None
 ):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
@@ -416,11 +420,14 @@ def kaiming_uniform_(
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
-        return tensor.uniform_(-bound, bound)
+        return tensor.uniform_(-bound, bound, generator=generator)
 
 
 def kaiming_normal_(
-    tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
+    tensor: Tensor, a: float = 0,
+    mode: str = 'fan_in',
+    nonlinearity: str = 'leaky_relu',
+    generator: _Optional[torch.Generator] = None
 ):
     r"""Fills the input `Tensor` with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level
@@ -455,7 +462,7 @@ def kaiming_normal_(
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
-        return tensor.normal_(0, std)
+        return tensor.normal_(0, std, generator=generator)
 
 
 def orthogonal_(tensor, gain=1):
