@@ -1084,6 +1084,15 @@ class CUDAGraphNode:
             assert storage_info is UnaliasedStorage
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)
+
+            # XXX: let autograd know that there will be an additional reference to the tensor
+            # that can be ignored when deciding whether to do gradient buffer inplacing.
+            # Otherwise, inplacing could differ between tracing and subsequent execution.
+            # For some models we tested this led to inputs no longer being in cudagraph pools,
+            # leading to spurious re-recordings.
+            # It also tells AMP cache that even though the tensor impls cannot be cached
+            # in dtype conversions.
+
             torch._C._add_cached_tensor(out)
 
             self_ref = weakref.ref(self)
