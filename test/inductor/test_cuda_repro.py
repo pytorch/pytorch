@@ -306,7 +306,11 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.triton_heuristics import CachingAutotuner, grid
+        from torch._inductor.triton_heuristics import (
+            CachingAutotuner,
+            grid,
+            HeuristicType,
+        )
         from torch._inductor.utils import instance_descriptor
 
         def autotune(configs, meta):
@@ -318,6 +322,7 @@ class CudaReproTests(TestCase):
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],
+                    heuristic_type=HeuristicType.POINTWISE,
                 )
 
             return decorator
@@ -612,6 +617,21 @@ class CudaReproTests(TestCase):
             for _ in range(10):
                 rn = fn(idx, values)
                 self.assertEqual(r1, rn, atol=0, rtol=0)
+
+    # https://github.com/pytorch/pytorch/issues/96406
+    def test_linear_cpu_input(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, data):
+                data = data.to("cuda")
+                return self.linear(data)
+
+        mod = Model().cuda().eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(4, 4),))
 
 
 if __name__ == "__main__":

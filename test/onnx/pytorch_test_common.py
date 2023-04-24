@@ -206,6 +206,18 @@ def skip_dynamic_fx_test(reason: str):
     return skip_dec
 
 
+def xfail(reason: str):
+    """Expect failure.
+
+    Args:
+        reason: The reason for expected failure.
+
+    Returns:
+        A decorator for expecting test failure.
+    """
+    return unittest.expectedFailure
+
+
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper
 # (for example, an op was modified but the change is not supported in caffe2)
