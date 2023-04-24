@@ -27,10 +27,10 @@ def _StateMeetsRule(state, rule):
         return False
     curr_stages = set(list(state.stage))
     # all stages in rule.stages should be in, otherwise it's not a match.
-    if len(rule.stage) and any([s not in curr_stages for s in rule.stage]):
+    if len(rule.stage) and any(s not in curr_stages for s in rule.stage):
         return False
     # none of the stage in rule.stages should be in, otherwise it's not a match.
-    if len(rule.not_stage) and any([s in curr_stages for s in rule.not_stage]):
+    if len(rule.not_stage) and any(s in curr_stages for s in rule.not_stage):
         return False
     # If none of the nonmatch happens, return True.
     return True
@@ -40,10 +40,10 @@ def _ShouldInclude(net_state, layer):
     """A function that reproduces Caffe's inclusion and exclusion rule."""
     ret = (len(layer.include) == 0)
     # check exclude rules: if any exclusion is met, we shouldn't include.
-    ret &= not any([_StateMeetsRule(net_state, rule) for rule in layer.exclude])
+    ret &= not any(_StateMeetsRule(net_state, rule) for rule in layer.exclude)
     if len(layer.include):
         # check include rules: if any inclusion is met, we should include.
-        ret |= any([_StateMeetsRule(net_state, rule) for rule in layer.include])
+        ret |= any(_StateMeetsRule(net_state, rule) for rule in layer.include)
     return ret
 
 

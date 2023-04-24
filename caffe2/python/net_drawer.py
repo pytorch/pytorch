@@ -168,8 +168,8 @@ def GetPydotGraphMinimal(
             # only add nodes that do not have transitive ancestry
             for node in parents:
                 if all(
-                    [node not in op_ancestry[other_node]
-                     for other_node in parents]
+                    node not in op_ancestry[other_node]
+                     for other_node in parents
                 ):
                     graph.add_edge(pydot.Edge(node, op_node))
         else:

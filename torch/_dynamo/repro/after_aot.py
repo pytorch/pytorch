@@ -411,7 +411,7 @@ def inductor_fails(fx_g, args, check_str=None):
     try:
         result = fx_g(*args)
         assert isinstance(result, (tuple, list))
-        assert not any([isinstance(x, (tuple, list)) for x in result])
+        assert not any(isinstance(x, (tuple, list)) for x in result)
     except Exception:
         return False
 
