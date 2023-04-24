@@ -56,7 +56,7 @@ def use_deterministic_algorithims(mode: bool, warn_only: bool):
 default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
 
-isSM86Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 6)
+isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 9)]
 
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
@@ -1213,7 +1213,7 @@ class TestSDPA(NNTestCase):
         math_ref_test = math_ref_test.to(dtype=torch.float32).contiguous()
         math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
 
-        self.assertEqual(math_ref_test, math_ref_lp_test, atol=9.5e-3, rtol=7e-3)
+        self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
@@ -1352,7 +1352,7 @@ class TestSDPA(NNTestCase):
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
         if PLATFORM_SUPPORTS_FUSED_SDPA:
-            batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
+            batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
             shape = (batch_size, seq_len, num_heads, head_dim)
             device = "cuda"
             make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float16, packed=True)
@@ -1395,29 +1395,39 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "Does not support fused SDPA or not SM86 hardware")
-    def test_memory_efficeint_sm86_failure(self):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
+                     "Does not support fused SDPA or not SM86+ hardware")
+    @parametrize("head_dim", [72, 96, 128])
+    def test_memory_efficient_sm86_plus_failure(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, 128)
+        # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "Does not support fused SDPA or not SM86 hardware")
-    def test_flash_backward_sm86_headdim128(self):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
+                     "Does not support fused SDPA or not SM86+ hardware")
+    @parametrize("head_dim", [72, 96, 128])
+    def test_flash_backward_failure_sm86plus(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, 128)
+        # See check_requires_grad_and_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
             # Should not fail because inputs don't require grad
-            torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
+            self.assertEqual(math_ref, flash_ref, atol=1e-3, rtol=1e-3)
 
             # Should fail because inputs require grad
             q = make_tensor(size, requires_grad=True)
@@ -1596,7 +1606,7 @@ class TestSDPA(NNTestCase):
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 128])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -1627,8 +1637,8 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if isSM86Device and head_dim == 128:
+            # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+            if isSM86or89Device and head_dim in range(65, 129):
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
                                                                                        dropout_p=dropout_p,
                                                                                        is_causal=is_causal, scale=scale))
@@ -1666,7 +1676,7 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_k needs larger tolerances
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
-        grad_k_ref_atol = max(9.5 * torch.abs(grad_k_deviation).max().item(), 9.5 * default_atol[out.dtype])
+        grad_k_ref_atol = max(7 * torch.abs(grad_k_deviation).max().item(), 7 * default_atol[out.dtype])
         grad_k_ref_rtol = max(7 * get_rtol(key_ref.grad, key_ref_lp.grad), 7 * default_rtol[out.dtype])
 
         grad_v_deviation = value_ref.grad - value_ref_lp.grad
