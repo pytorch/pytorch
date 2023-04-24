@@ -103,8 +103,8 @@ class TestDataParallel(DTensorTestBase):
             opt = torch.optim.SGD(mod.parameters(), **config)
 
             train_batch = (
-                torch.randn(128, 50).to(self.rank),
-                torch.randn(128, 8).to(self.rank),
+                torch.randn((128, 50), device=torch.device(self.rank)),
+                torch.randn((128, 8), device=torch.device(self.rank)),
             )
 
             ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
@@ -121,8 +121,8 @@ class TestDataParallel(DTensorTestBase):
         opt = torch.optim.Adam(mod.parameters(), lr=0.1, fused=True)
 
         train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
+            torch.randn((128, 50), device=torch.device(self.rank)),
+            torch.randn((128, 8), device=torch.device(self.rank)),
         )
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
@@ -146,8 +146,8 @@ class TestDataParallel(DTensorTestBase):
             opt = torch.optim.SGD(mod.parameters(), **config)
 
             train_batch = (
-                torch.randn(128, 50).to(self.rank),
-                torch.randn(128, 8).to(self.rank),
+                torch.randn((128, 50), device=torch.device(self.rank)),
+                torch.randn((128, 8), device=torch.device(self.rank)),
             )
 
             ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
@@ -163,8 +163,8 @@ class TestDataParallel(DTensorTestBase):
         opt = torch.optim.Adam(mod.parameters(), lr=0.1, fused=True)
 
         train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
+            torch.randn((128, 50), device=torch.device(self.rank)),
+            torch.randn((128, 8), device=torch.device(self.rank)),
         )
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
@@ -173,6 +173,7 @@ class TestDataParallel(DTensorTestBase):
         self._test_data_parallel(
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
         )
+
 
 if __name__ == "__main__":
     run_tests()
