@@ -53,6 +53,13 @@ class HeuristicType(Enum):
     TEMPLATE = auto()
 
 
+def disable_pointwise_autotuning():
+    return (
+        config.triton.autotune_pointwise
+        and torch.are_deterministic_algorithms_enabled()
+    )
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -168,15 +175,6 @@ class CachingAutotuner(KernelInterface):
 
         return launcher
 
-    def round_benched_timing(self, x, decimal_places=1):
-        """
-        Sometimes different autotuning configs can have very small runtime
-        difference. This can affect the ranking of different configs, making
-        autotuning nondeterministic.  This function rounds the benched timing to
-        a default value of one decimal place, i.e., precision of 0.1 ms.
-        """
-        return builtins.round(x, decimal_places)
-
     def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
         if launcher.n_spills > config.triton.spill_threshold:
@@ -200,7 +198,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return self.round_benched_timing(do_bench(kernel_call, rep=40, fast_flush=True))
+        return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args):
         from .compile_fx import clone_preserve_strides
@@ -695,9 +693,9 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             filename=filename,
         )
     if len(size_hints) == 2:
-        if (
-            not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
-        ) and not (config.max_autotune or config.max_autotune_pointwise):
+        if (disable_pointwise_autotuning() or tile_hint == TileHint.SQUARE) and not (
+            config.max_autotune or config.max_autotune_pointwise
+        ):
             return cached_autotune(
                 [triton_config(size_hints, 32, 32)],
                 meta=meta,
@@ -718,7 +716,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             heuristic_type=HeuristicType.POINTWISE,
         )
     if len(size_hints) == 3:
-        if not config.triton.autotune_pointwise:
+        if disable_pointwise_autotuning():
             return cached_autotune(
                 [triton_config(size_hints, 16, 16, 16)],
                 meta=meta,
@@ -777,7 +775,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
-        if not config.triton.autotune_pointwise:
+        if disable_pointwise_autotuning():
             return cached_autotune(
                 [triton_config_reduction(size_hints, 32, 128)],
                 meta=meta,
@@ -823,7 +821,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
 
-    if not config.triton.autotune_pointwise:
+    if disable_pointwise_autotuning():
         configs = configs[:1]
 
     return cached_autotune(
