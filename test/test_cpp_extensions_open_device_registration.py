@@ -240,6 +240,16 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertFalse(cpu_storage.is_pinned("hpu"))
         self.assertFalse(cpu_storage.is_pinned())
 
+    def test_open_device_storage_resize(self):
+        torch.utils.rename_privateuse1_backend('foo')
+        cpu_tensor = torch.randn([8])
+        foo_tensor = cpu_tensor.foo()
+        foo_storage = foo_tensor.storage()
+        self.assertTrue(foo_storage.size() == 8)
+        foo_storage.resize_(5)
+        self.assertTrue(foo_storage.size() == 5)
+
+    test_open_device_storage_resize()
 
 if __name__ == "__main__":
     common.run_tests()
