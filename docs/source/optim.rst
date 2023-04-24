@@ -265,11 +265,11 @@ normalization statistics at the end of training.
 
 SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_.
 
-EMA is a widely known technique to reduce the training time by reducing the number of weight updates needed. It is a variation of `Polyak averaging`_.
+EMA is a widely known technique to reduce the training time by reducing the number of weight updates needed. It is a variation of `Polyak averaging`_, but using exponential weights instead of equal weights across iterations.
 
 .. _`Averaging Weights Leads to Wider Optima and Better Generalization`: https://arxiv.org/abs/1803.05407
 
-.. _`Polyak averaging`: https://epubs.siam.org/doi/abs/10.1137/0330046
+.. _`Polyak averaging`: https://paperswithcode.com/method/polyak-averaging
 
 Constructing averaged models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -295,7 +295,7 @@ where alpha is the EMA decay.
 
 Here the model ``model`` can be an arbitrary :class:`torch.nn.Module` object. ``averaged_model``
 will keep track of the running averages of the parameters of the ``model``. To update these
-averages, you should use the :func:`update_parameters` function:
+averages, you should use the :func:`update_parameters` function after the `optimizer.step()`:
 
 >>> averaged_model.update_parameters(model)
 

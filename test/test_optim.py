@@ -4010,6 +4010,16 @@ class TestSWAUtils(TestCase):
             torch.nn.Linear(5, 10),
         ).to(net_device)
 
+        averaged_params, averaged_dnn = self._run_averaged_steps(dnn, swa_device, ema)
+
+        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+            self.assertEqual(p_avg, p_swa)
+            # Check that AveragedModel is on the correct device
+            self.assertTrue(p_swa.device == swa_device)
+            self.assertTrue(p_avg.device == net_device)
+        self.assertTrue(averaged_dnn.n_averaged.device == swa_device)
+
+    def _run_averaged_steps(self, dnn, swa_device, ema):
         ema_decay = 0.999
         if ema:
             averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
@@ -4028,12 +4038,7 @@ class TestSWAUtils(TestCase):
                     p_avg += p.detach() / n_updates
             averaged_dnn.update_parameters(dnn)
 
-        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
-            self.assertEqual(p_avg, p_swa)
-            # Check that AveragedModel is on the correct device
-            self.assertTrue(p_swa.device == swa_device)
-            self.assertTrue(p.device == net_device)
-        self.assertTrue(averaged_dnn.n_averaged.device == swa_device)
+        return averaged_params, averaged_dnn
 
     @parametrize("ema", [True, False])
     def test_averaged_model_all_devices(self, ema):
@@ -4054,22 +4059,8 @@ class TestSWAUtils(TestCase):
         )
         dnn[0].cuda()
         dnn[1].cpu()
-        ema_decay = 0.999
-        if ema:
-            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
-        else:
-            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_swa_multi_avg_fn())
 
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                if ema:
-                    p_avg += p.detach() * ema_decay ** (n_updates - i - 1) * ((1 - ema_decay) if i > 0 else 1.0)
-                else:
-                    p_avg += p.detach() / n_updates
-            averaged_dnn.update_parameters(dnn)
+        averaged_params, averaged_dnn = self._run_averaged_steps(dnn, None, ema)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
@@ -4160,7 +4151,7 @@ class TestSWAUtils(TestCase):
                 return decay * p_avg + (1 - decay) * p
 
             averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
-        
+
         dnn_params = itertools.chain(dnn.parameters(), dnn.buffers())
         averaged_params = [
             torch.zeros_like(param)

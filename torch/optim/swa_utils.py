@@ -7,7 +7,15 @@ import torch
 from torch.nn import Module
 from torch.optim.lr_scheduler import LRScheduler
 
-__all__ = ['AveragedModel', 'update_bn', 'SWALR', 'get_ema_multi_avg_fn', 'get_swa_multi_avg_fn', 'get_ema_avg_fn', 'get_swa_avg_fn']
+__all__ = [
+    'AveragedModel',
+    'update_bn',
+    'SWALR',
+    'get_ema_multi_avg_fn',
+    'get_swa_multi_avg_fn',
+    'get_ema_avg_fn',
+    'get_swa_avg_fn'
+]
 
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -69,12 +77,12 @@ class AveragedModel(Module):
         avg_fn (function, optional): the averaging function used to update
             parameters; the function must take in the current value of the
             :class:`AveragedModel` parameter, the current value of :attr:`model`
-            parameter and the number of models already averaged; if None,
+            parameter, and the number of models already averaged; if None,
             an equally weighted average is used (default: None)
         multi_avg_fn (function, optional): the averaging function used to update
             parameters inplace; the function must take in the current values of the
             :class:`AveragedModel` parameters as a list, the current values of :attr:`model`
-            parameters as a list and the number of models already averaged; if None,
+            parameters as a list, and the number of models already averaged; if None,
             an equally weighted average is used (default: None)
         use_buffers (bool): if ``True``, it will compute running averages for
             both the parameters and the buffers of the model. (default: ``False``)
@@ -108,7 +116,8 @@ class AveragedModel(Module):
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
-        >>> swa_model = torch.optim.swa_utils.AveragedModel(model, torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
+        >>> swa_model = torch.optim.swa_utils.AveragedModel(model,
+        >>>             torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
 
     .. note::
         When using SWA with models containing Batch Normalization you may
