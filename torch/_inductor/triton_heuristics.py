@@ -168,14 +168,14 @@ class CachingAutotuner(KernelInterface):
 
         return launcher
 
-    def clip_benched_timing(self, x, threshold=0.01):
+    def round_benched_timing(self, x, decimal_places=2):
         """
-        Small kernels with different configs can have small but different
-        runtimes, changing the ranking of different autotuning configs and
-        making autotuning non deterministic. This function clips the benched
-        timing to a threshold, with a default value of 0.01 ms.
+        Sometimes different autotuning configs can have very small runtime
+        difference. This can affect the ranking of different configs, making
+        autotuning nondeterministic.  This function rounds the benched timing to
+        a default value of two decimal places.
         """
-        return builtins.max(x, threshold)
+        return builtins.round(x, decimal_places)
 
     def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
@@ -200,7 +200,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return self.clip_benched_timing(do_bench(kernel_call, rep=40, fast_flush=True))
+        return self.round_benched_timing(do_bench(kernel_call, rep=40, fast_flush=True))
 
     def clone_args(self, *args):
         from .compile_fx import clone_preserve_strides
