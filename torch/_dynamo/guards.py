@@ -568,7 +568,7 @@ class GuardBuilder(GuardBuilderBase):
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
-                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                        f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
@@ -755,7 +755,8 @@ class CheckFunctionManager:
                 dynamic_dims_sizes = [
                     convert(
                         self.output_graph.tracing_context.fake_mode.from_tensor(
-                            t
+                            t,
+                            memoized_only=True,
                         ).size()
                     )
                     for t in tensor_check_examples
@@ -763,7 +764,8 @@ class CheckFunctionManager:
                 dynamic_dims_strides = [
                     convert(
                         self.output_graph.tracing_context.fake_mode.from_tensor(
-                            t
+                            t,
+                            memoized_only=True,
                         ).stride()
                     )
                     for t in tensor_check_examples
