@@ -160,7 +160,7 @@ void reduction_out_mps(const Tensor& input_t,
   }
 
   if (input_shape.size() >= 5 && canSqueezeLastDim) {
-    for (const auto i: c10::irange(4, input_shape.size())) {
+    for (const auto i : c10::irange(4, input_shape.size())) {
       if (input_shape[i] != 1) {
         canSqueezeLastDim = false;
       }
@@ -171,10 +171,9 @@ void reduction_out_mps(const Tensor& input_t,
 
   MPSShape* mpsShape = getMPSShape(input_t);
   if (canSqueezeLastDim) {
-    mpsShape = @[@(input_shape[0]), @(input_shape[1]), @(input_shape[2]), @(input_shape[3])];
+    mpsShape = @[ @(input_shape[0]), @(input_shape[1]), @(input_shape[2]), @(input_shape[3]) ];
     input_shape = makeArrayRef(input_shape.begin(), input_shape.end() - (input_t.dim() - 4));
   }
-
 
   NSMutableArray<NSNumber*>* axes = nil;
   NSMutableArray<NSNumber*>* apparent_input_shape = nil;
@@ -203,7 +202,8 @@ void reduction_out_mps(const Tensor& input_t,
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputScalarType = input_t.scalar_type();
 
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input_t.scalar_type()), mpsShape);
+      MPSGraphTensor* inputTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input_t.scalar_type()), mpsShape);
       MPSGraphTensor* castInputTensor = inputTensor;
       MPSDataType inputCastType = MPSDataTypeInvalid;
       if (dtype.has_value() &&

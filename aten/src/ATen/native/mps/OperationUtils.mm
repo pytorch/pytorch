@@ -161,7 +161,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
 
 NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
-  for (const auto i: c10::irange(ndim)) {
+  for (const auto i : c10::irange(ndim)) {
     axes[i] = [NSNumber numberWithInteger:i];
   }
   return axes;
@@ -180,7 +180,7 @@ NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArray
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
     auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
-    for (const auto i: c10::irange(ndim)) {
+    for (const auto i : c10::irange(ndim)) {
       axes[i] = [NSNumber numberWithInteger:dimValues[i]];
     }
 
