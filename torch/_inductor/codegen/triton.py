@@ -1174,8 +1174,6 @@ class TritonKernel(Kernel):
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
             )
 
-            cond = " & ".join(masks)
-
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
@@ -1193,14 +1191,6 @@ class TritonKernel(Kernel):
                 {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
                 """
                 )
-            else:
-                updated = combine_fn(accumulator, value)
-                self.compute.writeline(
-                    f"{accumulator} = tl.where({cond}, {updated}, {accumulator}"
-                )
-
-            if accumulator_index:
-                # argmax, argmin
                 idx_dtype = self.index_dtype
                 self.suffix.splice(
                     f"""
@@ -1211,6 +1201,10 @@ class TritonKernel(Kernel):
                 """
                 )
             else:
+                updated = combine_fn(accumulator, value)
+                self.compute.writeline(
+                    f"{accumulator} = tl.where({cond}, {updated}, {accumulator}"
+                )
                 self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
