@@ -500,11 +500,12 @@ def build_data_parallel_strategies(
                 for i in range(output_strategy_len):
                     if not isinstance(node.args[i], list):
                         raise RuntimeError(
-                            f"Expecting node or list as arg to build Tuple Strategy, but found type {type(node.args[i])}!"
+                            f"Expecting list as arg to build Tuple Strategy, but found type {type(node.args[i])}!"
                         )
                     # for list/tuple arg, use the first one to find out the node type
                     if len(node.args[i]) > 0:
                         arg_strategy = dp_strategy_map[node.args[i][0]]
+                        assert isinstance(arg_strategy, DataParallelStrategy)
                         assert arg_strategy.node_type in [
                             NodeType.PARAM,
                             NodeType.GRAD,
@@ -512,16 +513,13 @@ def build_data_parallel_strategies(
                         ], "Expecting param/grad/state as arg to build Tuple Strategy!"
                         replica_strategy = _gen_replicate_strategy(mesh)
                         shard_strategy = _gen_shard_strategy(mesh, shard_dim=0)
-                        out_node_strategy = DataParallelStrategy(
+                        out_node_strategy: StrategyType = DataParallelStrategy(
                             arg_strategy.node_type, [replica_strategy, shard_strategy]
                         )
-                    else:
-                        # if the list/tuple is empty, use a dummy tuple strategy
-                        out_node_strategy = TupleStrategy(())
 
-                    tuple_strategies.append(out_node_strategy)
+                        tuple_strategies.append(out_node_strategy)
 
-                output_tuple_strategy = TupleStrategy(tuple_strategies)
+                output_tuple_strategy = TupleStrategy(tuple(tuple_strategies))
                 dp_strategy_map[node] = output_tuple_strategy
             else:
                 # NOTE: This is the common region for all regular computation ops
@@ -678,14 +676,8 @@ def mark_data_parallel_shardings(
                 # for all tuple elements, assert that then use the first element's strategy as sharding
                 first_strategy = cast(DataParallelStrategy, node_strategy.childs[0])
                 for child_strategy in node_strategy.childs:
-                    if isinstance(child_strategy, DataParallelStrategy):
-                        assert child_strategy.strategies == first_strategy.strategies
-                    else:
-                        # if the child strategy is not data parallel strategy, it should be an empty tuple strategy
-                        assert (
-                            isinstance(child_strategy, TupleStrategy)
-                            and len(child_strategy.childs) == 0
-                        )
+                    assert isinstance(child_strategy, DataParallelStrategy)
+                    assert child_strategy.strategies == first_strategy.strategies
 
                 node_strategies = first_strategy.strategies
             else:
@@ -725,7 +717,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
     util function to convert a full tensor val to its local component
     """
     if isinstance(val, torch.Tensor):
-        local_shard = cast(torch.Tensor, val)
+        local_shard = val
         if val.ndim == 0:
             # If it's already a scalar tensor, it is already local, we don't
             # need to do anything
