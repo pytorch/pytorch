@@ -632,6 +632,20 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
+class ProdHelper:
+    name = "_prod_accumulate"
+
+    @staticmethod
+    def codegen(buffer):
+        buffer.splice(
+            f"""
+            @triton.jit
+            def {ProdHelper.name}(a, b):
+                return a * b
+            """
+        )
+
+
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = pexpr
@@ -654,6 +668,7 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
+        self.helper_functions = set()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1016,6 +1031,46 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    def gen_assert_indirect_indexing(self, buffer, original_index, mask):
+        if mask == "None":
+            return
+        body = self.current_node._body
+        indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
+        indirect_name = body.indirect_new
+        # Many indirect variables may be mapped to the same CSE'd variable
+        # For example when you do x[y, y] for x = randn(3, 8)
+        var_size = collections.defaultdict(set)
+        for ind, size in indirect_size.items():
+            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
+
+        indirect_vars = [
+            s for s in original_index.free_symbols if s.name.startswith("tmp")
+        ]
+        for var in indirect_vars:
+            sizes = list(var_size[var])
+            if all(isinstance(s, sympy.Integer) for s in sizes):
+                size = min(sizes)
+            else:
+                # Should this go here or in TritonPrinter?
+                def print_min(expr):
+                    if len(expr) == 1:
+                        return texpr(expr[0])
+                    else:
+                        return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
+
+                size = print_min(sizes)
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less # error-prone to use and/or/not, which is suported by triton
+            cond = f"((0 <= {var}) & ({var} < {size}))"
+            cond_print = f"0 <= {var} < {size}"
+            if not isinstance(original_index, sympy.Integer):
+                var_mask = f"({mask})" if "&" in mask else mask
+                var_mask = f" | ~{var_mask}"
+            else:
+                var_mask = ""
+            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond_print}")'
+            self.cse.generate(buffer, line, assignment=False)
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -1065,6 +1120,10 @@ class TritonKernel(Kernel):
         else:
             load_buffer = self.loads
 
+        # Assert that the loaded indices will not read garbage
+        if indirect_indexing and config.triton.assert_indirect_indexing:
+            self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
+
         result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
 
@@ -1079,7 +1138,13 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
+        indirect_indexing = self.is_indirect_indexing(index)
+        original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
+
+        if indirect_indexing and config.triton.assert_indirect_indexing:
+            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
+
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -1107,6 +1172,15 @@ class TritonKernel(Kernel):
         if reduction_type == "any":
             reduction_type = "max"
 
+        def final_reduction(value):
+            if reduction_type == "prod":
+                self.helper_functions.add(ProdHelper)
+                return (
+                    f"tl.reduce({value}, {dim}, {ProdHelper.name})[{', '.join(sizes)}]"
+                )
+            else:
+                return f"tl.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
@@ -1115,10 +1189,7 @@ class TritonKernel(Kernel):
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
-            result_var = self.cse.generate(
-                self.compute,
-                f"tl.{reduction_type}({masked_value}, {dim})[{', '.join(sizes)}]",
-            )
+            result_var = self.cse.generate(self.compute, final_reduction(masked_value))
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -1140,6 +1211,8 @@ class TritonKernel(Kernel):
                 masks.append(f"({accumulator} < {value})")
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
+            elif reduction_type == "prod":
+                updated = f"{accumulator} * {value}"
             else:
                 raise NotImplementedError(f"reduction_type {reduction_type}")
 
@@ -1168,9 +1241,7 @@ class TritonKernel(Kernel):
                     ]
                 )
             else:
-                self.suffix.writeline(
-                    f"{result_var} = tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}]"
-                )
+                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
@@ -1321,6 +1392,7 @@ class TritonKernel(Kernel):
         from triton import next_power_of_2
 
         code = IndentedBuffer()
+
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
@@ -1353,6 +1425,9 @@ class TritonKernel(Kernel):
                         from torch._inductor.triton_heuristics import grid
                     """
                 )
+
+        for helper in sorted(self.helper_functions, key=lambda kls: kls.__name__):
+            helper.codegen(code)
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
