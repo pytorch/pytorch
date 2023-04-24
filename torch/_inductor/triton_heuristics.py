@@ -824,9 +824,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         c.kwargs.pop("RBLOCK")
 
     if not config.triton.autotune_pointwise:
-        configs = [
-            configs[0],
-        ]
+        configs = configs[:1]
 
     return cached_autotune(
         configs,
