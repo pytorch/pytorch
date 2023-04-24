@@ -840,6 +840,7 @@ def partition_data_parallel(
     kwargs: Dict[str, Any],
     mesh: DeviceMesh,
     parallel_style: DataParallelStyle,
+    input_batch_dim: int,
 ) -> GraphModule:
     """
     The entry point function to partition the graph to data parallel
@@ -856,7 +857,7 @@ def partition_data_parallel(
 
     # 1. First build up data parallel strategies for the whole graph
     strategy_map = build_data_parallel_strategies(
-        graph, num_params_buffers, num_states, mesh=mesh
+        graph, num_params_buffers, num_states, mesh=mesh, batch_dim=input_batch_dim
     )
 
     # 2. Next we mark the data parallel strategy for each node base on

@@ -60,6 +60,7 @@ class DataParallel(ParallelMode):
     def __init__(
         self,
         parallel_style: str = "replicate",
+        input_batch_dim: int = 0,
         custom_passes: Optional[Callable[[GraphModule], GraphModule]] = None,
     ):
         """
@@ -71,6 +72,8 @@ class DataParallel(ParallelMode):
         Args:
             parallel_style (str): parallel style to use. Currently supports
                 "replicate", "fully_shard", and "default".
+            input_batch_dim (int): the batch dimension of the input tensor.
+                 default: 0
             custom_passes (Callable[[GraphModule], GraphModule], optional):
                 A custom callable that overrides the default graph transformation
                 and optimization passes.
@@ -84,6 +87,8 @@ class DataParallel(ParallelMode):
             self.parallel_style = DataParallelStyle.DEFAULT
         else:
             raise RuntimeError(f"Unknown parallel style: {parallel_style}")
+
+        self.input_batch_dim = input_batch_dim
 
         if custom_passes is not None:
             self._gm_passes: Callable[[GraphModule], GraphModule] = custom_passes
@@ -114,6 +119,7 @@ class DataParallel(ParallelMode):
             kwargs,
             mesh,
             self.parallel_style,
+            self.input_batch_dim,
         )
         return gm
 
