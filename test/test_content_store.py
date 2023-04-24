@@ -12,10 +12,7 @@ from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 
 class TestContentStore(TestCase):
-    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     def test_basic(self, device):
-        if device == "cuda" and not SM80OrLater:
-            self.skipTest("Does not support Triton")
         # setup test data
         x = torch.randn(4, device=device)
         y = torch.randn(6, device=device)
