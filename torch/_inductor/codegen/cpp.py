@@ -115,7 +115,9 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} *= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
-    return f"{var} = std::{reduction_type}({var}, {next_value})"
+    if reduction_type in ("min", "max"):
+        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+    raise AssertionError(reduction_type)
 
 
 index_value_name_counter = 1
@@ -532,14 +534,6 @@ class CppVecOverrides(OpOverrides):
         return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
-    def int_minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
-
-    @staticmethod
     def square(a):
         return f"{a} * {a}"
 
@@ -799,19 +793,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
+        return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"std::min({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -1809,7 +1795,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
-                    if not (name in self.fast_vec_list):
+                    if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
                     return self.simd_vec
 

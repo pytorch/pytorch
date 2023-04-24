@@ -414,6 +414,19 @@ class LoweringPatternEntry(PatternEntry):
 
 
 @dataclasses.dataclass
+class GraphPatternEntry(PatternEntry):
+    """
+    A pattern that runs a function on the FX graph
+    """
+
+    handler: Any
+
+    def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
+        with graph.inserting_before(node):
+            self.handler(match, graph, node, *match.args, **match.kwargs)
+
+
+@dataclasses.dataclass
 class ReplacementPatternEntry(PatternEntry):
     normalize_args: Callable
 
@@ -545,7 +558,9 @@ def register_replacement(
 
 def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
     """
-    Register an aten to inductor IR replacement pattern
+    Register an aten to inductor IR replacement pattern.  The decorated
+    function is saved and then called a lowering time allowing direct
+    pattern to inductor IR conversion.
     """
 
     def decorator(handler):
@@ -557,7 +572,23 @@ def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
         handler._inductor_lowering_function = True
         return handler
 
-    assert isinstance(pattern, CallFunction)
+    return decorator
+
+
+def register_graph_pattern(pattern, extra_check=_return_true, *, pass_dict):
+    """
+    Register a pattern that runs a function on the FX graph, allowing
+    custom transformation code.
+    """
+
+    def decorator(handler):
+        assert callable(handler)
+        for target in pattern.fns:
+            GraphPatternEntry(
+                pattern=pattern, extra_check=extra_check, handler=handler
+            ).register(pass_dict, target)
+        return handler
+
     return decorator
 
 
