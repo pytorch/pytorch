@@ -248,7 +248,7 @@
   mat2: mm_mat2_backward(grad, mat1, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta.conj())
+  self: handle_r_to_c(self.scalar_type(), maybe_multiply(grad, beta.conj()))
   mat: maybe_multiply(grad.ger(vec.conj()), alpha.conj())
   vec: maybe_multiply(mat.t().conj().mv(grad), alpha.conj())
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat_t.mv(vec_p), alpha) + maybe_multiply(mat_p.mv(vec_t), alpha)
