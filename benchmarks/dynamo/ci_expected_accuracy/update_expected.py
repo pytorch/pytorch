@@ -82,8 +82,8 @@ def normalize_suite_filename(suite_name):
 
 def download_artifacts_and_extract_csvs(urls):
     dataframes = {}
-    try:
-        for (suite, shard), url in urls.items():
+    for (suite, shard), url in urls.items():
+        try:
             resp = urlopen(url)
             subsuite = normalize_suite_filename(suite)
             artifact = ZipFile(BytesIO(resp.read()))
@@ -91,6 +91,7 @@ def download_artifacts_and_extract_csvs(urls):
                 name = f"test/test-reports/{phase}_{subsuite}.csv"
                 try:
                     df = pd.read_csv(artifact.open(name))
+                    df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
                     prev_df = dataframes.get((suite, phase), None)
                     dataframes[(suite, phase)] = (
                         pd.concat([prev_df, df]) if prev_df is not None else df
@@ -99,9 +100,9 @@ def download_artifacts_and_extract_csvs(urls):
                     print(
                         f"Warning: Unable to find {name} in artifacts file from {url}, continuing"
                     )
+        except urllib.error.HTTPError:
+            print(f"Unable to download {url}, perhaps the CI job isn't finished?")
 
-    except urllib.error.HTTPError:
-        print(f"Unable to download {url}, perhaps the CI job isn't finished?")
     return dataframes
 
 
