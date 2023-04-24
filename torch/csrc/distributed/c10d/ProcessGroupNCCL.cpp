@@ -1206,12 +1206,9 @@ namespace {
 
 // Check validity of tensor
 void check_gpu_single_tensor(const at::Tensor& tensor) {
-  if (!tensor.is_cuda() || tensor.is_sparse()) {
-    TORCH_CHECK(false, "Tensors must be CUDA and dense");
-  }
-  if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
-    TORCH_CHECK(false, "Tensors must be contiguous");
-  }
+  TORCH_CHECK(tensor.is_cuda(), "Tensors must be CUDA");
+  TORCH_CHECK(!tensor.is_sparse(), "Tensors must be dense");
+  TORCH_CHECK(tensor.is_contiguous(tensor.suggest_memory_format()), "Tensors must be contiguous");
 }
 
 // Checks that all `tensors' have the same type and shape and reside on distinct
