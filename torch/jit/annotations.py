@@ -14,7 +14,6 @@ from ._state import _get_script_class
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
     NoneType, DeviceObjType, StreamObjType, FutureType, AwaitType, EnumType, UnionType, NumberType, GeneratorType \
-    
 
 
 from textwrap import dedent

@@ -204,7 +204,7 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == GeneratorType::get()) {
     auto g = node->ival(attr::value).toGenerator();
     return g;
-  }else if (node->mustBeNone()) {
+  } else if (node->mustBeNone()) {
     return IValue();
   } else if (type->cast<EnumType>()) {
     const auto& enum_val = node->ival(attr::value);
