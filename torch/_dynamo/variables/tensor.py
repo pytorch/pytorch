@@ -8,7 +8,7 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
-from .. import config, variables
+from .. import config, utils, variables
 from ..bytecode_transformation import create_call_function, Instruction
 
 from ..exc import unimplemented
@@ -184,8 +184,8 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name == "resize_" and self.source is not None:
-            unimplemented("calling resize_() on graph input")
+        if name in ("resize_", "unsqueeze_") and self.source is not None:
+            unimplemented(f"calling {name}() on graph input")
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -736,39 +736,16 @@ class NumpyNdarrayVariable(VariableTracker):
         """
         if not config.numpy_ndarray_as_tensor:
             return []
-        from torch._dynamo.bytecode_transformation import create_instruction
 
-        # b.tensor.numpy()
         var = output_graph.new_var()
-        from torch_np import ndarray
 
-        check = [
-            codegen.create_store(var),
-            codegen.create_load_global("isinstance", False, add=True),
-            codegen.create_load(var),
-            codegen.create_load_python_module(ndarray, False),
-            *create_call_function(2, False),
-        ]
-        true_branch = [
-            codegen.create_load(var),
-            codegen.create_load_attr("tensor"),
-            create_instruction(name="LOAD_METHOD", argval="numpy"),
-            create_instruction(
-                name="CALL_METHOD",
-                arg=0,
-            ),
-            create_instruction(name="RETURN_VALUE"),
-        ]
-        jump = create_instruction("POP_JUMP_IF_FALSE")
-        false_branch_load = codegen.create_load(var)
-        false_branch_load.is_jump_target = True
-        jump.arg = false_branch_load.offset
-        jump.target = false_branch_load
         return [
-            *check,
-            jump,
-            *true_branch,
-            false_branch_load,
+            codegen.create_store(var),
+            *AttrSource(
+                codegen.tx.import_source(utils.__name__), "to_numpy_helper"
+            ).reconstruct(codegen),
+            codegen.create_load(var),
+            *create_call_function(1, False),
         ]
 
 

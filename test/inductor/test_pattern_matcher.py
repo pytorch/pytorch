@@ -1,7 +1,8 @@
 # Owner(s): ["module: inductor"]
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import count_calls, counters
+from torch._inductor.fx_passes import joint_graph
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -125,6 +126,27 @@ class TestPaternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
+    def test_pointless_convert(self):
+        def fn1(x):
+            x = torch.ops.prims.convert_element_type.default(x, torch.float16)
+            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+            return x
+
+        gm = torch.fx.symbolic_trace(fn1)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 1)
+
+        def fn2(x):
+            x = torch.ops.prims.convert_element_type.default(x, torch.int32)
+            x = torch.ops.prims.convert_element_type.default(x, torch.float32)
+            return x
+
+        gm = torch.fx.symbolic_trace(fn2)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
 
     def test_splitwithsizes_cat(self):
         # Good case
