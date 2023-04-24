@@ -3932,12 +3932,12 @@ at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& s
 // If TLS is set appropriately (for wrapper-tensor keys like Functionalize or functorch transforms),
 // then we'll dispatch to one of their implementations, which will properly lift the tensor into a wrapper.
 at::Tensor lift(const at::Tensor& self) {
-    return self;
+    return self.view(self.sizes());
 }
 
 // See notes in native_functions.yaml
 at::Tensor lift_fresh(const at::Tensor& self) {
-    return self;
+    return self.view(self.sizes());
 }
 
 // Autogen kernels for tensor list ops dont work on XLA. TODO(jakeszwe)

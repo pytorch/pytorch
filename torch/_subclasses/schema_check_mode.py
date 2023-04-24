@@ -124,7 +124,7 @@ class SchemaCheckMode(TorchDispatchMode):
                             raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                         else:
                             self.aliasing.append(Aliasing(func._schema.name, name, f"output_{j}"))
-                    if after is tuple_out[j]:
+                    if after is tuple_out[j] and isinstance(after, torch.Tensor):
                         # Only mutable ops e.g. (add_, add.out) are allowed to directly return inputs.
                         if not schema_info.is_mutable(SchemaArgument(SchemaArgType.input, i)):
                             raise RuntimeError(f"""\
