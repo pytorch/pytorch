@@ -43,6 +43,13 @@ use_buck = inductor_config.is_fbcode()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+FAIL_COUNTER = itertools.count()
+
+
+# Initialized the first accuracy failure(?)  (or maybe first run?)
+CONTENT_STORE = None
+
+
 def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
@@ -71,20 +78,25 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
         except Exception as e:
+            fail_id = next(FAIL_COUNTER)
             # TODO: Failures here are troublesome because no real inputs,
             # need a different serialization strategy
             if config.repro_after == "aot":
+                # TODO: the leveling here makes no sense, why not always
+                # dump both the minifier plus the repro
                 if config.repro_level == 1:
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
                         example_inputs,
                         compiler_name,
+                        fail_id,
                     )
                 elif config.repro_level == 2:
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         example_inputs,
                         compiler_name,
+                        fail_id,
                     )
                 log.error("CompilerError")
             raise
@@ -118,8 +130,9 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             ]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
+                fail_id = next(FAIL_COUNTER)
                 dump_to_minify(
-                    fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                    fx.GraphModule(gm, orig_graph), real_inputs, compiler_name, fail_id
                 )
 
             if config.repro_level == 4:
@@ -128,6 +141,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                         "Accuracy minification is supported for inductor only"
                     )
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                    fail_id = next(FAIL_COUNTER)
                     log.warning(
                         "Accuracy failed for the AOT Autograd graph %s", graph_name
                     )
@@ -135,16 +149,17 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
                         f"{compiler_name}_accuracy",
+                        fail_id,
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
                         real_inputs,
                         f"{compiler_name}_accuracy",
+                        fail_id,
                     )
-                    raise AccuracyError("Bad accuracy detected")
-                else:
-                    # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)
+                    # Do not raise exception, keep going
+                # Call the compiled function with real inputs
+                return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiled function with real inputs
@@ -156,17 +171,20 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                             break
                     return out
                 except Exception as e:
+                    fail_id = next(FAIL_COUNTER)
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
                             compiler_name,
+                            fail_id,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
                             fx.GraphModule(gm, orig_graph),
                             copy_tensor_attrs,
                             compiler_name,
+                            fail_id,
                         )
                     raise
 
@@ -454,18 +472,18 @@ def save_graph_repro(
         )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name):
+def dump_compiler_graph_state(gm, args, compiler_name, fail_id):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
+    file_name = os.path.join(subdir, f"{fail_id}_{len(gm.graph.nodes)}.py")
     log.warning(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
         save_graph_repro(fd, gm, args, compiler_name, save_dir=subdir)
     curdir = os.getcwd()
-    repro_path = os.path.join(curdir, "repro.py")
+    repro_path = os.path.join(curdir, f"repro{fail_id if fail_id else ''}.py")
     try:
         shutil.copyfile(file_name, repro_path)
         log.warning("Copying repro file for convenience to %s", repro_path)
@@ -481,7 +499,7 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def dump_to_minify(gm, args, compiler_name: str):
+def dump_to_minify(gm, args, compiler_name: str, fail_id: int):
     favored_device = 1 if torch.cuda.device_count() >= 2 else 0
 
     # TODO: factor this out
@@ -508,7 +526,7 @@ minifier(
     mod,
     args,
     module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}", patch_code=isolate_fails_code_str, save_dir={subdir!r}),
-    dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
+    dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}", fail_id={fail_id}),
 )
         """
     )

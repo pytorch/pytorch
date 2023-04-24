@@ -30,7 +30,7 @@ minimum_call_count = 1
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
-cache_size_limit = 64
+cache_size_limit = 4
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
