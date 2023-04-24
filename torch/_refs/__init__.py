@@ -4340,7 +4340,7 @@ def empty_like(
 
 @register_decomposition([aten.arange.start_step])
 @out_wrapper()
-def arange_start_step(
+def arange(
     start: NumberType = 0,
     end: Optional[NumberType] = None,
     step: NumberType = 1,
@@ -4427,37 +4427,6 @@ def arange_start_step(
     if requires_grad:
         result.requires_grad_(True)
     return result
-
-
-@register_decomposition(aten.arange.default)
-@out_wrapper()
-def arange_default(
-    end: NumberType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
-    pin_memory: bool = False,
-) -> TensorLikeType:
-    return aten.arange.start_step(
-        0, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
-    )
-
-
-@register_decomposition(aten.arange.start)
-@out_wrapper()
-def arange_start(
-    start: NumberType,
-    end: NumberType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
-    pin_memory: bool = False,
-) -> TensorLikeType:
-    return aten.arange.start_step(
-        start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
-    )
 
 
 @register_decomposition(aten.lerp)
