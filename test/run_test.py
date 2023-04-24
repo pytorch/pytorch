@@ -464,6 +464,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    cache_dir = tempfile.TemporaryDirectory()
     maybe_set_hip_visible_devies()
 
     unittest_args = options.additional_unittest_args.copy()
@@ -493,7 +494,7 @@ def run_test(
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
-        unittest_args.extend(get_pytest_args(options, is_cpp_test=is_cpp_test))
+        unittest_args.extend(get_pytest_args(options, cache_dir.name, is_cpp_test=is_cpp_test))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
     # TODO: These features are not available for C++ test yet
@@ -547,8 +548,9 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        and not options.continue_through_error
     )
-    timeout = THRESHOLD * 3 if should_file_rerun else None
+    timeout = 20 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
     with open(log_path, "w") as f:
@@ -559,7 +561,11 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1 if should_file_rerun else 0,
+            retries=1
+            if should_file_rerun
+            else float("inf")
+            if options.continue_through_error
+            else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
@@ -573,7 +579,7 @@ def run_test(
 
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
-
+    cache_dir.cleanup()
     return ret_code
 
 
@@ -893,7 +899,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def get_pytest_args(options, is_cpp_test=False):
+def get_pytest_args(options, cache_dir, is_cpp_test=False):
     if RERUN_DISABLED_TESTS:
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -904,13 +910,15 @@ def get_pytest_args(options, is_cpp_test=False):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", "--sw"]
+        rerun_options = ["-x", "--reruns=2", "--sc"]
 
     pytest_args = [
         "-vv",
         "-rfEX",
         "-p",
         "no:xdist",
+        "-o",
+        f"cache_dir={cache_dir}",
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
