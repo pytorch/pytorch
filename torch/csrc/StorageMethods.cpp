@@ -144,17 +144,22 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     void* original_data_ptr = storage.data_ptr().get();
 
-    auto src_option = c10::TensorOptions().device(storage.device()).dtype(at::kByte);
+    auto src_option =
+        c10::TensorOptions().device(storage.device()).dtype(at::kByte);
     auto src_tensor = at::empty({0}, {}, src_option).set_(storage);
     src_tensor.resize_({size_bytes});
 
-    // When using resize_ to replace resize_bytes_xxx, some cases may not malloc a new data_ptr.
-    // For these cases, an additional memory copy and update for storage are required.
+    // When using resize_ to replace resize_bytes_xxx, in some cases
+    // the original data_ptr is still returned, which is an inconsistent
+    // behavior when compared to resize_bytes_xxx. For these cases,
+    // an additional memory copy and update for storage are required.
     if (original_data_ptr == src_tensor.storage().data_ptr().get()) {
       auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
       new_tensor.copy_(src_tensor);
-      storage.set_data_ptr_noswap(std::move(const_cast<at::DataPtr&>(new_tensor.storage().data_ptr())));
-      storage.unsafeGetStorageImpl()->set_allocator(new_tensor.storage().unsafeGetStorageImpl()->allocator());
+      storage.set_data_ptr_noswap(
+          std::move(const_cast<at::DataPtr&>(new_tensor.storage().data_ptr())));
+      storage.unsafeGetStorageImpl()->set_allocator(
+          new_tensor.storage().unsafeGetStorageImpl()->allocator());
       storage.set_nbytes(new_tensor.storage().nbytes());
     }
   } else {
