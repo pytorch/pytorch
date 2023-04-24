@@ -8,7 +8,9 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
-from .. import config, variables
+from .. import config, utils, variables
+from ..bytecode_transformation import create_call_function, Instruction
+
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -182,8 +184,8 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name == "resize_" and self.source is not None:
-            unimplemented("calling resize_() on graph input")
+        if name in ("resize_", "unsqueeze_") and self.source is not None:
+            unimplemented(f"calling {name}() on graph input")
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
