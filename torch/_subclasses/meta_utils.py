@@ -534,6 +534,10 @@ class MetaConverter:
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
                     )
+                if type(t) is torch.nn.Parameter:
+                    # NB: Cannot directly use Parameter constructor
+                    # because that would force a detach, not desirable
+                    r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause
