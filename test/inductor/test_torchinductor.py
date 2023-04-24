@@ -5014,17 +5014,22 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
-        self.common(
-            fn,
-            [
-                torch.randn([144, 144]),
-            ],
-            # Mismatched elements: 1 / 144 (0.7%)
-            # Greatest absolute difference: 26 at index (71,)
-            # Greatest relative difference: 0.4126984179019928 at index (71,)
-            atol=1e-5,
-            rtol=0.5,
-        )
+        self.common(fn, (torch.randn([144, 144]),))
+
+    def test_argmax_argmin_with_duplicates(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        t1 = torch.randint(8, size=(32, 32))
+        self.common(fn, (t1,))
+
+        t1 = torch.randint(8, size=(1024, 1024))
+        self.common(fn, (t1,))
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
