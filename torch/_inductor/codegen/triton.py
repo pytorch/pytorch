@@ -632,20 +632,6 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-class ProdHelper:
-    name = "_prod_accumulate"
-
-    @staticmethod
-    def codegen(buffer):
-        buffer.splice(
-            f"""
-            @triton.jit
-            def {ProdHelper.name}(a, b):
-                return a * b
-            """
-        )
-
-
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = pexpr
@@ -668,7 +654,6 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
-        self.helper_functions = set()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1173,13 +1158,8 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            if reduction_type == "prod":
-                self.helper_functions.add(ProdHelper)
-                return (
-                    f"tl.reduce({value}, {dim}, {ProdHelper.name})[{', '.join(sizes)}]"
-                )
-            else:
-                return f"tl.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+            module = "triton_helpers" if reduction_type in ("prod",) else "tl"
+            return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
@@ -1414,6 +1394,7 @@ class TritonKernel(Kernel):
                     from torch._inductor.ir import TileHint
                     from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
+                    from torch._inductor import triton_helpers
                 """
             )
             if config.benchmark_kernel:
@@ -1425,9 +1406,6 @@ class TritonKernel(Kernel):
                         from torch._inductor.triton_heuristics import grid
                     """
                 )
-
-        for helper in sorted(self.helper_functions, key=lambda kls: kls.__name__):
-            helper.codegen(code)
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -1906,7 +1884,7 @@ class TritonScheduling:
             wrapper.kernel_to_hash[kernel_name] = basename
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.triton('''")
+            compile_wrapper.writeline("async_compile.triton('triton_', '''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("''')")
 
