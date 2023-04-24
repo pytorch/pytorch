@@ -579,13 +579,11 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu() || device.is_privateuseone()) {
+          device.is_hpu()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
-            "supported devices include CPU, CUDA, HPU and ",
-            c10::get_privateuse1_backend(),
-            " however got ",
+            "supported devices include CPU, CUDA and HPU, however got ",
             DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
