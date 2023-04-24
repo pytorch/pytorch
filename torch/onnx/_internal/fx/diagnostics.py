@@ -46,12 +46,12 @@ def format_argument(obj: Any) -> str:
 
 @_format_argument.register
 def _torch_nn_module(obj: torch.nn.Module) -> str:
-    return f"{obj.__class__.__name__}"
+    return f"torch.nn.Module({obj.__class__.__name__})"
 
 
 @_format_argument.register
 def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
-    return f"{obj.print_readable(print_output=False)}"
+    return f"torch.fx.GraphModule({obj.__class__.__name__})"
 
 
 @_format_argument.register
