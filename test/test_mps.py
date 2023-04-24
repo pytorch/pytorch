@@ -282,7 +282,6 @@ def mps_ops_modifier(ops):
         'nn.functional.tanhshrink': [torch.uint8],
         'nn.functional.triplet_margin_loss': [torch.uint8],
         'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
-        'nn.functional.pairwise_distance': [torch.uint8, torch.float16],
         'outer': [torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
