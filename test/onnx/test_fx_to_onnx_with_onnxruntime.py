@@ -359,13 +359,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
     # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
     # @unittest.expectedFailure
-    @pytorch_test_common.xfail(
-        "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
-        "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
-        "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
-        "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
-        "instance of <protocol 'torch.Tensor'>."
-    )
     @pytorch_test_common.skip_fx_tracer(
         {
             dynamo_graph_extractor.DynamoExport: (
@@ -615,9 +608,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
-    )
     @pytorch_test_common.skip_fx_tracer(
         {
             dynamo_graph_extractor.DynamoExport: (
@@ -720,7 +710,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    @pytorch_test_common.xfail("TypeError: missing a required argument: 'end'")
     @pytorch_test_common.skip_fx_tracer(
         {
             dynamo_graph_extractor.DynamoExport: "TypeError: missing a required argument: 'end'",

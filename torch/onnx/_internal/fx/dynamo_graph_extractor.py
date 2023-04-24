@@ -127,14 +127,10 @@ class DynamoOptimize(exporter.FXGraphExtractor):
 
 class DynamoExport(exporter.FXGraphExtractor):
     """Generates a FX GraphModule using torch.dynamo.export API
+
     Args:
-        aten_graph: Specify whether the resulting graph must be decomposed into core Aten ops
-                    Core aten ops is a subset of aten ops that remains after aten-to-aten decomposition and
-                    functionalization pass. Core aten ops are fully functional and adhere to single static
-                    assignment (SSA): this implies there will be no `inplace` or `_out` variants in this opset.
-                    This opset is designed to serve as the functional IR to interface with compiler backends.
-                    In contrast to primTorch, core aten opset doesn't decompose ops into explicit
-                    type promotion and broadcasting ops.
+        aten_graph: If True, exports a graph with ATen operators.
+                    If False, exports a graph with Python operators.
     """
 
     def __init__(
@@ -161,7 +157,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
         dynamo_flatten_output_step = io_adapter.DynamoFlattenOutputStep()
-        wrapped_model = io_adapter._wrap_model_with_output_adapter(
+        wrapped_model = io_adapter.wrap_model_with_output_adapter(
             model, dynamo_flatten_output_step
         )
         # Record the output adapter step.
