@@ -1467,12 +1467,10 @@ Arguments:
           .def(
               "_end_coalescing",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const c10::Device& device,
-                 std::vector<c10::intrusive_ptr<::c10d::Work>>& reqs) {
-                self->endCoalescing(device.type(), reqs);
+                 const c10::Device& device) {
+                return self->endCoalescing(device.type());
               },
               py::arg("device_type"),
-              py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_register_backend",
@@ -1832,7 +1830,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
-              py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>());
 
 #ifdef USE_C10D_GLOO
