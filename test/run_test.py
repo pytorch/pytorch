@@ -494,7 +494,9 @@ def run_test(
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
-        unittest_args.extend(get_pytest_args(options, cache_dir.name, is_cpp_test=is_cpp_test))
+        unittest_args.extend(
+            get_pytest_args(options, cache_dir.name, is_cpp_test=is_cpp_test)
+        )
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
     # TODO: These features are not available for C++ test yet
@@ -548,9 +550,8 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
-        and not options.continue_through_error
     )
-    timeout = 20 if should_file_rerun else None
+    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
     with open(log_path, "w") as f:
@@ -561,11 +562,7 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1
-            if should_file_rerun
-            else float("inf")
-            if options.continue_through_error
-            else 0,
+            retries=1 if should_file_rerun else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
