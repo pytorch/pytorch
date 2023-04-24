@@ -6414,8 +6414,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(y, y_ref)
 
 
-    def test_channel_shuffle_return_self(self):
-        # gh-76616: nn.ChannelShuffle will return self with an  empty input tensor
+    def test_channel_shuffle_return_alias_of_self(self):
+        # gh-76616: nn.ChannelShuffle will return alias of self with an empty input tensor
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
