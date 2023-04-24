@@ -62,7 +62,7 @@ def get_weight_obs_or_fq_ctr(quantization_config: QuantizationConfig):
         )
     observer_type = MinMaxObserver
     if quantization_spec.qscheme == torch.per_channel_symmetric:
-        observer_type = PerChannelMinMaxObserver # noqa
+        observer_type = PerChannelMinMaxObserver  # type: ignore[assignment]
     return create_observer(observer_type, quantization_spec, eps=2**-12)
 
 
