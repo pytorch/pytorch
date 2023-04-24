@@ -198,6 +198,16 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name]
         return None
 
+    def is_fully_static_sized_buffer(self, buffer_name: str):
+        buffer = self.get_buffer(buffer_name)
+        if not buffer:
+            return False
+
+        def _is_static(x):
+            return isinstance(x, (int, sympy.Integer))
+
+        return all(_is_static(x) for x in buffer.layout.size)
+
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
             return self.constants[buffer_name].dtype

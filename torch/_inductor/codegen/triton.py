@@ -72,12 +72,18 @@ def config_of(args):
 
     def is_aligned(x):
         if isinstance(x, TensorArg):
+            known_static_buffer = V.graph.is_fully_static_sized_buffer(x.buffer)
+            if not known_static_buffer:
+                return False
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
-            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            if isinstance(x.expr, (int, sympy.Integer)):
+                return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            else:
+                return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+    if config.triton.divisible_by_16:
         divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     else:
         divisible_by_16 = []
