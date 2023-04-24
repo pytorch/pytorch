@@ -320,7 +320,6 @@ def mps_ops_modifier(ops):
                            torch.int32, torch.int64, torch.uint8, torch.int8],
         'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
                   torch.int32, torch.int64, torch.uint8, torch.int8],
-        'dist': [torch.float16],  # cpu result off, showing inf values
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
