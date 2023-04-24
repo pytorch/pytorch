@@ -72,9 +72,6 @@ def config_of(args):
 
     def is_aligned(x):
         if isinstance(x, TensorArg):
-            known_static_buffer = V.graph.is_fully_static_sized_buffer(x.buffer)
-            if not known_static_buffer:
-                return False
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
             if isinstance(x.expr, (int, sympy.Integer)):
