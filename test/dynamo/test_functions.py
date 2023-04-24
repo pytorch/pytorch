@@ -608,8 +608,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["c"] = x * 2
             return dd["b"], dd
 
-        test = make_test(fn)
-        test(self)
+        x = torch.randn(10, 10)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize_assert("eager")(fn)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref[0], res[0]))
+        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1][param], res[1][param]))
 
     @make_test
     def test_call_dict1(x):
