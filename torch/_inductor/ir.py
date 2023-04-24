@@ -3045,8 +3045,15 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(nontensor_args),
         )
         if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
-            self.kernel = f"aten.{kernel.__name__}"
+            self.kernel = (
+                f"at::{kernel.__name__}"
+                if V.graph.cpp_wrapper
+                else f"aten.{kernel.__name__}"
+            )
         else:
+            assert (
+                not V.graph.cpp_wrapper
+            ), f"{kernel.__name__} is not supported with cpp wrapper"
             self.kernel = (
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
@@ -3107,9 +3114,14 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
         def generate_output(output, index=""):
-            if isinstance(output, (list, tuple)):
-                return type(output)(
+            if isinstance(output, list):
+                return [
                     generate_output(output[i], f"{index}[{i}]")
+                    for i in range(len(output))
+                ]
+            elif isinstance(output, tuple):
+                return tuple(
+                    generate_output(output[i], f"{index}<{i}>")
                     for i in range(len(output))
                 )
             elif isinstance(output, torch.Tensor):
@@ -3141,12 +3153,33 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
+    def gen_list_tuple_access(self, basename, index):
+        # cpp wrapper code needs to use std::get<> to access a tuple
+        if index.startswith("["):
+            pos = index.find("]")
+            current_index = index[1:pos]
+            remaining_index = index[pos + 1 :]
+            return self.gen_list_tuple_access(
+                f"{basename}[{current_index}]", remaining_index
+            )
+        elif index.startswith("<"):
+            pos = index.find(">")
+            current_index = index[1:pos]
+            remaining_index = index[pos + 1 :]
+            tuple_access = V.graph.wrapper_code.codegen_tuple_access(
+                basename, current_index
+            )
+            return self.gen_list_tuple_access(tuple_access, remaining_index)
+        else:
+            assert len(index) == 0, "Invalid index expression"
+            return basename
+
     def codegen(self, wrapper):
         line = V.graph.wrapper_code.declare
-        line += f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        line += f"{self.get_name()} = {self.gen_list_tuple_access(self.inputs[0].get_name(), self.index)}"
         line += V.graph.wrapper_code.ending
-        wrapper.writeline(line)
-        self.codegen_size_asserts(wrapper)
+        V.graph.wrapper_code.writeline(line)
+        self.codegen_size_asserts(V.graph.wrapper_code)
 
     def __init__(self, layout, input, index: str):
         super().__init__(None, layout, [input], ())
