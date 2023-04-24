@@ -435,7 +435,7 @@ Tensor conv_depthwise3d_cuda(
         int64_t smem = 0;
 
         const scalar_t* bias_ptr =
-            bias_.defined() ? bias_.data_ptr<scalar_t>() : NULL;
+            bias_.defined() ? bias_.const_data_ptr<scalar_t>() : NULL;
 
         // Range check to avoid overflow in CUDA kernels.
         TORCH_CHECK(input_.numel() <= std::numeric_limits<int32_t>::max(),

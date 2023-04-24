@@ -3,11 +3,12 @@ import dataclasses
 import itertools
 import logging
 import warnings
+import pprint
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
 
 from functorch import make_fx
@@ -20,13 +21,13 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
-from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions, PhiloxTotalOffsets
@@ -79,6 +80,16 @@ pytree._register_pytree_node(
         dict(zip(c, x))
     ),
 )
+
+def partial_asdict(obj: Any) -> Any:
+    if dataclasses.is_dataclass(obj):
+        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
+    elif isinstance(obj, (list, tuple)):
+        return obj.__class__([partial_asdict(item) for item in obj])
+    elif isinstance(obj, dict):
+        return {k: partial_asdict(v) for k, v in obj.items()}
+    else:
+        return obj
 
 aten = torch.ops.aten
 
@@ -416,6 +427,8 @@ class OutputAliasInfo:
     # - Tells us that the base of this alias is output_user_fwds[base_idx]
     #   here, this refers to the index of the *direct* traced
     base_idx: Optional[int]
+    # If it is a Tensor, what the dynamic dims are (otherwise is None)
+    dynamic_dims: Optional[Set[int]]
 
 
 # This class tells us info about user inputs.
@@ -534,6 +547,9 @@ class ViewAndMutationMeta:
             ]
         )
         self.num_mutated_inputs = self.num_mutated_data_inputs + self.num_mutated_metadata_only_inputs
+        self.dynamic_outputs = any(
+            o.dynamic_dims for o in self.output_info
+        )
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
@@ -830,10 +846,15 @@ def run_functionalized_fw_and_collect_metadata(
                 output_type = OutputType.non_alias
                 base_idx = None
 
+            if isinstance(o, torch.Tensor):
+                dynamic_dims = {i for i, s in enumerate(o.shape) if not is_concrete_int(s)}
+            else:
+                dynamic_dims = None
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
+                dynamic_dims=dynamic_dims,
             )
             output_info.append(out_info)
             output_requires_grad_info.append(
@@ -1652,6 +1673,7 @@ def remove_dupe_metadata(
             OutputAliasInfo(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
+                dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else dupe_to_dedup_idx[o.base_idx]
             )
             for o in m.output_info
@@ -1735,12 +1757,14 @@ def create_synthetic_base_metadata(
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
             raw_type=torch.Tensor,
+            dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
         OutputAliasInfo(
             output_type=o.output_type,
             raw_type=o.raw_type,
+            dynamic_dims=o.dynamic_dims,
             # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
             base_idx=None if o.base_idx is None
             else synthetic_base_info[o.base_idx]
@@ -2097,8 +2121,10 @@ def aot_wrapper_synthetic_base(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated, \
-            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(fw_metadata_updated)}'
+        assert ref_fw_metadata == fw_metadata_updated, (
+            f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
+            f'actual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+        )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
 
@@ -2314,9 +2340,20 @@ def create_runtime_wrapper(
                 # AND a way to replay that custom view fn.
                 regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
                 fw_outs_including_aliases.append(regenerated_out)
-            return fw_outs_including_aliases
+            ret_outs = fw_outs_including_aliases
         else:
-            return fw_outs
+            ret_outs = fw_outs
+
+        if runtime_metadata.dynamic_outputs:
+            for t, o in zip(ret_outs, runtime_metadata.output_info):
+                if o.dynamic_dims is None:
+                    continue
+                if hasattr(t, '_dynamo_weak_dynamic_indices'):
+                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
+                else:
+                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
+
+        return ret_outs
     return runtime_wrapper
 
 def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
@@ -2377,31 +2414,23 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
 
-    if config.use_functionalize:
-        fx_g = create_functionalized_graph(
-            joint_fn_to_trace,
-            joint_inputs,
-            meta=fw_metadata,
-            aot_config=aot_config,
-            trace_joint=True,
-        )
+    fx_g = create_functionalized_graph(
+        joint_fn_to_trace,
+        joint_inputs,
+        meta=fw_metadata,
+        aot_config=aot_config,
+        trace_joint=True,
+    )
 
-        # There should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fx_g.graph)
+    # There should be *NO* mutating ops in the graph at this point.
+    assert_functional_graph(fx_g.graph)
 
-        # Redudant with the check above, but worth having in case tracing introduced
-        # a fake tensor. Unlikely.
-        # See Note: [Fake Modules and AOTAutograd]
-        torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
-    else:
-        # joint_forward_backward() now always runs with functionalization, and factoring it out
-        # to make that toggleable is a bit painful.
-        # aot autograd without functionalization is wrong anyway, so we error.
-        raise AssertionError(
-            "Graph partitioning without functionalization is not sound, we may introduce errors"
-        )
+    # Redudant with the check above, but worth having in case tracing introduced
+    # a fake tensor. Unlikely.
+    # See Note: [Fake Modules and AOTAutograd]
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
+    fx_g.graph.eliminate_dead_code()
+    fx_g.recompile()
 
     if aot_config.enable_log:
         aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
@@ -2504,6 +2533,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # in the PhiloxStateTracker singleton object. Therefore, we save them
         # into rng_meta side datastructure.
 
+    saved_context = TracingContext.get()
 
 
     class CompiledFunction(torch.autograd.Function):
@@ -2708,9 +2738,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
                     context = disable_autocast_manager if disable_amp else nullcontext
-                    with context(), track_graph_compiling(aot_config, "backward"):
+                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, all_args
+                            bw_module, fx_placeholder_vals(bw_module)
                         )
 
                 ctx.maybe_clear_saved_tensors()
@@ -2828,68 +2858,48 @@ def create_aot_dispatcher_function(
             **aot_config.decompositions,
         }
 
-    # NB: don't bother setting allow_fallback_kernels; this should not actually
-    # be configurable in fake tensor, we should automatically do the right
-    # thing
-    if config.debug_fake_cross_ref:
-        # This is a little messy but TorchDynamo directly changes `use_fake_tensor`
-        # so it's not enough for user to change the config manually
-        # TODO: have TorchDynamo read in `use_fake_tensor` from os environ /
-        # coordinate flags
-        config.use_fake_tensor = False
-
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
-    for x in flat_args:
-        if isinstance(x, FakeTensor):
-            fake_mode = x.fake_mode
-            shape_env = fake_mode.shape_env
-            break
-    else:
+    fake_mode = detect_fake_mode(flat_args)
+    if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = (
-            FakeTensorMode(shape_env=shape_env)
-            if config.use_fake_tensor
-            else nullcontext()
-        )
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+    else:
+        shape_env = fake_mode.shape_env
 
-    cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode, PhiloxStateTracker():
+    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
 
         def process_inputs(flat_args):
-            if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
-                def convert(idx, x):
-                    if shape_env is not None:
-                        from torch._dynamo.source import ConstantSource
-                        if isinstance(x, int):
-                            return shape_env.create_symintnode(
-                                shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
-                                hint=x
-                            )
-                    if not isinstance(x, torch.Tensor):
-                        return x
-                    if isinstance(x, FakeTensor):
-                        assert x.fake_mode is fake_mode
-                        return x
-                    # TODO: Ensure that this codepath is never exercised from
-                    # Dynamo
-                    if (
-                        idx < aot_config.num_params_buffers
-                        and config.static_weight_shapes
-                    ):
-                        return fake_mode.from_tensor(x, static_shapes=True)
-                    return fake_mode.from_tensor(x, static_shapes=False)
+            def convert(idx, x):
+                if shape_env is not None:
+                    from torch._dynamo.source import ConstantSource
+                    if isinstance(x, int):
+                        return shape_env.create_symintnode(
+                            shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
+                            hint=x
+                        )
+                if not isinstance(x, torch.Tensor):
+                    return x
+                if isinstance(x, FakeTensor):
+                    assert x.fake_mode is fake_mode
+                    return x
+                # TODO: Ensure that this codepath is never exercised from
+                # Dynamo
+                if (
+                    idx < aot_config.num_params_buffers
+                    and config.static_weight_shapes
+                ):
+                    return fake_mode.from_tensor(x, static_shapes=True)
+                return fake_mode.from_tensor(x, static_shapes=False)
 
-                return [convert(idx, x) for idx, x in enumerate(flat_args)]
-            else:
-                return flat_args
+            return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
         fake_flat_args = process_inputs(flat_args)
 
@@ -2959,8 +2969,6 @@ def aot_function(
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
     num_params_buffers: int = 0,
-    hasher_type=None,  # deprecated
-    static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
     inference_compiler: Optional[Callable] = None,
     *,
@@ -3019,10 +3027,6 @@ def aot_function(
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
     """
-    if static_argnums is not None:
-        raise RuntimeError(
-            "static_argnums has been deprecated - manually wrap your function or use torchdynamo."
-        )
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -3154,8 +3158,6 @@ def aot_module_simplified(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
-    hasher_type=None,
-    static_argnums=None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
@@ -3202,6 +3204,7 @@ def aot_module_simplified(
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
+
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
@@ -3220,7 +3223,6 @@ def aot_module_simplified(
             )
         return out
 
-    assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:
