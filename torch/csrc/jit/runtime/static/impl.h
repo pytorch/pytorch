@@ -39,6 +39,7 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
     case TypeKind::FloatType:
     case TypeKind::BoolType:
     case TypeKind::DeviceObjType:
+    case TypeKind::GeneratorType:
     case TypeKind::StreamObjType:
       return true;
     default:

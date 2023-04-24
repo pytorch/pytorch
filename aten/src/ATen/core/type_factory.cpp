@@ -35,7 +35,8 @@ namespace c10 {
   _(Any, AnyType)                   \
   _(Capsule, CapsuleType)           \
   _(list, AnyListType)              \
-  _(tuple, AnyTupleType)
+  _(tuple, AnyTupleType)            \
+  _(Generator, GeneratorType)       \
 
 const std::unordered_map<std::string, c10::TypePtr>& DynamicTypeFactory::
     basePythonTypes() {

@@ -1014,6 +1014,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &DeviceObjType::get);
   py::class_<StreamObjType, Type, StreamObjTypePtr>(m, "StreamObjType")
       .def_static("get", &StreamObjType::get);
+  py::class_<GeneratorType, Type, GeneratorTypePtr>(m, "GeneratorType")
+    .def_static("get", &GeneratorType::get);
   py::class_<PyObjectType, Type, PyObjectTypePtr>(m, "PyObjectType")
       .def_static("get", &PyObjectType::get);
   py::class_<NoneType, Type, NoneTypePtr>(m, "NoneType")

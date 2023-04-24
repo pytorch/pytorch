@@ -358,6 +358,8 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
       return DynamicTypeTrait<CapsuleType>::getBaseType();
     case Tag::Tuple:
       return v.toTupleRef().type<c10::DynamicType>();
+    case Tag::Generator:
+      return DynamicTypeTrait<GeneratorType>::getBaseType();
     default:
       return DynamicTypeTrait<AnyType>::getBaseType();
   }
