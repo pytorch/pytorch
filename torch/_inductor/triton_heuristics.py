@@ -168,12 +168,12 @@ class CachingAutotuner(KernelInterface):
 
         return launcher
 
-    def round_benched_timing(self, x, decimal_places=2):
+    def round_benched_timing(self, x, decimal_places=1):
         """
         Sometimes different autotuning configs can have very small runtime
         difference. This can affect the ranking of different configs, making
         autotuning nondeterministic.  This function rounds the benched timing to
-        a default value of two decimal places.
+        a default value of one decimal place, i.e., precision of 0.1 ms.
         """
         return builtins.round(x, decimal_places)
 
