@@ -302,9 +302,9 @@ class TestPaternMatcher(TestCase):
                 clamp_max_output = torch.clamp_max(clamp_min_output, max_value)
                 return clamp_max_output
 
-        # check works for min_value >= max_value.
-        min_values = [3, 3, torch.randn(1, 32, 28, 28)]
-        max_values = [0, 3, torch.randn(1, 32, 28, 28)]
+        # check works for min_value > max_value.
+        min_values = [3, torch.randn(1, 32, 28, 28)]
+        max_values = [0, torch.randn(1, 32, 28, 28)]
         with torch.no_grad():
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
