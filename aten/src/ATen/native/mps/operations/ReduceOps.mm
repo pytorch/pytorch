@@ -349,36 +349,11 @@ void impl_func_norm_mps(const Tensor& input_tensor,
           : newCachedGraph->inputTensor_;
 
           if (opt_dtype.has_value() || castInputData) {
-<<<<<<< HEAD
-            inputTensor = [mpsGraph castTensor:inputTensor
-      }
-=======
             inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
           }
->>>>>>> 0fbb8d6620a (Fix build failures)
 
       MPSGraphTensor* outputTensor;
 
-<<<<<<< HEAD
-      if (pIsZero) {
-              MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
-              MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
-              MPSGraphTensor* nonZeros = [mpsGraph selectWithPredicateTensor:inputTensor
-                                                         truePredicateTensor:ones
-                                                        falsePredicateTensor:zeros
-                                                                  name:nil];
-              outputTensor = [mpsGraph reductionSumWithTensor:nonZeros
-                                                         axes:wrappedAxes
-                                                         name:nil];
-      } else if (pIsPosInf) {
-        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-        outputTensor = [mpsGraph reductionMaximumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
-      } else if (pIsNegInf) {
-        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-        outputTensor = [mpsGraph reductionMinimumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
-      } else {
-        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-=======
           if (pIsZero) {
             MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
             MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
@@ -395,7 +370,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
             outputTensor = [mpsGraph reductionMinimumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
           } else {
             MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
->>>>>>> 7f61951ea30 (Fix lintrunner)
 
         MPSGraphTensor* powerValTensor = [mpsGraph constantWithScalar:p dataType:mps_input_dtype];
 
@@ -416,17 +390,12 @@ void impl_func_norm_mps(const Tensor& input_tensor,
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:mps::getMPSShape(output_t) name:nil];
       }
 
-<<<<<<< HEAD
-          newCachedGraph->outputTensor_ = castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
-    });
-=======
           newCachedGraph->outputTensor_ =
               castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
         }
         return newCachedGraph;
       });
     }
->>>>>>> 7f61951ea30 (Fix lintrunner)
 
     auto otherPlaceholder = Placeholder();
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
