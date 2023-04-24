@@ -5459,6 +5459,33 @@ class CommonTemplate:
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_sqrt_dynamic_shapes(self):
+        # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
+        # TODO: support cuda path.
+        if self.device == "cuda":
+            raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                B, N, C = x.shape
+                return self.get_rel_indices(N)
+
+            def get_rel_indices(self, num_patches: int) -> torch.Tensor:
+                img_size = int(num_patches**0.5)
+                ind = torch.arange(img_size)
+                return ind
+
+        self.common(
+            Model(),
+            [
+                torch.randn(8, 4, 4),
+            ],
+        )
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_index_dynamic_shapes(self):
         if self.device == "cuda":
             raise unittest.SkipTest("index dynamic shapes only supports cpu")
