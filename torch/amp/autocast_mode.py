@@ -320,8 +320,8 @@ class autocast:
         elif self.device == self.custom_backend_name:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
-            self.custom_device_mod.set_autocast_enabled(self._enabled)
-            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
+            self.custom_device_mod.set_autocast_enabled(self.prev)
+            self.custom_device_mod.set_autocast_dtype(self.prev_fastdtype)
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()

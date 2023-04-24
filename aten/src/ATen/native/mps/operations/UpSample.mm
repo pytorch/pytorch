@@ -1,9 +1,34 @@
 //  Copyright © 2023 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UpSample.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_nearest_exact1d.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact1d_native.h>
+#include <ATen/ops/_upsample_nearest_exact2d.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact2d_native.h>
+#include <ATen/ops/upsample_bilinear2d.h>
+#include <ATen/ops/upsample_bilinear2d_backward.h>
+#include <ATen/ops/upsample_bilinear2d_backward_native.h>
+#include <ATen/ops/upsample_bilinear2d_native.h>
+#include <ATen/ops/upsample_nearest1d.h>
+#include <ATen/ops/upsample_nearest1d_backward.h>
+#include <ATen/ops/upsample_nearest1d_backward_native.h>
+#include <ATen/ops/upsample_nearest1d_native.h>
+#include <ATen/ops/upsample_nearest2d.h>
+#include <ATen/ops/upsample_nearest2d_backward.h>
+#include <ATen/ops/upsample_nearest2d_backward_native.h>
+#include <ATen/ops/upsample_nearest2d_native.h>
+#endif
 namespace at::native {
 namespace mps {
 
@@ -73,131 +98,120 @@ void upsample_out_template(const Tensor& input,
         getTensorsStringKey({input}) + ":[" + to_string(scale_h) + "," + to_string(scale_w) + "]:[" +
         (is_backward_pass ? getArrayRefString(input_size) : "Undefined") + "]";
 
-    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      newCachedGraph->outputSizeTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(2) ]);
 
-          newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-          newCachedGraph->outputSizeTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(2) ]);
+      MPSGraphTensor* scaleOffsetTensor = nullptr;
+      MPSGraphTensor* inputSizeTensor = nullptr;
 
-          MPSGraphTensor* scaleOffsetTensor = nullptr;
-          MPSGraphTensor* inputSizeTensor = nullptr;
-
-          if (scale_w > 0.0) {
-            const float outScales[4] = {scale_h, scale_w, offset_y, offset_x};
-            scaleOffsetTensor = [mpsGraph constantWithData:[NSData dataWithBytes:outScales length:sizeof(outScales)]
-                                                     shape:@[ @4 ]
-                                                  dataType:MPSDataTypeFloat32];
-          }
-          if (is_backward_pass) {
-            std::vector<NSNumber*> inputSizeVec(4);
-            inputSizeVec[0] = @(input_size[0]);
-            inputSizeVec[1] = @(input_size[1]);
-            inputSizeVec[2] = @(input_size[2]);
-            inputSizeVec[3] = @(input_dim.size() > 3 ? input_size[3] : 1);
-            inputSizeTensor = [mpsGraph constantWithScalar:0
-                                                     shape:[NSArray arrayWithObjects:inputSizeVec.data()
-                                                                               count:input_dim.size()]
-                                                  dataType:getMPSDataType(input)];
-          }
-          if (is_macOS_13_0_or_newer) {
-            if (!is_backward_pass) {
-              if (scaleOffsetTensor && !align_corners) {
-                if (resizeMode == MPSGraphResizeNearest) {
-                  newCachedGraph->outputTensor = [mpsGraph resizeNearestWithTensor:newCachedGraph->inputTensor
-                                                                        sizeTensor:newCachedGraph->outputSizeTensor
-                                                                 scaleOffsetTensor:scaleOffsetTensor
-                                                               nearestRoundingMode:nearestRoundingMode
-                                                                            layout:dataLayout
-                                                                              name:nil];
-                } else { // bilinear forward
-                  newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithTensor:newCachedGraph->inputTensor
-                                                                         sizeTensor:newCachedGraph->outputSizeTensor
-                                                                  scaleOffsetTensor:scaleOffsetTensor
-                                                                             layout:dataLayout
-                                                                               name:nil];
-                }
-              } else { // scaleOffsetTensor == nil || align_corners
-                if (resizeMode == MPSGraphResizeNearest) {
-                  newCachedGraph->outputTensor = [mpsGraph resizeNearestWithTensor:newCachedGraph->inputTensor
-                                                                        sizeTensor:newCachedGraph->outputSizeTensor
-                                                               nearestRoundingMode:nearestRoundingMode
-                                                                      centerResult:centerResults
-                                                                      alignCorners:align_corners
-                                                                            layout:dataLayout
-                                                                              name:nil];
-                } else { // bilinear forward
-                  newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithTensor:newCachedGraph->inputTensor
-                                                                         sizeTensor:newCachedGraph->outputSizeTensor
-                                                                       centerResult:centerResults
-                                                                       alignCorners:align_corners
-                                                                             layout:dataLayout
-                                                                               name:nil];
-                }
-              }
-            } else { // is_backward_pass == true
-              if (scaleOffsetTensor && !align_corners) {
-                if (resizeMode == MPSGraphResizeNearest) {
-                  newCachedGraph->outputTensor = [mpsGraph resizeNearestWithGradientTensor:newCachedGraph->inputTensor
-                                                                                     input:inputSizeTensor
-                                                                         scaleOffsetTensor:scaleOffsetTensor
-                                                                       nearestRoundingMode:nearestRoundingMode
-                                                                                    layout:dataLayout
-                                                                                      name:nil];
-                } else { // bilinear backward
-                  newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithGradientTensor:newCachedGraph->inputTensor
-                                                                                      input:inputSizeTensor
-                                                                          scaleOffsetTensor:scaleOffsetTensor
-                                                                                     layout:dataLayout
-                                                                                       name:nil];
-                }
-              } else { // scaleOffsetTensor == nil || align_corners
-                if (resizeMode == MPSGraphResizeNearest) {
-                  newCachedGraph->outputTensor = [mpsGraph resizeNearestWithGradientTensor:newCachedGraph->inputTensor
-                                                                                     input:inputSizeTensor
-                                                                       nearestRoundingMode:nearestRoundingMode
-                                                                              centerResult:centerResults
-                                                                              alignCorners:align_corners
-                                                                                    layout:dataLayout
-                                                                                      name:nil];
-                } else { // bilinear backward
-                  newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithGradientTensor:newCachedGraph->inputTensor
-                                                                                      input:inputSizeTensor
-                                                                               centerResult:centerResults
-                                                                               alignCorners:align_corners
-                                                                                     layout:dataLayout
-                                                                                       name:nil];
-                }
-              }
+      if (scale_w > 0.0) {
+        const float outScales[4] = {scale_h, scale_w, offset_y, offset_x};
+        scaleOffsetTensor = [mpsGraph constantWithData:[NSData dataWithBytes:outScales length:sizeof(outScales)]
+                                                 shape:@[ @4 ]
+                                              dataType:MPSDataTypeFloat32];
+      }
+      if (is_backward_pass) {
+        std::vector<NSNumber*> inputSizeVec(4);
+        inputSizeVec[0] = @(input_size[0]);
+        inputSizeVec[1] = @(input_size[1]);
+        inputSizeVec[2] = @(input_size[2]);
+        inputSizeVec[3] = @(input_dim.size() > 3 ? input_size[3] : 1);
+        inputSizeTensor = [mpsGraph constantWithScalar:0
+                                                 shape:[NSArray arrayWithObjects:inputSizeVec.data()
+                                                                           count:input_dim.size()]
+                                              dataType:getMPSDataType(input)];
+      }
+      if (is_macOS_13_0_or_newer) {
+        if (!is_backward_pass) {
+          if (scaleOffsetTensor && !align_corners) {
+            if (resizeMode == MPSGraphResizeNearest) {
+              newCachedGraph->outputTensor = [mpsGraph resizeNearestWithTensor:newCachedGraph->inputTensor
+                                                                    sizeTensor:newCachedGraph->outputSizeTensor
+                                                             scaleOffsetTensor:scaleOffsetTensor
+                                                           nearestRoundingMode:nearestRoundingMode
+                                                                        layout:dataLayout
+                                                                          name:nil];
+            } else { // bilinear forward
+              newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithTensor:newCachedGraph->inputTensor
+                                                                     sizeTensor:newCachedGraph->outputSizeTensor
+                                                              scaleOffsetTensor:scaleOffsetTensor
+                                                                         layout:dataLayout
+                                                                           name:nil];
             }
-          } else { // if macOS version < 13.0 (for backwards compatibility)
-            if (!is_backward_pass) {
-              newCachedGraph->outputTensor = [mpsGraph resizeTensor:newCachedGraph->inputTensor
-                                                         sizeTensor:newCachedGraph->outputSizeTensor
-                                                               mode:resizeMode
-                                                       centerResult:centerResults
-                                                       alignCorners:align_corners
-                                                             layout:dataLayout
-                                                               name:nil];
-            } else {
-              newCachedGraph->outputTensor = [mpsGraph resizeWithGradientTensor:newCachedGraph->inputTensor
-                                                                          input:inputSizeTensor
-                                                                           mode:resizeMode
+          } else { // scaleOffsetTensor == nil || align_corners
+            if (resizeMode == MPSGraphResizeNearest) {
+              newCachedGraph->outputTensor = [mpsGraph resizeNearestWithTensor:newCachedGraph->inputTensor
+                                                                    sizeTensor:newCachedGraph->outputSizeTensor
+                                                           nearestRoundingMode:nearestRoundingMode
+                                                                  centerResult:centerResults
+                                                                  alignCorners:align_corners
+                                                                        layout:dataLayout
+                                                                          name:nil];
+            } else { // bilinear forward
+              newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithTensor:newCachedGraph->inputTensor
+                                                                     sizeTensor:newCachedGraph->outputSizeTensor
                                                                    centerResult:centerResults
                                                                    alignCorners:align_corners
                                                                          layout:dataLayout
                                                                            name:nil];
             }
           }
+        } else { // is_backward_pass == true
+          if (scaleOffsetTensor && !align_corners) {
+            if (resizeMode == MPSGraphResizeNearest) {
+              newCachedGraph->outputTensor = [mpsGraph resizeNearestWithGradientTensor:newCachedGraph->inputTensor
+                                                                                 input:inputSizeTensor
+                                                                     scaleOffsetTensor:scaleOffsetTensor
+                                                                   nearestRoundingMode:nearestRoundingMode
+                                                                                layout:dataLayout
+                                                                                  name:nil];
+            } else { // bilinear backward
+              newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithGradientTensor:newCachedGraph->inputTensor
+                                                                                  input:inputSizeTensor
+                                                                      scaleOffsetTensor:scaleOffsetTensor
+                                                                                 layout:dataLayout
+                                                                                   name:nil];
+            }
+          } else { // scaleOffsetTensor == nil || align_corners
+            if (resizeMode == MPSGraphResizeNearest) {
+              newCachedGraph->outputTensor = [mpsGraph resizeNearestWithGradientTensor:newCachedGraph->inputTensor
+                                                                                 input:inputSizeTensor
+                                                                   nearestRoundingMode:nearestRoundingMode
+                                                                          centerResult:centerResults
+                                                                          alignCorners:align_corners
+                                                                                layout:dataLayout
+                                                                                  name:nil];
+            } else { // bilinear backward
+              newCachedGraph->outputTensor = [mpsGraph resizeBilinearWithGradientTensor:newCachedGraph->inputTensor
+                                                                                  input:inputSizeTensor
+                                                                           centerResult:centerResults
+                                                                           alignCorners:align_corners
+                                                                                 layout:dataLayout
+                                                                                   name:nil];
+            }
+          }
         }
-        return newCachedGraph;
-      });
-    }
+      } else { // if macOS version < 13.0 (for backwards compatibility)
+        if (!is_backward_pass) {
+          newCachedGraph->outputTensor = [mpsGraph resizeTensor:newCachedGraph->inputTensor
+                                                     sizeTensor:newCachedGraph->outputSizeTensor
+                                                           mode:resizeMode
+                                                   centerResult:centerResults
+                                                   alignCorners:align_corners
+                                                         layout:dataLayout
+                                                           name:nil];
+        } else {
+          newCachedGraph->outputTensor = [mpsGraph resizeWithGradientTensor:newCachedGraph->inputTensor
+                                                                      input:inputSizeTensor
+                                                                       mode:resizeMode
+                                                               centerResult:centerResults
+                                                               alignCorners:align_corners
+                                                                     layout:dataLayout
+                                                                       name:nil];
+        }
+      }
+    });
     MPSNDArrayDescriptor* sizeDesc = [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(2) ]];
     MPSNDArray* sizeNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:sizeDesc] autorelease];
     [sizeNDArray writeBytes:(int32_t[]){(int32_t)output_height, (int32_t)output_width} strideBytes:nil];

@@ -116,24 +116,15 @@ def unwrap_proxy(proxy_mode, e):
     else:
         return e
 
-# What invariants do we have for the 'val' set on the FX node?  It has accurate
-# metadata... but only for metadata that exists "below" all other subsystems
-# (most notably autograd, but also vmap, functorch transforms, etc).  This means
-# you can get the dtype, shape, stride, storage, but you CANNOT get requires_grad,
-# grad_fn, _base (_base actually may be set due to recursive call to
-# ADInplaceOrView, but you shouldn't rely on it.)
-def set_meta(proxy, val):
+def extract_val(val):
     if isinstance(val, FakeTensor):
-        proxy.node.meta['val'] = snapshot_fake(val)
-        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+        return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
-        proxy.node.meta['val'] = val
+        return val
     elif isinstance(val, (list, tuple)):
-        if any(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = [snapshot_fake(x) if isinstance(x, FakeTensor) else None for x in val]
+        return val.__class__([extract_val(x) for x in val])
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
             # TODO: This doesn't properly track storages.  A more robust
@@ -142,7 +133,23 @@ def set_meta(proxy, val):
             # snapshot_fake)
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
             with fake_tensor_mode:
-                proxy.node.meta['val'] = torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
+                return torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
+        else:
+            return None
+
+# What invariants do we have for the 'val' set on the FX node?  It has accurate
+# metadata... but only for metadata that exists "below" all other subsystems
+# (most notably autograd, but also vmap, functorch transforms, etc).  This means
+# you can get the dtype, shape, stride, storage, but you CANNOT get requires_grad,
+# grad_fn, _base (_base actually may be set due to recursive call to
+# ADInplaceOrView, but you shouldn't rely on it.)
+def set_meta(proxy, val):
+    proxy.node.meta['val'] = extract_val(val)
+    # Best effort tensor_meta setting; prefer using val!
+    if isinstance(val, FakeTensor):
+        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+    elif isinstance(val, torch.Tensor) and not val.is_sparse:
+        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
 def thunkify(f, *args, **kwargs):
@@ -698,12 +705,14 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
+            import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=True,
                     allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
+            import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 shape_env = ShapeEnv()

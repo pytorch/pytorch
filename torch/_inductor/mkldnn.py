@@ -282,25 +282,39 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
+                if cur_module.weight.device != torch.device(
+                    "cpu"
+                ) or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]:
+                    continue
                 if cur_module.training:
                     continue
+                if (
+                    cur_module.weight.dtype == torch.bfloat16
+                    and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                ):
+                    continue
                 if dynamo_config.dynamic_shapes:
-                    computation_node_input_meta = None
                     computation_node_input_size = None
-                    if (
+                    # Conv2d and ConvTranspose2d weight format are dependent on input size,
+                    # but ShapeProp may be failed to get the input size, so we skip them.
+                    if not (
                         type(cur_module) in [torch.nn.Linear]
-                        and cur_module.weight.dtype == torch.float32
+                        and cur_module.weight.dtype == torch.bfloat16
                     ):
                         continue
                 else:
-                    computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                    computation_node_input_size = computation_node_input_meta.shape
+                    computation_node_input_size = (
+                        node.args[0].meta.get("tensor_meta").shape
+                    )
                     if type(cur_module) in [torch.nn.Linear]:
                         # for fp32 linear, only packed when has mkl.
                         if (
                             cur_module.weight.dtype == torch.float32
                             and (not torch._C.has_mkl)
                         ) or len(computation_node_input_size) < 2:
+                            continue
+                    else:
+                        if len(computation_node_input_size) != 4:
                             continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
