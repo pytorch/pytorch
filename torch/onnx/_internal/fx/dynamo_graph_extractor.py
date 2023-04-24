@@ -135,20 +135,13 @@ class DynamoExport(exporter.FXGraphExtractor):
                     This opset is designed to serve as the functional IR to interface with compiler backends.
                     In contrast to primTorch, core aten opset doesn't decompose ops into explicit
                     type promotion and broadcasting ops.
-        tracing_mode: Define the behavior of input tensors during tracing
-                      * "real" disables FakeTensor and uses real tensors during graph tracing
-                      * Both "fake" and "symbolic" uses FakeTensor instead of actual tensors, but
-                        "symbolic" fully supports dynamic shapes.
-                      Valid tracing modes are: [real, fake, symbolic]
     """
 
     def __init__(
         self,
         aten_graph: Optional[bool] = None,
-        tracing_mode: Optional[str] = None,
     ):
         self.aten_graph = aten_graph or True
-        self.tracing_mode = tracing_mode or "real"
 
     def generate_fx(
         self,
@@ -182,13 +175,11 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         import torch._dynamo  # TODO: Not even torch/__init__.py imports it globally
 
-        # TODO(titaiwang): Set `tracing_mode` according to `self.options.dynamic_shapes`
         graph_module, graph_guard = torch._dynamo.export(
             wrapped_model,
             *args,
             aten_graph=self.aten_graph,
             decomposition_table=options.decomposition_table,
-            tracing_mode=self.tracing_mode,
             **kwargs,
         )
         del graph_guard  # Unused
