@@ -43,6 +43,13 @@ def format_argument(obj: Any) -> str:
 
     return result_str
 
+# NOTE: EDITING BELOW? READ THIS FIRST!
+#
+# The below functions register the `format_argument` function for different types via
+# `functools.singledispatch` registry. These are invoked by the diagnostics system
+# when recording function arguments and return values as part of a diagnostic.
+# Hence, code with heavy workload should be avoided. Things to avoid for example:
+# `torch.fx.GraphModule.print_readable()`.
 
 @_format_argument.register
 def _torch_nn_module(obj: torch.nn.Module) -> str:
