@@ -106,55 +106,42 @@ void binaryOpTensor(const Tensor& self,
     }
   }
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output_});
-    BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<BinaryOpCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      newCachedGraph->primaryTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
+      newCachedGraph->secondaryTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(otherDataType), getMPSShape(other));
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        BinaryOpCachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new BinaryOpCachedGraph(mpsGraph);
-          newCachedGraph->primaryTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(inputDataType), getMPSShape(self));
-          newCachedGraph->secondaryTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(otherDataType), getMPSShape(other));
+      MPSGraphTensor* primaryCastTensor = newCachedGraph->primaryTensor;
+      MPSGraphTensor* secondaryCastTensor = newCachedGraph->secondaryTensor;
 
-          MPSGraphTensor* primaryCastTensor = newCachedGraph->primaryTensor;
-          MPSGraphTensor* secondaryCastTensor = newCachedGraph->secondaryTensor;
-
-          // this type inference is only required at the time of graph creation
-          ScalarType common_dtype = c10::promoteTypes(inputDataType, otherDataType);
-          if (isIntegralType(common_dtype, true)) {
-            // integer inputs must be cast to float, if output is float
-            if (isFloatingType(outputDataType)) {
-              common_dtype = outputDataType;
-              // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
-            } else if (outputDataType == ScalarType::Bool &&
-                       (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
-              common_dtype = ScalarType::Byte;
-            }
-          }
-          if (inputDataType != common_dtype) {
-            primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
-          }
-          if (otherDataType != common_dtype) {
-            secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
-          }
-          newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
-          // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to
-          // int32 tensor Output tensor should have been promoted but it remains an int32 tensor
-          if (outputDataType != common_dtype ||
-              [newCachedGraph->outputTensor dataType] != getMPSDataType(outputDataType)) {
-            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, outputDataType);
-          }
+      // this type inference is only required at the time of graph creation
+      ScalarType common_dtype = c10::promoteTypes(inputDataType, otherDataType);
+      if (isIntegralType(common_dtype, true)) {
+        // integer inputs must be cast to float, if output is float
+        if (isFloatingType(outputDataType)) {
+          common_dtype = outputDataType;
+          // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
+        } else if (outputDataType == ScalarType::Bool &&
+                   (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
+          common_dtype = ScalarType::Byte;
         }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<BinaryOpCachedGraph*>(tmpCachedGraph);
-    }
+      }
+      if (inputDataType != common_dtype) {
+        primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
+      }
+      if (otherDataType != common_dtype) {
+        secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
+      }
+      newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
+      // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to
+      // int32 tensor Output tensor should have been promoted but it remains an int32 tensor
+      if (outputDataType != common_dtype || [newCachedGraph->outputTensor dataType] != getMPSDataType(outputDataType)) {
+        newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, outputDataType);
+      }
+    });
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     Placeholder selfPlaceholder;
