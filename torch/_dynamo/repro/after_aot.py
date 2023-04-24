@@ -71,6 +71,8 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
         except Exception as e:
+            # TODO: Failures here are troublesome because no real inputs,
+            # need a different serialization strategy
             if config.repro_after == "aot":
                 if config.repro_level == 1:
                     dump_compiler_graph_state(
@@ -87,7 +89,18 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                 log.error("CompilerError")
             raise
 
+        # We may run regular PyTorch compute that may trigger Dynamo, do NOT
+        # recursively attempt to accuracy minify in that case!
         def deferred_for_real_inputs(real_inputs):
+            # This is a bit obscure: if we recursively try to accuracy minify
+            # the SAME function, this would trigger.  But most of the time
+            # we should never hit this branch
+            if config.repro_after != "aot":
+                return inner_compiled_fn(real_inputs)
+            with config.patch(repro_after=None):
+                return inner_debug_fn(real_inputs)
+
+        def inner_debug_fn(real_inputs):
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
@@ -120,12 +133,12 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     )
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        copy_tensor_attrs,
+                        real_inputs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        copy_tensor_attrs,
+                        real_inputs,
                         f"{compiler_name}_accuracy",
                     )
                     raise AccuracyError("Bad accuracy detected")
@@ -290,6 +303,7 @@ class InputWriter:
         self.lines.append(
             f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
         )
+        self.seen_storages[ws] = v
         return v
 
     def tensor(self, t) -> str:
@@ -470,11 +484,16 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 def dump_to_minify(gm, args, compiler_name: str):
     favored_device = 1 if torch.cuda.device_count() >= 2 else 0
 
+    # TODO: factor this out
+    subdir = os.path.join(minifier_dir(), "checkpoints")
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+
     contents = textwrap.dedent(
         f"""
 isolate_fails_code_str = None
 
-{generate_compiler_repro_string(gm, args)}
+{generate_compiler_repro_string(gm, args, save_dir=subdir)}
 
 from functools import partial
 from torch._dynamo.repro.after_aot import (
@@ -488,7 +507,7 @@ env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
 minifier(
     mod,
     args,
-    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}", patch_code=isolate_fails_code_str),
+    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}", patch_code=isolate_fails_code_str, save_dir={subdir!r}),
     dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
 )
         """
@@ -496,7 +515,7 @@ minifier(
     return helper_for_dump_minify(contents)
 
 
-def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
+def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None, save_dir=None):
     if env is None:
         env = {}
     subdir = os.path.join(os.getcwd(), "isolate")
@@ -504,7 +523,7 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
-        repro_code = generate_compiler_repro_string(fx_g, args)
+        repro_code = generate_compiler_repro_string(fx_g, args, save_dir=save_dir)
         if patch_code is not None:
             repro_code = repro_code.replace(TEST_REPLACEABLE_COMMENT, patch_code)
         fd.write(repro_code)

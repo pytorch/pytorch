@@ -118,7 +118,7 @@ class ContentStoreWriter:
             return h
         # TODO: consider not using torch.save for this; we don't actually
         # need any metadata for the storage
-        subfolder = os.path.join(self.loc, "storages", h[:2])
+        subfolder = os.path.join(self.loc, "storages")
         os.makedirs(subfolder, exist_ok=True)
         torch.save(storage, os.path.join(subfolder, h))
         self.seen_storage_hashes.add(h)
@@ -154,7 +154,7 @@ class ContentStoreReader:
             if s is not None:
                 return s
         s = torch.load(
-            os.path.join(self.loc, "storages", h[:2], h), weights_only=True
+            os.path.join(self.loc, "storages", h), weights_only=True
         )._untyped_storage
         self.storage_cache[h] = StorageWeakRef(s)
         return s
