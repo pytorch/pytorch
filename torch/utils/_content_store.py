@@ -27,6 +27,8 @@
 # map to the same (padded) storage.  We think this will be immaterial for most
 # users.
 
+import ctypes
+import hashlib
 import os.path
 import struct
 from typing import Optional
@@ -39,7 +41,26 @@ import torch.nn.functional as F
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
-def hash_storage(storage):
+def hash_storage(storage, *, stable_hash=False):
+    # TODO: factor this into a helper
+    import torch._dynamo
+    compile_supported = torch._dynamo.is_dynamo_supported()
+    if storage.device.type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+        compile_supported = has_triton()
+
+    if stable_hash or compile_supported:
+        cpu_storage = storage.cpu()
+        # TODO: make storage support buffer protocol so this isn't
+        # necessary
+        buf = (ctypes.c_byte * cpu_storage.nbytes()).from_address(
+            cpu_storage.data_ptr()
+        )
+        sha1 = hashlib.sha1()
+        sha1.update(buf)
+        return sha1.hexdigest()
+
+
     # Use of torch.compile is mandatory for (1) good memory usage
     # and (2) xor_sum implementation
     @torch.compile(dynamic=True)
