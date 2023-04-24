@@ -1874,7 +1874,7 @@ class TritonScheduling:
             wrapper.kernel_to_hash[kernel_name] = basename
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.triton('triton_', '''")
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("''')")
 
