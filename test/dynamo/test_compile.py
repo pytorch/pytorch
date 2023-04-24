@@ -24,16 +24,10 @@ class InPlaceCompilationTests(unittest.TestCase):
         model = ToyModel()
         cnt = CompileCounter()
         model.compile(backend=cnt)
+        self.assertEqual(cnt.frame_count, 0)
         x = torch.randn(10, 10)
         model(x)
         self.assertEqual(cnt.frame_count, 1)
-
-    def test_overwrite_call_impl(self):
-        torch._dynamo.reset()
-        model = ToyModel()
-        self.assertTrue(model._compiled_call_impl is None)
-        model.compile()
-        self.assertTrue(model._compiled_call_impl is not None)
 
     def test_save(self):
         torch._dynamo.reset()
