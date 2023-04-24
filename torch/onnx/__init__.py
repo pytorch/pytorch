@@ -9,6 +9,9 @@ from torch._C._onnx import (
     TrainingMode,
 )
 
+# TODO: Uncomment this after `import onnxscript` is not on `import torch` path
+# from torch.onnx._internal.fx import DynamoExport, DynamoOptimize, FXSymbolicTracer
+
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
     errors,
@@ -93,6 +96,9 @@ __all__ = [
     "ExportOutput",
     "ExportOutputSerializer",
     "dynamo_export",
+    # "DynamoExport",    # TODO: uncomment after fixing the `import onnxscript` issue
+    # "DynamoOptimize",  #       e.g. free standing code using onnxscript
+    # "FXSymbolicTracer",
 ]
 
 # Set namespace for exposed private names
@@ -102,6 +108,9 @@ ExportOptions.__module__ = "torch.onnx"
 ExportOutput.__module__ = "torch.onnx"
 ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
+# DynamoExport.__module__ = "torch.onnx"  # TODO: uncomment after fixing the `import onnxscript` issue
+# DynamoOptimize.__module__ = "torch.onnx"
+# FXSymbolicTracer.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

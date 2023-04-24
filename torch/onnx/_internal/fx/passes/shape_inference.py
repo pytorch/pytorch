@@ -4,7 +4,6 @@ import itertools
 from typing import Optional
 
 import torch
-import torch._dynamo
 import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
@@ -30,6 +29,10 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
         # 2. run FakeTensorProp
         # If (1) and (2) are done with difference FakeTensorMode's, undefined behavior may
         # happen.
+        import torch._dynamo  # NOTE: Do not import at top level.
+
+        # Even torch/__init__.py does it internally, only
+        # Causes circular when torch._dynamo.* surfaces public facing API during `import torch`
         fake_tensor_mode = (
             torch._dynamo.utils.detect_fake_mode(args) or fake_tensor.FakeTensorMode()
         )

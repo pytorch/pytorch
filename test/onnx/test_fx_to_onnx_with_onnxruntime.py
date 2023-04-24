@@ -34,8 +34,8 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
-from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
+from torch.onnx._internal import _beartype, diagnostics, exporter, fx as fx_onnx
+from torch.onnx._internal.fx import dynamo_graph_extractor, fx_symbolic_graph_extractor
 from torch.testing._internal import common_utils
 from torch.types import Number
 
@@ -43,6 +43,16 @@ _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
 _InputArgsType = Optional[Union[torch.Tensor, Sequence[Any], Mapping[str, Any]]]
 _OutputsType = Sequence[_NumericType]
+_MainFXTracerClass = dynamo_graph_extractor.DynamoExport
+
+
+@_beartype.beartype
+def _fx_tracer_class_name(fx_tracer_cls: Type[exporter.FXGraphExtractor]):
+    return (
+        "dynamo_export"
+        if fx_tracer_cls == _MainFXTracerClass
+        else fx_tracer_cls.__name__
+    )
 
 
 try:
@@ -184,6 +194,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             opset_version=opset_version,
             op_level_debug=test_suite.op_level_debug,
             dynamic_shapes=test_suite.dynamic_shapes,
+            fx_tracer=test_suite.fx_tracer(),
         ),
     )
 
@@ -218,10 +229,14 @@ def _parameterized_class_attrs_and_values():
         itertools.product(
             (True, False),
             (True, False),
+            (
+                dynamo_graph_extractor.DynamoExport,
+                dynamo_graph_extractor.DynamoOptimize,
+            ),
         )
     )
     return {
-        "attrs": ["op_level_debug", "dynamic_shapes"],
+        "attrs": ["op_level_debug", "dynamic_shapes", "fx_tracer"],
         "input_values": input_values,
     }
 
@@ -234,7 +249,10 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
     """
     suffixes = []
     for k, v in input_dicts.items():
-        suffixes.append(f"{k}_{v}")
+        if k == "fx_tracer":
+            suffixes.append(_fx_tracer_class_name(v))
+        else:
+            suffixes.append(f"{k}_{v}")
     return f"{cls.__name__}_{'_'.join(suffixes)}"
 
 
@@ -245,6 +263,7 @@ def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     op_level_debug: bool
     dynamic_shapes: bool
+    fx_tracer: Type[exporter.FXGraphExtractor]
 
     def setUp(self):
         super().setUp()
@@ -261,6 +280,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             f"test_report_{self._testMethodName}"
             f"_op_level_debug_{self.op_level_debug}"
             f"_dynamic_axes_{self.dynamic_shapes}"
+            f"_{_fx_tracer_class_name(self.fx_tracer)}"
             ".sarif",
             compress=False,
         )
@@ -283,9 +303,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, func, (tensor_x,))
 
-    @pytorch_test_common.xfail(
-        "AssertionError: Dynamo input/output is not consistent with traced input/output. "
-        "Ref: https://github.com/pytorch/pytorch/issues/96379"
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: (
+                "AssertionError: Dynamo input/output is not consistent with traced input/output. "
+                "Ref: https://github.com/pytorch/pytorch/issues/96379"
+            )
+        }
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -342,6 +366,21 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
         "instance of <protocol 'torch.Tensor'>."
     )
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: (
+                "beartype.roar.BeartypeCallHintReturnViolation: @beartyped "
+                "torch.onnx._internal.exporter.ExportOutput.adapt_torch_inputs_to_onnx() "
+                "return (tensor([[[ 1.5410, -0.2934]]]), 8.0) violates type hint "
+                "typing.Sequence[torch.Tensor], as tuple index 1 item float 8.0 not "
+                "instance of <protocol 'torch.Tensor'>."
+            ),
+            dynamo_graph_extractor.DynamoOptimize: (
+                "RuntimeError: The two modules have different number of arguments. "
+                "module: 2, reference_module: 1"
+            ),
+        }
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -363,6 +402,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (tensor_x,), b=5.0
         )
 
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoOptimize: "Unhandled unused argument.",
+        }
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -399,6 +443,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             self, func, (x_dict, y_tuple, z_list)
         )
 
+    @pytorch_test_common.skip_fx_tracer(
+        {dynamo_graph_extractor.DynamoOptimize: "Unsupported output structure."}
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -540,6 +587,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "while running Expand node. Name:'_0x55b501ebaf10_n2' "
         "Status Message: invalid expand shape"
     )
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: (
+                "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
+                "while running Expand node. Name:'_0x55b501ebaf10_n2' "
+                "Status Message: invalid expand shape"
+            ),
+        }
+    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -561,6 +617,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.xfail(
         "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
+    )
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: (
+                "RuntimeError: Unknown call_function target: aten.scalar_tensor.default"
+            ),
+            dynamo_graph_extractor.DynamoOptimize: (
+                "RuntimeError: The two modules have different number of arguments. "
+                "module: 1, reference_module: 0"
+            ),
+        }
     )
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
@@ -654,6 +721,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail("TypeError: missing a required argument: 'end'")
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: "TypeError: missing a required argument: 'end'",
+            dynamo_graph_extractor.DynamoOptimize: (
+                "RuntimeError: The two modules have different number of arguments. "
+                "module: 1, reference_module: 0"
+            ),
+        }
+    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
@@ -714,8 +790,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.xfail(
-        "Unknown call_function target: aten.lift_fresh_copy.default"
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: "Unknown call_function target: aten.lift_fresh_copy.default"
+        }
     )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
@@ -759,6 +837,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     @pytorch_test_common.skip_dynamic_fx_test(
         "Shapes are assumed static by default by 'dynamo.export'."
+    )
+    @pytorch_test_common.skip_fx_tracer(
+        {
+            dynamo_graph_extractor.DynamoExport: "Shapes are assumed static by default by 'dynamo.export'."
+        }
     )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
@@ -866,16 +949,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
 
-                export_output = FXSymbolicTraceExporter(
-                    options=torch.onnx.ExportOptions(
+                export_output = torch.onnx.dynamo_export(
+                    fake_model,
+                    *fake_args,
+                    export_options=torch.onnx.ExportOptions(
                         opset_version=self.opset_version,
                         dynamic_shapes=self.dynamic_shapes,
                         op_level_debug=self.op_level_debug,
+                        fx_tracer=fx_symbolic_graph_extractor.FXSymbolicTracer(),
                     ),
-                    model=fake_model,
-                    model_args=fake_args,
-                    model_kwargs={},
-                ).export()
+                )
 
                 onnx_model = export_output.model_proto
 

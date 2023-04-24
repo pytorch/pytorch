@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import functools
 
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.fx
 import torch.onnx
+import torch.onnx._internal.exporter as exporter
 
-import torch.onnx._internal.fx.fx_exporter as fx_exporter
+import torch.onnx._internal.fx.io_adapter as io_adapter
 import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype, exporter
+from torch.onnx import utils as onnx_utils
+from torch.onnx._internal import _beartype
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -93,7 +95,7 @@ def _module_expansion_symbolic_trace(
     expanded into operators (e.g., torch.matmul, torch.add, +, and -) to simplify graph
     structure.
     """
-    # For functions doesn't support symbolic tracing, create wrappers
+    # For functions that don't support symbolic tracing, create wrappers
     # which produce symbolic results during tracing.
     patched_torch_methods = {
         target_name: _wrap_for_symbolic_trace(getattr(torch, target_name))
@@ -125,18 +127,51 @@ def _module_expansion_symbolic_trace(
 
 # TODO: Migrate to `DynamoExporter` after fake model tracing is supported.
 # Proposal at https://github.com/pytorch/pytorch/issues/95900.
-class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
+class FXSymbolicTracer(exporter.FXGraphExtractor):
+    """Generates a FX GraphModule using torch.fx.symbolic_trace API
+    Args:
+        concrete_args: Inputs to be partially specialized
+            It can be used to remove control flow or data structures.
+            For example::
+                def f(a, b):
+                    if b == True:
+                        return a
+                    else:
+                        return a*2
+            FX can typically not trace through this due to the presence of control
+            flow. However, we can use `concrete_args` to specialize on the value of
+            `b` to trace through this::
+                f = fx.symbolic_trace(f, concrete_args={'b': False})
+                assert f(3, False)  == 6
+            Note that although you can still pass in different values of `b`, they will be ignored.
+            It can also be used to eliminate data-structure handling from
+            our function. This will use pytrees to flatten your input. To avoid
+            overspecializing, pass in `fx.PH` for values that shouldn't be
+            specialized. For example::
+                def f(x):
+                    out = 0
+                    for v in x.values():
+                        out += v
+                    return out
+                f = fx.symbolic_trace(f, concrete_args={'x': {'a': fx.PH, 'b': fx.PH, 'c': fx.PH}})
+                assert f({'a': 1, 'b': 2, 'c': 4}) == 7
+    """
+
+    def __init__(self, concrete_args: Optional[Dict[str, Any]] = None):
+        # TODO: plumb ``concrete_args`` to symbolic_trace call at ``generate_fx``
+        self.concrete_args = concrete_args
+
     @_beartype.beartype
     def _trace_into_fx_graph_via_fx_symbolic_trace(
-        self,
+        self, model, model_args, model_kwargs
     ) -> Tuple[torch.fx.GraphModule, Sequence[Any]]:
         # Bind model args and kwargs with model signature to retrieve default values
         # of unprovided arguments. These are then used to construct ``concrete_args``.
-        _, named_args = self._apply_input_adapt_step(
-            fx_exporter.BindInputStep,
-            self.model_args,
-            self.model_kwargs,
-            step_init_args=(self.model_signature,),
+        _, named_args = self.adapt_input(
+            io_adapter.BindInputStep,
+            model_args,
+            model_kwargs,
+            step_init_args=(onnx_utils.model_signature(model),),
         )
 
         # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
@@ -154,20 +189,28 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
                 concrete_args[param_name] = param_value
 
         # Merge kwargs back into args since that is the format FX graph expects.
-        bound_args, _ = self._apply_input_adapt_step(
-            fx_exporter.MergeKwargsIntoArgsStep, [], named_args
+        bound_args, _ = self.adapt_input(
+            io_adapter.MergeKwargsIntoArgsStep, [], named_args
         )
 
         return (
-            _module_expansion_symbolic_trace(self.model, concrete_args=concrete_args),
+            _module_expansion_symbolic_trace(model, concrete_args=concrete_args),
             bound_args,
         )
 
-    def export(self) -> torch.onnx.ExportOutput:
-        self._input_adapter = exporter.InputAdapter()
-        self._output_adapter = exporter.OutputAdapter()
+    def generate_fx(
+        self,
+        options: exporter.ResolvedExportOptions,
+        model: Union[torch.nn.Module, Callable],
+        model_args: Sequence[Any],
+        model_kwargs: Mapping[str, Any],
+    ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
+        self._input_adapter = io_adapter.InputAdapter()
+        self._output_adapter = io_adapter.OutputAdapter()
 
-        graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace()
+        graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace(
+            model, model_args, model_kwargs
+        )
 
         # Make sure all placeholder nodes are executed before get_attr nodes.
         # Otherwise, inputs can interleave with initializers in the final ModeoProto.graph.input.
@@ -190,8 +233,4 @@ class FXSymbolicTraceExporter(fx_exporter.FXGraphModuleExporter):
         # Finalize the graph editing.
         graph_module.recompile()
 
-        export_output = self.export_fx_to_onnx(
-            graph_module, (*bound_args, *replaced_attrs)
-        )
-
-        return export_output
+        return graph_module, (*bound_args, *replaced_attrs)  # type: ignore[return-value]

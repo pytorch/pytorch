@@ -51,19 +51,26 @@ from torch.onnx._internal import (
 )
 
 __all__ = [
-    "is_in_onnx_export",
-    "select_model_mode_for_export",
     "disable_apex_o2_state_dict_hook",
-    "setup_onnx_logging",
-    "exporter_context",
     "export",
-    "warn_on_static_input_change",
-    "unpack_quantized_tensor",
+    "exporter_context",
     "export_to_pretty_string",
-    "unconvertible_ops",
+    "model_signature",
+    "is_in_onnx_export",
     "register_custom_op_symbolic",
+    "select_model_mode_for_export",
+    "setup_onnx_logging",
+    "unconvertible_ops",
+    "unpack_quantized_tensor",
     "unregister_custom_op_symbolic",
+    "warn_on_static_input_change",
 ]
+
+
+def model_signature(model: Union[torch.nn.Module, Callable]) -> inspect.Signature:
+    return inspect.signature(
+        model.forward if isinstance(model, torch.nn.Module) else model
+    )
 
 
 def is_in_onnx_export() -> bool:
