@@ -906,7 +906,9 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", f"--sc={stepcurrent_key}"]
+        rerun_options = ["-x", "--reruns=2"]
+        if IS_CI:
+            rerun_options.append(f"--sc={stepcurrent_key}")
 
     pytest_args = [
         "-vv",
