@@ -94,20 +94,22 @@ def dynamo_profiled(func):
 
 frame_phase_timing = collections.OrderedDict()
 
-curr_frame = 0
+TOTAL_FRAME_COUNTER = 0
 
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
-def increment_frame():
-    global curr_frame
-    curr_frame = curr_frame + 1
+def increment_frame(frame_state):
+    global TOTAL_FRAME_COUNTER
+    if "_id" not in frame_state:
+        frame_state["_id"] = TOTAL_FRAME_COUNTER
+        TOTAL_FRAME_COUNTER += 1
 
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count():
-    global curr_frame
+    global TOTAL_FRAME_COUNTER
     frame_phase_timing.clear()
-    curr_frame = 0
+    TOTAL_FRAME_COUNTER = 0
 
 
 op_count = 0
@@ -171,7 +173,7 @@ def dynamo_timed(original_function=None, phase_name=None):
             # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
             compilation_metrics[key].append(time_spent)
             if phase_name:
-                frame_key = str(curr_frame)
+                frame_key = str(TOTAL_FRAME_COUNTER)
                 if frame_key not in frame_phase_timing:
                     frame_phase_timing[frame_key] = {}
                 assert (
