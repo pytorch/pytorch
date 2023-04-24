@@ -195,14 +195,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
 
     @staticmethod
-    def int_minimum(a, b):
-        return f"tl.where({a} < {b}, {a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"tl.where({a} > {b}, {a}, {b})"
-
-    @staticmethod
     def where(a, b, c):
         return f"tl.where({a}, {b}, {c})"
 
@@ -1158,7 +1150,8 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            module = "triton_helpers" if reduction_type in ("prod",) else "tl"
+            use_helper = reduction_type in {"max", "min", "prod"}
+            module = "triton_helpers" if use_helper else "tl"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         dim = len(self.range_trees) - 1
