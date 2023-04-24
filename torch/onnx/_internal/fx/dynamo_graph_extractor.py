@@ -45,6 +45,7 @@ class DynamoOptimize(exporter.FXGraphExtractor):
         disable: bool = False,
         dynamic: bool = False,
     ):
+        super().__init__()
         self.backend = backend or DynamoOptimizeGraphCaptureCompiler()
         self.nopython = nopython
         self.disable = disable
@@ -57,9 +58,6 @@ class DynamoOptimize(exporter.FXGraphExtractor):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
-        self._input_adapter = io_adapter.InputAdapter()
-        self._output_adapter = io_adapter.OutputAdapter()
-
         # Fill in default values for optional args and kwargs. The goal is to preserve
         # them as inputs in `dynamo.optimize` produced FX graph. Otherwise, they will
         # be traced as constants.
@@ -103,7 +101,7 @@ class DynamoOptimize(exporter.FXGraphExtractor):
 
         # Outputs are flattened by `dynamo.optimize`.
         # Apply and record this output adapt step.
-        self._output_adapter.append_step(io_adapter.DynamoFlattenOutputStep())
+        self.output_adapter.append_step(io_adapter.DynamoFlattenOutputStep())
         # TODO: `dynamo.optimize` does not capture non computation part of the graph.
         # Hence any tensor that is returned multiple times will only appear once
         # in the return statement of `dynamo.optimize` traced graph. A specialized
@@ -137,6 +135,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         self,
         aten_graph: Optional[bool] = None,
     ):
+        super().__init__()
         self.aten_graph = aten_graph or True
 
     def generate_fx(
@@ -146,9 +145,6 @@ class DynamoExport(exporter.FXGraphExtractor):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
-        self._input_adapter = io_adapter.InputAdapter()
-        self._output_adapter = io_adapter.OutputAdapter()
-
         # args will be converted to symbolic tensor. Let's copy to avoid side effects.
         args = copy.deepcopy(model_args)
         kwargs = copy.deepcopy(model_kwargs)
@@ -161,7 +157,7 @@ class DynamoExport(exporter.FXGraphExtractor):
             model, dynamo_flatten_output_step
         )
         # Record the output adapter step.
-        self._output_adapter.append_step(dynamo_flatten_output_step)
+        self.output_adapter.append_step(dynamo_flatten_output_step)
 
         # Translate callable to FX graph.
         #
