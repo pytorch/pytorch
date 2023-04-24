@@ -539,6 +539,12 @@ def unsafe_chunk(g: jit_utils.GraphContext, self, chunks, dim, _outputs=None):
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::tile")
+@_beartype.beartype
+def tile(g: jit_utils.GraphContext, self, dims):
+    return g.op("Tile", self, dims)
+
+
 @_onnx_symbolic("aten::repeat_interleave")
 @_beartype.beartype
 def repeat_interleave(

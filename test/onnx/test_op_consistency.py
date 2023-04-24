@@ -312,6 +312,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "sqrt",
         "stft",
         "t",
+        "tile",
         "unflatten",
     ]
 )
@@ -336,6 +337,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     fixme("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
+    dont_care("tile", opsets=[opsets_before(13)], reason=reason_onnx_does_not_support("Tile")),
     fixme("unflatten", opsets=[opsets_before(13)], reason="Helper function is needed to support legacy ops."),
 )
 # fmt: on
