@@ -343,7 +343,7 @@ class TestControlFlowTraced(TestCase):
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(f_wrapper(f))(example_input_func)
 
-    def test_cond_functionalized_nested_input_aliasing_with_aot_func(self):
+    def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
 
@@ -376,6 +376,41 @@ class TestControlFlowTraced(TestCase):
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
             make_fx(f_wrapper(f))(example_input_func)
+
+    def test_cond_functionalized_aot_func_check_functional(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            y = x.sin()
+            y.add_(5)
+            return y
+
+        def f(x):
+            pred = x.shape[0] == 4
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(5, 5)
+        example_input_func = torch._to_functional_tensor(example_input, mirror_autograd_meta=True)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        result_gm = make_fx(f_wrapper(f))(example_input_func)
+        for node in result_gm.true_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+        for node in result_gm.false_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
 
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):

@@ -222,19 +222,28 @@ def _has_potential_branch_input_alias(branch, inputs):
 
 @cond.py_impl(DispatchKey.Functionalize)
 def cond_func(pred, true_fn, false_fn, inputs):
-    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=torch._C._functionalization_reapply_views_tls())
-    unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=torch._C._functionalization_reapply_views_tls())
+    reapply_views = torch._C._functionalization_reapply_views_tls()
+    unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
+    unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
+    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    functional_true = functionalize(true_fn, remove=mode)
+    functional_false = functionalize(false_fn, remove=mode)
     guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
-    for branch in [true_fn, false_fn]:
-        if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
-            raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                    "might be modifying the input!")
+    try:
+        for branch in [true_fn, false_fn]:
+            if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
+                raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                        "might be modifying the input!")
 
-        if _has_potential_branch_input_alias(branch, unwrapped_inputs):
-            raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                    "might be aliasing the input!")
+            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
+                raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                        "might be aliasing the input!")
 
-    return _wrap_all_tensors_to_functional(cond(unwrapped_pred, true_fn, false_fn, unwrapped_inputs), level=0)
+        cond_return = cond(unwrapped_pred, functional_true, functional_false, unwrapped_inputs)
+        return _wrap_all_tensors_to_functional(cond_return, level=0)
+
+    finally:
+        del guard
 
 
 @cond.py_impl(torch._C._functorch.TransformType.Functionalize)
