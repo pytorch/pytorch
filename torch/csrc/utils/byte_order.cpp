@@ -262,12 +262,12 @@ void THP_decodeComplexDoubleBuffer(
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t x;
+      uint64_t x;
       double re;
     };
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t y;
+      uint64_t y;
       double im;
     };
 
