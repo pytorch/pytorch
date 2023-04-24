@@ -116,24 +116,11 @@ class DataTypePropagation:
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
 
-    def deduce_reduction_node_dtype(self, node: torch.fx.Node):
-        assert node.target == "reduction"
-        _, _, _, _, reduction_type, _, _ = node.args
-        reduction_to_dtype = {
-            "any": torch.bool,
-            "argmin": torch.int64,
-            "argmax": torch.int64,
-        }
-        if reduction_type in reduction_to_dtype:
-            return reduction_to_dtype[reduction_type]
-        else:
-            return self.deduce_node_dtype_by_inputs(node)
-
     def deduce_node_dtype(self, node: torch.fx.Node):
         if node.target in OpDtypeClassifier.boolean_ops():
             return torch.bool
 
-        if node.target in OpDtypeClassifier.io_ops():
+        if node.op in OpDtypeClassifier.io_ops():
             return None
 
         if node.target in OpDtypeClassifier.explicit_dtype_ops():
@@ -147,7 +134,8 @@ class DataTypePropagation:
             return V.graph.get_dtype(buf_name)
 
         if node.target in OpDtypeClassifier.reduction_ops():
-            return self.deduce_reduction_node_dtype(node)
+            _, _, dtype, _, _, _, _ = node.args
+            return dtype
 
         return self.deduce_node_dtype_by_inputs(node)
 
