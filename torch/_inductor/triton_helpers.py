@@ -1,6 +1,14 @@
 import triton
 import triton.language as tl
 
+@triton.jit
+def is_floating(x):
+    if isinstance(x, tl.constexpr):
+        ret = isinstance(x.value, float)
+    else:
+        ret = x.dtype.is_floating()
+    return ret
+
 
 @triton.jit
 def _prod_accumulate(a, b):
@@ -15,7 +23,7 @@ def prod(input, axis):
 @triton.jit
 def minimum(a, b):
     mask = a < b
-    if a.dtype.is_floating():
+    if is_floating(a):
         mask |= a != a
     return tl.where(mask, a, b)
 
@@ -23,7 +31,7 @@ def minimum(a, b):
 @triton.jit
 def maximum(a, b):
     mask = a > b
-    if a.dtype.is_floating():
+    if is_floating(a):
         mask |= a != a
     return tl.where(mask, a, b)
 
