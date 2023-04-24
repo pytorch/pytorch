@@ -1150,7 +1150,8 @@ class TritonKernel(Kernel):
             indirect_indexing
             and config.triton.assert_indirect_indexing
             and torch.version.hip is None
-        ):            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
+        ):
+            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
