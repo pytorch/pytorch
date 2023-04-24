@@ -1,4 +1,4 @@
-from .optimizer import Optimizer, required, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc  # type: ignore[attr-defined]
+from .optimizer import Optimizer, _use_grad_for_differentiable, _differentiable_doc, _maximize_doc  # type: ignore[attr-defined]
 import torch
 from typing import List, Optional
 from torch import Tensor
@@ -10,7 +10,7 @@ class LARS(Optimizer):
     def __init__(
         self,
         params,
-        lr=required,
+        lr=1e-3,
         momentum: float = 0,
         dampening: float = 0,
         weight_decay: float = 0,
@@ -21,7 +21,7 @@ class LARS(Optimizer):
         maximize: bool = False,
         differentiable: bool = False,
     ):
-        if lr is not required and lr < 0.0:
+        if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight decay value: {weight_decay}")
