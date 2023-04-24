@@ -10,6 +10,9 @@
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/native/StridedRandomAccessor.h>
 
+#define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
+
+
 namespace at { namespace native {
 
 template <typename T>
@@ -154,6 +157,8 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   }
 }
 
+#if HAS_WARP_MERGE_SORT()
+
 template <int KeyDims, int ValueDims, int sort_size, int max_block_dim_y,
           typename K, typename V, typename Comparator, typename IndexType>
 C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE * max_block_dim_y)
@@ -236,6 +241,8 @@ warpMergeSortKVInPlace(
   WARP_SYNC();
   StoreValues(warp_storage.store_values).Store(values_iter, local_values, keySliceSize);
 }
+
+#endif // HAS_WARP_MERGE_SORT()
 
 template <int KeyDims, int ValueDims,
           int block_size, int items_per_thread,

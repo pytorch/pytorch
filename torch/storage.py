@@ -30,6 +30,7 @@ class _StorageBase:
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
+    def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
 
     def size(self) -> int:
@@ -91,7 +92,7 @@ class _StorageBase:
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -190,13 +191,24 @@ class _StorageBase:
         """Casts this storage to complex float type"""
         return self._to(torch.cfloat)
 
-    def pin_memory(self):
-        """Copies the storage to pinned memory, if it's not already pinned."""
-        if self.is_cuda:
+    def pin_memory(self, device="cuda"):
+        """Copies the CPU storage to pinned memory, if it's not already pinned."""
+        if self.device.type != 'cpu':
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
-        import torch.cuda
-        allocator = torch.cuda.memory._host_allocator()  # type: ignore[attr-defined]
-        return type(self)(self.size(), allocator=allocator).copy_(self)
+
+        """For other backends, device need to set. If not set, the default behaviour is CUDA device."""
+        if device == "cuda":
+            import torch.cuda
+            allocator = torch.cuda.memory._host_allocator()  # type: ignore[attr-defined]
+            return type(self)(self.size(), allocator=allocator).copy_(self)
+        else :
+            import torch
+            if torch._C._get_privateuse1_backend_name() == device:
+                pinned_tensor = torch.tensor([], dtype=torch.uint8, device=self.device).set_(
+                    cast(Storage, self)).pin_memory(device)
+                return pinned_tensor._typed_storage()._untyped_storage
+            else :
+                raise TypeError(f"cannot pin CPU memory to {device} device, please check the target device.")
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -725,7 +737,7 @@ class TypedStorage:
 
     def __iter__(self):
         _warn_typed_storage_removal()
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter((self[i] for i in range(self.size())))
 
     def __copy__(self):
         _warn_typed_storage_removal()
@@ -758,10 +770,10 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def pin_memory(self):
+    def pin_memory(self, device="cuda"):
         """Copies the  storage to pinned memory, if it's not already pinned."""
         _warn_typed_storage_removal()
-        return self._new_wrapped_storage(self._untyped_storage.pin_memory())
+        return self._new_wrapped_storage(self._untyped_storage.pin_memory(device=device))
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -982,9 +994,17 @@ class TypedStorage:
     def _expired(cls, *args, **kwargs):
         return UntypedStorage._expired(*args, **kwargs)
 
-    def is_pinned(self):
-        _warn_typed_storage_removal()
-        return self._untyped_storage.is_pinned()
+    def is_pinned(self, device="cuda"):
+        """For other backends, device need to set. If not set, the default behaviour is CUDA device."""
+        if device == "cuda":
+            _warn_typed_storage_removal()
+            return self._untyped_storage.is_pinned()
+        elif torch._C._get_privateuse1_backend_name() == device:
+            return torch.tensor([], dtype=torch.uint8, device=self.device).set_(
+                cast(Storage, self._untyped_storage)).is_pinned(device)
+        else:
+            # Currently, cannot pin CPU storage memory to other device, except for cuda and privateuse1.
+            return False
 
     def _write_file(self, *args, **kwargs):
         return self._untyped_storage._write_file(*args, **kwargs)

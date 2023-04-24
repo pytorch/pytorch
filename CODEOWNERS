@@ -14,7 +14,7 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser
+/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD @anjali411
@@ -65,6 +65,7 @@ nn/qat/ @jerryzh168
 
 # Docker
 /.ci/docker/ @jeffdaily
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @ngimel
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -117,3 +118,6 @@ torch/profiler/ @robieta
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
+
+# Dataloader
+torch/utils/data/ @NivekT @ejguan

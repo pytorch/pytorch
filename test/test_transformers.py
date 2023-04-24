@@ -35,7 +35,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater, PLATFORM
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
 
-
 @contextlib.contextmanager
 def use_deterministic_algorithims(mode: bool, warn_only: bool):
     r"""
@@ -57,7 +56,7 @@ def use_deterministic_algorithims(mode: bool, warn_only: bool):
 default_atol = {torch.float16: 1e-3, torch.bfloat16: 1e-3, torch.float32: 1e-5}
 default_rtol = {torch.float16: 1e-3, torch.bfloat16: 1.6e-2, torch.float32: 1.3e-6}
 
-isSM86Device = torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 6)
+isSM86or89Device = torch.cuda.is_available() and torch.cuda.get_device_capability() in [(8, 6), (8, 9)]
 
 
 def get_rtol(true_value: torch.Tensor, computed_value: torch.Tensor) -> float:
@@ -155,6 +154,37 @@ class TestTransformers(NNTestCase):
                 test_eval_bool = encoder(test, src_key_padding_mask=pad_mask)
                 l1_bool = nn.L1Loss()(test_train_bool[:, 0:2, :], test_eval_bool[:, 0:2, :]).item()
                 self.assertTrue(l1_bool < 1e-4, "Eval/Train difference in pad_mask BOOL")
+
+    @parametrize("device", device_list)
+    @parametrize("attn_mask_dim", [2, 3, None])
+    @parametrize("key_padding_mask_dim", [2, None])
+    def test_multiheadattention_fastpath_attn_mask(self, device, attn_mask_dim, key_padding_mask_dim):
+        with torch.no_grad():
+            B = 2
+            L = 4
+            D = 8
+            H = 4
+
+
+            if attn_mask_dim == 2:
+                attn_mask = torch.randn(L, L, device=device) > 0
+            elif attn_mask_dim == 3:
+                attn_mask = torch.randn(B * H, L, L, device=device) > 0
+            elif attn_mask_dim is None:
+                attn_mask = None
+
+            if key_padding_mask_dim == 2:
+                key_padding_mask = torch.randn(B, L, device=device) > 0
+            elif key_padding_mask_dim is None:
+                key_padding_mask = None
+
+            mha = nn.MultiheadAttention(D, H, batch_first=True, device=device)
+            X = torch.randn(B, L, D, device=device)
+
+            mha.train()  # disable fast path
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
+            mha.eval()  # enable fast path
+            out, _ = mha(X, X, X, attn_mask=attn_mask, key_padding_mask=key_padding_mask, need_weights=False)
 
     @parametrize("device", device_list)
     @parametrize("nhead", [1, 4, 8])
@@ -582,6 +612,19 @@ class TestTransformers(NNTestCase):
             transformer_decoder(inputs, input_seq_len, memory)
 
 
+    def test_encoder_is_causal(self):
+
+        d_model = 3
+        layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
+        layer.eval()
+        x = torch.randn(1, 5, d_model)
+        unmasked_output = layer(x)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
+        is_causal_output = layer(x, src_mask=mask, is_causal=True)
+        masked_output = layer(x, src_mask=mask)
+
+        self.assertEqual(masked_output, is_causal_output)
+
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -838,8 +881,11 @@ class TestTransformers(NNTestCase):
         encoder.train()
         optimizer.zero_grad()
         inputs = torch.randn(S, L, E).to(device)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            inputs.size(1), device=device
+        )
 
-        outputs = encoder(inputs, is_causal=True)
+        outputs = encoder(inputs, mask=mask, is_causal=True)
 
         loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
         loss.backward()
@@ -848,12 +894,16 @@ class TestTransformers(NNTestCase):
         # inference with is_causal
         t_qvk = torch.randn((S, L, E), device=device, dtype=torch.float32)
         mha = nn.MultiheadAttention(E, H).to(device)
-        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            S, device=device
+        )
 
-        # Can't give both attn_mask AND is_causal
+        attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
+
+        # Can't give only is_causal
         attn_mask = torch.randint(0, 2, size=(L, L), device=device, dtype=torch.bool)
-        with self.assertRaisesRegex(AssertionError, "Only allow causal mask or attn_mask"):
-            _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=attn_mask, is_causal=True)
+        with self.assertRaises(RuntimeError):
+            _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
@@ -878,6 +928,9 @@ class TestTransformers(NNTestCase):
         mha.in_proj_weight = Parameter(torch.ones((E * 3, E), device=device))
         mha.out_proj.weight = Parameter(torch.ones((E, E), device=device))
         expected = torch.ones(size=(S, L, E)).to(device) * 16
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            qkv.size(1), device=device
+        )
 
         for kernel in kernels:
             with torch.backends.cuda.sdp_kernel(
@@ -885,14 +938,17 @@ class TestTransformers(NNTestCase):
                 enable_flash=(kernel == 'flash'),
                 enable_mem_efficient=(kernel == 'meff')
             ):
-                actual, _ = mha(qkv, qkv, qkv, need_weights=False, is_causal=True)
+                actual, _ = mha(qkv, qkv, qkv, attn_mask=mask, need_weights=False, is_causal=True)
                 self.assertTrue(torch.equal(actual, expected))
 
                 if kernel != 'math':
                     # fails with embedding size not multiple of 4
                     with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                         qkv_f, mha_f = ones_tensor(S, L, 2), nn.MultiheadAttention(2, H).to(device)
-                        _ = mha_f(qkv_f, qkv_f, qkv_f, need_weights=False, is_causal=True)
+                        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                            qkv_f.size(1), device=device
+                        )
+                        _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
                         torch.cuda.synchronize()
 
     @unittest.skipIf(
@@ -1296,7 +1352,7 @@ class TestSDPA(NNTestCase):
             assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
         if PLATFORM_SUPPORTS_FUSED_SDPA:
-            batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
+            batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
             shape = (batch_size, seq_len, num_heads, head_dim)
             device = "cuda"
             make_tensor = partial(self.rand_tensor, device=device, dtype=torch.float16, packed=True)
@@ -1339,29 +1395,39 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "Does not support fused SDPA or not SM86 hardware")
-    def test_memory_efficeint_sm86_failure(self):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
+                     "Does not support fused SDPA or not SM86+ hardware")
+    @parametrize("head_dim", [72, 96, 128])
+    def test_memory_efficient_sm86_plus_failure(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, 128)
+        # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "Does not support fused SDPA or not SM86 hardware")
-    def test_flash_backward_sm86_headdim128(self):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
+                     "Does not support fused SDPA or not SM86+ hardware")
+    @parametrize("head_dim", [72, 96, 128])
+    def test_flash_backward_failure_sm86plus(self, head_dim: int):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, 128)
+        # See check_requires_grad_and_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=False, enable_math=True):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
         with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
             # Should not fail because inputs don't require grad
-            torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+            flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
+            self.assertEqual(math_ref, flash_ref, atol=1e-3, rtol=1e-3)
 
             # Should fail because inputs require grad
             q = make_tensor(size, requires_grad=True)
@@ -1540,7 +1606,7 @@ class TestSDPA(NNTestCase):
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 128])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
@@ -1571,8 +1637,8 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if isSM86Device and head_dim == 128:
+            # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+            if isSM86or89Device and head_dim in range(65, 129):
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
                                                                                        dropout_p=dropout_p,
                                                                                        is_causal=is_causal, scale=scale))

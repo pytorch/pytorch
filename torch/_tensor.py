@@ -100,7 +100,7 @@ class Tensor(torch._C._TensorBase):
                 or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
-                    and self.device.type == "privateuseone"
+                    and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
@@ -187,7 +187,7 @@ class Tensor(torch._C._TensorBase):
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
-            if not type(self) is Tensor:
+            if type(self) is not Tensor:
                 if type(new_tensor) is not type(self):
                     raise RuntimeError(
                         "Type of deepcopy result does not match the type of the source tensor. "
@@ -256,7 +256,8 @@ class Tensor(torch._C._TensorBase):
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
         if self.device.type in ["xla", "ort"] or (
-            not torch._C._has_storage(self) and self.device.type == "privateuseone"
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
@@ -992,7 +993,9 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__contains__, (self,), self, element)
-        if isinstance(element, (torch.Tensor, Number)):
+        if isinstance(
+            element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
+        ):
             # type hint doesn't understand the __contains__ result array
             return (element == self).any().item()  # type: ignore[union-attr]
 
@@ -1362,6 +1365,8 @@ class Tensor(torch._C._TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
+        elif self.device.type == "xpu":
+            device_type = DLDeviceType.kDLOneAPI
         else:
             raise ValueError(
                 "Unknown device type {} for Dlpack".format(torch_device_type)

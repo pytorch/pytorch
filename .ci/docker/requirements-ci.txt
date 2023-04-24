@@ -276,3 +276,8 @@ jinja2==3.1.2
 #Description: jinja2 template engine
 #Pinned versions: 3.1.2
 #test that import:
+
+pytest-cpp==2.3.0
+#Description: This is used by pytest to invoke C++ tests
+#Pinned versions: 2.3.0
+#test that import:

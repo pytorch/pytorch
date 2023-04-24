@@ -184,7 +184,7 @@ except ImportError:
 #     - @deviceCountAtLeast(<minimum number of devices to run test with>)
 #         Passes a list of strings representing all available devices of
 #         the test class's device type as the test template's "device" argument.
-#         If there are a fewer devices than the value passed to the decorator
+#         If there are fewer devices than the value passed to the decorator
 #         the test is skipped.
 #     - @dtypes(<list of tuples of dtypes>)
 #         In addition to accepting multiple dtypes, the @dtypes decorator
@@ -665,11 +665,6 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
     # Creates device-specific test cases
     for base in desired_device_type_test_bases:
-        # Special-case for ROCm testing -- only test for 'cuda' i.e. ROCm device by default
-        # The except_for and only_for cases were already checked above. At this point we only need to check 'cuda'.
-        if TEST_WITH_ROCM and base.device_type != 'cuda':
-            continue
-
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:
@@ -1235,9 +1230,7 @@ def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
 def has_cusolver():
-    version = _get_torch_cuda_version()
-    # cuSolver is disabled on cuda < 10.1.243
-    return version >= (10, 2)
+    return not TEST_WITH_ROCM
 
 # Skips a test on CUDA if cuSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
@@ -1287,10 +1280,26 @@ def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
             version = _get_torch_cuda_version()
-            if version == (0, 0):  # cpu
+            if version == (0, 0):  # cpu or rocm
                 return fn(self, *args, **kwargs)
             if version in (versions or []):
                 reason = "test skipped for CUDA version {0}".format(version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
+
+# Skips a test for CUDA versions less than specified, given in the form of [major, minor].
+def skipCUDAIfVersionLessThan(versions : Tuple[int, int] = None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            version = _get_torch_cuda_version()
+            if version == (0, 0):  # cpu or rocm
+                return fn(self, *args, **kwargs)
+            if version < versions:
+                reason = "test skipped for CUDA versions < {0}".format(version)
                 raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
 

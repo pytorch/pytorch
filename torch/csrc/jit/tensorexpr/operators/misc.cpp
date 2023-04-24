@@ -444,7 +444,7 @@ Tensor computeReshape(
         for (size_t idx = 0; idx < A.ndim(); idx++) {
           size_t dim_idx = A.ndim() - idx - 1;
           // We don't need to generate mod-div for the first dimension -
-          // ideally IRSimlifier would get rid of that for us, but for now
+          // ideally IRSimplifier would get rid of that for us, but for now
           // let's just avoid generating it in the first place.
           if (dim_idx > 0) {
             orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);

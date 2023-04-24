@@ -22,7 +22,14 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import config_of, signature_of, texpr, TritonKernel, TritonPrinter
+from .codegen.triton import (
+    config_of,
+    signature_of,
+    texpr,
+    TritonKernel,
+    TritonPrinter,
+    TritonScheduling,
+)
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
@@ -59,8 +66,14 @@ class TritonTemplateKernel(TritonKernel):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        *,
+        index_dtype,
     ):
-        super().__init__(sympy_product(output_node.get_size()), sympy.Integer(1))
+        super().__init__(
+            sympy_product(output_node.get_size()),
+            sympy.Integer(1),
+            index_dtype=index_dtype,
+        )
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}
@@ -269,10 +282,9 @@ class TritonTemplateKernel(TritonKernel):
         result, *mask = super().indexing(
             index,
             dense_indexing=False,
-            copy_shape=copy_shape,
+            copy_shape=self.template_mask,
             override_mask=self.template_mask,
         )
-        result += f" + tl.zeros({self.template_mask}.shape, tl.int32)"
         return (result, *mask)
 
     def initialize_range_tree(self, pid_cache):
@@ -337,6 +349,34 @@ class TritonTemplate:
         self.all_templates[name] = self
         self.debug = debug
 
+    def maybe_append_choice(
+        self,
+        choices,
+        input_nodes,
+        layout,
+        num_stages,
+        num_warps,
+        prefix_args=0,
+        suffix_args=0,
+        epilogue_fn=identity,
+        **kwargs,
+    ):
+        try:
+            choices.append(
+                self.generate(
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    prefix_args=prefix_args,
+                    suffix_args=suffix_args,
+                    epilogue_fn=epilogue_fn,
+                    **kwargs,
+                )
+            )
+        except NotImplementedError:
+            pass
+
     def generate(
         self,
         input_nodes,
@@ -357,6 +397,13 @@ class TritonTemplate:
         fake_out = ir.Buffer("buf_out", layout)
         kernel_name = f"triton_{self.name}"
 
+        numel = sympy_product(layout.size)
+        buffers = itertools.chain(input_nodes, (fake_out,))
+        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            raise NotImplementedError(
+                "64-bit indexing is not yet implemented for triton templates"
+            )
+
         kernel_options = dict(
             input_nodes=input_nodes,
             defines=defines,
@@ -368,6 +415,7 @@ class TritonTemplate:
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
+            index_dtype="tl.int32",
         )
         with patch.object(
             V.graph, "get_dtype", self.fake_get_dtype(fake_out)
@@ -553,9 +601,7 @@ class TritonTemplateCaller(ChoiceCaller):
         return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self):
-        return (
-            f"TritonTemplateCaller({self.to_callable().__file__}, {self.debug_extra})"
-        )
+        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
     def call_name(self):
         return f"template_kernels.{self.name}"
@@ -652,7 +698,7 @@ class ErrorFromChoice(RuntimeError):
 
 
 class AlgorithmSelectorCache(PersistentCache):
-    def __call__(self, choices: List[ChoiceCaller], input_nodes, layout):
+    def __call__(self, name, choices: List[ChoiceCaller], input_nodes, layout):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         assert len(choices) > 0, "no choices to select"
@@ -693,7 +739,7 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
-            choices[0].name,
+            name,
             repr([self.key_of(x) for x in input_nodes]),
             autotune,
         )
@@ -703,7 +749,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
-            self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+            self.log_results(name, input_nodes, timings, autotune_elapse)
         return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
@@ -740,7 +786,7 @@ class AlgorithmSelectorCache(PersistentCache):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
@@ -808,12 +854,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+            sys.stderr.write(
+                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+            )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):

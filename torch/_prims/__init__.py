@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
@@ -14,6 +13,7 @@ import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
+from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     check,
     Dim,
@@ -1403,7 +1403,9 @@ collapse_view = _make_prim(
 def _conj_meta(a: TensorLikeType) -> TensorLikeType:
     if not a.dtype.is_complex:
         raise RuntimeError("Expected complex dtype in prims.conj")
-    return a.as_strided(a.shape, a.stride(), a.storage_offset())
+    out = a.as_strided(a.shape, a.stride(), a.storage_offset())
+    torch._C._set_conj(out, not a.is_conj())
+    return out
 
 
 _conj_doc = """
@@ -1523,7 +1525,7 @@ def _slice_meta(
 
     new_shape = []
     for x, y, z in zip(start_indices, limit_indices, _strides):
-        new_shape.append(math.floor((y - x) / z))
+        new_shape.append(1 + (y - x - 1) // z)
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):
@@ -2787,7 +2789,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2964,3 +2966,4 @@ fft_c2r = _make_prim(
 )
 
 register_nvprims()
+register_rng_prims()

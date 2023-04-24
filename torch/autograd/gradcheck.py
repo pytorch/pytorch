@@ -68,8 +68,7 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
             yield x  # type: ignore[misc]
     elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
-            for result in _iter_tensors(elem, only_requiring_grad):
-                yield result
+            yield from _iter_tensors(elem, only_requiring_grad)
 
 
 def _densify(x):
@@ -754,7 +753,7 @@ def _check_inputs(tupled_inputs) -> bool:
                         'compute the numerical gradients correctly. You should call '
                         '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
-            inp.retain_grad()
+
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '

@@ -5,11 +5,12 @@ and torch operators given the same inputs.
 
 Usage:
 
-    pytest test/onnx/test_op_consistancy.py
+    pytest test/onnx/test_op_consistency.py
 
     To run tests on a specific operator (e.g. torch.ceil):
 
-    pytest test/onnx/test_op_consistancy.py -k ceil
+    pytest test/onnx/test_op_consistency.py -k ceil
+    pytest test/onnx/test_op_consistency.py -k nn_functional_scaled_dot_product_attention
 
     Read more on Running and writing tests:
         https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
@@ -305,10 +306,13 @@ def reason_flaky() -> str:
 TESTED_OPS: frozenset[str] = frozenset(
     [
         "ceil",
+        "flatten",
         "logical_not",
+        "nn.functional.scaled_dot_product_attention",
         "sqrt",
         "stft",
         "t",
+        "unflatten",
     ]
 )
 
@@ -328,8 +332,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
+    dont_care("nn.functional.scaled_dot_product_attention", opsets=[opsets_before(14)], reason="Need Trilu."),
+    fixme("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
+    fixme("unflatten", opsets=[opsets_before(13)], reason="Helper function is needed to support legacy ops."),
 )
 # fmt: on
 
@@ -338,6 +345,16 @@ SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
         "stft",
         reason="ONNX STFT does not support complex results",
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,
+    ),
+    fixme(
+        "unflatten",
+        reason="Logic not implemented for size 0 inputs in op.Reshape",
+        matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
+    ),
+    dont_care(
+        "nn.functional.scaled_dot_product_attention",
+        matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
+        reason="dropout is random so the results do not match",
     ),
 )
 
@@ -430,7 +447,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     # Cannot use self.skip because pytest would skip the entire test
                     warnings.warn(f"skipped sample {i}. Reason: {skip_reason}")
                     continue
-
                 model = SingleOpModel(op, cpu_sample.kwargs)
                 model.eval()
 

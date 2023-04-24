@@ -22,6 +22,7 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 from torch.utils._pytree import tree_flatten
+from torch._dynamo.exc import CondOpArgsMismatchError
 
 
 @dataclass
@@ -56,12 +57,22 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     flat_true_outs, _ = pytree.tree_flatten(true_outs)
     flat_false_outs, _ = pytree.tree_flatten(false_outs)
-    assert(len(flat_true_outs) == len(flat_false_outs))
+    if len(flat_true_outs) != len(flat_false_outs):
+        raise CondOpArgsMismatchError(
+            f"Expected to return same number of outputs but got:"
+            f"\n  {true_fn.__name__} returns {len(flat_true_outs)} item(s)"
+            f"\n  {false_fn.__name__} returns {len(flat_false_outs)} item(s)"
+        )
 
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        assert true_out.meta['tensor_meta'] == false_out.meta['tensor_meta']
+        if true_out.meta['tensor_meta'] != false_out.meta['tensor_meta']:
+            raise CondOpArgsMismatchError(
+                f"Expected each tensor to have same metadata but got:"
+                f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
+                f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
+            )
 
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
@@ -148,12 +159,6 @@ def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     return true_outs
 
 
-# We cannot directly call fallthrough here due to issue #89037.
-@cond.py_impl(DispatchKey.PythonDispatcher)
-def cond_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return cond(*args)
-
 
 def _has_potential_branch_input_mutation(branch, inputs):
     """
@@ -191,6 +196,7 @@ def _has_potential_branch_input_alias(branch, inputs):
     """
     try:
         gm = make_fx(branch)(*inputs)
+
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
@@ -242,6 +248,7 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
+cond.fallthrough(DispatchKey.PythonDispatcher)
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)

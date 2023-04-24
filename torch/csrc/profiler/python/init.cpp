@@ -123,7 +123,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<
            ProfilerState,
-           bool, /* record_input_shapes */
+           bool, /* report_input_shapes */
            bool, /* profile_memory */
            bool, /* with_stack */
            bool, /* with_flops */
@@ -296,7 +296,12 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");
-  m.def("gather_traceback", CapturedTraceback::gather);
+  m.def(
+      "gather_traceback",
+      CapturedTraceback::gather,
+      py::arg("python") = true,
+      py::arg("script") = true,
+      py::arg("cpp") = true);
   m.def("symbolize_tracebacks", py_symbolize);
   installCapturedTracebackPython();
 }

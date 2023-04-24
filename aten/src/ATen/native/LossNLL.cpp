@@ -9,6 +9,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/SmallBuffer.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -573,17 +574,31 @@ Tensor cross_entropy_loss_label_smoothing(
     }
 
     auto ignore_mask = target == std::move(ignore_index);
-    smooth_loss.index_put_({ignore_mask}, 0.0);
+    smooth_loss.masked_fill_(ignore_mask, 0.0);
 
     Tensor ret;
     switch (reduction) {
       case Reduction::Mean:
         if (weight.defined()) {
-          // TODO: This code can path can be removed if #61309 is resolved
-          // loss is normalized by the weights to be consistent with nll_loss_nd
-          ret = smooth_loss.sum() / weight.gather(0, target.masked_select(~ignore_mask).flatten()).sum();
+          if (isTensorSubclassLike(weight)){
+            // we will collect weights from 0 index which is always valid
+            // and mask them out if they are ignored
+            auto filtered_target = target.masked_fill(ignore_mask, 0);
+            auto tgt_weights = weight.gather(0, filtered_target.flatten());
+            auto weight_sum =
+                tgt_weights.masked_fill_(ignore_mask.flatten(), 0).sum();
+            ret = smooth_loss.sum() / weight_sum;
+          } else {
+            // TODO: This code can path can be removed if #61309 is resolved
+            // loss is normalized by the weights to be consistent with
+            // nll_loss_nd
+            ret = smooth_loss.sum() /
+                weight.gather(0, target.masked_select(~ignore_mask).flatten())
+                    .sum();
+          }
         } else {
-          ret = smooth_loss.masked_select(~ignore_mask).mean();
+          auto true_mask = ~ignore_mask;
+          ret = smooth_loss.sum()/ true_mask.sum();
         }
         break;
       case Reduction::Sum:

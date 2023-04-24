@@ -58,7 +58,7 @@ def _prepare_input_validate(
                 raise RuntimeError("device_mesh is not passed nor can be inferred")
         if device_mesh.ndim != 1:
             raise RuntimeError(
-                f"device_mesh has dims {device_mesh.ndim} but expcted to be 1"
+                f"device_mesh has dims {device_mesh.ndim} but expected to be 1"
                 " for input."
             )
         return _prepare_input_func(*args, **kwargs)
@@ -107,7 +107,7 @@ def _prepare_output_validate(
             device_mesh = args[1]
 
         assert device_mesh.ndim == 1, (
-            f"device_mesh has dims {device_mesh.ndim} but expcted to be 1 for"
+            f"device_mesh has dims {device_mesh.ndim} but expected to be 1 for"
             " output."
         )
         return _prepare_output_func(*args, **kwargs)
@@ -146,9 +146,11 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
     pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, tp_mesh_dim).reshape(
         -1, device_mesh.mesh.size(tp_mesh_dim)
     )
-    dim_mesh_1d = pg_ranks_by_dim[torch.any(pg_ranks_by_dim == cur_rank, 1), :]
+    for mesh_1d in pg_ranks_by_dim:
+        sub_mesh = DeviceMesh(device_mesh.device_type, mesh_1d, _init_process_groups=False)
+        if cur_rank in mesh_1d:
+            res_sub_mesh = sub_mesh
 
     sub_pg = device_mesh.get_dim_groups()[tp_mesh_dim]
-    mesh_1d = DeviceMesh(device_mesh.device_type, dim_mesh_1d.squeeze(), _init_process_groups=False)
-    mesh_1d._dim_groups = [sub_pg]
-    return mesh_1d
+    res_sub_mesh._dim_groups = [sub_pg]
+    return res_sub_mesh

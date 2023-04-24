@@ -189,7 +189,7 @@ class BasePruningMethod(ABC):
         try:
             # get the final mask, computed according to the specific method
             mask = method.compute_mask(importance_scores, default_mask=default_mask)
-            # reparametrize by saving mask to `module[name + '_mask']`...
+            # reparameterize by saving mask to `module[name + '_mask']`...
             module.register_buffer(name + "_mask", mask)
             # ... and the new pruned tensor to `module[name]`
             setattr(module, name, method.apply_mask(module))
