@@ -465,9 +465,9 @@ def run_test(
     env=None,
 ) -> int:
     maybe_set_hip_visible_devies()
-
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module
+    stepcurrent_key = test_file
     if isinstance(test_file, ShardedTest):
         # C++ tests work with pytest sharding
         unittest_args.extend(
@@ -477,6 +477,7 @@ def run_test(
             ]
         )
         test_file = test_module.name
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -494,7 +495,7 @@ def run_test(
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args.extend(
-            get_pytest_args(options, test_file, is_cpp_test=is_cpp_test)
+            get_pytest_args(options, stepcurrent_key, is_cpp_test=is_cpp_test)
         )
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
@@ -894,7 +895,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def get_pytest_args(options, stepcurrent_dir, is_cpp_test=False):
+def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     if RERUN_DISABLED_TESTS:
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -905,7 +906,7 @@ def get_pytest_args(options, stepcurrent_dir, is_cpp_test=False):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", f"--sc={stepcurrent_dir}"]
+        rerun_options = ["-x", "--reruns=2", f"--sc={stepcurrent_key}"]
 
     pytest_args = [
         "-vv",
