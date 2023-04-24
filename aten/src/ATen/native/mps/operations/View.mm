@@ -688,47 +688,35 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
   @autoreleasepool {
     string key = getStridedKey(
         self.scalar_type(), updates.scalar_type(), base_shape, size, stride, storage_offset, needsScatter);
-    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-    ViewCachedGraph* cachedGraph = static_cast<ViewCachedGraph*>(cache_->LookUp(key));
+    return LookUpOrCreateCachedGraph<ViewCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* updatesTensor = nil;
+      // Workaround for MPSShaderLibrary bug in macOS Monterey
+      // This is fixed in macOS Ventura
+      auto inputType = getMPSScalarType(self.scalar_type());
+      if (inputType == MPSDataTypeUInt8 || (inputType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+        inputType = MPSDataTypeInt8;
+      }
 
-    if (!cachedGraph) {
-      cachedGraph = static_cast<ViewCachedGraph*>(cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        ViewCachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          MPSGraphTensor* updatesTensor = nil;
-          newCachedGraph = new ViewCachedGraph(mpsGraph);
-          // Workaround for MPSShaderLibrary bug in macOS Monterey
-          // This is fixed in macOS Ventura
-          auto inputType = getMPSScalarType(self.scalar_type());
-          if (inputType == MPSDataTypeUInt8 || (inputType == MPSDataTypeBool && !is_macos_13_or_newer())) {
-            inputType = MPSDataTypeInt8;
-          }
-
-          // Self is the input tensor we are creating view of
-          newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
-          newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
-          for (const auto C10_UNUSED i : c10::irange(size.size())) {
-            newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
-          }
-          if (needsScatter) {
-            auto updatesType = getMPSScalarType(updates.scalar_type());
-            if (updatesType == MPSDataTypeUInt8 || (updatesType == MPSDataTypeBool && !is_macos_13_or_newer())) {
-              updatesType = MPSDataTypeInt8;
-            }
-            newCachedGraph->updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, updatesType, getMPSShape(self.numel()));
-            updatesTensor = newCachedGraph->updatesTensor;
-            if (inputType != updatesType) {
-              updatesTensor = [mpsGraph castTensor:updatesTensor toType:inputType name:@"castUpdatesTensor"];
-            }
-          }
-          newCachedGraph->outputTensor =
-              chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, updatesTensor);
+      // Self is the input tensor we are creating view of
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
+      newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
+      for (const auto C10_UNUSED i : c10::irange(size.size())) {
+        newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
+      }
+      if (needsScatter) {
+        auto updatesType = getMPSScalarType(updates.scalar_type());
+        if (updatesType == MPSDataTypeUInt8 || (updatesType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+          updatesType = MPSDataTypeInt8;
         }
-        return newCachedGraph;
-      }));
-    }
-    return cachedGraph;
+        newCachedGraph->updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, updatesType, getMPSShape(self.numel()));
+        updatesTensor = newCachedGraph->updatesTensor;
+        if (inputType != updatesType) {
+          updatesTensor = [mpsGraph castTensor:updatesTensor toType:inputType name:@"castUpdatesTensor"];
+        }
+      }
+      newCachedGraph->outputTensor =
+          chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, updatesTensor);
+    });
   }
 }
 
@@ -828,7 +816,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
-    id<MTLComputeCommandEncoder> computeEncoder = [mpsStream->commandBuffer() computeCommandEncoder];
+    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
     id<MTLComputePipelineState> gatherPSO = getPipelineState(MPSDevice::getInstance()->device(),
                                                              functionName,
@@ -864,8 +852,6 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
 
     MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
-    [computeEncoder endEncoding];
-    mpsStream->synchronize(SyncType::COMMIT_AND_CONTINUE);
   });
 
   return (dst.has_storage()) ? dst : output;
@@ -892,8 +878,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string functionName =
           getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/true);
       id<MTLComputePipelineState> scatterPSO = getPipelineState(MPSDevice::getInstance()->device(),
@@ -930,8 +915,6 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
-      [computeEncoder endEncoding];
-      mpsStream->synchronize(SyncType::COMMIT_AND_CONTINUE);
     }
   });
 

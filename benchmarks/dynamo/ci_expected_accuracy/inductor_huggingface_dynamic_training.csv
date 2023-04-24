@@ -1,7 +1,7 @@
 name,accuracy,graph_breaks
 AlbertForMaskedLM,fail_to_run,4
 AlbertForQuestionAnswering,fail_to_run,4
-AllenaiLongformerBase,pass,159
+AllenaiLongformerBase,pass,160
 BartForCausalLM,fail_to_run,4
 BertForMaskedLM,fail_to_run,4
 BertForQuestionAnswering,fail_to_run,4
@@ -12,7 +12,7 @@ DebertaForMaskedLM,fail_to_run,4
 DebertaForQuestionAnswering,fail_to_run,4
 DebertaV2ForMaskedLM,pass_due_to_skip,0
 DistilBertForMaskedLM,fail_to_run,4
-DistilBertForQuestionAnswering,pass,6
+DistilBertForQuestionAnswering,pass,7
 DistillGPT2,fail_to_run,4
 ElectraForCausalLM,fail_to_run,4
 ElectraForQuestionAnswering,fail_to_run,4
@@ -21,7 +21,7 @@ LayoutLMForMaskedLM,fail_to_run,4
 LayoutLMForSequenceClassification,fail_to_run,4
 M2M100ForConditionalGeneration,fail_to_run,4
 MBartForCausalLM,fail_to_run,4
-MBartForConditionalGeneration,pass,6
+MBartForConditionalGeneration,pass,7
 MT5ForConditionalGeneration,fail_to_run,4
 MegatronBertForCausalLM,fail_to_run,4
 MegatronBertForQuestionAnswering,fail_to_run,4
@@ -29,7 +29,7 @@ MobileBertForMaskedLM,fail_to_run,4
 MobileBertForQuestionAnswering,pass,4
 OPTForCausalLM,fail_to_run,4
 PLBartForCausalLM,fail_to_run,4
-PLBartForConditionalGeneration,pass,6
+PLBartForConditionalGeneration,pass,7
 PegasusForCausalLM,fail_to_run,4
 PegasusForConditionalGeneration,fail_to_run,4
 RobertaForCausalLM,fail_to_run,4
