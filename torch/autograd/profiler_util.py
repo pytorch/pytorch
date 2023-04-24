@@ -821,15 +821,7 @@ def _build_table(
         result.append('\n')  # Yes, newline after the end as well
 
     sum_self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
-    sum_self_cuda_time_total = 0
-    for evt in events:
-        if evt.device_type == DeviceType.CPU:
-            # in legacy profiler, kernel info is stored in cpu events
-            if evt.is_legacy:
-                sum_self_cuda_time_total += evt.self_cuda_time_total
-        elif evt.device_type == DeviceType.CUDA:
-            # in kineto profiler, there're events with the correct device type (e.g. CUDA)
-            sum_self_cuda_time_total += evt.self_cuda_time_total
+    sum_self_cuda_time_total = sum([event.self_cuda_time_total for event in events])
 
     # Actual printing
     if header is not None:
