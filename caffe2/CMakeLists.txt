@@ -829,13 +829,8 @@ endif()
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-  if(USE_MPS)
-    enable_language(OBJC OBJCXX)
-    foreach(input_filename ${Caffe2_MPS_SRCS})
-      set_source_files_properties(${input_filename} PROPERTIES COMPILE_FLAGS "-DUSE_MPS=1")
-    endforeach(input_filename)
-  endif()
+if(USE_MPS OR USE_PYTORCH_METAL)
+  enable_language(OBJC OBJCXX)
 endif()
 
 if(USE_PRECOMPILED_HEADERS)
