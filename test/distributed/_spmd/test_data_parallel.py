@@ -92,57 +92,27 @@ class TestDataParallel(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_replicate_sgd(self):
-        mod = SimpleMLP().cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.1)
-        train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
-        )
+        sgd_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "momentum": 0.9},
+            {"lr": 0.1, "momentum": 0.9, "foreach": True},
+        ]
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
-        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.1)
+        for config in sgd_configs:
+            mod = SimpleMLP().cuda(self.rank)
+            opt = torch.optim.SGD(mod.parameters(), **config)
 
-        self._test_data_parallel(
-            mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "replicate"
-        )
+            train_batch = (
+                torch.randn(128, 50).to(self.rank),
+                torch.randn(128, 8).to(self.rank),
+            )
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_replicate_sgd_momentum(self):
-        mod = SimpleMLP().cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.1, momentum=0.9)
+            ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+            ddp_opt = torch.optim.SGD(ddp_mod.parameters(), **config)
 
-        train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
-        )
-
-        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
-        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.1, momentum=0.9)
-
-        self._test_data_parallel(
-            mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "replicate"
-        )
-
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_replicate_sgd_foreach(self):
-        mod = SimpleMLP().cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.1, momentum=0.9, foreach=True)
-
-        train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
-        )
-
-        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
-        ddp_opt = torch.optim.SGD(
-            ddp_mod.parameters(), lr=0.1, momentum=0.9, foreach=True
-        )
-
-        self._test_data_parallel(
-            mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "replicate"
-        )
+            self._test_data_parallel(
+                mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "replicate"
+            )
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -165,56 +135,26 @@ class TestDataParallel(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_fully_shard_sgd(self):
-        mod = SimpleMLP().cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.1)
+        sgd_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "momentum": 0.9},
+            {"lr": 0.1, "momentum": 0.9, "foreach": True},
+        ]
 
-        train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
-        )
+        for config in sgd_configs:
+            mod = SimpleMLP().cuda(self.rank)
+            opt = torch.optim.SGD(mod.parameters(), **config)
 
-        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
-        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.1)
-        self._test_data_parallel(
-            mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
-        )
+            train_batch = (
+                torch.randn(128, 50).to(self.rank),
+                torch.randn(128, 8).to(self.rank),
+            )
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_fully_shard_sgd_momentum(self):
-        mod = SimpleMLP().cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.1, momentum=0.9)
-
-        train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
-        )
-
-        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
-        ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.1, momentum=0.9)
-        self._test_data_parallel(
-            mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
-        )
-
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_fully_shard_sgd_foreach(self):
-        mod = SimpleMLP().cuda(self.rank)
-        opt = torch.optim.SGD(mod.parameters(), lr=0.1, momentum=0.9, foreach=True)
-
-        train_batch = (
-            torch.randn(128, 50).to(self.rank),
-            torch.randn(128, 8).to(self.rank),
-        )
-
-        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
-        ddp_opt = torch.optim.SGD(
-            ddp_mod.parameters(), lr=0.1, momentum=0.9, foreach=True
-        )
-
-        self._test_data_parallel(
-            mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
-        )
+            ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+            ddp_opt = torch.optim.SGD(ddp_mod.parameters(), **config)
+            self._test_data_parallel(
+                mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
+            )
 
     @skip_if_lt_x_gpu(2)
     @with_comms
