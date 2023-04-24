@@ -48,7 +48,7 @@ def _function_source_info(fn: Callable) -> Tuple[Sequence[str], int, Optional[st
     """Returns the source lines, line number, and source file path for the given function.
 
     Essentially, inspect.getsourcelines() and inspect.getsourcefile() combined.
-    Cache is applied to reduce the performance impact of this function.
+    Caching is applied to reduce the performance impact of this function.
     """
     source_lines, lineno = inspect.getsourcelines(fn)
     return source_lines, lineno, inspect.getsourcefile(fn)
