@@ -168,15 +168,6 @@ class CachingAutotuner(KernelInterface):
 
         return launcher
 
-    def round_benched_timing(self, x, decimal_places=1):
-        """
-        Sometimes different autotuning configs can have very small runtime
-        difference. This can affect the ranking of different configs, making
-        autotuning nondeterministic.  This function rounds the benched timing to
-        a default value of one decimal place, i.e., precision of 0.1 ms.
-        """
-        return builtins.round(x, decimal_places)
-
     def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
         if launcher.n_spills > config.triton.spill_threshold:
@@ -200,7 +191,7 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        return self.round_benched_timing(do_bench(kernel_call, rep=40, fast_flush=True))
+        return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args):
         from .compile_fx import clone_preserve_strides
@@ -819,12 +810,10 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
+
     for c in configs:
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
-
-    if not config.triton.autotune_pointwise:
-        configs = configs[:1]
 
     return cached_autotune(
         configs,
