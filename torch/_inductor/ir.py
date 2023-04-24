@@ -3148,9 +3148,10 @@ class MultiOutputLayout(IRNode):
 
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
-        )
+        line = V.graph.wrapper_code.declare
+        line += f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        line += V.graph.wrapper_code.ending
+        wrapper.writeline(line)
         self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, index: str):
