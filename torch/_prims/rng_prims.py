@@ -45,9 +45,41 @@ def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
         p.prim_meta_impl = impl_meta
 
 
+# Philox rand offsets could be shared in future with other philox ops, so
+# keeping these functions in global scope.
+def philox_rand_offset_meta(
+    shape: torch.Size,
+):
+    return _prims.TensorLike(torch.tensor(0, dtype=torch.int64))
+
+
+def philox_rand_offset(
+    shape: torch.Size,
+):
+    # For impl, look at the function calc_execution_policy in the file
+    # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
+    # commit hash 72aa0667bd16707d50eb8fa337092a1f5d11dfb6
+    numel_scalar = 1
+    for dim_size in shape:
+        numel_scalar *= dim_size
+    numel = torch.scalar_tensor(numel_scalar, dtype=torch.int64)
+
+    block_size = 256
+    unroll = 4
+    curand4_engine_calls = 4
+    device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
+    blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
+    grid_size = (numel + block_size - 1) // block_size
+    grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
+    offset = (
+        (numel - 1) // (block_size * grid_size * unroll) + 1
+    ) * curand4_engine_calls
+    return offset
+
+
 def register_philox_rand():
     name = "philox_rand"
-    schema = "philox_rand(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> Tensor"  # noqa: B950
+    schema = "philox_rand(SymInt[] size, Tensor seed, Tensor offset, int[]? stride, Device? device=None, ScalarType? dtype=None) -> (Tensor, Tensor)"  # noqa: B950
 
     def _philox_rand_meta(
         shape: torch.Size,
@@ -60,9 +92,11 @@ def register_philox_rand():
         # stride arg will be useful for distributed usecase. Currently, its unused.
         assert stride is None
         stride = make_contiguous_strides_for(shape)
-        return _prims.TensorMeta(
+        random_values = _prims.TensorMeta(
             shape=shape, strides=stride, dtype=dtype, device=device
         )
+        offset = philox_rand_offset_meta(shape)
+        return (random_values, offset)
 
     def _philox_rand(
         shape: torch.Size,
@@ -84,7 +118,9 @@ def register_philox_rand():
 
         with torch.random.fork_rng(devices):
             CUDARngStateHelper.set_torch_state_tensor(seed, offset)
-            return torch.rand(shape, device=device, dtype=dtype)
+            random_values = torch.rand(shape, device=device, dtype=dtype)
+
+        return random_values, philox_rand_offset(shape)
 
     register_rng_prim(
         name=name,
@@ -96,50 +132,5 @@ def register_philox_rand():
     )
 
 
-def register_phiilox_rand_offset():
-    name = "philox_rand_offset"
-    schema = "philox_rand_offset(SymInt[] size) -> Tensor"  # noqa: B950
-
-    def _philox_rand_offset_meta(
-        shape: torch.Size,
-    ):
-        return _prims.TensorLike(torch.tensor(0, dtype=torch.int64))
-
-    def _philox_rand_offset(
-        shape: torch.Size,
-    ):
-        # For impl, look at the function calc_execution_policy in the file
-        # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
-        # commit hash 72aa0667bd16707d50eb8fa337092a1f5d11dfb6
-
-        numel_scalar = 1
-        for dim_size in shape:
-            numel_scalar *= dim_size
-        numel = torch.scalar_tensor(numel_scalar, dtype=torch.int64)
-
-        block_size = 256
-        unroll = 4
-        curand4_engine_calls = 4
-        device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
-        blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
-        grid_size = (numel + block_size - 1) // block_size
-        grid_size = min(
-            grid_size, device_property.multi_processor_count * blocks_per_sm
-        )
-        offset = (
-            (numel - 1) // (block_size * grid_size * unroll) + 1
-        ) * curand4_engine_calls
-        return offset
-
-    register_rng_prim(
-        name=name,
-        schema=schema,
-        impl_aten=_philox_rand_offset,
-        impl_meta=_philox_rand_offset_meta,
-        doc="Computes offset for the philox_rand operator",
-    )
-
-
 def register_rng_prims():
     register_philox_rand()
-    register_phiilox_rand_offset()

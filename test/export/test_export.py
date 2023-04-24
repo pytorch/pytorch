@@ -92,7 +92,7 @@ class TestExport(TestCase):
         inp = (torch.tensor([3]),)
         ref = f(*inp)
 
-        gm, _ = torchdynamo.export(f, *inp, aten_graph=True)
+        gm, _ = torchdynamo.export(f, *inp, aten_graph=True, tracing_mode="symbolic")
         res = gm(*inp)
 
         self.assertTrue(torchdynamo.utils.same(ref, res))
@@ -111,7 +111,7 @@ class TestExport(TestCase):
 
         inp = (torch.tensor([3]),)
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Unable to set min size"):
-            _ = torchdynamo.export(invalid_size, *inp, aten_graph=True)
+            _ = torchdynamo.export(invalid_size, *inp, aten_graph=True, tracing_mode="symbolic")
 
         def invalid_input(x):
             b = x.item()
@@ -121,7 +121,7 @@ class TestExport(TestCase):
         inp = (torch.tensor([6]),)
 
         with self.assertRaisesRegex(torch.utils._sympy.value_ranges.ValueRangeError, "Invalid value 6 for range"):
-            _ = torchdynamo.export(invalid_input, *inp, aten_graph=True)
+            _ = torchdynamo.export(invalid_input, *inp, aten_graph=True, tracing_mode="symbolic")
 
         def conflicting_constraints(x):
             b = x.item()
@@ -132,7 +132,7 @@ class TestExport(TestCase):
         inp = (torch.tensor([3]),)
 
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid ranges"):
-            _ = torchdynamo.export(conflicting_constraints, *inp, aten_graph=True)
+            _ = torchdynamo.export(conflicting_constraints, *inp, aten_graph=True, tracing_mode="symbolic")
 
 if __name__ == '__main__':
     run_tests()

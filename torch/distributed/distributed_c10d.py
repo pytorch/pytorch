@@ -3625,9 +3625,9 @@ def new_subgroups(
     pg_options=None,
 ):
     """
-    Creates GPU subgroups of equal size. By default, it creates intra-machine subgroups,
+    Creates subgroups of equal size. By default, it creates intra-machine subgroups,
     where each of which contains all the ranks of a machine, based on the assumption
-    that each machine has the same number of CUDA devices.
+    that each machine has the same number of devices.
 
     This is a convenience API that calls ``new_group`` to generate multiple subgroups.
     It requires that all processes in the main group (i.e. all
@@ -3635,13 +3635,13 @@ def new_subgroups(
     if they are not going to be members of the group.
 
     .. warning::
-        This API only works when CUDA is available.
-
-    .. warning::
         If ``group_size`` is passed in, the world size must be divisible by ``group_size``.
-        If no ``group_size`` is passed in, and not all the machines have the same number
-        of devices, the subgroup division will be different across nodes and can cause
-        unexpected behaviors.
+        If no ``group_size`` is passed in, it believe that you are creating a group based
+        on CUDA and determining the group size by number of CUDA devices, and if not all
+        the machines have the same number of devices, the subgroup division will be
+        different across nodes and can cause unexpected behaviors. Therefore, if you are
+        creating a subgroup that does not depend on CUDA (such as Gloo on CPU), please
+        pass in ``group_size`` correctly.
 
     .. warning::
         Using multiple process groups with the ``NCCL`` backend concurrently
@@ -3708,11 +3708,15 @@ def new_subgroups(
         >>> for subgroup in subgroups:
         >>>     dist.destroy_process_group(subgroup)
     """
-    if not torch.cuda.is_available():
-        raise ValueError("Subgroups can only be created when CUDA is available")
-
     if group_size is None:
+        if not torch.cuda.is_available():
+            raise ValueError("Default group size only takes effect when CUDA is available."
+                             "If your subgroup using a backend that does not depend on CUDA,"
+                             "please pass in 'group_size' correctly.")
         group_size = torch.cuda.device_count()
+    if group_size <= 0:
+        raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
+
     world_size = get_world_size()
     if world_size < group_size:
         raise ValueError(f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})")
@@ -3752,7 +3756,7 @@ def new_subgroups_by_enumeration(
     pg_options=None,
 ):
     """
-    Creates GPU subgroups by dividing the global world, where the division is specified by
+    Creates subgroups by dividing the global world, where the division is specified by
     a nested list of ranks. The subgroups cannot have overlap, and some ranks may not have
     to be in any subgroup.
 
@@ -3821,12 +3825,8 @@ def new_subgroups_by_enumeration(
         tensor([2])     # Subgroup 0: ranks 0 and 2
         tensor([4])     # Subgroup 1: ranks 1 and 3
     """
-    if not torch.cuda.is_available():
-        raise ValueError("Subgroups can only be created when CUDA is available")
     if ranks_per_subgroup_list is None or len(ranks_per_subgroup_list) == 0:
         raise ValueError("The arg 'ranks_per_subgroup_list' cannot be empty")
-
-    world_size = get_world_size()
 
     subgroups = []
     cur_subgroup = None
