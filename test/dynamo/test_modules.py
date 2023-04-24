@@ -553,6 +553,22 @@ class LazyModuleWithListInput(torch.nn.Module):
         return self.layer(input[:-1])
 
 
+class LazyParentModule(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def impl(self, x):
+        return x.cos()
+
+
+class LazyChildModuleNoClsToBecome(LazyParentModule):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input):
+        return super().impl(input.sin())
+
+
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
     requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
     return requires_grad
@@ -1234,6 +1250,16 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module_no_cls_to_become(self):
+        # make sure super() works in the case where cls_to_become is None
+        m = LazyChildModuleNoClsToBecome()
+        x = [torch.rand([5, 5])] * 3 + [None]
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
