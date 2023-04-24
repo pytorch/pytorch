@@ -3,6 +3,7 @@ import dis
 import functools
 import logging
 import os.path
+import re
 import sys
 import types
 import unittest
@@ -11,14 +12,13 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
     is_generator,
     transform_code_object,
 )
-from .config_utils import config
 from .guards import CheckFunctionManager, GuardedCode
 from .utils import same
 
@@ -55,10 +55,7 @@ def named_buffers_for_optimized_module(mod):
 
 
 def remove_optimized_module_prefix(name):
-    prefix = "_orig_mod."
-    assert name.startswith(prefix)
-    name = name[len(prefix) :]
-    return name
+    return re.sub(r"^_orig_mod[.]", "", name)
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -149,7 +146,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -301,9 +298,8 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
     return DummyTestClass
 
 
-# temporary decorator to skip failing 3.11 dynamo tests
-def skipIfPy311(fn):
-    if sys.version_info < (3, 11):
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
         return fn
-    else:
-        return unittest.skip(fn)
+    return unittest.skip(fn)

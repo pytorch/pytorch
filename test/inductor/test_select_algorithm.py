@@ -3,10 +3,10 @@ import functools
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
-from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest

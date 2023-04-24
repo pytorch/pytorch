@@ -13,7 +13,7 @@ from typing import Dict, Optional, Set
 import torch
 from torch.fx._symbolic_trace import is_fx_tracing
 
-from .config_utils import config
+from . import config
 from .external_utils import is_compiling
 from .utils import HAS_NUMPY, is_safe_constant, np
 
@@ -253,6 +253,8 @@ def is_allowed(obj):
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
+    if id(obj) in _disallowed_function_ids:
+        return False
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
