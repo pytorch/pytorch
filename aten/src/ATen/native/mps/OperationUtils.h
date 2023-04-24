@@ -281,6 +281,25 @@ struct MPSGraphCache
 
 };
 
+// Common template for creating graph with a specified cache if missing
+template<typename T>
+inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(MPSGraph*, T*)> instantiate) {
+  auto cache_ = MPSGraphCache::getInstance();
+  if (auto rc  = cache_->LookUpAs<T>(key)) {
+    return rc;
+  }
+  return cache_->CreateCachedGraphAs<T>(key, ^mps::MPSCachedGraph*() {
+    T* newCachedGraph = nil;
+    @autoreleasepool {
+      // Initialize graph
+      auto mpsGraph = mps::make_mps_graph();
+      newCachedGraph = new T(mpsGraph);
+      instantiate(mpsGraph, newCachedGraph);
+    }
+    return newCachedGraph;
+  });
+}
+
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
