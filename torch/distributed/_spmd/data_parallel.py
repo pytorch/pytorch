@@ -715,28 +715,32 @@ def mark_data_parallel_shardings(
             raise RuntimeError(f"op code {node.op} not supported")
 
 
-def _to_local_shard(
-    full_tensor: torch.Tensor, spec: DTensorSpec, from_local: bool = False
-) -> torch.Tensor:
+def _partition_val(val: Any, spec: DTensorSpec) -> Any:
     """
-    util function to convert a full tensor to its local component
+    util function to convert a full tensor val to its local component
     """
-    local_shard = full_tensor
-    if from_local:
-        # flag indicate the tensor is already local, we don't need to do anything
-        return local_shard
+    if isinstance(val, torch.Tensor):
+        local_shard = cast(torch.Tensor, val)
+        if val.ndim == 0:
+            # If it's already a scalar tensor, it is already local, we don't
+            # need to do anything
+            return local_shard
 
-    for idx, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            placement = cast(Shard, placement)
-            num_chunks = spec.mesh.size(dim=idx)
-            my_coord = spec.mesh.get_coordinate()
-            assert my_coord is not None, "current rank not in mesh!"
-            my_coord_on_mesh_dim = my_coord[idx]
-            local_shard = placement._split_tensor(
-                local_shard, num_chunks, contiguous=False
-            )[0][my_coord_on_mesh_dim]
-    return local_shard
+        for idx, placement in enumerate(spec.placements):
+            if placement.is_shard():
+                placement = cast(Shard, placement)
+                num_chunks = spec.mesh.size(dim=idx)
+                my_coord = spec.mesh.get_coordinate()
+                assert my_coord is not None, "current rank not in mesh!"
+                my_coord_on_mesh_dim = my_coord[idx]
+                local_shard = placement._split_tensor(
+                    local_shard, num_chunks, contiguous=False
+                )[0][my_coord_on_mesh_dim]
+        return local_shard
+    elif isinstance(val, (tuple, list)):
+        return val.__class__(_partition_val(v, spec) for v in val)
+    else:
+        raise RuntimeError(f"val type {type(val)} not supported")
 
 
 def partitioner(graph: GraphModule) -> GraphModule:
@@ -744,7 +748,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
     Graph partitioner that partitions the single device graph
     to distributed graph
     """
-
     shape_adjustment_ops = [
         aten.view.default,
         aten.reshape.default,
@@ -760,7 +763,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
         if node.op == "placeholder":
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
-                local_val = _to_local_shard(node.meta["val"], out_spec)
+                local_val = _partition_val(node.meta["val"], out_spec)
                 # update node value
                 node.meta["val"] = local_val
         elif node.op == "call_function":
@@ -803,16 +806,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
                         )
                     node.replace_input_with(input_arg, output_node)
 
-            if "val" not in node.meta:
-                # if no 'val' in the node meta, we can't do anything about
-                # this node itself, so skip processing it. "val" usually should
-                # always appear in the node meta, but for some complicated ops that
-                # have nested container as return types (i.e. fused adam have tuple[list]
-                # as return type), tracing can't capture the "val" correctly yet.
-                # TODO: See if we can fix this directly in tracing
-                # issue: https://github.com/pytorch/pytorch/issues/99356
-                continue
-
             output_val = node.meta["val"]
 
             if node.target in shape_adjustment_ops:
@@ -823,21 +816,8 @@ def partitioner(graph: GraphModule) -> GraphModule:
                 )
                 node.update_arg(1, local_shape)
 
-            # convert output tensor to local shard
-            # note that if the output is already local, we don't need to convert
-            if isinstance(output_val, list):
-                new_local_list = []
-                for tensor_val in output_val:
-                    local_val = _to_local_shard(tensor_val, out_spec)
-                    new_local_list.append(local_val)
-                node.meta["val"] = new_local_list
-            else:
-                if isinstance(output_val, torch.Tensor):
-                    if not hasattr(out_spec, "from_local"):
-                        local_val = _to_local_shard(output_val, out_spec)
-                        node.meta["val"] = local_val
-                else:
-                    raise RuntimeError(f"Output type {type(output_val)} not supported!")
+            # convert output val to its local component
+            node.meta["val"] = _partition_val(output_val, out_spec)
 
         elif node.op == "output":
             break

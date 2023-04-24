@@ -1458,7 +1458,7 @@ def meta__fused_adam(
         empty_like_list(grads),
         empty_like_list(exp_avgs),
         empty_like_list(exp_avg_sqs),
-        empty_like_list(state_steps),
+        empty_like_list(max_exp_avg_sqs),
     )
 
 
