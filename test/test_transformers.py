@@ -625,6 +625,29 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(masked_output, is_causal_output)
 
+    def test_funtional_MHA(self):
+        x = torch.randn(2000,6,256)
+        mha_out, attn_weights = F.multi_head_attention_forward(
+            query = x,
+            key = x,
+            value = x,
+            embed_dim_to_check = 256,
+            num_heads = 4,
+            in_proj_weight = torch.randn(768, 256),
+            in_proj_bias = torch.randn(768),
+            bias_k = None,
+            bias_v = None,
+            add_zero_attn = False,
+            dropout_p = 0.1,
+            out_proj_weight = torch.randn(256, 256),
+            out_proj_bias = torch.randn(256),
+            training = True,
+            key_padding_mask = torch.zeros(2000, 6).bool(),
+            need_weights = False,
+            attn_mask = None,
+            average_attn_weights = True,
+            is_causal = False,
+        )
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
