@@ -16,6 +16,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
+    check_constant_args,
     get_custom_getattr,
     is_namedtuple_cls,
     istype,
@@ -23,7 +24,7 @@ from ..utils import (
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
-from .ctx_manager import NullContextVariable
+from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -105,6 +106,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if self.value is contextlib.nullcontext:
             return NullContextVariable(**options)
+        elif (
+            issubclass(type(self.value), type)
+            and hasattr(self.value, "__enter__")
+            and hasattr(self.value, "__exit__")
+            and check_constant_args(args, kwargs)
+            and len(kwargs) == 0  # TODO(ybliang): support kwargs
+        ):
+            unwrapped_args = [x.as_python_constant() for x in args]
+            return GenericContextWrappingVariable(
+                unwrapped_args, cm_obj=self.value(*unwrapped_args), **options
+            )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)
