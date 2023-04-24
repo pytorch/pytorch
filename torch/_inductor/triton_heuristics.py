@@ -54,10 +54,11 @@ class HeuristicType(Enum):
 
 
 def disable_pointwise_autotuning():
-    return (
-        config.triton.autotune_pointwise
-        and torch.are_deterministic_algorithms_enabled()
-    )
+    # Autotuning can give different benchmarking results from run to run, and
+    # therefore we disable autotuning when use_deterministic flag is on.
+    if torch.are_deterministic_algorithms_enabled():
+        return True
+    return not config.triton.autotune_pointwise
 
 
 class CachingAutotuner(KernelInterface):
