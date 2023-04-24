@@ -4,7 +4,7 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
-import torch.distributed._functional_collectives
+from torch.distributed import _functional_collectives
 from . import external_utils
 
 
@@ -121,7 +121,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 # to inline objects from it or its children.
 skipfiles_inline_module_allowlist = {
     torch.nn,
-    torch.distributed._functional_collectives,
+    _functional_collectives,
     torch.distributions,
     torch.testing,
     torch.ao.nn,

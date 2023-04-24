@@ -374,6 +374,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
         assert counter.op_count == 2
         assert same(out, correct)
+
     def test_backwards(self):
         """
         It's probably not that common to need backwards support for collectives.
