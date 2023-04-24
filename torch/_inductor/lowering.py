@@ -510,7 +510,7 @@ def squeeze(x, dim=None):
     new_shape = [
         s
         for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
+        if not (d in dims and V.graph.sizevars.statically_known_equals(s, 1))
     ]
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
@@ -1412,7 +1412,6 @@ make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
-make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
@@ -1572,7 +1571,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = end + dim_size
     if start is None:
         start = 0
-    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
         end = dim_size
 
     src_size = list(x.get_size())
@@ -3783,6 +3782,17 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         dtype = torch.int64
 
     fn = make_reduction("sum", override_return_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
+@register_lowering(aten.prod)
+def prod(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    fn = make_reduction("prod", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
 
