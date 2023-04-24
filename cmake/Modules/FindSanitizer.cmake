@@ -53,10 +53,18 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
 
   set(CMAKE_REQUIRED_QUIET ON)
   set(_run_res 0)
-  include(CheckSourceRuns)
+  include(CheckCSourceRuns)
+  include(CheckCXXSourceRuns)
   foreach(lang IN LISTS languages)
-    if(lang STREQUAL CXX OR lang STREQUAL C)
-      check_source_runs(${lang} "${_source_code}"
+    if(lang STREQUAL C)
+      check_c_source_runs("${_source_code}"
+                        __${lang}_${sanitizer_name}_res)
+      if(__${lang}_${sanitizer_name}_res)
+        set(_run_res 1)
+      endif()
+    endif()
+    if(lang STREQUAL CXX)
+      check_cxx_source_runs("${_source_code}"
                         __${lang}_${sanitizer_name}_res)
       if(__${lang}_${sanitizer_name}_res)
         set(_run_res 1)

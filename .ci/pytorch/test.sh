@@ -251,6 +251,11 @@ test_inductor() {
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+
+  # docker build uses bdist_wheel which does not work with test_aot_inductor
+  # TODO: need a faster way to build
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  LD_LIBRARY_PATH="$TORCH_LIB_DIR $TORCH_BIN_DIR"/test_aot_inductor
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -296,33 +301,42 @@ test_perf_for_dashboard() {
     # Run accuracy test for inductor with different configs
     # --disable-cudagraphs is the default inductor behavior
     # TODO: update here once cudagraphs is turned on as default
-    if [[ "${TEST_CONFIG}" != *max_autotune* ]]; then
+    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+      # Only run this one config for max-autotune
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+    else
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
       python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+          --dynamic-batch-only --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
     fi
-    # Only test this one config for max-autotune
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
 
     # Run performance test
-    if [[ "${TEST_CONFIG}" != *max_autotune* ]]; then
+    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+      # Only run this one config for max-autotune
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
+    else
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
           --dynamic-batch-only --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
     fi
-    # Only test this one config for max-autotune
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
   done
 }
 
@@ -543,10 +557,6 @@ test_libtorch() {
       "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
 
-    if [[ "${BUILD_ENVIRONMENT}" == *sm86* ]]; then
-      BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-      "LD_LIBRARY_PATH=$TORCH_LIB_DIR $BUILD_BIN_DIR"/test_aot_inductor --gtest_output=xml:$TEST_REPORTS_DIR/test_aot_inductor.xml
-    fi
     assert_git_not_dirty
   fi
 }

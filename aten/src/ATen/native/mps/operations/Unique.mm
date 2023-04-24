@@ -179,37 +179,21 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self,
                                          const bool return_counts,
                                          const bool consecutive,
                                          c10::optional<int64_t> dim) {
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string key = getUniqueKey(self.scalar_type(), self.sizes(), return_inverse, return_counts, consecutive, dim);
-    UniqueCachedGraph* cachedGraph = static_cast<UniqueCachedGraph*>(cache_->LookUp(key));
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        UniqueCachedGraph* newCachedGraph = nil;
+    return LookUpOrCreateCachedGraph<UniqueCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      // Workaround for MPSShaderLibrary bug
+      // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+      auto inputType = getMPSScalarType(self.scalar_type());
+      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self.sizes()));
 
-        @autoreleasepool {
-          // Initialize graph
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new UniqueCachedGraph(mpsGraph);
+      auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
 
-          // Workaround for MPSShaderLibrary bug
-          // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
-          auto inputType = getMPSScalarType(self.scalar_type());
-          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self.sizes()));
-
-          auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
-
-          newCachedGraph->outputTensor_ = outputTensors[0];
-          newCachedGraph->inverseIndicesTensor_ = outputTensors[1];
-          newCachedGraph->countsTensor_ = outputTensors[2];
-          newCachedGraph->lengthTensor_ = outputTensors[3];
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<UniqueCachedGraph*>(tmpCachedGraph);
-    }
-    return cachedGraph;
+      newCachedGraph->outputTensor_ = outputTensors[0];
+      newCachedGraph->inverseIndicesTensor_ = outputTensors[1];
+      newCachedGraph->countsTensor_ = outputTensors[2];
+      newCachedGraph->lengthTensor_ = outputTensors[3];
+    });
   }
 }
 
