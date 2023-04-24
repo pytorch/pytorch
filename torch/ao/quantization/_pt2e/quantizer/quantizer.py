@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Callable, List, NamedTuple, Optional
 
 import torch
@@ -17,6 +17,15 @@ SUPPORTED_QSCHEMES = [
     torch.per_channel_symmetric,
     torch.per_channel_affine_float_qparams,
 ]
+
+# TODO: add support for torch dtype in quant code base
+# this includes observers and prepare/convert code
+_TORCH_DTYPE_TO_QDTYPE = {
+    torch.int8: torch.qint8,
+    torch.uint8: torch.quint8,
+    torch.int32: torch.qint32,
+    torch.float16: torch.float16,
+}
 
 
 @dataclass(eq=True, frozen=True)
@@ -53,15 +62,19 @@ class QuantizationSpec:
             raise ValueError("Ch_axis is < 0.")
 
 
+def get_observer_kwargs(quant_spec: QuantizationSpec):
+    kwargs_dict = asdict(quant_spec)
+    kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
+    return kwargs_dict
+
+
 # In the absence of better name, just winging it with QuantizationConfig
-QuantizationConfig = NamedTuple(
-    "QuantizationConfig",
-    [
-        ("activation", QuantizationSpec),
-        ("weight", QuantizationSpec),
-        ("bias", QuantizationSpec),
-    ],
-)
+@dataclass(eq=True, frozen=True)
+class QuantizationConfig:
+    activation: Optional[QuantizationSpec]
+    weight: Optional[QuantizationSpec]
+    bias: Optional[QuantizationSpec]
+    is_qat: bool = False
 
 OperatorPatternType = List[Callable]
 

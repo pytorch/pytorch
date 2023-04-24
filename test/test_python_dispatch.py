@@ -1477,6 +1477,48 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
 
+    def test_record_stream(self) -> None:
+        class TestMode(TorchDispatchMode):
+            def __init__(self, testcase):
+                self.testcase = testcase
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.testcase.assertEqual(func.name(), "aten::record_stream")
+                self.testcase.assertIsInstance(args[0], torch.Tensor)
+                self.testcase.assertIsInstance(args[1], torch.Stream)
+                self.testcase.assertEqual(args[1].stream_id, 1)
+                self.testcase.assertEqual(args[1].device_index, 2)
+                self.testcase.assertEqual(args[1].device_type, 3)
+
+        t = torch.tensor(5.)
+        s = torch.Stream(stream_id=1, device_index=2, device_type=3)
+        with TestMode(self):
+            t.record_stream(s)
+
+    def test_return_stream(self) -> None:
+        l_def = torch.library.Library("test_return_stream", "DEF")
+        l_def.define("return_stream(Tensor self) -> Stream")
+        l_impl = torch.library.Library("test_return_stream", "IMPL", "CPU")
+        l_impl.impl("return_stream", lambda _: torch.Stream(stream_id=0, device_index=1, device_type=2))
+
+        class TestMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.Stream(stream_id=1, device_index=2, device_type=3)
+
+        t = torch.tensor(5.)
+        s = torch.ops.test_return_stream.return_stream(t)
+        self.assertIsInstance(s, torch.Stream)
+        self.assertEqual(s.stream_id, 0)
+        self.assertEqual(s.device_index, 1)
+        self.assertEqual(s.device_type, 2)
+
+        with TestMode():
+            s = torch.ops.test_return_stream.return_stream(t)
+        self.assertIsInstance(s, torch.Stream)
+        self.assertEqual(s.stream_id, 1)
+        self.assertEqual(s.device_index, 2)
+        self.assertEqual(s.device_type, 3)
+
     def test_subclass_autograd_device_check(self) -> None:
         class NonWrapperSubclass(torch.Tensor):
             elem: torch.Tensor
