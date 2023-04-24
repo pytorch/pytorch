@@ -266,7 +266,7 @@ class PContext(abc.ABC):
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
         to a poll).
 
-        ..note: Multiprocesing library registers SIGTERM and SIGINT signal handlers that raise
+        ..note: Multiprocessing library registers SIGTERM and SIGINT signal handlers that raise
                 ``SignalException`` when the signals received. It is up to the consumer of the code
                 to properly handle the exception. It is important not to swallow the exception otherwise
                 the process would not terminate. Example of the typical workflow can be:
@@ -322,7 +322,7 @@ class PContext(abc.ABC):
         meta resources (e.g. redirect, error_file files).
 
         Args:
-            death_sig: Death signal to terminate porcesses.
+            death_sig: Death signal to terminate processes.
             timeout: Time to wait for processes to finish, if process is
                 still alive after this time, it will be terminated via SIGKILL.
         """
@@ -491,9 +491,12 @@ class MultiprocessContext(PContext):
             error_filepath = self.error_files[failed_local_rank]
 
             log.error(
-                f"failed (exitcode: {failed_proc.exitcode})"
-                f" local_rank: {failed_local_rank} (pid: {e.pid})"
-                f" of fn: {fn_name} (start_method: {self.start_method})",
+                "failed (exitcode: %s)"
+                " local_rank: %s (pid: %s)"
+                " of fn: %s (start_method: %s)",
+                failed_proc.exitcode,
+                failed_local_rank, e.pid,
+                fn_name, self.start_method,
                 exc_info=True,
             )
 
@@ -520,12 +523,12 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning(f"Closing process {proc.pid} via signal {death_sig.name}")
+                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
                     # If the process exited because of some reason,
-                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
+                    # `ProcessLookupError` will be raised, it is safe to ignore it.
                     pass
         end = time.monotonic() + timeout
         for proc in self._pc.processes:
@@ -536,13 +539,14 @@ class MultiprocessContext(PContext):
         for proc in self._pc.processes:
             if proc.is_alive():
                 log.warning(
-                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
+                    "Unable to shutdown process %s via %s, forcefully exiting via %s",
+                    proc.pid, death_sig, _get_kill_signal()
                 )
                 try:
                     os.kill(proc.pid, _get_kill_signal())
                 except ProcessLookupError:
                     # If the process exited because of some reason,
-                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
+                    # `ProcessLookupError` will be raised, it is safe to ignore it.
                     pass
             proc.join()
 
@@ -670,9 +674,10 @@ class SubprocessContext(PContext):
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
                 log.error(
-                    f"failed (exitcode: {first_failure.exitcode})"
-                    f" local_rank: {first_failure.local_rank} (pid: {first_failure.pid})"
-                    f" of binary: {self.entrypoint}"
+                    "failed (exitcode: %s)"
+                    " local_rank: %s (pid: %s)"
+                    " of binary: %s",
+                    first_failure.exitcode, first_failure.local_rank, first_failure.pid, self.entrypoint
                 )
             else:
                 # Populate return with dummy values. This provides consistency with MultiprocessingHandler
@@ -696,7 +701,7 @@ class SubprocessContext(PContext):
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(
-                    f"Sending process {handler.proc.pid} closing signal {death_sig.name}"
+                    "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
         end = time.monotonic() + timeout
@@ -713,7 +718,8 @@ class SubprocessContext(PContext):
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(
-                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exiting via {_get_kill_signal()}"
+                    "Unable to shutdown process %s via %s, forcefully exiting via %s",
+                    handler.proc.pid, death_sig, _get_kill_signal()
                 )
                 handler.close(death_sig=_get_kill_signal())
                 handler.proc.wait()

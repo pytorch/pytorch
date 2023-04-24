@@ -16,13 +16,13 @@ on:
 jobs:
   calculate-docker-image:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 30
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
 

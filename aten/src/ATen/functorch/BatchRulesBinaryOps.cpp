@@ -392,8 +392,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(_cdist_forward);
   VMAP_SUPPORT(_cdist_backward, cdist_backward_batch_rule);
 
-  // Commented out so we have a test op
-  // BINARY_SCALAR_2(copysign, Tensor, Scalar);
+  BINARY_SCALAR_2(copysign, Tensor, Scalar);
+  POINTWISE_BOXED(copysign_.Tensor);
+  POINTWISE_BOXED(copysign_.Scalar);
   BINARY_SCALAR_2(div, Tensor, Scalar);
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 

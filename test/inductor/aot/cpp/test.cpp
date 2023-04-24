@@ -1,8 +1,10 @@
 //#include <gtest/gtest.h>
 #include <iostream>
+#include <vector>
 
-#include "build/aot_inductor_output.h"
+#include <torch/torch.h>
 
+extern std::vector<at::Tensor> inductor_cpp_entry(const std::vector<at::Tensor>& args);
 /*
 class Net(torch.nn.Module):
     def __init__(self):
@@ -29,13 +31,14 @@ int main() {
     torch::Tensor results_ref = net.forward(x);
 
     // TODO: we need to provide an API to concatenate args and weights
-    std::vector<torch::Tensor> inputs = {x};
+    std::vector<torch::Tensor> inputs;
     for (const auto& pair : net.named_parameters()) {
       inputs.push_back(pair.value());
     }
-    torch::Tensor results_opt = aot_inductor_entry(inputs);
+    inputs.push_back(x);
+    auto results_opt = inductor_cpp_entry(inputs);
 
-    assert(torch::allclose(results_ref, results_opt));
+    assert(torch::allclose(results_ref, results_opt[0]));
     printf("PASS\n");
     return 0;
 }

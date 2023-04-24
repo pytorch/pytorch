@@ -403,7 +403,7 @@ const std::vector<std::string> functions = {
 
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
-        # whice potentially uses large intermediate of size b*m*p,
+        # which potentially uses large intermediate of size b*m*p,
         # we do [m, bn] * [bn, p] to avoid having the large
         # intermediate, thus reduces max memory usage.
         def AD_matmul_bw_special_fold(mat1, mat2):

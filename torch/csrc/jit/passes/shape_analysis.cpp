@@ -208,7 +208,7 @@ c10::ScalarType unionScalarTypes(
 // Promotes result types for arithmetic operations on Tensor operands using
 // new type promotion logic. See tensor_attributes.rst for details.
 // This doesn't handle the case of arithmetic ops with Scalar arguments (when
-// `Tensor.getUnsafeTensorImpl()->is_wrapped_nubmer()` would return true)
+// `Tensor.getUnsafeTensorImpl()->is_wrapped_number()` would return true)
 c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
   c10::ScalarType dimmed = c10::ScalarType::Undefined;
   c10::ScalarType zerodim = c10::ScalarType::Undefined;
@@ -460,7 +460,7 @@ class ShapePropagator : public PropertyPropBase {
       // its most constrained form.
       auto tensor_type = node->outputs()[i]->type()->cast<TensorType>();
       if (stack[i].isTensor() && tensor_type) {
-        // gradient information isn't always available or part of represenative
+        // gradient information isn't always available or part of representative
         // inputs, maintain original grad property
         auto tensor_grad = tensor_type->requiresGrad();
         node->outputs()[i]->setType(TensorType::create(stack[i].toTensor())
@@ -1458,7 +1458,7 @@ class ShapePropagator : public PropertyPropBase {
     //   tensor inputs  : 1
     //   tensor outputs : 1
     // Additionally:
-    //   - has ScalarType dtype, Layeout layout and Device device arguments
+    //   - has ScalarType dtype, Layout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
             "aten::empty_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -1487,7 +1487,7 @@ class ShapePropagator : public PropertyPropBase {
     //   tensor inputs  : 1
     //   tensor outputs : 1
     // Additionally:
-    //   - has int[] size, ScalarType dtype, Layeout layout and Device device
+    //   - has int[] size, ScalarType dtype, Layout layout and Device device
     //   arguments
     static const register_formula_for size_factories_with_options{
         {

@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Pattern, Optional, Tuple
+from typing import List, Optional, Pattern, Tuple
 
 
 BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
@@ -10,9 +10,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 
 OFFICE_HOURS_LINK = "https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours"
 CONTACT_US = f"Questions? Feedback? Please reach out to the [PyTorch DevX Team]({OFFICE_HOURS_LINK})"
-ALTERNATIVES = (
-    f"Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
-)
+ALTERNATIVES = f"Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
 
 
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
@@ -46,31 +44,41 @@ class TryMergeExplainer(object):
         self.project = project
         self.ignore_current = ignore_current
 
-    def _get_flag_msg(self, ignore_current_checks: Optional[List[Tuple[str, Optional[str]]]] = None) -> str:
+    def _get_flag_msg(
+        self,
+        ignore_current_checks: Optional[
+            List[Tuple[str, Optional[str], Optional[int]]]
+        ] = None,
+    ) -> str:
         if self.force:
-            return "Your change will be merged immediately since you used the force (-f) flag, " + \
-                "**bypassing any CI checks** (ETA: 1-5 minutes)."
+            return (
+                "Your change will be merged immediately since you used the force (-f) flag, "
+                + "**bypassing any CI checks** (ETA: 1-5 minutes)."
+            )
         elif self.ignore_current and ignore_current_checks is not None:
             msg = f"Your change will be merged while ignoring the following {len(ignore_current_checks)} checks: "
-            msg += ', '.join(f"[{x[0]}]({x[1]})" for x in ignore_current_checks)
+            msg += ", ".join(f"[{x[0]}]({x[1]})" for x in ignore_current_checks)
             return msg
         else:
             return "Your change will be merged once all checks pass (ETA 0-4 Hours)."
 
-
     def get_merge_message(
         self,
-        ignore_current_checks: Optional[List[Tuple[str, Optional[str]]]] = None
+        ignore_current_checks: Optional[
+            List[Tuple[str, Optional[str], Optional[int]]]
+        ] = None,
     ) -> str:
         title = "### Merge started"
         main_message = self._get_flag_msg(ignore_current_checks)
 
-        advanced_debugging = "\n".join((
-            "<details><summary>Advanced Debugging</summary>",
-            "Check the merge workflow status ",
-            f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>",
-            "</details>"
-        ))
+        advanced_debugging = "\n".join(
+            (
+                "<details><summary>Advanced Debugging</summary>",
+                "Check the merge workflow status ",
+                f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>",
+                "</details>",
+            )
+        )
 
         msg = title + "\n"
         msg += main_message + "\n\n"

@@ -760,6 +760,9 @@ size_t StaticModule::prepareStaticNodeInfos(
   return node_idx - node_start;
 }
 
+BlockInfo::BlockInfo(uint32_t input_idx, Block& block)
+    : input_idx_(input_idx), block_(block) {}
+
 void BlockInfo::set_nodes(
     std::vector<StaticNodeInfo> nodes,
     const c10::FastMap<Node*, bool>& node_has_out_variant) {
@@ -1251,7 +1254,7 @@ void BlockRunner::Deallocator::cleanupImpl() {
     block_runner_.planner_->deallocate();
   } else {
     // This is the first run, and it didn't finish, so we can't use a
-    // `MemoryPlanner` to deallocate stuff. Just reset everything mannually.
+    // `MemoryPlanner` to deallocate stuff. Just reset everything manually.
     block_runner_.resetMemory();
   }
   // clean up owning refs of input tensors
@@ -1712,7 +1715,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   results.setup_time = timer.MilliSeconds();
 
   // The first iteration profiles each node's output Tensors' sizes and
-  // initializes the memory planner with the profile information. Folllowing
+  // initializes the memory planner with the profile information. Following
   // iterations just use the already established memory planning.
   timer.Start();
   operator()(args_list[0], is_kwargs_empty ? empty_kwargs : kwargs_list[0]);

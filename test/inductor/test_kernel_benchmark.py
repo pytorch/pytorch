@@ -85,7 +85,7 @@ class TestKernelBenchmark(TestCase):
         M, N, K = 1000, 1000, 10
         x = torch.rand(M, K).to("cuda")
         y = torch.rand(K, N).to("cuda")
-        out = torch.compile(f)(x, y)
+        out = f(x, y)
 
         compiled_module = self.get_compiled_module()
 

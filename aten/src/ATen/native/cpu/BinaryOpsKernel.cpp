@@ -2,10 +2,10 @@
 #include <ATen/native/BinaryOps.h>
 
 #include <cmath>
-#include <iostream>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
@@ -21,6 +21,14 @@ namespace at::native {
 namespace {
 
 using namespace vec;
+
+template <typename scalar_t, typename Op, typename opmath_t = at::opmath_type<scalar_t>,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline Vectorized<scalar_t> binary_op_scalar(const Vectorized<scalar_t>& a, opmath_t b, const Op& op) {
+  Vectorized<opmath_t> a0, a1, vec_b(b);
+  std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+  return convert_from_float<scalar_t>(op(a0, vec_b), op(a1, vec_b));
+}
 
 void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Scalar& min_val, const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
@@ -55,9 +63,10 @@ void atan2_kernel(TensorIteratorBase& iter) {
 }
 
 void mul_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
+  auto dtype = iter.common_dtype();
+  if (dtype == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
-  } else if (iter.dtype() == kComplexHalf) {
+  } else if (dtype == kComplexHalf) {
     cpu_kernel(
         iter,
         [=](c10::complex<at::Half> a,
@@ -65,8 +74,19 @@ void mul_kernel(TensorIteratorBase& iter) {
           using comp_t = c10::complex<float>;
           return comp_t{a} * comp_t{b};
         });
+  } else if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "mul_cpu_reduced_float", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t b = iter.original_scalar_value<opmath_t>(2);
+      iter.remove_operand(2);
+      cpu_kernel_vec(iter,
+        [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t { return static_cast<opmath_t>(a) * b; },
+        [=](Vectorized<scalar_t> a) __ubsan_ignore_undefined__ {
+          return binary_op_scalar(a, b, [](const Vectorized<opmath_t>& x, const Vectorized<opmath_t>& y) { return x * y; });
+        });
+    });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "mul_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, dtype, "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) __ubsan_ignore_undefined__ {
@@ -77,15 +97,31 @@ void mul_kernel(TensorIteratorBase& iter) {
 }
 
 void div_true_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_cpu", [&]() {
-    cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-        return a / b;
-      },
-      [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-        return a / b;
-      });
-  });
+  const auto dtype = iter.common_dtype();
+  if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_cpu_reduced_float", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t b = iter.original_scalar_value<opmath_t>(2);
+      iter.remove_operand(2);
+      cpu_kernel_vec(iter,
+        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          return static_cast<opmath_t>(a) / b;
+        },
+        [=](Vectorized<scalar_t> a) {
+          return binary_op_scalar(a, b, [](const Vectorized<opmath_t>& x, const Vectorized<opmath_t>& y) { return x / y; });
+        });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, dtype, "div_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          return a / b;
+        },
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
+          return a / b;
+        });
+    });
+  }
 }
 
 void div_trunc_kernel(TensorIteratorBase& iter) {
@@ -98,6 +134,19 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         return a / b;
       });
+    });
+  } else if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_trunc_cpu_reduced_float", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_t b = iter.original_scalar_value<opmath_t>(2);
+      iter.remove_operand(2);
+      cpu_kernel_vec(iter,
+        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          return std::trunc(static_cast<opmath_t>(a) / b);
+        },
+        [=](Vectorized<scalar_t> a) {
+          return binary_op_scalar(a, b, [](const Vectorized<opmath_t>& x, const Vectorized<opmath_t>& y) { return (x / y).trunc(); });
+        });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_trunc_cpu", [&]() {
@@ -121,6 +170,49 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
 //
 // For reference, see CPython's implementation:
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
+template <typename scalar_t>
+inline scalar_t div_floor_internal(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
+  if (C10_UNLIKELY(b == 0)) {
+    // Divide by zero: return standard IEEE result
+    return a / b;
+  }
+
+  auto mod = std::fmod(a, b);
+  auto div = (a - mod) / b;
+  if ((mod != 0) && (b < 0) != (mod < 0)) {
+    div -= scalar_t(1);
+  }
+
+  scalar_t floordiv;
+  if (div != 0) {
+    floordiv = std::floor(div);
+    if (div - floordiv > scalar_t(0.5)) {
+      floordiv += scalar_t(1.0);
+    }
+  } else {
+    floordiv = c10::copysign(scalar_t(0), a / b);
+  }
+  return floordiv;
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> div_floor_internal(const Vectorized<scalar_t>& a, const Vectorized<scalar_t>& b) {
+  using vec_t = Vectorized<scalar_t>;
+  auto mod = a.fmod(b);
+  auto div = (a - mod) / b;
+  const auto zero = vec_t(0);
+  auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+  const auto one = vec_t(1);
+  div = vec_t::blendv(div, div - one, mask);
+  auto floordiv = div.floor();
+  mask = (div - floordiv) > vec_t(0.5);
+  floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+  const auto basic_div = a / b;
+  floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
+  floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
+  return floordiv;
+};
 
 void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
@@ -148,48 +240,32 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     });
   } else {
     // See NOTE: [Floor Division in Python]
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
-      using vec_t = Vectorized<scalar_t>;
-      cpu_kernel_vec(iter,
-          [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-            if (C10_UNLIKELY(b == 0)) {
-              // Divide by zero: return standard IEEE result
-              return a / b;
-            }
-
-            auto mod = std::fmod(a, b);
-            auto div = (a - mod) / b;
-            if ((mod != 0) && (b < 0) != (mod < 0)) {
-              div -= scalar_t(1);
-            }
-
-            scalar_t floordiv;
-            if (div != 0) {
-              floordiv = std::floor(div);
-              if (div - floordiv > scalar_t(0.5)) {
-                floordiv += scalar_t(1.0);
-              }
-            } else {
-              floordiv = c10::copysign(scalar_t(0), a / b);
-            }
-            return floordiv;
+    if (iter.is_scalar(2) && at::isReducedFloatingType(dtype)) {
+      AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "div_floor_cpu_reduced_float", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
+        opmath_t b = iter.original_scalar_value<opmath_t>(2);
+        iter.remove_operand(2);
+        using vec_t = Vectorized<opmath_t>;
+        cpu_kernel_vec(iter,
+          [=](scalar_t a) -> scalar_t {
+            return div_floor_internal(static_cast<opmath_t>(a), b);
+          },
+          [=](Vectorized<scalar_t> a) {
+            return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_internal(x, y); });
+          });
+      });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
+        using vec_t = Vectorized<scalar_t>;
+        cpu_kernel_vec(iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return div_floor_internal(a, b);
           },
           [](vec_t a, vec_t b) -> vec_t {
-            auto mod = a.fmod(b);
-            auto div = (a - mod) / b;
-            const auto zero = vec_t(0);
-            auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
-            const auto one = vec_t(1);
-            div = vec_t::blendv(div, div - one, mask);
-            auto floordiv = div.floor();
-            mask = (div - floordiv) > vec_t(0.5);
-            floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
-            const auto basic_div = a / b;
-            floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
-            floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
-            return floordiv;
+            return div_floor_internal(a, b);
           });
-    });
+      });
+    }
   }
 }
 

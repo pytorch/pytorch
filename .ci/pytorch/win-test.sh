@@ -20,14 +20,6 @@ export PYTORCH_FINAL_PACKAGE_DIR_WIN
 
 mkdir -p "$TMP_DIR"/build/torch
 
-# This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
-CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
-mkdir -p "$CI_SCRIPTS_DIR"
-
-if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
-    rm "$CI_SCRIPTS_DIR"/*
-fi
-
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
@@ -42,7 +34,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-python -m pip install pytest-rerunfailures==10.3
+# TODO: Move both of them to Windows AMI
+python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0
 
 run_tests() {
     # Run nvidia-smi if available

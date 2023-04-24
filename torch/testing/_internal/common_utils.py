@@ -15,6 +15,7 @@ import gc
 import inspect
 import io
 import json
+import logging
 import math
 import operator
 import os
@@ -91,6 +92,7 @@ import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
+log = logging.getLogger(__name__)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -112,15 +114,18 @@ DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
+def maybe_load_json(filename):
+    if os.path.isfile(filename):
+        with open(filename, 'r') as fp:
+            return json.load(fp)
+    log.warning("Attempted to load json file '%s' but it does not exist.", filename)
+    return {}
+
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
 if os.getenv("SLOW_TESTS_FILE", ""):
-    with open(os.getenv("SLOW_TESTS_FILE"), 'r') as fp:
-        slow_tests_dict = json.load(fp)
-        warnings.warn(f"loaded {len(slow_tests_dict)} slow tests")
+    slow_tests_dict = maybe_load_json(os.getenv("SLOW_TESTS_FILE", ""))
 if os.getenv("DISABLED_TESTS_FILE", ""):
-    with open(os.getenv("DISABLED_TESTS_FILE"), 'r') as fp:
-        disabled_tests_dict = json.load(fp)
-        warnings.warn(f"loaded {len(disabled_tests_dict)} disabled tests")
+    disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
@@ -571,9 +576,9 @@ CI_TEST_PREFIX = str(Path(os.getcwd()))
 CI_PT_ROOT = str(Path(os.getcwd()).parent)
 CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
-def wait_for_process(p):
+def wait_for_process(p, timeout=None):
     try:
-        return p.wait()
+        return p.wait(timeout=timeout)
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
@@ -590,7 +595,7 @@ def wait_for_process(p):
         # Always call p.wait() to ensure exit
         p.wait()
 
-def shell(command, cwd=None, env=None, stdout=None, stderr=None):
+def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The following cool snippet is copied from Py3 core library subprocess.call
@@ -602,7 +607,22 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None):
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
-    return wait_for_process(p)
+    return wait_for_process(p, timeout=timeout)
+
+
+def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None, retries=1):
+    assert retries >= 0, f"Expecting non negative number for number of retries, got {retries}"
+    try:
+        exit_code = shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout)
+        if exit_code == 0 or retries == 0:
+            return exit_code
+        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout, flush=True)
+    except subprocess.TimeoutExpired:
+        if retries == 0:
+            print(f"Command took >{timeout // 60}min, returning 124", file=stdout, flush=True)
+            return 124
+        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout, flush=True)
+    return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
 
 
 def discover_test_cases_recursively(suite_or_case):
@@ -753,7 +773,10 @@ def run_tests(argv=UNITTEST_ARGS):
                 [test_case_full_name]
             )
             string_cmd = " ".join(cmd)
-            exitcode = shell(cmd)
+
+            timeout = None if RERUN_DISABLED_TESTS else 15 * 60
+
+            exitcode = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
@@ -794,7 +817,6 @@ def run_tests(argv=UNITTEST_ARGS):
         exit_code = pytest.main(args=pytest_args)
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
-        print("If in CI, skip info is located in the xml test reports, please either go to s3 or the hud to download them")
 
         if not RERUN_DISABLED_TESTS:
             # exitcode of 5 means no tests were found, which happens since some test configs don't
@@ -1133,13 +1155,6 @@ def skipIfRocmVersionLessThan(version=None):
         return wrap_fn
     return dec_fn
 
-# Temporary function to simplify adding support to 3.11
-def xfailIfPython311(fn):
-    if sys.version_info < (3, 11):
-        return fn
-    else:
-        return unittest.expectedFailure(fn)
-
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1167,6 +1182,18 @@ class DeterministicGuard:
         torch.use_deterministic_algorithms(
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
+
+class AlwaysWarnTypedStorageRemoval:
+    def __init__(self, always_warn):
+        assert isinstance(always_warn, bool)
+        self.always_warn = always_warn
+
+    def __enter__(self):
+        self.always_warn_restore = torch.storage._get_always_warn_typed_storage_removal()
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn_restore)
 
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
@@ -1595,7 +1622,7 @@ class CudaMemoryLeakCheck():
 
             discrepancy_detected = True
 
-            # Query memory multiple tiems to ensure leak was not transient
+            # Query memory multiple items to ensure leak was not transient
             for n in range(3):
                 caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
                 bytes_free, bytes_total = torch.cuda.mem_get_info(i)
@@ -1659,7 +1686,7 @@ def skip_exception_type(exc_type):
     except exc_type as e:
         raise unittest.SkipTest(f"not implemented: {e}") from e
 
-#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  "min_satisfying_examples" setting has been deprecated in hypothesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
     import hypothesis
@@ -1780,7 +1807,7 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
     if TEST_SKIP_FAST:
-        if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 
@@ -1966,7 +1993,7 @@ class UnittestPair(Pair):
 
 
 class StringPair(UnittestPair):
-    CLS = str
+    CLS = (str, bytes)
     TYPE_NAME = "string"
 
 
@@ -2343,7 +2370,7 @@ class TestCase(expecttest.TestCase):
         we'll find a maximal window in (n_rows + 1, n_cols + 1)-grid
         that is able to hold a sequence of sawteeth and so-called
         final correction, while the external part of the window is
-        filled with counts to meet the nnz contraint exactly.
+        filled with counts to meet the nnz constraint exactly.
         """
         assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
 
@@ -4179,7 +4206,7 @@ def clone_input_helper(input):
 
 @contextmanager
 def custom_op(opname, symbolic_fn, opset_version):
-    """Context manager/decorator to test ONNX export with custom oeprator"""
+    """Context manager/decorator to test ONNX export with custom operator"""
     try:
         register_custom_op_symbolic(opname, symbolic_fn, opset_version)
         yield
@@ -4343,3 +4370,39 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! autograd not supported.")
         if op.name == "cat":
             self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
+
+def make_lazy_class(cls):
+
+    def lazy_init(self, cb):
+        self._cb = cb
+        self._value = None
+
+    cls.__init__ = lazy_init
+
+    for basename in [
+        "add", "sub", "mul", "truediv", "floordiv", "mod", "divmod", "pow",
+        "lshift", "rshift", "and", "or", "xor", "neg", "pos", "abs", "invert",
+        "eq", "ne", "lt", "le", "gt", "ge", "bool", "int", "index",
+    ]:
+        name = f"__{basename}__"
+
+        def inner_wrapper(name):
+            use_operator = basename not in ("bool", "int")
+
+            def wrapped(self, *args, **kwargs):
+                if self._cb is not None:
+                    self._value = self._cb()
+                    self._cb = None
+                if not use_operator:
+                    return getattr(self._value, name)(*args, **kwargs)
+                else:
+                    return getattr(operator, name)(self._value, *args, **kwargs)
+            return wrapped
+
+        setattr(cls, name, inner_wrapper(name))
+
+    return cls
+
+@make_lazy_class
+class LazyVal:
+    pass

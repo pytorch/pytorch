@@ -77,6 +77,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
+      sympy \
       typing-extensions \
       ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then

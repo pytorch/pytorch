@@ -1,3 +1,4 @@
+#include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -113,6 +114,7 @@ void _record_memory_history(
       recorder = gather;
     }
   }
+  at::globalContext().lazyInitCUDA();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, trace_alloc_record_context);
 }
@@ -142,6 +144,7 @@ std::string _memory_snapshot_pickled() {
   IValue frames_s = "frames";
   IValue history_s = "history";
   IValue blocks_s = "blocks";
+  IValue is_expandable_s = "is_expandable";
 
   auto empty_frames = new_list();
 
@@ -162,6 +165,7 @@ std::string _memory_snapshot_pickled() {
     segmentDict.insert(
         segment_pool_id,
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
+    segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
 
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -208,6 +212,8 @@ std::string _memory_snapshot_pickled() {
   IValue free_completed_s = "free_completed";
   IValue segment_alloc_s = "segment_alloc";
   IValue segment_free_s = "segment_free";
+  IValue segment_map_s = "segment_map";
+  IValue segment_unmap_s = "segment_unmap";
   IValue snapshot_s = "snapshot";
   IValue oom_s = "oom";
   IValue device_free_s = "device_free";
@@ -230,6 +236,10 @@ std::string _memory_snapshot_pickled() {
         return oom_s;
       case TraceEntry::SNAPSHOT:
         return snapshot_s;
+      case TraceEntry::SEGMENT_UNMAP:
+        return segment_unmap_s;
+      case TraceEntry::SEGMENT_MAP:
+        return segment_map_s;
     }
     throw std::runtime_error("unreachable");
   };

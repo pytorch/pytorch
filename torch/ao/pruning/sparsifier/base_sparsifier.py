@@ -6,8 +6,11 @@ from typing import Any, Dict, Optional, Set, Tuple, List, Type
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 from .utils import (
+    module_contains_param,
+    swap_module,
     FakeSparsity,
     get_arg_info_from_tensor_fqn,
     module_to_fqn,
@@ -15,13 +18,12 @@ from .utils import (
 
 __all__ = ["BaseSparsifier"]
 
-SUPPORTED_MODULES = {
-    nn.Linear
-}
+SUPPORTED_MODULES = {nn.Linear}
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
 
 __all__ = ["BaseSparsifier"]
+
 
 # TODO update desc with new config args
 class BaseSparsifier(abc.ABC):
@@ -49,6 +51,7 @@ class BaseSparsifier(abc.ABC):
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
+
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.defaults: Dict[str, Any] = defaults or {}
@@ -59,21 +62,21 @@ class BaseSparsifier(abc.ABC):
 
     def __getstate__(self) -> Dict[str, Any]:
         return {
-            'defaults': self.defaults,
-            'state': self.state,
-            'groups': self.groups,
+            "defaults": self.defaults,
+            "state": self.state,
+            "groups": self.groups,
         }
 
     def __setstate__(self, state: Dict[str, Dict[str, Any]]) -> None:
         self.__dict__.update(state)
 
     def __repr__(self):
-        format_string = self.__class__.__name__ + ' ('
+        format_string = self.__class__.__name__ + " ("
         for i, sparse_args in enumerate(self.groups):
-            module = sparse_args['module']
-            format_string += '\n'
-            format_string += f'\tGroup {i}\n'
-            format_string += f'\t    module: {module}\n'
+            module = sparse_args["module"]
+            format_string += "\n"
+            format_string += f"\tGroup {i}\n"
+            format_string += f"\t    module: {module}\n"
             for key in sorted(sparse_args.keys()):
                 if key == "module":
                     continue
@@ -92,20 +95,24 @@ class BaseSparsifier(abc.ABC):
         TODO: Need a clean way of loading the state of the "prepared" module
         """
 
-
         groups: List[Dict[str, Any]] = [
-            dict(filter(lambda key_value: key_value[0] not in KEYS_NOT_IN_STATE_DICT , mg.items()))
+            dict(
+                filter(
+                    lambda key_value: key_value[0] not in KEYS_NOT_IN_STATE_DICT,
+                    mg.items(),
+                )
+            )
             for mg in self.groups
         ]
 
         return {
-            'state': self.state,
-            'groups': groups,
+            "state": self.state,
+            "groups": groups,
         }
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
-        groups = copy.deepcopy(state_dict['groups'])
-        states = state_dict['state']
+        groups = copy.deepcopy(state_dict["groups"])
+        states = state_dict["state"]
         for tensor_fqn, s in states.items():
             arg_info = get_arg_info_from_tensor_fqn(self.model, tensor_fqn)
             module = arg_info["module"]
@@ -143,9 +150,7 @@ class BaseSparsifier(abc.ABC):
                 if type(child) in SUPPORTED_MODULES:
                     module_fqn = module_to_fqn(model, child)
                     assert isinstance(module_fqn, str)  # for mypy
-                    self.config.append(
-                        {"tensor_fqn": module_fqn + ".weight"}
-                    )
+                    self.config.append({"tensor_fqn": module_fqn + ".weight"})
                 else:
                     stack.append(child)
 
@@ -204,20 +209,24 @@ class BaseSparsifier(abc.ABC):
         self._prepare()
 
     def _prepare(self, *args, **kwargs):
-        r"""Adds mask parametrization to the layer weight
-        """
+        r"""Adds mask parametrization to the layer weight"""
         for config in self.groups:
-            module = config['module']
-            tensor_name = config['tensor_name']
-            parametrization = config.get('parametrization', FakeSparsity)
-            mask = config.get('mask', torch.ones_like(getattr(module, tensor_name)))
-            self.state[config['tensor_fqn']]['mask'] = mask
-            parametrize.register_parametrization(module, tensor_name, parametrization(mask))
+            module = config["module"]
+            tensor_name = config["tensor_name"]
+            parametrization = config.get("parametrization", FakeSparsity)
+            mask = config.get("mask", torch.ones_like(getattr(module, tensor_name)))
+            self.state[config["tensor_fqn"]]["mask"] = mask
+            parametrize.register_parametrization(
+                module, tensor_name, parametrization(mask)
+            )
 
-    def squash_mask(self,
-                    params_to_keep: Optional[Tuple[str, ...]] = None,
-                    params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
-                    *args, **kwargs):
+    def squash_mask(
+        self,
+        params_to_keep: Optional[Tuple[str, ...]] = None,
+        params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
+        *args,
+        **kwargs,
+    ):
         r"""Squashes the sparse masks into the appropriate tensors.
 
         If either the `params_to_keep` or `params_to_keep_per_layer` is set,
@@ -271,10 +280,11 @@ class BaseSparsifier(abc.ABC):
             {'foo': 42, 'bar': 24, 'baz': 0.1}
         """
         for config in self.groups:
-            module = config['module']
-            tensor_name = config['tensor_name']
-            parametrize.remove_parametrizations(module, tensor_name,
-                                                leave_parametrized=True)
+            module = config["module"]
+            tensor_name = config["tensor_name"]
+            parametrize.remove_parametrizations(
+                module, tensor_name, leave_parametrized=True
+            )
             sparse_params = {}
             if params_to_keep is not None:
                 global_params = {k: config[k] for k in params_to_keep}
@@ -288,12 +298,49 @@ class BaseSparsifier(abc.ABC):
                 # TODO handle multiple tensor being quantized on a single module, where to store sparse_params?
                 module.sparse_params = sparse_params
 
-    def convert(self):
-        # TODO: Call the torch.ao.utils.convert in here
-        raise NotImplementedError(
-            "`convert` is not implemented. Please, use "
-            "`torch.ao.utils.convert` instead."
-        )
+    def convert(
+        self,
+        module: nn.Module,
+        mapping: Optional[Dict[Type[nn.Module], Type[nn.Module]]] = None,
+        inplace: bool = False,
+        parameterization: Type[nn.Module] = FakeSparsity,
+    ):
+        r"""Converts submodules in input module to a different module according to `mapping`
+        by calling `from_dense` method on the target module class
+        Args:
+            module: input module
+            mapping: a dictionary that maps from source module type to target
+                module type, can be overwritten to allow swapping user defined
+                Modules
+            inplace: carry out model transformations in-place, the original module
+                is mutated
+        """
+        if mapping is None:
+            raise NotImplementedError("Need to auto generate mapping ")
+        if not inplace:
+            module = copy.deepcopy(module)
+
+        reassign = {}
+        for name, mod in module.named_children():
+            # leaf node
+            if (
+                module_contains_param(mod, parameterization)
+                and type_before_parametrizations(mod) in mapping
+            ):
+                reassign[name] = swap_module(mod, mapping)
+            else:
+                # recurse
+                reassign[name] = self.convert(
+                    mod,
+                    mapping=mapping,
+                    inplace=True,
+                    parameterization=parameterization,
+                )
+
+        for key, value in reassign.items():
+            module._modules[key] = value
+
+        return module
 
     def step(self, use_path: bool = True) -> None:
         if not self.enable_mask_update:

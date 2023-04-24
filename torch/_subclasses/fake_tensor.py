@@ -15,10 +15,12 @@ from torch._ops import OpOverload
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -28,6 +30,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
+
+DimList = List
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +72,11 @@ class DynamicOutputShapeException(RuntimeError):
 
 @dataclass
 class DataDependentOutputException(RuntimeError):
+    func: OpOverload
+
+
+@dataclass
+class UnsupportedOperatorException(RuntimeError):
     func: OpOverload
 
 
@@ -242,10 +251,15 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
+        if memoized_only:
+            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -275,6 +289,8 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -310,6 +326,9 @@ class FakeTensorConverter:
         shape_env=None,
         ignore_subclass=False,
         source=None,
+        dynamic_dims=None,
+        constraint_dims=None,
+        memoized_only=False,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -318,6 +337,9 @@ class FakeTensorConverter:
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
+            memoized_only=memoized_only,
         )
 
 
@@ -380,6 +402,32 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
+# Many of these operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration.
+# TODO: fix registrations, add all existing impls that are correct
+def unsupported_complex_op(op):
+    if op.namespace not in ("aten", "prims"):
+        return False
+    if op is aten._fft_c2c.default:
+        return False
+
+    op_name = op.name()
+    if "fft" in op_name:
+        return True
+    if "_linalg_svd" in op_name:
+        return True
+    if op is torch.ops.prims.svd.default:
+        return True
+    return False
+
+
+# These operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration
+@register_op_impl(unsupported_complex_op)
+def unsupported_fft(fake_mode, func, *args, **kwargs):
+    raise UnsupportedOperatorException(func)
+
+
 # Dont default to default device handling,
 # since the device of `the_template` is ignored
 @register_op_impl(aten.resize_as_.default)
@@ -412,6 +460,8 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symint()
+    elif is_boolean_dtype(arg.dtype):
+        return fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
 
@@ -905,12 +955,6 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         return fake_mode.from_tensor(t)
 
-    # TODO: resolve error in default __repr__
-    def __repr__(self):
-        with in_kernel_invocation_manager(self.fake_mode):
-            self_repr = super().__repr__()
-        return f"FakeTensor({self_repr}, {self.fake_device})"
-
     @classmethod
     @count
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -934,10 +978,8 @@ class FakeTensor(torch.Tensor):
         fake_mode = None
         for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
             if isinstance(arg, FakeTensor):
-                if fake_mode is None:
-                    fake_mode = arg.fake_mode
-                else:
-                    assert fake_mode is arg.fake_mode, "Mixing modes NYI"
+                fake_mode = arg.fake_mode
+                break
 
         assert fake_mode is not None
         with fake_mode:  # type: ignore[attr-defined]
@@ -1026,6 +1068,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
+        log.info("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1071,7 +1114,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
-                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
+                "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             incr = IncrementRecursionCount()
 
@@ -1105,7 +1148,13 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
         ):
-            out = func(*args, **kwargs)
+            assert all(
+                t.constant is not None for t in flat_arg_fake_tensors
+            ), "f{func} should not have fake inputs without constants"
+            const_args, const_kwargs = pytree.tree_map_only(
+                FakeTensor, lambda t: t.constant, (args, kwargs)
+            )
+            out = func(*const_args, **const_kwargs)
             if self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
@@ -1131,11 +1180,16 @@ class FakeTensorMode(TorchDispatchMode):
             assert (
                 len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
             ), f"{args} {kwargs}"
+
             return converter(self, args[0])
 
-        args, kwargs = self.validate_and_convert_non_fake_tensors(
-            func, converter, args, kwargs
-        )
+        # Recompute flat_arg_fake_tensors here again in case some of the inputs
+        # were real tensors and fakified in validate_and_convert_non_fake_tensors
+        (
+            args,
+            kwargs,
+            flat_arg_fake_tensors,
+        ) = self.validate_and_convert_non_fake_tensors(func, converter, args, kwargs)
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -1220,7 +1274,12 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
+        # TODO - fix prims complex ops
+        if (
+            "prims::" in func._schema.name
+            and hasattr(func, "prim_meta_impl")
+            and not unsupported_complex_op(func)
+        ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
@@ -1241,7 +1300,7 @@ class FakeTensorMode(TorchDispatchMode):
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.allow_fallback_kernels:
-                raise
+                raise UnsupportedOperatorException(func)
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
@@ -1270,9 +1329,12 @@ class FakeTensorMode(TorchDispatchMode):
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
+        Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
+        flat_arg_fake_tensors = []
 
         def validate(x):
+            nonlocal flat_arg_fake_tensors
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
@@ -1284,14 +1346,19 @@ class FakeTensorMode(TorchDispatchMode):
                         f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
                     )
 
-                return converter(self, x)
+                x = converter(self, x)
+            else:
+                assert x.fake_mode is self, "Mixing fake modes NYI"
+
+            flat_arg_fake_tensors.append(x)
             return x
 
-        return tree_map_only(
+        args, kwargs = tree_map_only(
             torch.Tensor,
             validate,
             (args, kwargs),
         )
+        return args, kwargs, flat_arg_fake_tensors
 
     def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
         wrap = self.gen_wrap_fn(func, args, kwargs)
@@ -1387,20 +1454,31 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(
         self,
         tensor,
+        *,
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
+        # seen before.
+        memoized_only=False,
     ):
+        shape_env = self.shape_env
         if static_shapes:
-            return self.fake_tensor_converter(
-                self, tensor, ignore_subclass=ignore_subclass, source=source
-            )
+            assert (
+                dynamic_dims is None
+            ), "cannot set both static_shapes and dynamic_dims"
+            shape_env = None
         return self.fake_tensor_converter(
             self,
             tensor,
-            shape_env=self.shape_env,
+            shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
+            constraint_dims=constraint_dims,
+            memoized_only=memoized_only,
         )
 
 

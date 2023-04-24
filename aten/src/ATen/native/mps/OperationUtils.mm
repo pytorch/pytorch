@@ -1,7 +1,14 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at::native::mps {
 
@@ -376,6 +383,24 @@ MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar&
 
 void resize_tensor(Tensor* output) {
   output->resize_(output->sizes());
+}
+
+Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
+  // Copied and modified from aten/stc/ATen/ScalarOps.h
+  // as MPS doesn't support float64 tensor.
+  Tensor tensor;
+  if (scalar.isFloatingPoint()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kFloat));
+  } else if (scalar.isBoolean()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kBool));
+  } else if (scalar.isComplex()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
+  } else {
+    AT_ASSERT(scalar.isIntegral(false));
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));
+  }
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
 }
 
 MPSGraph* make_mps_graph() {

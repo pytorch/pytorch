@@ -5,6 +5,7 @@ import numbers
 
 import torch
 import torch._decomp as decomp
+import torch.ao.quantization.fx._decomposed
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
@@ -15,6 +16,7 @@ from . import config, utils
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
@@ -41,8 +43,14 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning(f"duplicate decomp: {ops}")
+            log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten._unsafe_view.default)
+def _unsafe_view(self, size):
+    # this makes pattern matching easier
+    return self.view(size)
 
 
 @register_decomposition([aten.clamp])
@@ -171,13 +179,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+            )
         else:
             if input is not None:
                 input = torch.randn_like(input)
             ori_time = do_bench(
                 lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+            )
 
         mat1_pad = torch.randn_like(mat1)
         mat2_pad = torch.randn_like(mat2)
@@ -198,7 +206,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
                 lambda: pad_mm(
@@ -211,7 +219,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
         else:
             pad_time = do_bench(
                 lambda: pad_bmm(
@@ -224,7 +232,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 warmup=warmup,
                 rep=rep,
                 fast_flush=True,
-            )[0]
+            )
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
@@ -371,6 +379,13 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
@@ -418,6 +433,74 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
+@register_decomposition([aten.native_dropout])
+def native_dropout(input: Tensor, p: float, train: bool):
+    if not train or p == 0:
+        return (input, torch.ones_like(input, dtype=torch.bool))
+    if p == 1:
+        return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+    # intentionally don't decompose to improve pattern matching
+    return NotImplemented
+
+
+# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.quantize_per_tensor.default)
+def quantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.default)
+def dequantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition(quantized_decomposed.quantize_per_tensor.tensor)
+def quantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.tensor)
+def dequantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
@@ -425,7 +508,6 @@ turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
     [
-        aten.native_dropout,
         aten.cauchy,
         aten.cauchy_,
         aten.exponential,
@@ -447,11 +529,15 @@ register_extra_random_decomp = functools.partial(
 
 @register_extra_random_decomp([aten.bernoulli_])
 def bernoulli_(self, p=0.5):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
 
 @register_extra_random_decomp([aten.bernoulli.p])
 def bernoulli_p(self, p=0.5, *, generator=None):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < p
 

@@ -309,7 +309,7 @@ C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
     } else if (order_ == StorageOrder::NHWC) {
       sizes = {0, pooled_height_, pooled_width_, X.dim32(3)};
     }
-    // Output tensor is inititalized with proper sizes and data type
+    // Output tensor is initialized with proper sizes and data type
     Output(0, sizes, at::dtype<float>());
     return true;
   }
@@ -408,7 +408,7 @@ Based on https://arxiv.org/abs/1703.01086.
         0,
         "Y",
         "4D output of shape (R, C, pooled_h, pooled_w). The r-th batch element "
-        "is a pooled feature map cooresponding to the r-th RoI.");
+        "is a pooled feature map corresponding to the r-th RoI.");
 
 } // namespace caffe2
 

@@ -994,6 +994,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<SymIntType, Type, SymIntTypePtr>(m, "SymIntType")
       .def_static("get", &SymIntType::get);
+  py::class_<SymBoolType, Type, SymBoolTypePtr>(m, "SymBoolType")
+      .def_static("get", &SymBoolType::get);
   py::class_<FloatType, Type, FloatTypePtr>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<ComplexType, Type, ComplexTypePtr>(m, "ComplexType")

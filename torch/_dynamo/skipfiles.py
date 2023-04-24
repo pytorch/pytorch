@@ -30,24 +30,9 @@ import unittest
 import weakref
 
 import torch
+import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
-
-
-try:
-    import torch._prims
-
-    # isort: split
-    # TODO: Hack to unblock simultaneous landing changes. Fix after https://github.com/pytorch/pytorch/pull/81088 lands
-    import torch._prims.utils
-    import torch._prims.wrappers
-    import torch._refs
-    import torch._refs.nn
-    import torch._refs.nn.functional
-    import torch._refs.special
-
-    HAS_PRIMS_REFS = True
-except ImportError:
-    HAS_PRIMS_REFS = False
+import torch.ao.quantization._pt2e.qat_utils
 
 from . import comptime, config, external_utils
 
@@ -136,19 +121,25 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
-if HAS_PRIMS_REFS:
-    FILENAME_ALLOWLIST |= {
-        torch._prims.__file__,
-        torch._prims.utils.__file__,
-        torch._prims.wrappers.__file__,
-        torch._refs.__file__,
-        torch._refs.special.__file__,
-        torch._refs.nn.functional.__file__,
-    }
+# Do trace through match and replace patterns used in PT2E QAT
+# Note: These patterns are comprised of torch ops and for internal use only.
+# They are exported to aten graphs before being passed to the FX subgraph rewriter.
+FILENAME_ALLOWLIST |= {torch.ao.quantization._pt2e.qat_utils.__file__}
 
 
 SKIP_DIRS_RE = None
+
+is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
+# Skip fbcode paths(including torch.package paths) containing
+# one of the following strings.
+FBCODE_SKIP_DIRS = {
+    "torchrec/distributed",
+    "torchrec/fb/distributed",
+    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
+}
+FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
 
 def _recompile_re():
@@ -179,12 +170,15 @@ def check(filename, allow_torch=False):
         return False
     if allow_torch and is_torch(filename):
         return False
+    if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
+        return True
     return bool(SKIP_DIRS_RE.match(filename))
 
 
 # skip common third party libs
 for _name in (
     "functorch",
+    "fx2trt_oss",
     "intel_extension_for_pytorch",
     "networkx",
     "numpy",
@@ -201,7 +195,6 @@ for _name in (
     "tqdm",
     "tree",
     "tvm",
-    "fx2trt_oss",
     "xarray",
 ):
     add(_name)

@@ -58,31 +58,6 @@ Tensor pad_tensor_to_shape(
 }
 } // namespace
 
-std::vector<at::Tensor> NestedTensor_unbind(
-    const at::Tensor& self,
-    int64_t dim) {
-  TORCH_CHECK(
-      dim == 0,
-      "NestedTensor can only be unbound along dimension 0 ",
-      "got dimension ",
-      dim,
-      " instead.");
-  auto self_ptr = get_nested_tensor_impl(self);
-  int64_t ntensors = self_ptr->size(0);
-  std::vector<at::Tensor> result_tensors(ntensors);
-  if (ntensors == 0) {
-    return result_tensors;
-  }
-  // This returns a differentiable view of self as a regular tensor
-  auto buffer = self.values();
-  std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
-      strides = NestedTensor_get_strides(self_ptr);
-  int64_t *offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
-  for (const int64_t i: c10::irange(ntensors)){
-    result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets_ptr[i]);
-  }
-  return result_tensors;
-}
 
 Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
     TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
@@ -500,43 +475,6 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
 
 }
 
-Tensor clone_nested(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto memory_format = optional_memory_format.value_or(c10::MemoryFormat::Preserve);
-  auto self_ptr = get_nested_tensor_impl(self);
-  if (memory_format == c10::MemoryFormat::Preserve ||
-  (memory_format == c10::MemoryFormat::Contiguous && self.is_contiguous())) {
-    const Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor(),
-        sizemat = self_ptr->get_nested_sizes(),
-        stridemat = self_ptr->get_nested_strides();
-    const auto& offsets = self_ptr->get_storage_offsets();
-    // TODO: The size and the stride do not necessarily need to be cloned,
-    //       but it is more conservative.
-    //       This is something we could revisit once we land a more
-    //       efficient implementation of nested_sizes_ and nested_strides.
-    return wrap_buffer(buffer.clone(), sizemat.clone(), stridemat.clone(), offsets.clone());
-  }
-  // actually, memory format is contiguous and self is noncontiguous
-  else if (memory_format == c10::MemoryFormat::Contiguous) {
-    const Tensor& self_buffer = self_ptr->get_unsafe_storage_as_tensor(),
-        sizemat = self_ptr->get_nested_sizes();
-    Tensor output_buffer = at::empty(self.numel(), self_buffer.options());
-    Tensor output = wrap_buffer(output_buffer, sizemat);
-    std::vector<Tensor> self_unbind = self.unbind(),
-        output_unbind = output.unbind();
-    for (const int64_t i: c10::irange(self_ptr->size(0))) {
-      output_unbind[i].copy_(self_unbind[i]);
-    }
-    return output;
-  } else {
-    TORCH_CHECK(
-        false,
-        "Nested tensor clone supports Preserve and Contiguous memory formats, called clone with memory format: ",
-        memory_format);
-  }
-}
-
 std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
   auto input_ptr = get_nested_tensor_impl(input);
   const Tensor& input_buffer = input_ptr-> get_unsafe_storage_as_tensor(),
@@ -729,8 +667,8 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
   bool viewable = true;
   Tensor sizemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op),
       stridemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op);
-  int64_t* sizemat_reshaped_ptr = sizemat_reshaped.data_ptr<int64_t>(),
-      * stridemat_reshaped_ptr = stridemat_reshaped.data_ptr<int64_t>();
+  int64_t* sizemat_reshaped_ptr = sizemat_reshaped.mutable_data_ptr<int64_t>(),
+      * stridemat_reshaped_ptr = stridemat_reshaped.mutable_data_ptr<int64_t>();
   for (int64_t itensor = 0; itensor < ntensors; itensor++) {
     const IntArrayRef& size = sizes[itensor],
         & stride = strides[itensor];

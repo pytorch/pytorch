@@ -12,7 +12,7 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
@@ -26,7 +26,13 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
 from .dicts import ConstDictVariable
-from .lists import BaseListVariable, ListIteratorVariable, ListVariable, TupleVariable
+from .lists import (
+    BaseListVariable,
+    ListIteratorVariable,
+    ListVariable,
+    TupleIteratorVariable,
+    TupleVariable,
+)
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
@@ -44,12 +50,10 @@ class BuiltinVariable(VariableTracker):
             bool,
             callable,
             chr,
-            dict,
             divmod,
             float,
             int,
             len,
-            list,
             max,
             min,
             ord,
@@ -60,7 +64,6 @@ class BuiltinVariable(VariableTracker):
             str,
             str.format,
             sum,
-            tuple,
             type,
             operator.pos,
             operator.neg,
@@ -473,6 +476,16 @@ class BuiltinVariable(VariableTracker):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
 
+                if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                    # Standard indexing will force specialization due to
+                    # __index__.  Rewrite as a regular torch op which will
+                    # trace fine
+                    fn, args = torch.select, [
+                        args[0],
+                        variables.ConstantVariable(0),
+                        args[1],
+                    ]
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -552,7 +565,9 @@ class BuiltinVariable(VariableTracker):
             except TypeError as exc:
                 if not has_constant_handler:
                     log.warning(
-                        f"incorrect arg count {handler} {exc} and no constant handler"
+                        "incorrect arg count %s %s and no constant handler",
+                        handler,
+                        exc,
                     )
                 handler = None
 
@@ -577,6 +592,14 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
+
+        if self.fn is round:
+            if len(args) > 0 and isinstance(args[0], SymNodeVariable):
+                raise UserError(
+                    UserErrorType.STANDARD_LIBRARY,
+                    "Calling round() on symbolic value is not supported. "
+                    "You can use floor() to implement this functionality",
+                )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -732,7 +755,10 @@ class BuiltinVariable(VariableTracker):
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
-                guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                if isinstance(obj, TupleIteratorVariable):
+                    guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+                else:
+                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
@@ -767,6 +793,14 @@ class BuiltinVariable(VariableTracker):
             )
         )
 
+    def call_callable(self, tx, arg):
+        from .functions import BaseUserFunctionVariable
+
+        if isinstance(
+            arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
+        ):
+            return variables.ConstantVariable(True).add_options(arg)
+
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
         if arg is None:
@@ -796,9 +830,21 @@ class BuiltinVariable(VariableTracker):
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 
-    def call_dict(self, tx, obj=None):
-        if self.is_supported_call_dict_arg(tx, obj):
-            return self.call_dict_helper(tx, dict, obj)
+    def call_dict(self, tx, *args, **kwargs):
+        if not (args or kwargs):
+            return self.call_dict_helper(tx, dict, None)
+        elif (
+            not kwargs
+            and len(args) == 1
+            and self.is_supported_call_dict_arg(tx, args[0])
+        ):
+            return self.call_dict_helper(tx, dict, args[0])
+        elif not args and kwargs:
+            return variables.ConstDictVariable(
+                dict(kwargs), user_cls=dict, mutable_local=MutableLocal()
+            )
+        else:
+            unimplemented(f"dict(): {args} {kwargs}")
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
@@ -1035,7 +1081,7 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        if isinstance(obj, (variables.BlackHoleVariable, variables.DataClassVariable)):
+        if isinstance(obj, variables.DataClassVariable):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
@@ -1049,6 +1095,9 @@ class BuiltinVariable(VariableTracker):
             )
         elif isinstance(obj, variables.NNModuleVariable):
             obj.convert_to_unspecialized(tx)
+
+    def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
+        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder
@@ -1066,7 +1115,11 @@ class BuiltinVariable(VariableTracker):
                 self, obj
             )
 
-        unimplemented(f"type({obj})")
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "Can't call type() on generated custom object. "
+            "Please use __class__ instead",
+        )
 
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
@@ -1121,6 +1174,17 @@ class BuiltinVariable(VariableTracker):
             return variables.TupleVariable(
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
+
+    # neg is a constant fold function, so we only get here if constant fold is not valid
+    def call_neg(self, tx, a):
+        if isinstance(a, SymNodeVariable):
+            return SymNodeVariable.create(
+                tx,
+                (operator.neg)(a.as_proxy()),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
 
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
