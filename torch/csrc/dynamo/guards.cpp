@@ -26,21 +26,18 @@ class TensorCheck {
       const LocalState& state,
       PyTypeObject* pt,
       const at::Tensor& v,
-      std::vector<std::optional<int64_t>> dynamic_dims)
+      std::vector<std::optional<int64_t>> dynamic_dims_sizes,
+      std::vector<std::optional<int64_t>> dynamic_dims_strides)
       : pytype(pt),
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
         device_index_(v.device().index()),
         requires_grad_(state.grad_mode_enabled && v.requires_grad()),
-        sizes_(dynamic_dims) {
-    dim_ = v.ndimension();
-    const auto& strides = v.strides();
-    strides_.reserve(dim_);
-    for (auto i : c10::irange(dim_)) {
-      // Should we peek into dynamic_dims and determine if we need to make
-      // strides optionals?
-      strides_.emplace_back(strides[i]);
-    }
+        sizes_(std::move(dynamic_dims_sizes)),
+        strides_(std::move(dynamic_dims_strides)) {
+    // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
+    // we just treat this as optional?
+    dim_ = sizes_.size();
   }
 
   // See note in guards.py [Note - On Export Tensor Guards]
@@ -60,8 +57,14 @@ class TensorCheck {
     const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
+      auto known_stride = strides_[i];
       if (known_size.has_value()) {
-        if (known_size.value() != sizes[i] || strides_[i] != strides[i]) {
+        if (known_size.value() != sizes[i]) {
+          return false;
+        }
+      }
+      if (known_stride.has_value()) {
+        if (known_stride.value() != strides[i]) {
           return false;
         }
       }
@@ -114,20 +117,16 @@ class TensorCheck {
     const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
-      if (known_size.has_value()) {
-        if (known_size.value() != sizes[i]) {
-          // return fmt::format("tensor size mismatch at index {}. expected {},
-          // actual {}", i, sizes_[i], sizes[i]);
-          fail_reason << "size mismatch at index " << i << ". expected "
-                      << known_size.value() << ", actual " << sizes[i];
-          return fail_reason.str();
-        } else if (strides_[i] != strides[i]) {
-          // return fmt::format("tensor strides mismatch at index {}. expected
-          // {}, actual {}", i, strides_[i]);
-          fail_reason << "strides mismatch at index " << i << ". expected "
-                      << strides_[i] << ", actual " << strides[i];
-          return fail_reason.str();
-        }
+      auto known_stride = strides_[i];
+      if (known_size.has_value() && (known_size.value() != sizes[i])) {
+        fail_reason << "size mismatch at index " << i << ". expected "
+                    << known_size.value() << ", actual " << sizes[i];
+        return fail_reason.str();
+      }
+      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+        fail_reason << "stride mismatch at index " << i << ". expected "
+                    << known_stride.value() << ", actual " << strides[i];
+        return fail_reason.str();
       }
     }
     return "";
@@ -145,7 +144,7 @@ class TensorCheck {
   bool requires_grad_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<int64_t>> sizes_;
-  std::vector<int64_t> strides_;
+  std::vector<std::optional<int64_t>> strides_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
 };
@@ -176,7 +175,7 @@ static PyObject* TensorGuards_new(
   return (PyObject*)self;
 }
 
-static std::vector<std::optional<int64_t>> c10IntArrayToVecOptInt(
+static std::vector<std::optional<int64_t>> wrapIntegersInOptional(
     const c10::IntArrayRef& intArray) {
   std::vector<std::optional<int64_t>> optVec(intArray.size());
   std::transform(
@@ -195,10 +194,30 @@ static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
       vec.push_back(std::nullopt);
     } else {
       int64_t value = PyLong_AsLongLong(item);
+      if (value == -1 && PyErr_Occurred()) {
+        PyErr_SetString(
+            PyExc_TypeError,
+            "Size or stride list item is not a valid integer.");
+        TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
+      }
       vec.push_back(value);
     }
   }
   return vec;
+}
+
+static std::vector<std::vector<std::optional<int64_t>>> get_dynamic_dims(
+    PyObject* dynamic_dims_py) {
+  std::vector<std::vector<std::optional<int64_t>>> per_tensor_dynamic_dims;
+  if (dynamic_dims_py != Py_None) {
+    Py_ssize_t size = PyList_Size(dynamic_dims_py);
+    for (Py_ssize_t i = 0; i < size; i++) {
+      PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
+      std::vector<std::optional<int64_t>> vec = pyListToVecOptInt(py_list);
+      per_tensor_dynamic_dims.push_back(std::move(vec));
+    }
+  }
+  return per_tensor_dynamic_dims;
 }
 
 static int TensorGuards_init(
@@ -210,22 +229,26 @@ static int TensorGuards_init(
     return -1;
   }
   // Top level structure is List[List[Union[int, None]]]
-  PyObject* dynamic_dims_py = PyDict_GetItemString(kwds, "dynamic_dims");
-  if (dynamic_dims_py == NULL) {
-    PyErr_SetString(PyExc_TypeError, "missing dynamic_dims=...");
+  PyObject* dynamic_dims_sizes_py =
+      PyDict_GetItemString(kwds, "dynamic_dims_sizes");
+  if (dynamic_dims_sizes_py == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_sizes=...");
     return -1;
   }
-  std::vector<std::vector<std::optional<int64_t>>> per_tensor_dynamic_dims;
-  // dynamic_dims_py is None when dynamic_shapes=False - this is an optimization
-  // to avoid invoking .size() in python needlessly
-  if (dynamic_dims_py != Py_None) {
-    Py_ssize_t size = PyList_Size(dynamic_dims_py);
-    for (Py_ssize_t i = 0; i < size; i++) {
-      PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
-      std::vector<std::optional<int64_t>> vec = pyListToVecOptInt(py_list);
-      per_tensor_dynamic_dims.push_back(vec);
-    }
+  PyObject* dynamic_dims_strides_py =
+      PyDict_GetItemString(kwds, "dynamic_dims_strides");
+  if (dynamic_dims_strides_py == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_strides=...");
+    return -1;
   }
+
+  // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
+  // an optimization to avoid invoking .size()/.stride() in python needlessly
+  std::vector<std::vector<std::optional<int64_t>>>
+      per_tensor_dynamic_dims_sizes = get_dynamic_dims(dynamic_dims_sizes_py);
+  std::vector<std::vector<std::optional<int64_t>>>
+      per_tensor_dynamic_dims_strides =
+          get_dynamic_dims(dynamic_dims_strides_py);
 
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
@@ -238,13 +261,20 @@ static int TensorGuards_init(
       return -1;
     }
     auto tensor = THPVariable_Unpack(item);
-    std::vector<std::optional<int64_t>> tensor_dims;
-    if (per_tensor_dynamic_dims.size() == 0) {
-      tensor_dims = c10IntArrayToVecOptInt(tensor.sizes());
-    } else {
-      tensor_dims = per_tensor_dynamic_dims[i];
-    }
-    checks.emplace_back(state, Py_TYPE(item), tensor, tensor_dims);
+    std::vector<std::optional<int64_t>> tensor_dims_size =
+        per_tensor_dynamic_dims_sizes.size() == 0
+        ? wrapIntegersInOptional(tensor.sizes())
+        : per_tensor_dynamic_dims_sizes[i];
+    std::vector<std::optional<int64_t>> tensor_dims_stride =
+        per_tensor_dynamic_dims_strides.size() == 0
+        ? wrapIntegersInOptional(tensor.strides())
+        : per_tensor_dynamic_dims_strides[i];
+    checks.emplace_back(
+        state,
+        Py_TYPE(item),
+        std::move(tensor),
+        std::move(tensor_dims_size),
+        std::move(tensor_dims_stride));
   }
   return 0;
 }

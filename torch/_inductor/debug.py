@@ -94,7 +94,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         func1.__name__ = name
         return func1
 
-    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snodes", "type"])
+    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
     buf_to_fx_node = {}
@@ -135,7 +135,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         name = snode.get_name()
         fx_node.name = name
 
-        fx_node.meta["fusion_meta"] = FusionMeta(group, [snode], node_type)
+        fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
