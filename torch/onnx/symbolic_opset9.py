@@ -1359,8 +1359,7 @@ def relu(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def relu6(g: jit_utils.GraphContext, input):
-    relu = _op_with_optional_float_cast(g, "Relu", input, opset_before=14)
-    return clamp_max(g, relu, 6)
+    return clamp(g, input, 0, 6)
 
 
 @_onnx_symbolic("aten::ceil")

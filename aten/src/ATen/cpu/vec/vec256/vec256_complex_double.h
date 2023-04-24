@@ -446,11 +446,15 @@ Vectorized<c10::complex<double>> inline operator^(const Vectorized<c10::complex<
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::eq(const Vectorized<c10::complex<double>>& other) const {
-  return (*this == other) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
+  auto eq = (*this == other);  // compares real and imag individually
+  // If both real numbers and imag numbers are equal, then the complex numbers are equal
+  return (eq.real() & eq.imag()) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::ne(const Vectorized<c10::complex<double>>& other) const {
-  return (*this != other) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
+  auto ne = (*this != other);  // compares real and imag individually
+  // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+  return (ne.real() | ne.imag()) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 #endif

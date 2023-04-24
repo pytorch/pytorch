@@ -3,13 +3,13 @@ import functools
 import inspect
 import itertools
 import logging
-import operator
 import os
 import re
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
+import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
@@ -414,6 +414,19 @@ class LoweringPatternEntry(PatternEntry):
 
 
 @dataclasses.dataclass
+class GraphPatternEntry(PatternEntry):
+    """
+    A pattern that runs a function on the FX graph
+    """
+
+    handler: Any
+
+    def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
+        with graph.inserting_before(node):
+            self.handler(match, graph, node, *match.args, **match.kwargs)
+
+
+@dataclasses.dataclass
 class ReplacementPatternEntry(PatternEntry):
     normalize_args: Callable
 
@@ -461,7 +474,13 @@ def _return_true(match):
 
 
 def register_replacement(
-    search_fn, replace_fn, example_inputs, trace_fn, pass_dict, *, scalar_workaround=()
+    search_fn,
+    replace_fn,
+    example_inputs,
+    trace_fn,
+    pass_dict,
+    extra_check=_return_true,
+    scalar_workaround=(),
 ):
     """
     Create a replacement rule based on example functions that get traced
@@ -474,6 +493,7 @@ def register_replacement(
         example_inputs: example inputs for initial trace
         trace_fn: inference_graph or training_graph
         pass_dict: dict of passes to register to
+        extra_check: additional check to run on match(using real shapes)
     """
 
     def check_fn(match: Match):
@@ -488,7 +508,6 @@ def register_replacement(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
-
         for i, grad in enumerate(requires_grad):
             if isinstance(args[i], torch.Tensor):
                 args[i] = torch.empty_strided(
@@ -498,10 +517,10 @@ def register_replacement(
                     device=args[i].device,
                     requires_grad=grad,
                 )
-
         specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(specific_graph, argnames=argnames)
-        if specific_pattern.match(match.output_nodes()[0]):
+        specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
+        if specific_pattern_match and extra_check(specific_pattern_match):
             # trace the pattern using the shapes form the user program
             match.replacement_graph = trace_fn(replace_fn, args)
             return True
@@ -537,14 +556,12 @@ def register_replacement(
     pattern.register(pass_dict)
 
 
-def register_lowering_pattern(
-    pattern, extra_check=_return_true, pass_number=1, pass_dict=None
-):
+def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
     """
-    Register an aten to inductor IR replacement pattern
+    Register an aten to inductor IR replacement pattern.  The decorated
+    function is saved and then called a lowering time allowing direct
+    pattern to inductor IR conversion.
     """
-    if pass_dict is None:
-        pass_dict = pass_patterns[pass_number]
 
     def decorator(handler):
         assert callable(handler)
@@ -555,7 +572,23 @@ def register_lowering_pattern(
         handler._inductor_lowering_function = True
         return handler
 
-    assert isinstance(pattern, CallFunction)
+    return decorator
+
+
+def register_graph_pattern(pattern, extra_check=_return_true, *, pass_dict):
+    """
+    Register a pattern that runs a function on the FX graph, allowing
+    custom transformation code.
+    """
+
+    def decorator(handler):
+        assert callable(handler)
+        for target in pattern.fns:
+            GraphPatternEntry(
+                pattern=pattern, extra_check=extra_check, handler=handler
+            ).register(pass_dict, target)
+        return handler
+
     return decorator
 
 
@@ -591,22 +624,6 @@ class PatternMatcherPass:
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
-
-
-def reorder_for_locality(graph: torch.fx.Graph):
-    def visit(other_node):
-        if (
-            other_node.op == "call_function"
-            and other_node.target != operator.getitem
-            and all((n in seen_nodes) for n in other_node.users)
-        ):
-            # move node's producers right before it
-            node.prepend(other_node)
-
-    seen_nodes = set()
-    for node in reversed(graph.nodes):
-        seen_nodes.add(node)
-        torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
 def _not_implemented(*args, **kwargs):
@@ -684,13 +701,14 @@ def training_graph(fn, args):
         gm = clone_graph(joint_graph)
         return default_partition(joint_graph, inputs, **kwargs)
 
-    aot_function(
-        fn,
-        lambda g, i: make_boxed_func(g),
-        partition_fn=record_joint_graph,
-        decompositions=select_decomp_table(),
-        enable_log=False,
-    )(*args)
+    with torch._guards.tracing(None):
+        aot_function(
+            fn,
+            lambda g, i: make_boxed_func(g),
+            partition_fn=record_joint_graph,
+            decompositions=select_decomp_table(),
+            enable_log=False,
+        )(*args)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
@@ -711,12 +729,6 @@ def clone_graph(input_graph):
 
 
 _seen_patterns = set()
-# First pass_patterns[0] are applied, then [1], then [2]
-pass_patterns = [
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-]
 
 
 def get_arg_value(node, arg_number, kwarg_name=None):

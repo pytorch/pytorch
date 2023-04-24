@@ -1387,7 +1387,6 @@ from torch import multiprocessing as multiprocessing
 from torch import sparse as sparse
 from torch import special as special
 import torch.utils.backcompat
-from torch import onnx as onnx
 from torch import jit as jit
 from torch import linalg as linalg
 from torch import hub as hub
@@ -1530,6 +1529,12 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def reset(self):
+        from torch._inductor import config
+        if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
+            if self.config.get("triton.cudagraphs", True):
+                from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+                reset_cudagraph_trees()
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1591,8 +1596,6 @@ def compile(model: Optional[Callable] = None, *,
     import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
-    if torch.backends.mps.is_available():
-        backend = "aot_eager"
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
@@ -1635,6 +1638,9 @@ import torch.fx.experimental.symbolic_shapes
 
 from torch import func as func
 from torch.func import vmap
+
+# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
