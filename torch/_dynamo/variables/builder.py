@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import logging
 import operator
 import re
 import types
@@ -105,6 +106,9 @@ from .torch import (
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+
+
+log = logging.getLogger(__name__)
 
 
 DimList = List
@@ -1199,6 +1203,9 @@ def wrap_to_fake_tensor_and_record(
             for i in range(e.dim()):
                 # NB: mark dynamic has precedence over static
                 marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+                marked_weak_dynamic = i in getattr(
+                    e, "_dynamo_weak_dynamic_indices", set()
+                )
                 marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
                 # NB: both static and dynamic have precedence over
@@ -1223,7 +1230,7 @@ def wrap_to_fake_tensor_and_record(
                 constraint_dims.append(constraint)
 
                 # Now, figure out if the dim is dynamic/duck/static
-                if constraint is not None or marked_dynamic:
+                if constraint is not None or marked_dynamic or marked_weak_dynamic:
                     # NB: We could assert static_shapes is False here, but it
                     # seems better to allow the user to override policy in this
                     # case
@@ -1236,6 +1243,13 @@ def wrap_to_fake_tensor_and_record(
 
         tx.output.frame_state[name] = curr_sizes
 
+        log.debug(
+            "wrap_to_fake %s %s %s %s",
+            source.name(),
+            tuple(e.shape),
+            dynamic_dims,
+            constraint_dims,
+        )
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
