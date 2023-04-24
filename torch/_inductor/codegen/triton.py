@@ -632,6 +632,20 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
+class ProdHelper:
+    name = "_prod_accumulate"
+
+    @staticmethod
+    def codegen(buffer):
+        buffer.splice(
+            f"""
+            @triton.jit
+            def {ProdHelper.name}(a, b):
+                return a * b
+            """
+        )
+
+
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = pexpr
@@ -654,6 +668,7 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
+        self.helper_functions = set()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1157,6 +1172,15 @@ class TritonKernel(Kernel):
         if reduction_type == "any":
             reduction_type = "max"
 
+        def final_reduction(value):
+            if reduction_type == "prod":
+                self.helper_functions.add(ProdHelper)
+                return (
+                    f"tl.reduce({value}, {dim}, {ProdHelper.name})[{', '.join(sizes)}]"
+                )
+            else:
+                return f"tl.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
@@ -1165,10 +1189,7 @@ class TritonKernel(Kernel):
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
-            result_var = self.cse.generate(
-                self.compute,
-                f"tl.{reduction_type}({masked_value}, {dim})[{', '.join(sizes)}]",
-            )
+            result_var = self.cse.generate(self.compute, final_reduction(masked_value))
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -1190,6 +1211,8 @@ class TritonKernel(Kernel):
                 masks.append(f"({accumulator} < {value})")
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
+            elif reduction_type == "prod":
+                updated = f"{accumulator} * {value}"
             else:
                 raise NotImplementedError(f"reduction_type {reduction_type}")
 
@@ -1218,9 +1241,7 @@ class TritonKernel(Kernel):
                     ]
                 )
             else:
-                self.suffix.writeline(
-                    f"{result_var} = tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}]"
-                )
+                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
@@ -1371,6 +1392,7 @@ class TritonKernel(Kernel):
         from triton import next_power_of_2
 
         code = IndentedBuffer()
+
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
@@ -1403,6 +1425,9 @@ class TritonKernel(Kernel):
                         from torch._inductor.triton_heuristics import grid
                     """
                 )
+
+        for helper in sorted(self.helper_functions, key=lambda kls: kls.__name__):
+            helper.codegen(code)
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
