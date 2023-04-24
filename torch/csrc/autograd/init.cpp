@@ -175,8 +175,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("HPU", c10::DeviceType::HPU)
       .value("VE", c10::DeviceType::VE)
       .value("Lazy", c10::DeviceType::Lazy)
-      .value("IPU", c10::DeviceType::IPU)
-      .value("PrivateUse1", c10::DeviceType::PrivateUse1);
+      .value("IPU", c10::DeviceType::IPU);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event

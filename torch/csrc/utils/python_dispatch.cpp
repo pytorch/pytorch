@@ -547,7 +547,6 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
       DEF_ONE(AutocastCUDA)
-      DEF_ONE(AutocastPrivateUse1)
   // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
