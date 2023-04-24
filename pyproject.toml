@@ -24,6 +24,7 @@ target-version = ["py38", "py39", "py310", "py311"]
 [tool.ruff]
 target-version = "py38"
 
+# NOTE: Synchoronize the ignores with .flake8
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
