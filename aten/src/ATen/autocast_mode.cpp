@@ -356,7 +356,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
 }
 
-
 TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }

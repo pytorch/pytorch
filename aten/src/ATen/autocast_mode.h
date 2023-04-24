@@ -63,7 +63,6 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
       return false;
   }
 }
-
 } // namespace
 
 inline DispatchKey get_autocast_dispatch_key_from_device_type(
