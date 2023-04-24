@@ -22,3 +22,4 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 xdoctest==1.1.0
 filelock==3.6.0
 sympy==1.11.1
+pytest-cpp==2.3.0
