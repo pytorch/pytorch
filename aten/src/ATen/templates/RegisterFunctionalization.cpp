@@ -47,13 +47,6 @@ inline bool has_internal_overlap_helper(const at::Tensor t) {
   auto has_overlap = at::has_internal_overlap(t);
   if (has_overlap == at::MemOverlap::Yes) return true;
   if (has_overlap == at::MemOverlap::No) return false;
-  auto strides = t.sym_strides();
-  auto sizes = t.sym_sizes();
-  for (size_t i = strides.size() - 1; i > 1; ++i) {
-    // Another relatively simple heuristic.
-    if (strides[i] == 1 && strides[i-1] < sizes[i]) return true;
-  }
-  // We can insert more complicated checks here if needed.
   return false;
 }
 
