@@ -728,7 +728,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
   Tensor columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height * kernel_depth,
       input_depth * input_height * input_width}, input.options()) : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND3(at::ScalarType::BFloat16, at::ScalarType::Half,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
       input.scalar_type(),
       "slow_conv_transpose3d_acc_grad_parameters_cpu",
       [&] {
