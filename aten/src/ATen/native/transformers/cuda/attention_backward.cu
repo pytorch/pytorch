@@ -4,6 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/bit_cast.h>
 
 #include <c10/core/TensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -106,8 +107,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  uint64_t unsigned_philox_seed = sdp::bit_cast<uint64_t>(philox_seed);
-  uint64_t unsigned_philox_offset = sdp::bit_cast<uint64_t>(philox_offset);
+  uint64_t unsigned_philox_seed = c10::bit_cast<uint64_t>(philox_seed);
+  uint64_t unsigned_philox_offset = c10::bit_cast<uint64_t>(philox_offset);
 
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
           contiguous_grad_out,
@@ -201,24 +202,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   bool grad_kv_needs_init = causal && N > M;
   at::Tensor grad_q, grad_k, grad_v;
   int8_t gQKV_strideM_multiplier = 1;
-  if (chunk_grad_outputs) {
-    // Create one big contiguous chunk
-    // This is because q, k and v usually come from a single
-    // output of a linear layer that is chunked.
-    // Creating the gradients with the right layout saves us
-    // a `torch.cat` call in the backward pass
-    at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
-    grad_q = chunk.select(2, 0);
-    grad_k = chunk.select(2, 1);
-    grad_v = chunk.select(2, 2);
-    gQKV_strideM_multiplier=3;
-  } else {
-    grad_q = at::empty(query.sizes(), query.options());
-    grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
-                                : at::empty(key.sizes(), key.options());
-    grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
-                                : at::empty(value.sizes(), value.options());
-  }
+  grad_q = at::empty(query.sizes(), query.options());
+  grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
+                              : at::empty(key.sizes(), key.options());
+  grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
+                              : at::empty(value.sizes(), value.options());
+
 
   auto launchKernel = [&](auto _k, int computeCapability) {
     using Kernel = decltype(_k);

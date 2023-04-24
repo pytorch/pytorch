@@ -67,7 +67,7 @@ Tensor nested_linear(
       at::linear(input_buffer.reshape({-1, weight.size(1)}), weight, bias_opt);
   result_buffer = result_buffer.reshape({-1});
   int64_t weight_size_1 = weight.size(0);
-  Tensor new_sizes = nt_input->get_nested_size_tensor().clone();
+  Tensor new_sizes = nt_input->get_nested_sizes().clone();
   // Now the last entry in every row of new_sizes should be weight_size_1.
   new_sizes.index_put_({at::indexing::Slice(), -1}, weight_size_1);
   return wrap_buffer(result_buffer, new_sizes);
@@ -81,7 +81,7 @@ Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
       at::mm(self_buffer.reshape({-1, other.sizes()[0]}), other);
   result_buffer = result_buffer.reshape({-1});
   int64_t other_size_1 = other.sizes()[1];
-  Tensor new_sizes = nt_self->get_nested_size_tensor().clone();
+  Tensor new_sizes = nt_self->get_nested_sizes().clone();
   // Now the last entry in every row of new_sizes should be other_size_1.
   new_sizes.index_put_({at::indexing::Slice(), -1}, other_size_1);
   return wrap_buffer(result_buffer, new_sizes);
@@ -116,7 +116,7 @@ Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(
             *use_gelu);
   result_buffer = result_buffer.reshape({-1});
   int64_t other_size_1 = mat2.sizes()[1];
-  Tensor new_sizes = nt_mat1->get_nested_size_tensor().clone();
+  Tensor new_sizes = nt_mat1->get_nested_sizes().clone();
   new_sizes.index_put_({at::indexing::Slice(), -1}, other_size_1);
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(result_buffer), std::move(new_sizes));
@@ -129,8 +129,8 @@ Tensor NestedTensor_add_NestedTensor_in_place(
   const auto& nt_self = *get_nested_tensor_impl(self);
   const auto& nt_other = *get_nested_tensor_impl(other);
 
-  const auto& self_sizes = nt_self.get_nested_size_tensor();
-  const auto& other_sizes = nt_other.get_nested_size_tensor();
+  const auto& self_sizes = nt_self.get_nested_sizes();
+  const auto& other_sizes = nt_other.get_nested_sizes();
 
   TORCH_CHECK(at::equal(self_sizes, other_sizes));
   TORCH_INTERNAL_ASSERT(
@@ -145,7 +145,7 @@ Tensor NestedTensor_softmax_dropout(const Tensor& self, const Tensor& query) {
   TORCH_INTERNAL_ASSERT(query_nt != nullptr);
   TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(query_nt));
 
-  const Tensor& sizes = query_nt->get_nested_size_tensor();
+  const Tensor& sizes = query_nt->get_nested_sizes();
   const auto num_tensors = sizes.sizes()[0];
 
   auto output = at::empty_like(self,{}, at::MemoryFormat::Contiguous);
@@ -228,7 +228,7 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   TORCH_CHECK(
       mask_dim && *mask_dim == 2 && nt.dim() == 3,
       "Only the special case of mask_dim == 2 on a 3-D NestedTensor is supported right now.")
-  const auto& sizes = nt_impl->get_nested_size_tensor();
+  const auto& sizes = nt_impl->get_nested_sizes();
   // Shape: # of tensors in our NestedTensor by max size along first dim
   // TODO: calculate this without allocating a std::vector.
   const auto result_size_1 = mask_dim_length ? *mask_dim_length : NestedTensor_get_max_size(*nt_impl)[0];

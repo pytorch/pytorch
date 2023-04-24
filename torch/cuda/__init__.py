@@ -87,6 +87,14 @@ else:
             return -1
         raise RuntimeError("PyTorch was compiled without CUDA support")
 
+if hasattr(torch._C, '_cuda_maybeExchangeDevice'):
+    _maybe_exchange_device = torch._C._cuda_maybeExchangeDevice
+else:
+    def _maybe_exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without CUDA support")
+
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -305,7 +313,7 @@ class _DeviceGuard:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -325,7 +333,7 @@ class device:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -603,7 +611,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
                 continue
-            # Ambigous candidate
+            # Ambiguous candidate
             if best_match != -1:
                 return -1
             best_match = idx
@@ -660,7 +668,7 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
         visible_devices = _transform_uuid_to_ordinals(cast(List[str], visible_devices), uuids)
-    idx_map = {idx: real_idx for idx, real_idx in enumerate(cast(List[int], visible_devices))}
+    idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})")
     return idx_map[idx]
@@ -887,6 +895,64 @@ def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     return pynvml.nvmlDeviceGetClockInfo(handle, 1)
 
 
+
+
+def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+    r"""Return the torch.device type object from the passed in device.
+
+    Args:
+        device (torch.device or int): selected device.
+    """
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
+        device = torch.device('cuda', device)
+    return device
+
+
+def _get_generator(device: torch.device) -> torch._C.Generator:
+    r"""Return the CUDA Generator object for the given device.
+
+    Args:
+        device (torch.device): selected device.
+    """
+
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    return torch.cuda.default_generators[idx]
+
+
+def _set_rng_state_offset(offset: int, device: Union[int, str, torch.device] = 'cuda') -> None:
+    r"""Sets the random number generator state offset of the specified GPU.
+
+    Args:
+        offset (int): The desired offset
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+    """
+    final_device = _get_device(device)
+
+    def cb():
+        default_generator = _get_generator(final_device)
+        default_generator.set_offset(offset)
+
+    _lazy_call(cb)
+
+def _get_rng_state_offset(device: Union[int, str, torch.device] = 'cuda') -> int:
+    r"""Returns the random number generator state offset of the specified GPU.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state offset of.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+
+    .. warning::
+        This function eagerly initializes CUDA.
+    """
+    _lazy_init()
+    final_device = _get_device(device)
+    default_generator = _get_generator(final_device)
+    return default_generator.get_offset()
 
 
 from .memory import *  # noqa: F403

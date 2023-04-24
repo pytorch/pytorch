@@ -159,7 +159,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     return success
 
 
-# This function creates a dis atugorad context, run rpc_sync on the given ps,
+# This function creates a dis autograd context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
@@ -174,7 +174,7 @@ def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
         rpc.rpc_sync(ps, _check_rpc_done, args=(0,))
 
 # This function is the same as _run_trainer, except rpc calls torchscript
-# function "my_script_ref_add" instead of python funciton "my_rref_add"
+# function "my_script_ref_add" instead of python function "my_rref_add"
 def _run_trainer_torchscript(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_script_ref_add, args=(rref_t1, t2))
@@ -999,7 +999,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         )
         self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
-        # For send function when returning resonpose to previous call
+        # For send function when returning response to previous call
         # next function of the send function is the recv function
         # for received tensor result returned from nested call
         next_funcs = list(send_functions.values())[1].next_functions
@@ -2371,7 +2371,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
             @staticmethod
             def backward(ctx, grad):
-                # Create a sparse tensor with non-contigous indices and values
+                # Create a sparse tensor with non-contiguous indices and values
                 # and return as grad.
                 v = torch.rand(1, 3)
                 i = torch.ones(1, 1, dtype=torch.long)

@@ -227,7 +227,7 @@ class _RemoteModule(nn.Module):
 
         enable_moving_cpu_tensors_to_cuda = self._prepare_init(remote_device)
 
-        # Default arguments preperation.
+        # Default arguments preparation.
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
@@ -282,7 +282,7 @@ class _RemoteModule(nn.Module):
     def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
         """
         Returns a list of :class:`~torch.distributed.rpc.RRef` pointing to the
-        remote module's parameters. This can typically be used in conjuction
+        remote module's parameters. This can typically be used in conjunction
         with :class:`~torch.distributed.optim.DistributedOptimizer`.
 
         Args:
@@ -458,7 +458,7 @@ class _RemoteModule(nn.Module):
 
     def _prepare_init(self, remote_device_str: str) -> bool:
         """
-        Prepares the initializaiton and returns whether to enable automatically moving CPU tensors to CUDA devices.
+        Prepares the initialization and returns whether to enable automatically moving CPU tensors to CUDA devices.
         """
         # Sanity check.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
@@ -516,7 +516,7 @@ class _RemoteModule(nn.Module):
     ):
         """
         Besides the constructor, a RemoteModule instance can also be initialized given a module RRef.
-        This alternate initiailization method can be particularly useful if we want to create multiple
+        This alternate initialization method can be particularly useful if we want to create multiple
         RemoteModule instances that share the same underlying module and reduce memory consumption.
 
         Moreover, this also provides a workaround for passing script RemoteModule over RPC,
@@ -745,7 +745,7 @@ def _recursive_script_module_receiver(
     recursive_script_module_serialized,
 ):
     """
-    Deserializes a RecursiveScirptModule that does not contain a script RemoteModule.
+    Deserializes a RecursiveScriptModule that does not contain a script RemoteModule.
     """
     f = io.BytesIO(recursive_script_module_serialized)
     m = torch.jit.load(f)
@@ -754,7 +754,7 @@ def _recursive_script_module_receiver(
 
 def _recursive_script_module_reducer(recursive_script_module):
     """
-    Serializes a RecursiveScirptModule that does not contain a script RemoteModule,
+    Serializes a RecursiveScriptModule that does not contain a script RemoteModule,
     and raises an error otherwise.
     """
     if hasattr(recursive_script_module._c, "module_rref"):

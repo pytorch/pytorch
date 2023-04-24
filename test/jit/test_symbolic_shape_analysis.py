@@ -163,7 +163,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
-            break
 
     def test_binary_shape_fns_inplace(self):
         def div_inplace_tensor(x: torch.Tensor, y: torch.Tensor):
@@ -574,3 +573,24 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_register_shape_compute_graph_for_node(node, too_many_inputs.graph)
 
         self.assertTrue("fewer arguments than schema" in str(error.exception))
+
+    def test_cross_entropy_loss(self):
+        @torch.jit.script
+        def foo(x, y):
+            return torch.ops.aten.cross_entropy_loss(x, y, reduction=0)
+
+        inputs = list(foo.graph.inputs())
+        inputs[0].setType(inputs[0].type().with_sizes([8, 2]))
+        inputs[1].setType(inputs[1].type().with_sizes([8,]))
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        self.assertEqual(next(foo.graph.outputs()).type().sizes(), [8,])
+
+    def test_squeeze_dims(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.ops.aten.squeeze(x, dim=0)
+
+        input = next(foo.graph.inputs())
+        input.setType(input.type().with_sizes([1, 5, 8]))
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        self.assertEqual(next(foo.graph.outputs()).type().symbolic_sizes(), [5, 8])

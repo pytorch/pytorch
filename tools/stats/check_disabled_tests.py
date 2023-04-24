@@ -46,7 +46,7 @@ def process_report(
         parsed_test_case = process_xml_element(test_case)
 
         # Under --rerun-disabled-tests mode, a test is skipped when:
-        # * it's skipped explicitly inside PyToch code
+        # * it's skipped explicitly inside PyTorch code
         # * it's skipped because it's a normal enabled test
         # * or it's falky (num_red > 0 and num_green > 0)
         # * or it's failing (num_red > 0 and num_green == 0)

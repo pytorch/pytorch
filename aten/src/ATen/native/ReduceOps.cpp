@@ -853,10 +853,10 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
 }
 
 Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor& indices, int64_t dim) {
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     return input;
   }
-  auto result = at::zeros(input.sizes(), input.options());
+  auto result = at::zeros_symint(input.sym_sizes(), input.options());
 
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if `indices` or `grad` is a Tensor Subclass.
@@ -1304,7 +1304,9 @@ TORCH_IMPL_FUNC(mean_out)
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
   // in lieu of the sum + divide implementation below.
-  if (self.device().is_cpu()) {
+  // Note: there has an accuracy loss for half and bfloat16 which has one more type
+  // cast compared with mean_stub path.
+  if (self.device().is_cpu() && dtype != kHalf && dtype != kBFloat16) {
     int64_t dim_prod = 1;
     if (!opt_dim.has_value() || opt_dim.value().empty() || self.ndimension() == 0) {
       dim_prod = self.numel();

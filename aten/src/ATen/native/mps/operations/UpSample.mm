@@ -1,9 +1,34 @@
 //  Copyright © 2023 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UpSample.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_nearest_exact1d.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact1d_native.h>
+#include <ATen/ops/_upsample_nearest_exact2d.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward.h>
+#include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact2d_native.h>
+#include <ATen/ops/upsample_bilinear2d.h>
+#include <ATen/ops/upsample_bilinear2d_backward.h>
+#include <ATen/ops/upsample_bilinear2d_backward_native.h>
+#include <ATen/ops/upsample_bilinear2d_native.h>
+#include <ATen/ops/upsample_nearest1d.h>
+#include <ATen/ops/upsample_nearest1d_backward.h>
+#include <ATen/ops/upsample_nearest1d_backward_native.h>
+#include <ATen/ops/upsample_nearest1d_native.h>
+#include <ATen/ops/upsample_nearest2d.h>
+#include <ATen/ops/upsample_nearest2d_backward.h>
+#include <ATen/ops/upsample_nearest2d_backward_native.h>
+#include <ATen/ops/upsample_nearest2d_native.h>
+#endif
 namespace at::native {
 namespace mps {
 

@@ -6,7 +6,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 def _attach_model_to_data_sparsifier(module, data_sparsifier, config=None):
     """Attaches a data sparsifier to all the layers of the module.
-    Essentialy, loop over all the weight parameters in the module and
+    Essentially, loop over all the weight parameters in the module and
     attach it to the data sparsifier.
     Note::
         The '.' in the layer names are replaced with '_' (refer to _get_valid_name() below)
@@ -35,5 +35,5 @@ def _log_sparsified_level(model, data_sparsifier) -> None:
         mask = data_sparsifier.get_mask(name=valid_name)
         sparsity_level = 1.0 - mask.float().mean()
         logger.info(
-            f"Sparsity in layer {name} = {sparsity_level: .2%}"
+            "Sparsity in layer %s = % .2%", name, sparsity_level
         )

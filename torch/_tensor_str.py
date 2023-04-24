@@ -402,9 +402,9 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append("device='" + str(self.device) + "'")
 
     # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
-    # representable format. These operations on ipu/xla/lazy tensor results in compilations. Hence,
+    # representable format. These operations on ipu/xla/lazy/mtia tensor results in compilations. Hence,
     # to avoid compilations, copying the tensor to cpu before printing.
-    if self.device.type in ["xla", "lazy", "ipu"]:
+    if self.device.type in ["xla", "lazy", "ipu", "mtia"]:
         self = self.to("cpu")
 
     # TODO: add an API to map real -> complex dtypes
@@ -536,12 +536,15 @@ def _str_intern(inp, *, tensor_contents=None):
         prefix = "_to_functional_tensor("
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
-        if self.is_meta:
+        # Circular import problem, so we import it here
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        if self.is_meta or isinstance(self, FakeTensor):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
             # TODO: This implies that ellipses is valid syntax for allocating
-            # a meta tensor, which it could be, but it isn't right now
+            # a meta tensor or FakeTensor, which it could be, but it isn't right now
             if not custom_contents_provided:
                 tensor_str = "..."
         else:

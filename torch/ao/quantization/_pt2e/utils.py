@@ -17,7 +17,7 @@ def _get_tensor_constant_from_node(node, m):
 # fuse conv bn weights, inplace modification of the graph_module and graph
 def _fuse_conv_bn_(m: GraphModule) -> None:
     for n in m.graph.nodes:
-        if n.op != "call_function" or n.target != torch.ops.aten.native_batch_norm.default:
+        if n.op != "call_function" or n.target != torch.ops.aten._native_batch_norm_legit_no_training.default:
             continue
         bn_op = n
         n = bn_op.args[0]
@@ -39,9 +39,9 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
         bn_rm = _get_tensor_constant_from_node(bn_op.args[3], m)
         # bn running variance
         bn_rv = _get_tensor_constant_from_node(bn_op.args[4], m)
-        bn_eps = bn_op.args[7]
+        bn_eps = bn_op.args[6]
 
-        fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=False)
+        fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=transpose)
 
         # update the weight and bias for conv
         conv_args = list(conv_op.args)

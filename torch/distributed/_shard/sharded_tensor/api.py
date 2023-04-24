@@ -421,7 +421,7 @@ class ShardedTensor(ShardedTensorBase):
 
     def _get_preferred_device(self) -> torch.device:
         """
-        Return the prefered device to be used when creating tensors for collectives.
+        Return the preferred device to be used when creating tensors for collectives.
         This method takes into account the associated process group
         """
         if dist.get_backend(self._process_group) == dist.Backend.NCCL:

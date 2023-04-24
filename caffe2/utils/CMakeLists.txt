@@ -30,7 +30,6 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
-  utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
   utils/threadpool/ThreadPool.cc

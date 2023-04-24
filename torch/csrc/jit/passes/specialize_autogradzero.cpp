@@ -302,8 +302,8 @@ struct AutogradZeroSpecializer {
     }
 
     // We've created:
-    // succesful_checks = Guards(...)
-    // if (succesful_checks)
+    // successful_checks = Guards(...)
+    // if (successful_checks)
     // -> optimized graph
     // else:
     // -> fallback graph

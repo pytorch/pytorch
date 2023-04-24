@@ -140,7 +140,7 @@ def transform_get_item_tensor(constraint, counter):
     When the index is a tuple, then the output will be a tensor
     TODO: we have to check if this is the case for all HF models
 
-    The cases we are covrering here are a tuple with one of:
+    The cases we are covering here are a tuple with one of:
      - slice with default argument
      - None
 
@@ -700,7 +700,7 @@ def gen_all_reshape_possibilities(list_of_dims, target):
         list_of_dims: The input list of dimensions
         target: The tensor we want to reshape to
 
-    Returns: A disjuncition of transformed reshape constraints
+    Returns: A disjunction of transformed reshape constraints
 
     """
     all_possibilities = generate_all_int_dyn_dim_possibilities(list_of_dims)
@@ -830,8 +830,8 @@ def no_broadcast_dim_with_index(d1: List[DVar],
                                 i: int):
     """
     Args:
-        d1: inpput 1
-        d2: inpput 2
+        d1: input 1
+        d2: input 2
         d3: simulated broadcasting for input 1
         d4: simulated broadcasting for input 2
         i: the rank of the resulting tensor addition
@@ -971,7 +971,7 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
 def generate_all_broadcasting_possibilities_no_padding(d1: List[DVar], d2: List[DVar], d11: List[DVar], d12: List[DVar]):
     """
     Generate broadcasting constraints assuming no padding. Broadcasting can happen at any dimension.
-    We look at all combinations for all dimendions in d1 and d2
+    We look at all combinations for all dimensions in d1 and d2
     Args:
         d1: input1 dimensions
         d2: input2 dimensions

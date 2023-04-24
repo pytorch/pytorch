@@ -1030,7 +1030,7 @@ class CollectTensorOp final : public Operator<Context> {
         CAFFE_ENFORCE(
             // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             tensorVector->size() == numToCollect_,
-            "TensorVecotor size = ",
+            "TensorVector size = ",
             tensorVector->size(),
             " is different from numToCollect = ",
             numToCollect_);

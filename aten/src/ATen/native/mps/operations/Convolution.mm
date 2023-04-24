@@ -1,13 +1,7 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
 
 namespace at::native {
 
