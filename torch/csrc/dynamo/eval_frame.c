@@ -335,7 +335,7 @@ static PyObject* _custom_eval_frame(
     int throw_flag,
     PyObject* callback);
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
-                                        PyFrameObject *frame, int throw_flag) = NULL;
+                                        THP_EVAL_API_FRAME_OBJECT *frame, int throw_flag) = NULL;
 
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject* custom_eval_frame_shim(
@@ -575,6 +575,75 @@ static long cache_size(CacheEntry* e) {
   return 1 + cache_size(e->next);
 }
 
+#if IS_PYTHON_3_11_PLUS
+#define COPY_FIELD(f1, f2, field) \
+  Py_XINCREF((f2)->func_##field); \
+  (f1)->func_##field = (f2)->func_##field;
+
+PyFunctionObject *
+_PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
+{
+  PyFunctionObject *op = PyObject_GC_New(PyFunctionObject, &PyFunction_Type);
+  if (op == NULL) {
+    return NULL;
+  }
+  Py_XINCREF(code);
+  op->func_code = (PyObject *) code;
+  Py_XINCREF(code->co_name);
+  op->func_name = code->co_name;
+  Py_XINCREF(code->co_qualname);
+  op->func_qualname = code->co_qualname;
+  COPY_FIELD(op, o, globals);
+  COPY_FIELD(op, o, builtins);
+  COPY_FIELD(op, o, defaults);
+  COPY_FIELD(op, o, kwdefaults);
+  COPY_FIELD(op, o, closure);
+  COPY_FIELD(op, o, doc);
+  COPY_FIELD(op, o, dict);
+  COPY_FIELD(op, o, weakreflist);
+  COPY_FIELD(op, o, module);
+  COPY_FIELD(op, o, annotations);
+  op->vectorcall = o->vectorcall;
+  op->func_version = o->func_version;
+  PyObject_GC_Track(op);
+  return op;
+}
+
+void
+_PyFrame_Clear(_PyInterpreterFrame *frame)
+{
+    /* It is the responsibility of the owning generator/coroutine
+     * to have cleared the enclosing generator, if any. */
+    assert(frame->owner != FRAME_OWNED_BY_GENERATOR ||
+        _PyFrame_GetGenerator(frame)->gi_frame_state == FRAME_CLEARED);
+    // GH-99729: Clearing this frame can expose the stack (via finalizers). It's
+    // crucial that this frame has been unlinked, and is no longer visible:
+    assert(_PyThreadState_GET()->cframe->current_frame != frame);
+    assert(frame->frame_obj == NULL);
+    // if (frame->frame_obj) {
+    //     PyFrameObject *f = frame->frame_obj;
+    //     frame->frame_obj = NULL;
+    //     if (Py_REFCNT(f) > 1) {
+    //         take_ownership(f, frame);
+    //         Py_DECREF(f);
+    //         return;
+    //     }
+    //     Py_DECREF(f);
+    // }
+    assert(frame->stacktop >= 0);
+    for (int i = 0; i < frame->stacktop; i++) {
+        Py_XDECREF(frame->localsplus[i]);
+    }
+    Py_XDECREF(frame->frame_obj);
+    Py_XDECREF(frame->f_locals);
+    Py_DECREF(frame->f_func);
+    Py_DECREF(frame->f_code);
+}
+
+#endif
+
+char FRAME_MEMORY[1000];
+
 inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -591,39 +660,39 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
-  #if IS_PYTHON_3_11_PLUS
-  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
-  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
-  #else
-  DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
-  DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
-  #endif
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
-  PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
+  PyObject* result = NULL;
+
   #if IS_PYTHON_3_11_PLUS
-  THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
-  Py_XINCREF(frame->f_func->func_closure);
-  shadow->f_func->func_closure = frame->f_func->func_closure;
-  // NOTE: in Python 3.11.1+, PyFrame_New changes prev_instr, causing
-  // Python runtime errors, so we revert the change.
-  // See https://github.com/python/cpython/pull/97886.
-  // TODO if there are more shadow frame related bugs in the future,
-  // consider not using PyFrame_New.
-  shadow->prev_instr = _PyCode_CODE(shadow->f_code) - 1;
-  #else
-  THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
-  #endif
-  if (shadow == NULL) {
-    Py_DECREF(shadow_obj);
+
+  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
+  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
+
+  PyFunctionObject *func = _PyFunction_CopyWithNewCode((PyFunctionObject *) frame->f_func, code);
+  if (func == NULL) {
     return NULL;
   }
 
-  #if IS_PYTHON_3_11_PLUS
+  size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
+  THP_EVAL_API_FRAME_OBJECT* shadow = malloc(size);
+  if (shadow == NULL) {
+    Py_DECREF(func);
+    return NULL;
+  }
+
+  Py_INCREF(func);
+  // consumes reference to func
+  _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
+
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
 
-  // copy from old fastlocals to new fastlocals:
+  for (int i = 0; i < code->co_nlocalsplus; i++) {
+    fastlocals_new[i] = NULL;
+  }
+
+  // copy from old localsplus to new localsplus:
   // for i, name in enumerate(localsplusnames_new):
   //   name_to_idx[name] = i
   // for i, name in enumerate(localsplusnames_old):
@@ -631,17 +700,15 @@ inline static PyObject* eval_custom_code(
   PyObject* name_to_idx = PyDict_New();
   if (name_to_idx == NULL) {
     DEBUG_TRACE0("unable to create localsplus name dict");
-    Py_DECREF(shadow_obj);
-    return NULL;
+    goto cleanup;
   }
 
   for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
     PyObject *name = PyTuple_GET_ITEM(code->co_localsplusnames, i);
     PyObject *idx = PyLong_FromSsize_t(i);
     if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
-      Py_DECREF(shadow_obj);
       Py_DECREF(name_to_idx);
-      return NULL;
+      goto cleanup;
     }
   }
 
@@ -650,16 +717,25 @@ inline static PyObject* eval_custom_code(
     PyObject *idx = PyDict_GetItem(name_to_idx, name);
     Py_ssize_t new_i = PyLong_AsSsize_t(idx);
     if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
-      Py_DECREF(shadow_obj);
       Py_DECREF(name_to_idx);
-      return NULL;
+      goto cleanup;
     }
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[new_i] = fastlocals_old[i];
   }
 
   Py_DECREF(name_to_idx);
+
   #else
+
+  DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
+  DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+
+  THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
+  if (shadow == NULL) {
+    return NULL;
+  }
+
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
 
@@ -672,10 +748,20 @@ inline static PyObject* eval_custom_code(
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+
   #endif
 
-  PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
-  Py_DECREF(shadow_obj);
+  result = eval_frame_default(tstate, shadow, throw_flag);
+
+  #if IS_PYTHON_3_11_PLUS
+ cleanup:
+  _PyFrame_Clear(shadow);
+  free(shadow);
+  Py_DECREF(func);
+  #else
+  Py_DECREF(shadow);
+  #endif
+
   return result;
 }
 
