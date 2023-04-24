@@ -28,13 +28,13 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
-    data_type_propagation,
+    DataTypePropagation,
     DeferredLine,
-    dtype_agnostic_ops,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
+    OpDtypeClassifier,
     OpOverrides,
     OptimizationContext,
 )
@@ -2049,7 +2049,7 @@ class CppKernelProxy(CppKernel):
     def data_type_propagation(self, nodes):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            data_type_propagation(_node)
+            DataTypePropagation.propagate_scheduler_node(_node)
 
     # Check if all the nodes of a given fx graph can support BF16
     def is_bf16_sch(self, sch_node: SchedulerNode):
@@ -2059,7 +2059,7 @@ class CppKernelProxy(CppKernel):
         sch_node.is_bf16 = False
 
         # Propagate the dtype to check if all the fx node is bf16
-        data_type_propagation(sch_node)
+        DataTypePropagation.propagate_scheduler_node(sch_node)
 
         sub_blocks = [sch_node._body.root_block] + list(
             sch_node._body.subblocks.values()
@@ -2068,7 +2068,10 @@ class CppKernelProxy(CppKernel):
             for _node in sub_block.graph.nodes:
                 # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
                 # the data type as well.
-                if _node.target in dtype_agnostic_ops():
+                if (
+                    _node.op in OpDtypeClassifier.io_ops()
+                    or _node.target in OpDtypeClassifier.index_ops()
+                ):
                     continue
 
                 # Fast path if all operations can support bf16 without converting to fp32
@@ -2078,7 +2081,7 @@ class CppKernelProxy(CppKernel):
                     "store",
                     "abs",
                     "neg",
-                ] and _node.op not in ["placeholder", "output"]:
+                ]:
                     return False
 
                 if hasattr(_node, "meta") and _node.meta:
