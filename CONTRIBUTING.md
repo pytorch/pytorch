@@ -792,7 +792,7 @@ USE_PRECOMPILED_HEADERS=1 python setup.py develop
 If you are using MacOS on Apple M1:
 
 ```sh
-USE_PRECOMPILED_HEADERS=1 USE_MPS=1 python setup.py develop
+USE_PRECOMPILED_HEADERS=1 python setup.py develop
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
