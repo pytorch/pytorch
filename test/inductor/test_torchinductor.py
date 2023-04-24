@@ -823,6 +823,7 @@ class CommonTemplate:
         def fn(a):
             return (torch.max(a), torch.min(a))
 
+        t1 = torch.randn(32)
         t1[16] = float("nan")
         self.common(fn, (t1,))
 
