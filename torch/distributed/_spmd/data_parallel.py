@@ -358,18 +358,11 @@ def build_data_parallel_strategies(
             elif placeholder_idx < activation_idx:
                 # optimizer states follow the same strategy as
                 # the corresponding parameters
-                placement_strategies: List[PlacementStrategy] = []
-
                 replica_strategy = _gen_replicate_strategy(mesh)
-                placement_strategies.append(replica_strategy)
+                shard_strategy = _gen_shard_strategy(mesh, 0)
 
-                if node.meta["val"].ndim > 0:
-                    # if the state is a scalar, we don't want to shard it
-                    # i.e. param state step is usually a scalar tensor
-                    shard_strategy = _gen_shard_strategy(mesh, 0)
-                    placement_strategies.append(shard_strategy)
                 dp_strategy_map[node] = DataParallelStrategy(
-                    NodeType.STATE, placement_strategies
+                    NodeType.STATE, [replica_strategy, shard_strategy]
                 )
             else:
                 activation_batch_dim_size = node.meta["val"].shape[batch_dim]
@@ -904,7 +897,9 @@ def partition_data_parallel(
             param_states = named_states[param_key]
             param_dtensor_states = {}
             for state_key, state_val in param_states.items():
-                if isinstance(state_val, torch.Tensor):
+                if isinstance(state_val, torch.Tensor) and state_val.ndim > 0:
+                    # shard/replicate non-scalar tensors, for scalar tensor, we
+                    # don't do anything
                     dtensor_state = distribute_tensor(state_val, mesh, [placement])
                     param_dtensor_states[state_key] = dtensor_state
                     param_states[state_key] = dtensor_state.to_local()
