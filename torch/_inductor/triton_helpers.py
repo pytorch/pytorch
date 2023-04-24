@@ -4,11 +4,9 @@ import triton.language as tl
 
 @triton.jit
 def is_floating(x):
-    if isinstance(x, tl.constexpr):
-        ret = isinstance(x.value, float)
-    else:
-        ret = x.dtype.is_floating()
-    return ret
+    # Addition to promote scalars to tensor
+    x += tl.zeros((1,), tl.int1)
+    return x.dtype.is_floating()
 
 
 @triton.jit
