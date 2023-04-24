@@ -12,8 +12,7 @@ from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
 
-from . import reset, utils
-from .config_utils import config
+from . import config, reset, utils
 
 
 def run_tests(needs=()):

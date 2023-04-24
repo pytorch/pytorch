@@ -5,15 +5,9 @@ import torch
 from .. import ir
 
 from ..lowering import lowerings as L
-from ..pattern_matcher import (
-    Arg,
-    CallFunction,
-    filter_nodes,
-    get_arg_value,
-    KeywordArg,
-    register_lowering_pattern,
-)
+from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
 from ..virtualized import ops
+from .post_grad import register_lowering_pattern
 
 
 if torch._C.has_mkldnn:
@@ -290,6 +284,7 @@ if torch._C.has_mkldnn:
             return False
         if any(
             n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
+            or n.args[0].meta["val"].device != n.args[1].meta["val"].device
             for n in binary_nodes
         ):
             return False

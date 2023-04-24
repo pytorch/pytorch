@@ -5,6 +5,7 @@ import weakref
 import torch
 
 import torch._dynamo
+import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 

@@ -4,7 +4,7 @@ from typing import Any, List
 
 import torch
 
-from .config_utils import config
+from . import config
 from .utils import print_once
 
 

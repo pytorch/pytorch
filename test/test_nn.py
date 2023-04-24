@@ -2425,17 +2425,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _ = m.state_dict()
         self.assertTrue(called)
 
-    def test_register_state_dict_pre_hook(self):
+    def _test_register_state_dict_pre_hook(self, model, submodule):
         _state_dict_prefix = "foo."
         state_dict_pre_hook_count = 0
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3))
-
-            def forward(self, x):
-                return self.a(x)
+        keep_var_setting = False
 
         def my_state_dict_pre_hook(module, prefix, keep_vars):
             nonlocal keep_var_setting
@@ -2444,14 +2437,46 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             state_dict_pre_hook_count += 1
             self.assertTrue(prefix.startswith(_state_dict_prefix))
 
-        mod = MyModule()
-        mod.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        model.register_state_dict_pre_hook(my_state_dict_pre_hook)
         # Test to ensure submodules run the hook as well.
-        mod.a.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        for keep_var_setting in [True, False]:
-            _ = mod.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
-            self.assertEqual(2, state_dict_pre_hook_count)
-            state_dict_pre_hook_count = 0
+        submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
+
+        def check_results(model):
+            nonlocal _state_dict_prefix, state_dict_pre_hook_count, keep_var_setting
+            for keep_var_setting in [True, False]:
+                _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
+                self.assertEqual(2, state_dict_pre_hook_count)
+                state_dict_pre_hook_count = 0
+        # Test state dict works as expected after model construction
+        check_results(model)
+        # Test state dict works as expected after forward
+        model(torch.ones(10, 3))
+        check_results(model)
+
+    def test_register_state_dict_pre_hook(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3))
+
+            def forward(self, x):
+                return self.a(x)
+
+        mod = MyModule()
+        self._test_register_state_dict_pre_hook(mod, mod.a)
+
+    def test_register_state_dict_pre_hook_lazy_module(self):
+        class MyLazyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LazyLinear(8)
+                self.layer2 = nn.LazyLinear(5)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x))
+
+        mod = MyLazyModule()
+        self._test_register_state_dict_pre_hook(mod, mod.layer1)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -7191,6 +7216,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
         y = net(x)
+
+    def test_fractional_max_pool2d_invalid_output_ratio(self):
+        arg_1 = [2, 1]
+        arg_2 = [0.5, 0.5, 0.6]
+        arg_class = torch.nn.FractionalMaxPool2d(kernel_size=arg_1, output_ratio=arg_2,)
+        arg_3_0_tensor = torch.rand([20, 16, 50, 32], dtype=torch.float32)
+        arg_3_0 = arg_3_0_tensor.clone()
+        arg_3 = [arg_3_0,]
+
+        with self.assertRaisesRegex(ValueError,
+                                    "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
+            res = arg_class(*arg_3)
 
 
 class TestFusionEval(TestCase):
