@@ -1162,7 +1162,6 @@ class TritonKernel(Kernel):
                 """
             )
 
-
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
@@ -1174,13 +1173,18 @@ class TritonKernel(Kernel):
             )
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = self.cse.generate(
-                    self.compute, f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)"
+                    self.compute,
+                    f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
                 )
                 result_var = self.cse.newvar()
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
-                final_argreduce(self.compute, result_var, masked_value, accumulator_index)
+                final_argreduce(
+                    self.compute, result_var, masked_value, accumulator_index
+                )
             else:
-                result_var = self.cse.generate(self.compute, final_reduction(masked_value))
+                result_var = self.cse.generate(
+                    self.compute, final_reduction(masked_value)
+                )
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
