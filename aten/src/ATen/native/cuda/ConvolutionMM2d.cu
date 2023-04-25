@@ -280,9 +280,9 @@ void slow_conv2d_backward(
       using acc_t = at::acc_type<scalar_t, true>;
       at::native::col2im<scalar_t, acc_t>(
         c10::cuda::getCurrentCUDAStream(),
-        grad_columns.data_ptr<scalar_t>(),
+        grad_columns.const_data_ptr<scalar_t>(),
         nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-        1, 1, grad_input_n.data_ptr<scalar_t>()
+        1, 1, grad_input_n.mutable_data_ptr<scalar_t>()
       );
     }
   });
