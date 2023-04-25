@@ -103,6 +103,16 @@ struct TORCH_API InterpolateFuncOptions {
   /// result would match Pillow result for downsampling operation. Supported
   /// modes: "bilinear". Default: "False".
   TORCH_ARG(bool, antialias) = false;
+
+  /// if true then output size is computed as
+  /// ``round(input_size * scale_factor)`` (correct way) instead of
+  /// ``int(input_size * scale_factor)`` (old incorrect way).
+  /// If `round_with_scale_factor` is ``None``, a warning is raised and
+  /// computation is done as ``round_with_scale_factor=false``.
+  /// If ``false``, old incorrect way to compute the output size is used
+  /// for backward compatibility.
+  /// Default: "None".
+  TORCH_ARG(c10::optional<bool>, round_with_scale_factor) = c10::nullopt;
 };
 
 } // namespace functional

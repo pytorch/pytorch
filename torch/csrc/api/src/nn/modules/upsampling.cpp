@@ -44,7 +44,8 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
       mode,
       options.align_corners(),
       c10::nullopt,
-      false);
+      false,
+      c10::nullopt);
 }
 
 } // namespace nn

@@ -2266,6 +2266,26 @@ TEST_F(FunctionalTest, Interpolate) {
     auto output = F::interpolate(tensor, options);
     ASSERT_TRUE(output.allclose(expected));
   }
+  {
+    auto mode = torch::kNearest;
+    auto tensor = torch::rand({1, 3, 32, 32});
+
+    auto new_options = F::InterpolateFuncOptions()
+                           .mode(mode)
+                           .scale_factor(std::vector<double>({0.123, 0.123}))
+                           .round_with_scale_factor(true);
+    auto output1 = F::interpolate(tensor, new_options);
+    // 4 = round(32 * 0.123)
+    ASSERT_EQ(output1.sizes(), std::vector<int64_t>({1, 3, 4, 4}));
+
+    auto old_options = F::InterpolateFuncOptions()
+                           .mode(mode)
+                           .scale_factor(std::vector<double>({0.123, 0.123}))
+                           .round_with_scale_factor(false);
+    auto output2 = F::interpolate(tensor, old_options);
+    // 3 = int(32 * 0.123)
+    ASSERT_EQ(output2.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
+  }
 }
 
 TEST_F(FunctionalTest, Pad1) {
