@@ -219,20 +219,24 @@ def register_default_collate_for(name: Type, collate_fn: Optional[Callable] = No
         ...     batch = ...
         ...     return batch
         >>> register_default_collate_for(xxx, collate_xxx_fn)
+        >>> register_default_collate_for(xxx)(collate_xxx_fn)
 
     """
 
     # register()
     if collate_fn is not None:
         default_collate_fn_map[name] = collate_fn
-
-    # @register()
-    @wraps(register_default_collate_for)
-    def register(name, collate_fn):
-        default_collate_fn_map[name] = collate_fn
         return collate_fn
 
-    return lambda x: register(name, x)
+    # @register()
+    def decorator(name):
+        @wraps(register_default_collate_for)
+        def wrapper(collate_fn):
+            default_collate_fn_map[name] = collate_fn
+            return collate_fn
+        return wrapper
+
+    return decorator(name)
 
 
 def default_collate(batch):
