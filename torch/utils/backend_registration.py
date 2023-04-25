@@ -205,12 +205,11 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
         # For sparse storage, custom need to extend the implementation by themselves.
         if self.is_sparse:
             raise RuntimeError(f"Can not support a sparse storage move to {custom_backend_name} backend")
-        # create untyped_storage and copy data
-        untyped_storage = torch.UntypedStorage(
-            self.size(), device=torch.device(f'{custom_backend_name}:{device_idx}')
-        )
-        untyped_storage.copy_(self, non_blocking)
-        return untyped_storage
+        # copy data by tensor
+        cpu_tensor = torch.ByteTensor(self)
+        device_tensor = torch.empty(self.size(), dtype=torch.uint8, device=torch.device(f'{custom_backend_name}:{device_idx}'))
+        device_tensor.copy_(cpu_tensor, non_blocking)
+        return device_tensor.untyped_storage()
 
     _check_register_once(torch.storage._StorageBase, custom_backend_name)
     setattr(torch.storage._StorageBase, custom_backend_name, wrap_storage_to)

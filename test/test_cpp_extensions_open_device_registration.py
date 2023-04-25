@@ -259,7 +259,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         def test_open_device_serialization():
             storage = torch.UntypedStorage(4, device=torch.device('foo'))
-            self.assertEqual(torch.serialization.location_tag(storage), 'foo')
+            self.assertEqual(torch.serialization.location_tag(storage), 'foo:0')
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
