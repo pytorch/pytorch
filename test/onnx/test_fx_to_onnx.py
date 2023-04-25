@@ -66,6 +66,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             func, torch.randn(1, 1, 2), export_options=self.export_options
         )
 
+    def test_empty(self):
+        # Since `torch.empty` returns tensor with uninitialized data, we cannot
+        # test this under `test_fx_to_onnx_with_onnxruntime.py` with result comparison.
+        def func(x):
+            return torch.empty(x.size(), dtype=torch.int64)
+
+        tensor_x = torch.randn(1, 1, 2)
+        _ = dynamo_export(func, tensor_x, export_options=self.export_options)
+
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):

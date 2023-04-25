@@ -339,7 +339,7 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all([x is None for x in flat_grads])
+        all_none_grads = all(x is None for x in flat_grads)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -750,6 +750,13 @@ class CommonTemplate:
             return (a.sum(), a.max(), a.min(), a.argmax())
 
         self.common(fn, (torch.full((4,), float("-inf")),))
+
+    def test_prod(self):
+        def fn(a):
+            return a.prod(0), a.prod(1), a.prod()
+
+        self.common(fn, (torch.rand((10, 10)),))
+        self.common(fn, (torch.rand((1, 2050)),))
 
     def test_unroll_small_reduction(self):
         def fn(x):
@@ -1873,6 +1880,14 @@ class CommonTemplate:
         self.common(fn, (torch.randn(2, 2, 10), [3, 3, 4]))
         self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
         self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
+
+    def test_split_with_sizes_failed(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(a):
+            return torch.split(a, [2, 1, 1], dim=1)
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            fn(torch.randn(1, 5))
 
     def test_split(self):
         def fn(a):
@@ -5792,6 +5807,52 @@ class CommonTemplate:
         self.assertEqual(get_data_type(bitwise_not), torch.int64)
         self.assertEqual(get_data_type(bitwise_or), torch.bool)
         self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
+
+    def test_AllenaiLongformerBase_repro(self):
+        def fn(query, scores, window_overlap):
+            batch_size, seq_len, num_heads, _ = query.size()
+            chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
+            diagonal_attention_scores = scores.new_zeros(
+                (
+                    batch_size * num_heads,
+                    chunks_count + 1,
+                    window_overlap,
+                    window_overlap * 2 + 1,
+                )
+            )
+            diagonal_attention_scores[:, :-1, :, window_overlap:] = scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
+            input_tensor = diagonal_attention_scores.view(
+                batch_size, num_heads, seq_len, 2 * window_overlap + 1
+            ).transpose(2, 1)
+            beginning_input = input_tensor[:, :window_overlap, :, : window_overlap + 1]
+            input_tensor[:, :window_overlap, :, : window_overlap + 1] = torch.full_like(
+                beginning_input, -float("inf")
+            )
+            return input_tensor
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                args = [
+                    ((4, 1024, 12, 64), (768, 3072, 64, 1), torch.float32, "cpu"),
+                    ((48, 3, 512, 513), (787968, 262656, 513, 1), torch.float32, "cpu"),
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(*args, 256), opt_fn(*args, 256))
+
+    def test_slice(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x, 2), opt_fn(x, 2))
 
 
 @dataclasses.dataclass

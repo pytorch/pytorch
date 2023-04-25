@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -200,7 +200,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             continue
         if key == "dtype":
             if value is None:
-                filtered["dtype"] = -1
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
             else:
                 filtered["dtype"] = int(
                     _type_utils.JitScalarType.from_dtype(value).onnx_type()

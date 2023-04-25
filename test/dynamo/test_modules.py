@@ -554,7 +554,7 @@ class LazyModuleWithListInput(torch.nn.Module):
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
-    requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
+    requires_grad = any(p.requires_grad for p in module.parameters(recurse))
     return requires_grad
 
 

@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional
 
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import (
@@ -19,8 +19,6 @@ def patched_aot_function(
     partition_fn: Callable[..., object] = default_partition,
     decompositions: Optional[Dict[object, object]] = None,
     num_params_buffers: int = 0,
-    hasher_type: object = None,  # deprecated
-    static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
     pre_compile_fn: Optional[Callable[..., object]] = None,
 ) -> Callable[..., object]:
@@ -98,11 +96,6 @@ def patched_aot_function(
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
     """
-    if static_argnums is not None:
-        raise RuntimeError(
-            "static_argnums has been deprecated - manually wrap your function or use torchdynamo."
-        )
-
     if bw_compiler is None:
         bw_compiler = fw_compiler
 
