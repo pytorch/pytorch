@@ -240,7 +240,7 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch._subclasses.fake_tensor.FakeTensor)
 
 @contextlib.contextmanager
 def inside_mode(proxy_mode):
@@ -444,7 +444,7 @@ class PythonKeyTracer(Tracer):
         return attr_val
 
     def create_arg(self, a: Any):
-        if isinstance(a, torch.nn.Parameter):
+        if isinstance(a, (torch.nn.Parameter, torch._subclasses.FakeTensor)):
             for n, p in self.root.named_parameters():
                 if a is p:
                     return self.create_node('get_attr', n, (), {})

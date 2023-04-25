@@ -997,7 +997,7 @@ def export(
                     graph_with_interpreter,
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
-                    _allow_non_fake_inputs=True,
+                    _allow_non_fake_inputs=False,
                     pre_autograd=pre_autograd,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:

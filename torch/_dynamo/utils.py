@@ -589,15 +589,18 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    fake_mode = detect_fake_mode()
+    if not fake_mode:
+        rng = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available() :
+            cuda_rng = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
+        if not fake_mode:
+            torch.random.set_rng_state(rng)
+            if torch.cuda.is_available() and not fake_mode:
+                torch.cuda.set_rng_state(cuda_rng)
 
 
 def is_jit_model(model0):
@@ -994,7 +997,6 @@ def same(
                         ref_error,
                         res.size(),
                     )
-                    # import pdb; pdb.set_trace()
                 return passes_test
 
             if ignore_non_fp:

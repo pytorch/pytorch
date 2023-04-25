@@ -823,7 +823,7 @@ def in_kernel_invocation_manager(fake_mode):
     # See: note [Fake Tensor Dispatch Keys]
     prev_in_kernel = fake_mode.in_kernel_invocation
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
+    assert meta_in_tls == prev_in_kernel, f"meta_in_tls={meta_in_tls}, prev_in_kernel={prev_in_kernel}"
 
     guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
     fake_mode.in_kernel_invocation = True
@@ -901,13 +901,16 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
-        self = torch.Tensor._make_subclass(
-            cls,
-            elem,
-            elem.requires_grad,
-            dispatch_device=True,
-            device_for_backend_keys=device,
-        )
+        if isinstance(elem, torch._subclasses.FakeTensor):
+            self = elem
+        else:
+            self = torch.Tensor._make_subclass(
+                cls,
+                elem,
+                elem.requires_grad,
+                dispatch_device=True,
+                device_for_backend_keys=device,
+            )
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)

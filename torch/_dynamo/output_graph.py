@@ -29,6 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
+from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 from torch.utils.weak import WeakIdKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -225,17 +226,35 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state["_id"],
+
+        # Preserve the FakeTensorMode from outside torch.export call
+        fake_modes = []
+        for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
+            if isinstance(m, torch._subclasses.FakeTensorMode):
+                fake_modes.append((m, "active fake mode", i))
+        assert len(fake_modes) <= 1, f"fake_modes: {fake_modes}"
+
+        if len(fake_modes) == 1:
+            fake_mode, _, _ = fake_modes[0]
+            fake_mode.shape_env = ShapeEnv(
+                    allow_scalar_outputs=config.capture_scalar_outputs,
+                    allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                    frame_id=frame_state["_id"],
+                ) if config.dynamic_shapes else None
+            fake_mode.allow_non_fake_inputs = False
+        else:
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=ShapeEnv(
+                    allow_scalar_outputs=config.capture_scalar_outputs,
+                    allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                    frame_id=frame_state["_id"],
+                )
+                if config.dynamic_shapes
+                else None,
+                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                allow_non_fake_inputs=True if self.export else False,
             )
-            if config.dynamic_shapes
-            else None,
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
+
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         if config.dynamic_shapes:
             # Register a SHAPE_ENV guard to make sure we setup shape guards
@@ -809,7 +828,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
-        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 

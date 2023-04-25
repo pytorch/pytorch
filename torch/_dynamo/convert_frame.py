@@ -9,7 +9,7 @@ from typing import Dict, Optional, Set
 
 import torch
 import torch._logging
-from torch._guards import tracing
+from torch._guards import detect_fake_mode, tracing
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -116,7 +116,8 @@ def wrap_convert_context(fn):
         prior_grad_mode = torch.is_grad_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
-        if torch.cuda.is_available():
+        fake_mode = detect_fake_mode(list([*args + (kwargs.values(),)]))
+        if torch.cuda.is_available() and not fake_mode:
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
@@ -128,7 +129,7 @@ def wrap_convert_context(fn):
             torch._C._set_grad_enabled(prior_grad_mode)
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
-            if torch.cuda.is_available():
+            if torch.cuda.is_available() and not fake_mode:
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 

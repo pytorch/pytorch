@@ -179,7 +179,7 @@ namespace detail {
  */
 static inline void check_rng_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK_TYPE(
-    new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
+    new_state.layout() == kStrided && (new_state.device().type() == kCPU || new_state.device().type() == kMeta) && new_state.dtype() == kByte,
     "RNG state must be a torch.ByteTensor"
   );
 
