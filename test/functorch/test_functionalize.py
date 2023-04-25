@@ -1,7 +1,5 @@
 # Owner(s): ["module: functorch"]
 
-import functorch
-from unittest.mock import patch
 import functools
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 import test_aotdispatch
@@ -10,8 +8,7 @@ import test_aotdispatch
 def make_functionalize_fn(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        with patch.object(functorch.compile.config, "use_functionalize", True):
-            return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
 
     return _fn
 

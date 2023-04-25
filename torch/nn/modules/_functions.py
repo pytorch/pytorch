@@ -165,7 +165,7 @@ class SyncBatchNorm(Function):
             # Although this process can directly set grad_input as an empty
             # tensor of zeros, it still needs to participate in the collective
             # communication to unblock its peers, as other peer processes might
-            # have recieved non-empty inputs.
+            # have received non-empty inputs.
             num_channels = saved_input.shape[1]
             if self.needs_input_grad[0]:
                 # launch all_reduce to unblock other peer processes

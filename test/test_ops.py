@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     TEST_WITH_ASAN,
     TEST_WITH_UBSAN,
-    skipIfRocm,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
@@ -315,6 +314,8 @@ class TestCommon(TestCase):
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
             except torch._subclasses.fake_tensor.DataDependentOutputException:
+                continue
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -1977,7 +1978,7 @@ fake_tensor_stride_failing_ops = {
     "linalg.svd",
 }
 
-fake_backward_xfails = fake_tensor_stride_failing_ops | {
+fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1990,12 +1991,10 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "cholesky",
 }
 
-fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
+fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
-    xfail("norm", "nuc"),
-    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
-}
+} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2065,6 +2064,8 @@ class TestFakeTensor(TestCase):
                 self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
+                pass
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
@@ -2151,21 +2152,22 @@ class TestFakeTensor(TestCase):
             )
 
             # TODO: enable check_aliasing, batch norm fails
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
-                    composite_compliance.compute_expected_grads(
-                        op.get_op(), args, kwargs,
-                        sample.output_process_fn_grad,
-                        op.gradcheck_wrapper)
+            try:
+                with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
+                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
+                        composite_compliance.compute_expected_grads(
+                            op.get_op(), args, kwargs,
+                            sample.output_process_fn_grad,
+                            op.gradcheck_wrapper)
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                pass
 
-    @skipIfRocm
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @skipIfRocm
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)

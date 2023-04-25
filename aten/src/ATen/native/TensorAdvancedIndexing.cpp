@@ -1585,7 +1585,7 @@ void _scatter_via_index_put(
       {mut_out_contig.dim()},
       TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
     std::memcpy(
-      coord_strides.data_ptr(),
+      coord_strides.mutable_data_ptr(),
       mut_out_contig_strides.data(),
       coord_strides.nbytes());
     coord_strides = coord_strides.to(mut_out_contig.device());
@@ -2252,6 +2252,78 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 Tensor nonzero_cpu(const Tensor& self) {
   auto result = at::empty({0}, self.options().dtype(kLong));
   nonzero_out_cpu(self, result);
+  return result;
+}
+
+Tensor& nonzero_static_out_cpu(
+    const Tensor& self,
+    int64_t size,
+    int64_t fill_value,
+    Tensor& result) {
+  // Check if `size` is not negative
+  TORCH_CHECK(
+      size >= 0, "nonzero_static: 'size' must be an non-negative integer");
+  TORCH_CHECK(
+      result.scalar_type() == kLong,
+      "nonzero_static: Expected out tensor to have scalar type Long "
+      "but got scalar type",
+      result.scalar_type());
+
+  int64_t ndim = self.dim();
+  if (result.dim() != 2 || result.size(0) != size || result.size(1) != ndim) {
+    at::native::resize_output(result, {size, ndim});
+  }
+  // Verify that the output tensor is resized to expected size=(size, ndim)
+  TORCH_CHECK(
+      result.dim() == 2,
+      "nonzero_static: Expected out tensor to be a 2D tensor but got a ",
+      result.dim(),
+      "D tensor");
+  TORCH_CHECK(
+      result.size(0) == size && result.size(1) == ndim,
+      "nonzero_static: Expected out tensor to have Size([",
+      size,
+      ", ",
+      ndim,
+      "]) but got Size([",
+      result.size(0),
+      ", ",
+      result.size(1),
+      "]) ");
+  at::assert_no_internal_overlap(result);
+  at::assert_no_overlap(result, self);
+
+  // Return earlier if either dim is 0
+  if (result.size(0) == 0 || result.size(1) == 0) {
+    return result;
+  }
+
+  // Delegate call to regular nonzero to get a data-dependent output
+  auto dyn_result = nonzero_cpu(self);
+  int64_t num_nonzeros = dyn_result.size(0);
+  int64_t copy_len = std::min(size, num_nonzeros);
+  // Copy the dynamic result to the fixed-size tensor
+  result.narrow(0, 0, copy_len).copy_(dyn_result.narrow(0, 0, copy_len));
+  if (size > copy_len) {
+    // Pad result with `fill_value`
+    result.narrow(0, copy_len, size - copy_len).fill_(fill_value);
+  }
+  return result;
+}
+
+Tensor nonzero_static_cpu(
+    const Tensor& self,
+    int64_t size,
+    int64_t fill_value) {
+  // Check if `size` is not negative
+  TORCH_CHECK(
+      size >= 0, "nonzero_static: 'size' must be an non-negative integer");
+  // Allocate fixed-size out tensor
+  int64_t ndim = self.dim();
+  auto result = at::empty(
+      {size, ndim},
+      at::TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
+  nonzero_static_out_cpu(self, size, fill_value, result);
   return result;
 }
 

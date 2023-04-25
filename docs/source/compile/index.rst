@@ -41,6 +41,8 @@ Optimizations can be passed in :func:`~torch.compile` with either a backend mode
 The default backend is `inductor` which will likely be the most reliable and performant option for most users and library maintainers,
 other backends are there for power users who don't mind more experimental community support.
 
+There is some nuance involved in benchmarking ``torch.compile`` so we've provided a utility to make this simpler with :func:`~torch.utils.benchmark.utils.compile.bench_all`
+
 You can get the full list of community backends by running :func:`~torch._dynamo.list_backends`
 
 .. autosummary::

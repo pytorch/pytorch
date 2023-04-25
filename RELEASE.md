@@ -150,7 +150,7 @@ git push origin  v1.12.0-rc2
 
 Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
 
-This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/master/.github/pytorch-circleci-labels.yml)
+This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). and make sure all binary builds are successful.
 ### Release Candidate Storage
@@ -190,7 +190,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
-[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/master/release/promote.sh)
+[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/main/release/promote.sh)
 
 Users of that script should take care to update the versions necessary for the specific packages you are attempting to promote.
 
