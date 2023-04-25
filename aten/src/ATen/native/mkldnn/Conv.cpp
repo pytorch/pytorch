@@ -708,7 +708,7 @@ Tensor _mkldnn_convolution_transpose(
 
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
-    ideep::convolution_transpose_forward::compute_v3(
+    ideep::convolution_transpose_forward::compute(
         x,
         w,
         b,
@@ -719,10 +719,9 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding, output_padding),
         dilation.vec(),
         groups,
-        use_channels_last,
         op_attr);
   } else {
-    ideep::convolution_transpose_forward::compute_v3(
+    ideep::convolution_transpose_forward::compute(
         x,
         w,
         output_sizes,
@@ -732,7 +731,6 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding, output_padding),
         dilation.vec(),
         groups,
-        use_channels_last,
         op_attr);
   }
   if (input.is_mkldnn()) {
@@ -740,6 +738,7 @@ Tensor _mkldnn_convolution_transpose(
   } else if (!use_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
+    TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
   }
 }
@@ -924,18 +923,65 @@ Tensor mkldnn_convolution_transpose(
     IntArrayRef dilation,
     int64_t groups)
 {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
   bool use_channels_last = mkldnn_conv_use_channels_last(input, weight);
-  return _mkldnn_convolution_transpose(
-      input,
-      weight,
-      bias_opt,
-      padding,
-      output_padding,
-      stride,
-      dilation,
-      groups,
-      use_channels_last
-  );
+  auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), use_channels_last);
+
+  auto output_sizes = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
+  auto output = at::empty({0}, input.options());
+
+  const ideep::tensor x = itensor_from_tensor(input);
+  ideep::tensor w = itensor_from_tensor(weight);
+  // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
+  // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
+  w.transpose_(0, 1);
+
+  ideep::tensor y;
+  if (use_channels_last) {
+    output.resize_(output_sizes, memory_format);
+    y = itensor_from_tensor(output);
+  }
+  if (bias.defined()) {
+    const ideep::tensor b = itensor_from_tensor(bias);
+    ideep::convolution_transpose_forward::compute(
+        x,
+        w,
+        b,
+        output_sizes,
+        y,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups);
+  } else {
+    ideep::convolution_transpose_forward::compute(
+        x,
+        w,
+        output_sizes,
+        y,
+        stride.vec(),
+        padding.vec(),
+        padding_r(padding, output_padding),
+        dilation.vec(),
+        groups);
+  }
+
+  if (input.is_mkldnn()) {
+    return MKLDNNTensor(y, input.options());
+  } else if (!use_channels_last) {
+    return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
+  } else {
+    return output;
+  }
 }
 
 Tensor mkldnn_convolution_transpose_backward_input(

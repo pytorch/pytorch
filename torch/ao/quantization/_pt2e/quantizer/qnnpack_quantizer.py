@@ -74,7 +74,9 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [
         get_symmetric_quantization_config(),
+        get_symmetric_quantization_config(is_qat=True),
         get_symmetric_quantization_config(is_per_channel=True),
+        get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
     ]:
         ops = supported_symmetric_quantized_operators()
         for op_string, pattern_list in ops.items():
@@ -85,7 +87,10 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
 
 
 @functools.lru_cache
-def get_symmetric_quantization_config(is_per_channel=False):
+def get_symmetric_quantization_config(
+    is_per_channel: bool = False,
+    is_qat: bool = False,
+):
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
@@ -106,13 +111,17 @@ def get_symmetric_quantization_config(is_per_channel=False):
     )
     bias_quantization_spec = QuantizationSpec(dtype=torch.float)
     quantization_config = QuantizationConfig(
-        act_quantization_spec, weight_quantization_spec, bias_quantization_spec
+        act_quantization_spec, weight_quantization_spec, bias_quantization_spec, is_qat
     )
     return quantization_config
 
 
 def get_supported_config_and_operators() -> List[OperatorConfig]:
     return get_supported_symmetric_config_and_operators()
+
+
+def _get_default_obs_or_fq_ctr():
+    return PlaceholderObserver.with_args(dtype=torch.float)
 
 
 def _is_annotated(nodes: List[Node]):
@@ -184,8 +193,10 @@ class QNNPackQuantizer(Quantizer):
 
     @register_annotator(
         [
-            get_symmetric_quantization_config(),
-            get_symmetric_quantization_config(is_per_channel=True),
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=False),
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=False),
         ]
     )
     def annotate_symmetric_config(
@@ -198,6 +209,8 @@ class QNNPackQuantizer(Quantizer):
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
+            if config.is_qat:
+                self._annotate_conv2d_bn(node, config)
             self._annotate_conv2d_relu(node, config)
             self._annotate_conv2d(node, config)
             self._annotate_linear(node, config)
@@ -209,6 +222,68 @@ class QNNPackQuantizer(Quantizer):
             self._annotate_adaptive_avg_pool2d(node, config)
 
         return model
+
+    def _annotate_conv2d_bn(
+        self, node: Node, quantization_config: Optional[QuantizationConfig]
+    ) -> None:
+        """
+        Match the following pattern:
+
+          ... -> conv -> bn -> getitem[0] - ...
+
+        Annotate it to get the following pattern after prepare:
+
+                weight -> obs1
+                           |
+          ...  -> obs0 -> conv -> bn -> getitem[0] -> obs2 -> ...
+
+        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+        """
+        if (
+            node.op != "call_function"
+            or node.target != operator.getitem
+            or node.args[1] != 0
+        ):
+            return
+        getitem_node = node
+        bn_node = getitem_node.args[0]
+        assert isinstance(bn_node, Node)
+        if (
+            bn_node.op != "call_function"
+            or bn_node.target != torch.ops.aten._native_batch_norm_legit.default
+        ):
+            return
+        conv_node = bn_node.args[0]
+        assert isinstance(conv_node, Node)
+        if (
+            conv_node.op != "call_function"
+            or conv_node.target != torch.ops.aten.convolution.default
+        ):
+            return
+        if _is_annotated([getitem_node, bn_node, conv_node]):
+            return
+
+        conv_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
+            "weight_index": 1,
+            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
+            "bias_index": 2,
+            "_annotated": True,
+        }
+        bn_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "_annotated": True,
+        }
+        getitem_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "_annotated": True,
+        }
 
     def _annotate_conv2d_relu(
         self, node: Node, quantization_config: QuantizationConfig
@@ -233,9 +308,7 @@ class QNNPackQuantizer(Quantizer):
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
             "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
-                dtype=torch.float
-            ),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -243,7 +316,7 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
@@ -298,7 +371,7 @@ class QNNPackQuantizer(Quantizer):
         # bias and output act
         addmm_node.meta["target_dtype_info"] = {
             "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "bias_index": 0,
             "_annotated": True,
@@ -306,17 +379,13 @@ class QNNPackQuantizer(Quantizer):
         # input act
         view_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
-                dtype=torch.float
-            ),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         # weight
         t_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
-                dtype=torch.float
-            ),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
 
@@ -344,13 +413,11 @@ class QNNPackQuantizer(Quantizer):
 
         maxpool_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
-                dtype=torch.float
-            ),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         getitem_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "input_output_share_observers": True,
             "_annotated": True,
@@ -423,13 +490,11 @@ class QNNPackQuantizer(Quantizer):
 
         add_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": PlaceholderObserver.with_args(
-                dtype=torch.float
-            ),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=torch.float),
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
