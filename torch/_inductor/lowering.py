@@ -22,7 +22,6 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
-from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
@@ -1103,11 +1102,9 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and IS_CI:
+    if get_decompositions([kernel]) and warn:
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
-        # set warn=False we do not want a CI error.
-        # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
-        # likely to be triggered preferentially on one CI config over another.
+        # set warn=False we do not want an error.
         if torch._dynamo.config.suppress_errors:
             torch._dynamo.config.suppress_errors = False
             log.warning(
