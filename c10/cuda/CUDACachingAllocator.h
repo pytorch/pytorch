@@ -218,6 +218,7 @@ class CUDAAllocator : public Allocator {
       MempoolId_t mempool_id) = 0;
   virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
+  // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       int device,
       MempoolId_t mempool_id,
