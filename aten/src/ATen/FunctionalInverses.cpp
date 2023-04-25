@@ -330,6 +330,13 @@ Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor&
     // unfold_backward() is safe to use here because it is NOT a view op.
     // (note: technically, "reapply_views" won't do anything here and we'll have an extra memory copy.
     // We'd need to add an aliasing version of unfold_backward to fix that though).
+    TORCH_CHECK(
+      !(reapply_views && size > step),
+      "While executing unfold, functionalization encountered a tensor being mutated that has internal overlap. \
+When using torch.compile (or running functionalization directly), this is banned \
+as the behavior is not well defined. Consider cloning the tensor before mutating it, \
+or removing the mutation from your model."
+        );
     return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
 }
 
