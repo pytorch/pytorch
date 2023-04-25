@@ -8884,10 +8884,6 @@ op_db: List[OpInfo] = [
                                     'test_inplace_gradgrad', dtypes=(torch.cdouble,)),
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), 'TestFwdGradients',
                                     'test_inplace_forward_mode_AD', dtypes=(torch.cdouble,)),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestSparseUnaryUfuncs",
                                     "test_inplace", dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
                        # Reference: https://github.com/pytorch/pytorch/issues/49224
@@ -13185,11 +13181,7 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1.3e-04)}), 'TestUnaryUfuncs',), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                         dtypes=(torch.int, torch.int8)),
-            # pytorch computes (0+nanj), numpy computes (-5e-18-1j) for input (-501.-1.0000e+20j)
-            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
-                         "test_reference_numerics_large", dtypes=(torch.complex64,), device_type='cpu',
-                         active_if=not IS_MACOS and not IS_WINDOWS),),
+                         dtypes=(torch.int, torch.int8)),),
     ),
     UnaryUfuncInfo(
         'nn.functional.tanhshrink',
@@ -14078,14 +14070,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/41245
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
-                       # Reference: https://github.com/pytorch/pytorch/issues/53958
-                       # Test fails in comparison on Nan as the `equal_nan` is True for
-                       # comparing the CPU tensors.
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cpu', dtypes=[torch.complex64, torch.complex128]),
-                       # Reference: https://github.com/pytorch/pytorch/issues/48486
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cpu', dtypes=[torch.complex64]),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
@@ -18077,18 +18061,7 @@ python_ref_db = [
     #
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
-        torch_opinfo_name="abs",
-        skips=(
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-            # Reference result was farther (0.0) from the precise computation
-            # than the torch result was (nan)!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-        )
-    ),
+        torch_opinfo_name="abs"),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
         torch_opinfo_name="acos",

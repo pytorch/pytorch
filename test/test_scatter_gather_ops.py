@@ -314,6 +314,17 @@ class TestScatterGather(TestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_gather_expanded_index(self, device, dtype):
+        # Test when index is [N, 1], which would have stride [1, 0]
+        # should be excluded from the fast path when index ix expanded
+        input = torch.arange(25).view(5, 5)
+        input2 = input.to(dtype=dtype)
+
+        idx = torch.arange(5).view(5, 1)
+        out = torch.gather(input, 0, idx)
+        out2 = torch.gather(input2, 0, idx)
+
+        self.assertEqual(out.to(dtype=dtype), out2)
+
         def helper(input_size, idx_size):
             input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone()
