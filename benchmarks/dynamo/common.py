@@ -1078,6 +1078,16 @@ def skip_layout_opt(name):
         "shufflenet_v2_x1_0",
         "yolov3",
         "timm_efficientdet",
+
+        # timm
+        "cspdarknet53",
+        "dla102",
+        "jx_nest_base",
+        "levit_128",
+        "poolformer_m36",
+        "res2net101_26w_4s",
+        "res2net50_14w_8s",
+        "sebotnet33ts_256",
     ]:
         torch._inductor.config.layout_opt = False
 
