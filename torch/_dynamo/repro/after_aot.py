@@ -313,7 +313,9 @@ class InputWriter:
         return v
 
     def tensor(self, t) -> str:
-        storage = self.storage(t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device)
+        storage = self.storage(
+            t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
+        )
         maybe_stride = ""
         if _stride_or_default(None, shape=t.shape) != t.stride():
             maybe_stride = f", {tuple(t.stride())}"
