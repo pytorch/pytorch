@@ -2262,6 +2262,7 @@ class ShapeEnv:
                 ):
                     constraints = symbol_to_constraints[expr]
                     constraint = constraints[0]
+                    assert equalities_inputs
                     if not equalities_inputs.is_equal(source, symbol_to_source[expr][0]):
                         msg = (
                             f"The equalities {equalities_inputs.render()} are not sufficient as "
