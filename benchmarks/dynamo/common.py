@@ -263,7 +263,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
     "levit_128",  # Accuracy fails on A10G, passes on A100
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
@@ -2053,6 +2052,8 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+        if not args.dynamic_batch_only:
+            torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
