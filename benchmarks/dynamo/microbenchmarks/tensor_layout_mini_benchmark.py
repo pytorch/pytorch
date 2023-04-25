@@ -18,18 +18,29 @@ def to_channels_last(x):
 
 
 def bench_conv(with_stack=True):
-    x = torch.rand(256, 3, 224, 224).cuda()
-    weight = torch.rand(64, 3, 7, 7).cuda()
+    args = {
+        "x_size": (256, 3, 224, 224),
+        "w_size": (64, 3, 7, 7),
+    }
+    args = {
+        "x_size": (32, 224, 112, 112),
+        "w_size": (224, 112, 3, 3),
+        "padding": (1, 1),
+        "groups": 2,
+    }
+
+    x = torch.rand(*args["x_size"]).cuda()
+    weight = torch.rand(*args["w_size"]).cuda()
 
     x_chan = to_channels_last(x)
     weight_chan = to_channels_last(weight)
     kwargs = {
-        "stride": [2, 2],
-        "padding": [3, 3],
+        "stride": args.get("stride", [2, 2]),
+        "padding": args.get("padding", [3, 3]),
         "dilation": [1, 1],
         "transposed": False,
         "output_padding": [0, 0],
-        "groups": 1,
+        "groups": args.get("groups", 1),
     }
 
     def baseline_fn():
