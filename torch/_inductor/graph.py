@@ -151,6 +151,7 @@ class GraphLowering(torch.fx.Interpreter):
         # make inference faster but training will slow down so far.
         # Simply disable layout optimization for such model for now.
         if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 for n in gm.graph.nodes):
+            print("FOUND GROUPED CONVOLUTION!")
             config.layout_opt = False
 
 

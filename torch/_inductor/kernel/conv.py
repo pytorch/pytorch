@@ -335,8 +335,10 @@ def convolution(
 
     x.realize()
     weight.realize()
-
-    if config.layout_opt and groups == 1:
+    
+    # ndim can be 1 for demucs
+    if config.layout_opt and groups == 1 and ndim == 2:
+        print("FORCE CHANNELS LAST INPUT FOR CONV")
         x = ir.ExternKernel.require_channels_last(x)
         # NOTE: it's fine that weight is not channels last.
         # We can make it contiguous if that's necessary.
