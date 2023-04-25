@@ -13,7 +13,7 @@ from typing import List, NamedTuple, Optional, Union
 import torch
 
 from torch import SymInt
-from torch._guards import GuardSource
+from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import (
@@ -157,6 +157,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
+        assert TracingContext.get() is not None, "Expected active TracingContext"
         super().__init__()
         self.tx = tx
         self.source = source
