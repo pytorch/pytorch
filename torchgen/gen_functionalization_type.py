@@ -571,22 +571,6 @@ def emit_inplace_functionalization_body(
             for a in non_mutated_tensor_names
         ]
     )
-    check_any_tensors_are_xla = " || ".join(
-        ["false"]
-        + [
-            f"{a.name}.device().type() == c10::DeviceType::XLA"
-            for a in f.func.arguments.flat_all
-            if a.type == BaseType(BaseTy.Tensor)
-        ]
-    )
-    any_mutated_tensors_have_internal_overlap = " || ".join(
-        ["false"]
-        + [
-            f"has_internal_overlap_helper({str(a.name)})"
-            for a in f.func.arguments.flat_all
-            if a.type == BaseType(BaseTy.Tensor)
-        ]
-    )
     # These are used in the cases where we don't functionalize and redispatch to the inplace op
     # case 1: we hit an inplace op that doesn't have an out-of-place equivalent
     # case 2: we hit an inplace ops but our inputs are not functional tensors (in which case our kernel just no-ops)
@@ -663,14 +647,6 @@ def emit_inplace_functionalization_body(
          {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
          {return_from_mutable_noop_redispatch(f, 'tmp_output')};
         }}
-      }} else if (!({check_any_tensors_are_xla}) && ({any_mutated_tensors_have_internal_overlap})) {{
-        TORCH_CHECK(
-          false,
-          "While executing {str(f.func.name)}, functionalization encountered a tensor being mutated that has internal overlap. \
-When using torch.compile (or running functionalization directly), this is banned \
-as the behavior is not well defined. Consider cloning the tensor before mutating it, \
-or removing the mutation from your model."
-        );
       }} else {{
         {return_type} tmp_output;
         {{
