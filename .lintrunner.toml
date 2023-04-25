@@ -972,3 +972,29 @@ command = [
     'python3',
     'tools/linter/adapters/lintrunner_version_linter.py'
 ]
+
+[[linter]]
+code = 'RUFF'
+include_patterns = ['**/*.py']
+exclude_patterns = [
+    'caffe2/**',
+    'functorch/docs/**',
+    'functorch/notebooks/**',
+    'scripts/**',
+    'third_party/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/ruff_linter.py',
+    '--config=pyproject.toml',
+    '--show-disable',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'ruff==0.0.262',
+]
+is_formatter = true

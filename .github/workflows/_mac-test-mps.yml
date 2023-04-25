@@ -119,6 +119,7 @@ jobs:
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
@@ -138,6 +139,20 @@ jobs:
           ${CONDA_RUN} python --version
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          pushd "${RUNNER_TEMP}"
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          RC=$?
+          popd
+
+          if [ "${RC}" -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
+
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
       - name: Print remaining test logs
