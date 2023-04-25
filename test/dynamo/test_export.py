@@ -1672,6 +1672,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             dynamo_result = out_graph(pred, x)
             self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_with_cond_with_closed_function(self):
+        def hello(x):
+            return x + 1
+
+        def hi(x):
+            return x + 2
+
+        def foo(pred, x):
+            def true_fn(x):
+                return hello(x)
+
+            def false_fn(x):
+                return hi(x)
+
+            return cond(pred, true_fn, false_fn, [x])
+
+        x = torch.randn(5)
+        pred = x[0] > 0
+        real_result = foo(pred, x)
+        out_graph, _ = torch._dynamo.export(foo, pred, x)
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
 

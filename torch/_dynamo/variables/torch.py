@@ -844,6 +844,12 @@ class TorchHigherOrderOperator(VariableTracker):
                     for var in f.closure.items
                     if isinstance(var, ClosureVariable) and var.name != "self"
                 ]
+                scope = {**tx.symbolic_locals, **tx.symbolic_globals}
+                closure_vars = [
+                    name
+                    for name in closure_vars
+                    if not isinstance(scope[name], (UserFunctionVariable, NestedUserFunctionVariable))
+                ]
                 if closure_vars:
                     code = f.get_code()
                     raise torch._dynamo.exc.UserError(
