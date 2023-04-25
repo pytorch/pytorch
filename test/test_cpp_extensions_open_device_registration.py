@@ -47,6 +47,10 @@ class DummyModule(object):
     def set_rng_state(new_state: torch.Tensor, device: Union[int, str, torch.device] = 'foo') -> None:
         pass
 
+    @staticmethod
+    def is_available():
+        return True
+
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
@@ -183,6 +187,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z2 = z2.foo()
         self.assertFalse(self.module.custom_add_called())
         self.assertTrue(z2.is_foo)
+
+        storage = torch.UntypedStorage(4, device=torch.device('foo'))
+        self.assertEqual(torch.serialization.location_tag(storage), 'foo')
+        cpu_storage = torch.empty(4, 4).storage()
+        foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
+        self.assertTrue(foo_storage.is_foo)
 
     def test_open_device_random(self):
         torch.utils.rename_privateuse1_backend('foo')
