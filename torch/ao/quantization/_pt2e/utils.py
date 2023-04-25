@@ -6,6 +6,7 @@ from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
 import operator
+from typing import Dict, Tuple
 
 
 def _get_tensor_constant_from_node(node, m):
@@ -127,3 +128,15 @@ def _rearrange_weight_observer_for_decomposed_linear(
     model.graph.eliminate_dead_code()
     model.graph.lint()
     model.recompile()
+
+def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
+    # TODO: move this information to fx node itself
+    node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+    for n in model.graph.nodes:
+        nn_module_stack = n.meta.get("nn_module_stack", None)
+        current_scope = ("", type(None))
+        if nn_module_stack:
+            bt = list(nn_module_stack.values())[-1]
+            current_scope = (bt[0].split(".")[-1], bt[1])
+        node_name_to_scope[n.name] = current_scope
+    return node_name_to_scope
