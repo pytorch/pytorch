@@ -4,6 +4,7 @@ import itertools
 import logging
 import operator
 import tempfile
+import time
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import (
@@ -109,7 +110,7 @@ def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
                 else:
                     dump_graphs_to_files({prefix: gm}, _dump_graph_folder)
 
-            logger.info(f"Spent {time.time() - begin} seconds applying {func_key}")
+            logger.info(f"Spent %f seconds applying %s", time.time() - begin, func_key)
 
         return pass_wrapper
 
