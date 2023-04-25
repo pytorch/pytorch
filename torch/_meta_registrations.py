@@ -1420,9 +1420,46 @@ def meta__fused_adam_(
 ):
     for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         check(
-            isinstance(self, List),
-            lambda: f"exponent must be a tensor list but got {type(self)}",
+            isinstance(l, List),
+            lambda: f"exponent must be a tensor list but got {type(l)}",
         )
+
+
+@register_meta([aten._fused_adam.default])
+def meta__fused_adam(
+    self,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
+        check(
+            isinstance(l, List),
+            lambda: f"exponent must be a tensor list but got {type(l)}",
+        )
+
+    def empty_like_list(tensor_list):
+        return [torch.empty_like(t) for t in tensor_list]
+
+    return (
+        empty_like_list(self),
+        empty_like_list(grads),
+        empty_like_list(exp_avgs),
+        empty_like_list(exp_avg_sqs),
+        empty_like_list(max_exp_avg_sqs),
+    )
 
 
 @register_meta([aten._int_mm])
@@ -3045,37 +3082,6 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     result_size = list(self.size())
     return self.new_empty(result_size)
-
-
-@register_meta([aten._fused_adam.default])
-def meta__fused_adam(
-    params,
-    grads,
-    exp_avgs,
-    exp_avg_sqs,
-    max_exp_avg_sqs,
-    state_steps,
-    *,
-    lr,
-    beta1,
-    beta2,
-    weight_decay,
-    eps,
-    amsgrad,
-    maximize,
-    grad_scale=None,
-    found_inf=None,
-):
-    def empty_like_list(tensor_list):
-        return [torch.empty_like(t) for t in tensor_list]
-
-    return (
-        empty_like_list(params),
-        empty_like_list(grads),
-        empty_like_list(exp_avgs),
-        empty_like_list(exp_avg_sqs),
-        empty_like_list(state_steps),
-    )
 
 
 # We must also trigger meta registrations from PrimTorch ref
