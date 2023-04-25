@@ -1338,12 +1338,14 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
+        adjusted_flat_args = flat_args
         if config.functionalize_rng_ops:
             # Add the seed and offset as example inputs to pass to the compiler
             fake_mode = detect_fake_mode()
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-            flat_args = (seed, offset, *flat_args)
-        compiled_fw = compiler(fw_module, flat_args)
+            adjusted_flat_args = [seed, offset, *flat_args]
+            flat_args.clear()  # Don't hold extra reference
+        compiled_fw = compiler(fw_module, adjusted_flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
     # However, create_runtime_wrapper does not expect the rng offsets in the
@@ -2560,7 +2562,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Update example inputs for the fw_compiler
                 fake_mode = detect_fake_mode()
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-                adjust_flat_args = (seed, offset, *flat_args)
+                adjusted_flat_args = [seed, offset, *flat_args]
+                # We are not clearing flat_args here because
+                # 1) There is a check in the the debug compiler at the end
+                # 2) It does not matter as these are fake tensors
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )
