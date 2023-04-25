@@ -16,6 +16,17 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 """
+The old check `sys.executable == 'torch_deploy'` for torch::deploy was replaced here:
+https://github.com/pytorch/multipy/pull/138/files#diff-dae4e20139ff6af007a16cc6888d0e3c1d40d297cb7aef89d8e6cc201caacb9eR124
+
+The new check is a bit more hackish, but that's all we have for now.
+
+"""
+def _is_running_under_torch_deploy():
+    return torch._meta_registrations is object
+
+
+"""
 New traceable, functional collectives.
 RFC: https://github.com/pytorch/pytorch/issues/93173
 
@@ -324,8 +335,7 @@ def all_gather_tensor(
     assert self.is_contiguous()
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
-    res: torch.Tensor = AsyncCollectiveTensor(tensor)
-    _register_wrapper_tensor(res, tensor)
+    res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
@@ -365,9 +375,6 @@ def reduce_scatter_tensor(
     res = _maybe_wrap_tensor(tensor)
     return res
 
-c10_lib = torch.library.Library("c10d_functional", "DEF")
-c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
-
 # We now register meta kernels to deal with tracing
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self)
@@ -404,8 +411,12 @@ def _register_ops():
         c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
 
-
-if sys.executable != 'torch_deploy':
+if not _is_running_under_torch_deploy():
+    # Library MUST be defined at module scope or it doesn't work
+    # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
+    #   guarded against running inside it
+    c10_lib = torch.library.Library("c10d_functional", "DEF")
+    c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")

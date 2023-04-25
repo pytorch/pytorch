@@ -189,6 +189,7 @@ def generate_wheels_matrix(
     os: str,
     arches: Optional[List[str]] = None,
     python_versions: Optional[List[str]] = None,
+    gen_special_an_non_special_wheel: bool = True,
 ) -> List[Dict[str, str]]:
     package_type = "wheel"
     if os == "linux":
@@ -249,6 +250,8 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+                if not gen_special_an_non_special_wheel:
+                    continue
 
             ret.append(
                 {

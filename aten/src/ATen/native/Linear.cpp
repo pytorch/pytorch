@@ -726,6 +726,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 // in the two dimension lists
 Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
   TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
+  TORCH_CHECK(input1.scalar_type() == input2.scalar_type(), "both inputs should have same dtype");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
