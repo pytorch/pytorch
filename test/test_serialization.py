@@ -927,9 +927,9 @@ class TestSerialization(TestCase, SerializationMixin):
             test(fname)
 
         if IS_FILESYSTEM_UTF8_ENCODING:
-            with (TemporaryDirectoryName(suffix='非ASCIIパス') as dname,
-                  TemporaryFileName(dir=dname) as fname):
-                test(fname)
+            with TemporaryDirectoryName(suffix='非ASCIIパス') as dname:
+                with TemporaryFileName(dir=dname) as fname:
+                    test(fname)
 
         test(io.BytesIO())
 
