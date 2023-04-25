@@ -155,8 +155,8 @@ def generate_libtorch_matrix(os: str, abi_version: str,
                         gpu_arch_type, gpu_arch_version
                     ),
                     "libtorch_variant": libtorch_variant,
-                    "libtorch_config": abi_version if os == "windows" else "",
-                    "devtoolset": abi_version if os != "windows" else "",
+                    "libtorch_config": abi_version if os in ("windows", "windows-arm64") else "",
+                    "devtoolset": abi_version if os not in ("windows", "windows-arm64") else "",
                     "container_image": LIBTORCH_CONTAINER_IMAGES[
                         (arch_version, abi_version)
                     ] if os not in ("windows", "windows-arm64") else "",
