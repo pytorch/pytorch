@@ -3,12 +3,19 @@
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Device.h>
+#include <ATen/ScalarType.h>
+#include <ATen/native/utils/ParamsHash.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/result_type_native.h>
 #endif
+
+#include <vector>
+#include <unordered_map>
 
 namespace at::native {
 namespace {
@@ -214,5 +221,75 @@ bool can_use_fast_route(
       {tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
 }
 
-} // namespace
-} // namespace at::native
+using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
+using IndicesT = std::vector<int>;
+using nested_optional_tensorvec_t = std::vector<std::vector<c10::optional<at::Tensor>>>;
+using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
+using FlatMap = std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, ParamsHash<DeviceDtypeKey>>;
+
+FlatMap group_tensors_by_first_tensors_device_and_dtype(const nested_optional_tensorvec_t& nested_tensorlist, const bool with_indices) {
+  FlatMap grouped_tensors_with_indices;
+
+  TORCH_CHECK_GT(nested_tensorlist.size(), 0);
+  TORCH_CHECK_GT(nested_tensorlist[0].size(), 0);
+  const auto num_lists = nested_tensorlist.size();
+  const auto num_tensors = nested_tensorlist[0].size();
+
+  TORCH_CHECK(std::all_of(nested_tensorlist.cbegin(), nested_tensorlist.cend(),
+    [&](const auto& tensorlist) -> bool {
+      // note(crcrpar): Allow empty tensorlists following
+      // ref: https://github.com/pytorch/pytorch/blob/85885301fd3c6adb8b9dc3cf7afadf6945566684/torch/utils/_foreach_utils.py#L21-L24
+      return tensorlist.size() == num_tensors || tensorlist.size() == 0;
+    }));
+
+  for (const auto& tensor_index : c10::irange(num_tensors)) {
+    const auto key = [&]() -> DeviceDtypeKey {
+        const auto t = nested_tensorlist[0][tensor_index];
+        TORCH_CHECK(t.has_value());
+        return {t->device(), t->scalar_type()};
+    }();
+    if (!grouped_tensors_with_indices.count(key)) {
+      grouped_tensors_with_indices.insert(
+        {
+          key,
+          TensorsAndIndicesT{
+            [&]() -> nested_optional_tensorvec_t {
+              nested_optional_tensorvec_t nested_tensorvec;
+              nested_tensorvec.reserve(num_lists);
+             for (const auto& i : c10::irange(num_lists)) {
+                std::vector<c10::optional<at::Tensor>> tensors;
+                if (!nested_tensorlist[i].empty()) {
+                  tensors.reserve(num_tensors);
+                }
+                nested_tensorvec.emplace_back(tensors);
+              }
+              return nested_tensorvec;
+            }(),
+            [&]() -> IndicesT {
+              if (!with_indices) {
+                return {};
+              } else {
+                IndicesT indices;
+                indices.reserve(num_tensors);
+                return indices;
+              }
+            }()
+          }
+        }
+      );
+    }
+    for (const auto& list_index : c10::irange(num_lists)) {
+      if (!nested_tensorlist[list_index].empty()) {
+        grouped_tensors_with_indices[key].first[list_index].emplace_back(nested_tensorlist[list_index][tensor_index]);
+      }
+    }
+    if (with_indices) {
+      grouped_tensors_with_indices[key].second.emplace_back(tensor_index);
+    }
+  }
+
+  return grouped_tensors_with_indices;
+}
+
+} // namespace anonymous
+} // at::native
