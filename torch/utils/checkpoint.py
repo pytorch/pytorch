@@ -47,19 +47,25 @@ def _get_device_module(device='cuda'):
 # the device of all Tensor args.
 #
 # To consider:  maybe get_device_states and set_device_states should reside in torch/random.py?
-def get_device_states(*args, device='cuda') -> Tuple[List[int], List[torch.Tensor]]:
+def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
-    fwd_devices = list({arg.get_device() for arg in args
+    fwd_device_ids = list({arg.get_device() for arg in args
                         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
-
+    device_types = list({arg.device.type for arg in args
+                        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
+    if len(device_types) > 1:
+        raise ValueError("Expected all tensor args except CPU tensor to be on the same device,"
+                         " but found at least two devices, ", device_types)
     fwd_device_states = []
-    device_module = _get_device_module(device)
-    for device in fwd_devices:
-        with device_module.device(device):
+    if len(fwd_device_ids) > 0 and len(device_types) > 0:
+        device_module = _get_device_module(device_types[0])
+
+    for device_id in fwd_device_ids:
+        with device_module.device(device_id):
             fwd_device_states.append(device_module.get_rng_state())
 
-    return fwd_devices, fwd_device_states
+    return fwd_device_ids, fwd_device_states
 
 
 def set_device_states(devices, states, device='cuda') -> None:
@@ -112,7 +118,7 @@ class CheckpointFunction(torch.autograd.Function):
             device_module = _get_device_module(ctx.device)
             if device_module._initialized:
                 ctx.had_device_in_fwd = True
-                ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args, device=ctx.device)
+                ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args)
 
         # Save non-tensor inputs in ctx, keep a placeholder None for tensors
         # to be filled out during the backward.
@@ -735,7 +741,7 @@ def _checkpoint_without_reentrant(
         had_device_in_fwd = False
         if device_module._initialized:
             had_device_in_fwd = True
-            fwd_devices, fwd_device_states = get_device_states(*args, device=device)
+            fwd_devices, fwd_device_states = get_device_states(*args)
 
     def recompute_fn(*inputs):
         kwargs, *args = inputs
