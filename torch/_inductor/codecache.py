@@ -61,7 +61,6 @@ def _compile_end():
 
 
 log = logging.getLogger(__name__)
-logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
 @functools.lru_cache(None)
