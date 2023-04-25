@@ -526,7 +526,7 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py setup
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      python test/run_test.py --cpp --verbose -i cpp/test_jit -i nvfuser_tests
+      python test/run_test.py --cpp --verbose -i cpp/test_jit -i cpp/nvfuser_tests
     else
       python test/run_test.py --cpp --verbose -i cpp/test_jit
       #"$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
