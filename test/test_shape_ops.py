@@ -274,7 +274,7 @@ class TestShapeOps(TestCase):
         return X, X_clamped
 
     # Tests clamp and its alias, clip
-    @dtypes(torch.int64, torch.float32)
+    @dtypes(torch.int64, torch.float32, torch.half)
     def test_clamp(self, device, dtype):
         op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
