@@ -339,7 +339,7 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all([x is None for x in flat_grads])
+        all_none_grads = all(x is None for x in flat_grads)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -1880,6 +1880,14 @@ class CommonTemplate:
         self.common(fn, (torch.randn(2, 2, 10), [3, 3, 4]))
         self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
         self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
+
+    def test_split_with_sizes_failed(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(a):
+            return torch.split(a, [2, 1, 1], dim=1)
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            fn(torch.randn(1, 5))
 
     def test_split(self):
         def fn(a):

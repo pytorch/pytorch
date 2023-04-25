@@ -1,5 +1,8 @@
 #pragma once
 
+#include <Python.h>
+#include <torch/csrc/utils/python_compat.h>
+
 // Functions that need to be copied from the CPython source
 // should go in cpython_defs.c. Copying is required when, e.g.,
 // we need to call internal CPython functions that are not exposed.
@@ -8,10 +11,11 @@
 
 #include <internal/pycore_frame.h>
 
-static int
-_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg);
+static int _PyFrame_OpAlreadyRan(
+    _PyInterpreterFrame* frame,
+    int opcode,
+    int oparg);
 
-int
-THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame);
+int THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame* frame);
 
 #endif

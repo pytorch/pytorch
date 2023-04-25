@@ -2,9 +2,12 @@
 
 #if IS_PYTHON_3_11_PLUS
 
+#define Py_BUILD_CORE
+#include <internal/pycore_pystate.h>
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
+#undef Py_BUILD_CORE
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
