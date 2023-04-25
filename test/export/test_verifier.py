@@ -1,4 +1,4 @@
-# Owner(s): ["module: fx"]
+# Owner(s): ["module: dynamo"]
 import copy
 from typing import Tuple
 import unittest
