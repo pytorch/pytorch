@@ -5044,13 +5044,13 @@ class CommonTemplate:
             raise unittest.SkipTest("broken on CPU")
 
         t1 = torch.randn((10, 10))
-        t1[:, 4] = float('nan')
-        t1[:, 8] = float('nan')
+        t1[:, 4] = float("nan")
+        t1[:, 8] = float("nan")
         self.common(fn, (t1,))
 
         t1 = torch.randn((1024, 1024))
-        t1[:, 40] = float('nan')
-        t1[:, 100] = float('nan')
+        t1[:, 40] = float("nan")
+        t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
     def test_conv_backward(self):
