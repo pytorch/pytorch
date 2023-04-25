@@ -117,6 +117,27 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
   no_reset_rnn_state_.clear();
 }
 
+/**
+ * Sets the offset to be used by curandStatePhilox4_32_10
+ *
+ * See Note [Acquire lock when using random generators]
+ */
+void CUDAGeneratorImpl::set_offset(uint64_t offset) {
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_offset");
+  philox_offset_per_thread_ = offset;
+  no_reset_rnn_state_.clear();
+}
+
+/**
+ * Gets the current offset of CUDAGeneratorImpl.
+ */
+uint64_t CUDAGeneratorImpl::get_offset() const {
+  // Debatable if get_offset() should be allowed in captured regions.
+  // Conservatively disallow it for now.
+  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::get_offset");
+  return philox_offset_per_thread_;
+}
+
 #define CAPTURE_DEFAULT_GENS_MSG \
 "In regions captured by CUDA graphs, you may only use the default CUDA RNG " \
 "generator on the device that's current when capture begins. " \
