@@ -238,7 +238,7 @@ if torch._C.has_mkldnn:
             ):
                 matched = False
             else:  # inp is a Number
-                matched = True
+                matched = min_value <= max_value
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
@@ -267,8 +267,14 @@ if torch._C.has_mkldnn:
         if len(binary_nodes) < 1:
             return False
         if any(
-            not isinstance(n.args[0].meta.get("val", None), torch.Tensor)
-            or not isinstance(n.args[1].meta.get("val", None), torch.Tensor)
+            not (
+                hasattr(n.args[0], "meta")
+                and isinstance(n.args[0].meta.get("val", None), torch.Tensor)
+            )
+            or not (
+                hasattr(n.args[1], "meta")
+                and isinstance(n.args[1].meta.get("val", None), torch.Tensor)
+            )
             for n in binary_nodes
         ):
             return False

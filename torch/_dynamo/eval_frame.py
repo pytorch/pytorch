@@ -680,8 +680,9 @@ def export(
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
-    tracing_mode: str = "real",
+    tracing_mode: str = "symbolic",
     constraints: List[Constraint] = None,
+    assume_static_by_default: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -724,7 +725,7 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None or tracing_mode != "real":
+    if decomposition_table is not None:
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
@@ -802,7 +803,9 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        summarize_dim_constraints=True, specialize_int=True
+        summarize_dim_constraints=True,
+        specialize_int=True,
+        assume_static_by_default=assume_static_by_default,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
