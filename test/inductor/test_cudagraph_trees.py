@@ -572,6 +572,43 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
+        def test_unaligned_static_parameter(self):
+            def gen_inp():
+                inp = torch.ones([20], device="cuda")
+                return [inp[1:]]
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x + x,)
+
+            foo_cg = self.cudagraphify_impl(foo, gen_inp(), (0,))
+
+            for _ in range(3):
+                out = foo_cg(gen_inp())
+                self.assertEqual(out, foo(gen_inp()))
+                del out
+
+            node = self.curr_node()
+            self.assertEqual(node.static_input_data_ptrs, [None])
+
+        def test_frozen_fn(self):
+            @torch.compile()
+            def foo(x):
+                return x @ x
+
+            for _ in range(3):
+                out = foo(torch.rand([10, 10], device="cuda"))
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
+            frozen = torch._dynamo.run(foo)
+
+            for _ in range(3):
+                out = frozen(torch.rand([10, 10], device="cuda"))
+
+            # didnt do additional recordings
+            self.assertTrue(self.get_manager().new_graph_id().id == 2)
+
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")
 
@@ -581,7 +618,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 out = x + x
                 return (x, x[0])
 
-            foo_cg = self.cudagraphify_impl(foo, [inp])
+            foo_cg = self.cudagraphify_impl(foo, [inp], ())
 
             for _ in range(3):
                 out_1, out_2 = foo_cg([inp])

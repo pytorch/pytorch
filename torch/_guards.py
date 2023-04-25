@@ -356,6 +356,8 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
+        self.trainstep = False
+        self.traced_backward = False
 
     @staticmethod
     def extract_stack():

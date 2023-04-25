@@ -43,9 +43,12 @@ vec_dtypes = test_torchinductor.vec_dtypes
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
+check_model = test_torchinductor.check_model
 
 
 class CPUReproTests(TestCase):
+    common = check_model
+
     def test_conv_stride_constraints(self):
         for fmt in [torch.channels_last, torch.contiguous_format]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -80,6 +83,102 @@ class CPUReproTests(TestCase):
                 out = fn_compiled(inps)
 
             self.assertTrue(conv_seen)
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv2d_packed(self):
+        x_shape = (1, 3, 56, 56)
+        for mode_train in [True, False]:
+            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
+                mode=mode_train
+            )
+            v = torch.randn(x_shape, dtype=torch.float32)
+
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_used_from_multiple_places(self):
+        class M(torch.nn.Module):
+            def __init__(self, conv_in_channel, conv_out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                res = self.conv(res)
+                return res
+
+        with torch.no_grad():
+            mod = M(3, 3).eval()
+            x = torch.randn(1, 3, 224, 224)
+            self.common(
+                mod,
+                (x,),
+            )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_linear_used_from_multiple_places(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(in_channel, out_channel)
+
+            def forward(self, x):
+                res = self.linear(x)
+                res = F.relu(res)
+                res = self.linear(res)
+                return res
+
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_linear_packed(self):
+        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
+        for input_shape, bias in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_transpose2d_packed(self):
+        x_shape = (1, 3, 28, 28)
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
 
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(

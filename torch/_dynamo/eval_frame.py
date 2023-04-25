@@ -45,7 +45,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, skipfiles, utils
-from .exc import ResetRequired
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -348,7 +348,11 @@ class OptimizeContext(_TorchDynamoContext):
 
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self):
-        super().__init__(callback=False)
+        # cudagraph trees relies on generation increment
+        def on_enter():
+            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+
+        super().__init__(callback=False, on_enter=on_enter)
 
 
 class DisableContext(_TorchDynamoContext):
@@ -417,7 +421,7 @@ def _optimize_catch_errors(
 
 
 def get_compiler_fn(compiler_fn):
-    from .debug_utils import wrap_backend_debug
+    from .repro.after_dynamo import wrap_backend_debug
 
     if hasattr(compiler_fn, "compiler_name"):
         compiler_str = compiler_fn.compiler_name
@@ -463,6 +467,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=False,
+    trainstep=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -488,6 +493,9 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    if trainstep:
+        nopython = True
+
     check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
@@ -504,11 +512,9 @@ def optimize(
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
-    if nopython:
+    if nopython or trainstep:
         return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
+            backend, dynamic=dynamic, hooks=hooks, trainstep=trainstep
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
@@ -763,7 +769,7 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        specialize_int=True
+        summarize_dim_constraints=True, specialize_int=True
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -839,12 +845,16 @@ def export(
                 return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-                tracing_mode="real",
-                _allow_non_fake_inputs=True,
-            )(*example_fake_inputs)
+            try:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="real",
+                    _allow_non_fake_inputs=True,
+                )(*example_fake_inputs)
+            except CondOpArgsMismatchError as e:
+                # Wrap the internal error to the user-facing error
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -961,6 +971,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=False,
+    trainstep=False,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -972,7 +983,10 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend,
+            export=export,
+            export_constraints=export_constraints,
+            trainstep=trainstep,
         ),
         hooks,
         backend_ctx_ctor,

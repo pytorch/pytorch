@@ -2439,6 +2439,34 @@ aot_autograd_failures = {
     xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
+    # many complex operators incorrect striding, metadata
+    xfail("pca_lowrank"),
+    xfail("norm", "nuc"),
+    xfail('fft.fft', ''),
+    xfail('fft.hfft2', ''),
+    xfail('fft.hfft', ''),
+    xfail('fft.hfftn', ''),
+    xfail('fft.ifft', ''),
+    xfail('fft.ihfft2', ''),
+    xfail('fft.ihfft', ''),
+    xfail('fft.ihfftn', ''),
+    xfail('fft.irfft2', ''),
+    xfail('fft.irfft', ''),
+    xfail('fft.irfftn', ''),
+    xfail('fft.rfft2', ''),
+    xfail('fft.rfft', ''),
+    xfail('fft.rfftn', ''),
+
+    xfail('linalg.svdvals', ''),
+    xfail('linalg.cond', ''),
+    xfail('linalg.matrix_norm', ''),
+    xfail('linalg.norm', ''),
+    xfail('linalg.norm', 'subgradients_at_zero'),
+    xfail('linalg.svd', ''),
+    xfail('svd', ''),
+    xfail('svd_lowrank', ''),
+    xfail('stft', ''),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),

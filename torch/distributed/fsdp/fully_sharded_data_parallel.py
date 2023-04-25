@@ -1815,7 +1815,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim=optim,
             optim_state_dict=optim_state_dict,
             optim_input=None,
-            rank0_only=getattr(state_dict_settings, "rank0_only", False),
+            rank0_only=getattr(
+                state_dict_settings.optim_state_dict_config, "rank0_only", False
+            ),
             full_state_dict=state_dict_settings.state_dict_type
             == StateDictType.FULL_STATE_DICT,
             group=group,
@@ -1856,7 +1858,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             optim=optim,
             optim_state_dict=optim_state_dict,
             optim_input=None,
-            rank0_only=getattr(state_dict_settings, "rank0_only", False),
+            rank0_only=getattr(
+                state_dict_settings.optim_state_dict_config, "rank0_only", False
+            ),
             full_state_dict=state_dict_settings.state_dict_type
             == StateDictType.FULL_STATE_DICT,
             group=None,
@@ -1940,7 +1944,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             full_state_dict=(
                 state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT
             ),
-            rank0_only=getattr(state_dict_settings, "rank0_only", False),
+            rank0_only=getattr(
+                state_dict_settings.optim_state_dict_config, "rank0_only", False
+            ),
             is_named_optimizer=is_named_optimizer,
             group=group,
         )
