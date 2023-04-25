@@ -36,6 +36,7 @@ def capture(f, args):
         f,
         *copy.deepcopy(args),
         aten_graph=True,
+        tracing_mode='fake',
     )
 
     def graph_with_interpreter(*args):

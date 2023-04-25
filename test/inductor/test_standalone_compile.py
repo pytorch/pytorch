@@ -83,7 +83,7 @@ class TestStandaloneInductor(TestCase):
         mod = MyModule3().eval()
         inp = torch.randn(10)
         correct = mod(inp)
-        gm, guards = dynamo.export(mod, inp, aten_graph=True)
+        gm, guards = dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
         mod_opt = inductor.compile(gm, [inp])
         actual = mod_opt(inp)
         self.assertEqual(actual, correct)
