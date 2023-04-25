@@ -428,8 +428,8 @@ def forward(self, x_1):
 
         traced = make_fx(f, tracing_mode=self.tracing_mode)(torch.randn(3))
 
-        self.assertTrue(all([isinstance(node.target, torch._ops.OpOverload)
-                             for node in traced.graph.nodes if node.op == 'call_function']))
+        self.assertTrue(all(isinstance(node.target, torch._ops.OpOverload)
+                            for node in traced.graph.nodes if node.op == 'call_function'))
 
     def test_tensor_constants(self):
         def f():

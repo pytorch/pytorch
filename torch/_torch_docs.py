@@ -2869,7 +2869,7 @@ Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
 
 Args:
-    real (Tensor): The real part of the complex tensor. Must be float or double.
+    real (Tensor): The real part of the complex tensor. Must be half, float or double.
     imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
         as :attr:`real`.
 
