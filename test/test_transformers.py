@@ -625,6 +625,37 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(masked_output, is_causal_output)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @parametrize("nb_heads", [1, 8])
+    @parametrize("bias", [True, False])
+    def test_mha_native_args(self, nb_heads, bias):
+
+        B, L, F = 8, 100, 128
+        batch_first = True
+        fast_path = True
+        use_pad_mask = (bias % 2) == 1
+
+
+        mha = nn.MultiheadAttention(
+            embed_dim=F,
+            num_heads=nb_heads,
+            batch_first=batch_first,
+            bias=bias
+        ).cuda()
+        mha.eval()
+
+        ctx = torch.no_grad if fast_path else contextlib.nullcontext
+        with ctx():
+            x = torch.randn(B, L, F).cuda()
+            if not batch_first:
+                x = x.transpose(0, 1)
+
+            pad_mask = None
+            if use_pad_mask:
+                pad_mask = torch.zeros((B, L), dtype=torch.bool).cuda()
+
+            mha(query=x, key=x, value=x, key_padding_mask=pad_mask)
+
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -964,6 +995,7 @@ class TestTransformers(NNTestCase):
         ).eval()
 
         torch.jit.script(mha)
+
 
 
 class TestSDPA(NNTestCase):
