@@ -1150,9 +1150,18 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            use_helper = reduction_type in {"max", "min", "prod"}
+            use_helper = reduction_type in {"argmax", "argmin", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+
+        def final_argreduce(buffer, result_var, value, index):
+            buffer.splice(
+                f"""\
+                _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                {result_var} = {result_var}_tmp[{', '.join(sizes)}]
+                """
+            )
+
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
@@ -1163,7 +1172,15 @@ class TritonKernel(Kernel):
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
-            result_var = self.cse.generate(self.compute, final_reduction(masked_value))
+            if reduction_type in {"argmax", "argmin"}:
+                accumulator_index = self.cse.generate(
+                    self.compute, f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)"
+                )
+                result_var = self.cse.newvar()
+                root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
+                final_argreduce(self.compute, result_var, masked_value, accumulator_index)
+            else:
+                result_var = self.cse.generate(self.compute, final_reduction(masked_value))
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -1190,14 +1207,7 @@ class TritonKernel(Kernel):
                 """
                 )
                 idx_dtype = self.index_dtype
-                self.suffix.splice(
-                    f"""
-                _, {result_var}_tmp = triton_helpers.{root_op}_with_index(
-                    {accumulator}, {accumulator_index}, {dim}
-                )
-                {result_var} = {result_var}_tmp[{', '.join(sizes)}]
-                """
-                )
+                final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
                 updated = value
                 if reduction_type == "min":
