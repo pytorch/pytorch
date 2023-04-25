@@ -1188,8 +1188,13 @@ class TritonKernel(Kernel):
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
+            # NOTE: We should be using tl.full here, but this also does type
+            # promotion e.g. bool to int32, which is sometimes necessary if
+            # similar promotion happened elsewhere in the pre-reduction
+            # operation. We should identify any such cases and fix them.
+            default_value = f" + {default}" if default != 0 else ""
             self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_compute_type(src_dtype)})"
+                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
             )
 
             if reduction_type in {"argmax", "argmin"}:
