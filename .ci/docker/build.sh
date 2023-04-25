@@ -81,7 +81,7 @@ fi
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
-_UCX_COMMIT=ae505b93582b10ce15c29a546a86c168e2e36216
+_UCX_COMMIT=00bcc6bb18fc282eb160623b4c0d300147f579af
 _UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 
 # It's annoying to rename jobs every time you want to rewrite a
