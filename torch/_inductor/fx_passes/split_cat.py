@@ -18,10 +18,24 @@ log = logging.getLogger(__name__)
 # Normalize split with split_size into split_with_sizes, so that we only deal with one type of split in
 # subsequent optimizations
 class NormalizeSplit(PatternEntry):
+    def _get_split_args(self, split_node):
+        input_kwarg = "tensor"
+        split_size_kwarg = "split_size_or_sections"
+        dim_kwarg = "dim"
+        if split_node.op == "call_method":
+            split_size_kwarg = "split_size"
+        return (
+            get_arg_value(split_node, 0, input_kwarg),
+            get_arg_value(split_node, 1, split_size_kwarg),
+            get_arg_value(split_node, 2, dim_kwarg),
+        )
+
     def apply(self, match, graph, node):
         split_node = match.nodes[0]
-        split_dim = get_arg_value(split_node, 2, "dim")
-        split_size = get_arg_value(split_node, 1, "split_size_or_sections")
+        split_input, split_size, split_dim = self._get_split_args(split_node)
+        if split_input is None or split_dim is None or split_size is None:
+            log.warning("couldn't find split args")
+            return
         if isinstance(split_size, (list, tuple)):
             return
         if "example_value" not in split_node.meta:
@@ -33,7 +47,6 @@ class NormalizeSplit(PatternEntry):
         if any(isinstance(section, torch.SymInt) for section in split_sections):
             # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
             return
-        split_input = get_arg_value(split_node, 0, "tensor")
         with graph.inserting_after(split_node):
             new_split_node = graph.call_function(
                 torch.split, args=(split_input, split_sections, split_dim)
