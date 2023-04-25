@@ -936,8 +936,8 @@ def gen_pyi(
                 "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, UntypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, UntypedStorage]) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
