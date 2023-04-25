@@ -99,12 +99,17 @@ def _set_datapipe_valid_iterator_id(datapipe):
     return datapipe._valid_iterator_id
 
 
-def hook_iterator(namespace, profile_name):
+def hook_iterator(namespace):
     r"""
     Hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`. This is done for the purpose of
     profiling and checking if an iterator is still valid.
     """
-    def profiler_record_fn_context():
+    profile_name = None
+
+    def profiler_record_fn_context(datapipe):
+        nonlocal profile_name
+        if profile_name is None:
+            profile_name = _generate_iterdatapipe_msg(datapipe)
         return torch.autograd.profiler.record_function(profile_name)
 
     class IteratorDecorator:
@@ -138,7 +143,7 @@ def hook_iterator(namespace, profile_name):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
             if self._profiler_enabled:
-                with profiler_record_fn_context():
+                with profiler_record_fn_context(self.source_dp):
                     return self._get_next()
             else:  # Decided against using `contextlib.nullcontext` for performance reasons
                 return self._get_next()
@@ -167,7 +172,7 @@ def hook_iterator(namespace, profile_name):
             _profiler_enabled = torch.autograd._profiler_enabled()
             try:
                 if _profiler_enabled:
-                    with profiler_record_fn_context():
+                    with profiler_record_fn_context(datapipe):
                         response = gen.send(None)
                 else:
                     response = gen.send(None)
@@ -177,7 +182,7 @@ def hook_iterator(namespace, profile_name):
                     request = yield response
                     # Pass through here every time `__next__` is called
                     if _profiler_enabled:
-                        with profiler_record_fn_context():
+                        with profiler_record_fn_context(datapipe):
                             _check_iterator_valid(datapipe, iterator_id)
                             response = gen.send(request)
                     else:  # Decided against using `contextlib.nullcontext` for performance reasons
@@ -208,12 +213,12 @@ def hook_iterator(namespace, profile_name):
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
+                datapipe = args[0]
                 if torch.autograd._profiler_enabled():
-                    with profiler_record_fn_context():
+                    with profiler_record_fn_context(datapipe):
                         result = next_func(*args, **kwargs)
                 else:
                     result = next_func(*args, **kwargs)
-                datapipe = args[0]
                 datapipe._number_of_samples_yielded += 1
                 return result
 
