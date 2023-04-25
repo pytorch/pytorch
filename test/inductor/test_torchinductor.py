@@ -5034,7 +5034,7 @@ class CommonTemplate:
         self.common(fn, (t1,))
 
         # Non-persistent reduction
-        t1 = torch.randint(8, size=(1024, 1024))
+        t1 = torch.randint(8, size=(1028, 1028))
         self.common(fn, (t1,))
 
     def test_argmax_argmin_with_nan(self):
@@ -5062,7 +5062,7 @@ class CommonTemplate:
         self.common(fn, (t1,))
 
         # Non-persistent reduction
-        t1 = torch.randn((1024, 1024))
+        t1 = torch.randn((1028, 1028))
         t1[:, 40] = float("nan")
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
