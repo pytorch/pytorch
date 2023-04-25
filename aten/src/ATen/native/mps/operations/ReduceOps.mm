@@ -348,9 +348,9 @@ void impl_func_norm_mps(const Tensor& input_tensor,
           ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_)
           : newCachedGraph->inputTensor_;
 
-          if (opt_dtype.has_value() || castInputData) {
-            inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
-          }
+      if (opt_dtype.has_value() || castInputData) {
+        inputTensor = castMPSTensor(mpsGraph, inputTensor, mps_input_dtype);
+      }
 
       MPSGraphTensor* outputTensor;
 
@@ -358,7 +358,7 @@ void impl_func_norm_mps(const Tensor& input_tensor,
         MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
         MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
         MPSGraphTensor* nonZeros = [mpsGraph selectWithPredicateTensor:inputTensor
-                                                    truePredicateTensor:ones
+                                                   truePredicateTensor:ones
                                                   falsePredicateTensor:zeros
                                                                   name:nil];
         outputTensor = [mpsGraph reductionSumWithTensor:nonZeros axes:wrappedAxes name:nil];
@@ -376,22 +376,22 @@ void impl_func_norm_mps(const Tensor& input_tensor,
         MPSGraphTensor* reciprocalPowerValTensor = [mpsGraph constantWithScalar:reciprocal_p dataType:mps_input_dtype];
 
         MPSGraphTensor* powerTensor = [mpsGraph powerWithPrimaryTensor:absoluteTensor
-                                                        secondaryTensor:powerValTensor
+                                                       secondaryTensor:powerValTensor
                                                                   name:nil];
 
         MPSGraphTensor* reductionSumTensor = [mpsGraph reductionSumWithTensor:powerTensor axes:wrappedAxes name:nil];
 
         outputTensor = [mpsGraph powerWithPrimaryTensor:reductionSumTensor
                                         secondaryTensor:reciprocalPowerValTensor
-                                                    name:nil];
+                                                   name:nil];
       }
 
       if (cdist) {
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:mps::getMPSShape(output_t) name:nil];
       }
 
-              newCachedGraph->outputTensor_ =
-                  castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
+      newCachedGraph->outputTensor_ =
+          castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
     });
 
     auto otherPlaceholder = Placeholder();
