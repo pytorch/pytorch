@@ -41,7 +41,7 @@ fake_tensor_mode = FakeTensorMode()
 
 _optimized_func: Set[str] = set()
 # The key is the target pass and the value is the prerequisites of the pass.
-_prerequisite_sets: DefaultDict[Callable, Set[str]] = collections.defaultdict(set)
+_prerequisite_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
 # The key is the target pass and the value is the passes that must applied before
 # the key.
 _apply_before_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
@@ -67,26 +67,27 @@ def graph_optimization_pass(
     The contract of graph optimization pass. All the passes should be wrapped
     with this decorator.
 
-    `prerequisites` is used to annotate the prerequisite passes of the this
-    pass. `apply_after` means that this wrapped pass muste apply after `apply_after`.
-    The difference between `prerequisites` and `apply_after` is that all the
-    passes in `prerequisites` must be applied to the graph and must be applifed
-    before the wrapped pass. The passes `apply_after` are optional. But if a pass
-    in `apply_after` is applied to the graph, it must be applied before the wrapped
-    pass.
-    Optimizer pass developers are required to add this field accordingly and
+    `prerequisites` is used to annotate the prerequisite passes of the this pass.
+    `apply_after` means that this wrapped pass must be applied after the passes
+    in `apply_after`. The difference between `prerequisites` and `apply_after`
+    is that all the passes in `prerequisites` must be applied to the graph and
+    must be applifed before the wrapped pass while the passes `apply_after` are
+    optional. But if a pass in `apply_after` is applied to the graph, it has to
+    be done before the wrapped pass.
+    Optimizer pass developers are required to add these fields accordingly and
     users need to follow the restrictions to avoid the assert.
 
-    Current design has one limitation: users can only apply the optimizations once.
-    In some cases, we may need to run multiple the same optimization multiple time,
-    e.g., optimization passes -> profiling the result -> apply optimization passes
-    with the profiling result again. Will address this limitation in the future.
+    Current design has one limitation: users can only apply the optimizations
+    once.  In some cases, we may need to run multiple the same optimization
+    multiple time, e.g., optimization passes -> profiling the result -> apply
+    optimization passes with the profiling result again. This limitation will be
+    addressed limitation in the future.
 
     Args:
         prerequisites (Iterable[Callable]): the list of string to the names of
             passes which are the prerequisites of this pass.
-        apply_after (Iterable[Callable]): the list of string to the names of passes
-            that can not be applied after the wrapped pass.
+        apply_after (Iterable[Callable]): the list of string to the names of
+            passes that can not be applied after the wrapped pass.
     """
 
     def inner(func: Callable) -> Callable:
