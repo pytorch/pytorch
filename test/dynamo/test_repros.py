@@ -2643,7 +2643,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
-            self.assertEqual(example_inputs[0].size(), torch.Size([3, 4]))
+            self.assertEqual(example_inputs[0].size(), torch.Size([1, 3, 4]))
             return gm
 
         @torch.compile(backend=backend)
@@ -3091,6 +3091,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def fn(inp1, inp2, inp3, inp4, c):
             a = torch_bmm_nd(inp1, inp2, 4)
             a.unsqueeze_(2)
+            a = a * 2
 
             b = torch_bmm_nd(inp3, inp4, 4)
             b.unsqueeze_(2)
@@ -3108,7 +3109,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnt)(fn)
         opt_fn(inp1, inp2, inp3, inp4, c)
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":
