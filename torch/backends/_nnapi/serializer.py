@@ -1557,9 +1557,11 @@ class _NnapiSerializer:
         arg3_ctype, arg3_arg = self.get_constant_value(arg3_jit)
         if arg3_ctype.kind() == "BoolType":
             scale_ctype, scale_arg = self.get_constant_value(arg2_jit)
+            round_with_scale_factor = arg3_arg
         else:
             scale_h_ctype, scale_h_arg = self.get_constant_value(arg2_jit)
             scale_w_ctype, scale_w_arg = self.get_constant_value(arg3_jit)
+            round_with_scale_factor = None
 
             # The only way for the 4-argument overload of upsample_nearest2d to
             # have been added to the graph without error is if the scale_h and
@@ -1603,8 +1605,10 @@ class _NnapiSerializer:
             if len(scale_arg) == 1:
                 scale_arg = scale_arg * 2
             assert len(scale_arg) == 2
-            out_h = int(scale_arg[0] * image_oper.shape[2])
-            out_w = int(scale_arg[1] * image_oper.shape[3])
+            assert round_with_scale_factor is not None
+            d = 0.5 if round_with_scale_factor else 0.0
+            out_h = int(scale_arg[0] * image_oper.shape[2] + d)
+            out_w = int(scale_arg[1] * image_oper.shape[3] + d)
             arg_h = self.add_immediate_float_scalar(scale_arg[0])
             arg_w = self.add_immediate_float_scalar(scale_arg[1])
         else:

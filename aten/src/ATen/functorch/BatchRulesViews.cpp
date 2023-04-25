@@ -305,7 +305,7 @@ std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& se
   return std::make_tuple(at::reshape_symint(self_, new_shape), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, IntArrayRef shifts, IntArrayRef dims) {
+std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, SymIntArrayRef shifts, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
   auto self_ = moveBatchDimToFront(self, bdim);
@@ -314,7 +314,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     for (auto i: dims) {
       new_dims.push_back(getPhysicalDim(self, true, i));
     }
-    return std::make_tuple(at::roll(self_, shifts, new_dims), 0);
+    return std::make_tuple(at::roll_symint(self_, shifts, new_dims), 0);
   }
   // We will do something like: t.reshape(a, -1).roll(1, dims=[1, ]).reshape(old_shape)
   auto old_shape = self_.sizes();
@@ -324,7 +324,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     self_ = self_.unsqueeze(0);
   }
 
-  auto output = at::roll(self_.flatten(1), shifts, new_dims);
+  auto output = at::roll_symint(self_.flatten(1), shifts, new_dims);
   // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
   // with `old_shape` takes care of it.
   output = output.reshape(old_shape);
