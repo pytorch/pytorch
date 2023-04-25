@@ -11846,53 +11846,53 @@
   dispatch:
     CompositeImplicitAutograd: pad_symint
 
-- func: upsample_linear1d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+- func: upsample_linear1d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_linear1d.vec_out
 
-- func: upsample_bilinear2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+- func: upsample_bilinear2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_bilinear2d.vec_out
   tags: core
 
-- func: _upsample_bilinear2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+- func: _upsample_bilinear2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: _upsample_bilinear2d_aa.vec_out
 
-- func: upsample_trilinear3d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+- func: upsample_trilinear3d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_trilinear3d.vec_out
 
-- func: upsample_bicubic2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+- func: upsample_bicubic2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_bicubic2d.vec_out
 
-- func: _upsample_bicubic2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+- func: _upsample_bicubic2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: _upsample_bicubic2d_aa.vec_out
 
-- func: upsample_nearest1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+- func: upsample_nearest1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_nearest1d.vec_out
 
-- func: _upsample_nearest_exact1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+- func: _upsample_nearest_exact1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: _upsample_nearest_exact1d.vec_out
 
-- func: upsample_nearest2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+- func: upsample_nearest2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_nearest2d.vec_out
   tags: core
 
-- func: _upsample_nearest_exact2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+- func: _upsample_nearest_exact2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: _upsample_nearest_exact2d.vec_out
 
-- func: upsample_nearest3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+- func: upsample_nearest3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: upsample_nearest3d.vec_out
 
-- func: _upsample_nearest_exact3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+- func: _upsample_nearest_exact3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> Tensor
   python_module: nn
   autogen: _upsample_nearest_exact3d.vec_out
 
