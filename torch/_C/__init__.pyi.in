@@ -30,7 +30,7 @@ import torch
 from torch import inf, Tensor
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
-from torch.storage import TypedStorage
+from torch.storage import UntypedStorage, TypedStorage
 from torch.types import (
     _bool,
     _complex,
