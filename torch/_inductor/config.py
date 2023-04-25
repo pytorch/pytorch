@@ -231,6 +231,9 @@ class triton:
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
 
+    # assert that indirect indexing does not read / write out of bounds
+    assert_indirect_indexing = True
+
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
