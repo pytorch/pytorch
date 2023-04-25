@@ -1,7 +1,5 @@
-import logging
 import operator
 import typing
-from abc import abstractmethod
 from contextlib import nullcontext
 from typing import (
     Any,
@@ -35,7 +33,7 @@ __all__ = ["ExportPassBase"]
 
 
 Argument = Any
-Value = Any 
+Value = Any
 Fn = Callable[..., Any]
 
 
@@ -46,7 +44,7 @@ class ExportPassBaseError(RuntimeError):
 def make_inline_interpreter(
     parent: Type[torch.fx.Interpreter],
 ) -> Type[torch.fx.Interpreter]:
-    class InlineInterpreter(parent):
+    class InlineInterpreter(parent):  # type: ignore[valid-type, misc]
         def call_function(self, target, args, kwargs):
             if target == torch.ops.cond:
                 pred, true, false, params = args
@@ -65,18 +63,18 @@ class ExportTracer(PythonKeyTracer):
     """
     Tracer used to create nodes during the retracing part of the ExportPassBase
     """
-    def __init__(self, callback: "ExportPassBase[T]", codegen: CodeGen) -> None:
+    def __init__(self, callback: "ExportPassBase", codegen: CodeGen) -> None:
         super().__init__()
         self.callback = callback
         self.root = torch.nn.Module()
         self.graph = torch.fx.Graph()
         self.graph.set_codegen(codegen)
-        self.tensor_attrs: Dict[str, torch.Tensor] = {}
-        self.fake_tensor_mode = None
+        self.tensor_attrs: Dict[str, torch.Tensor] = {}  # type: ignore[assignment]
+        self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self.submodules: Dict[torch.nn.Module, str] = {}
 
     def trace(self) -> None:
-        raise ("ExportTracer doesn't support trace().")
+        raise ExportPassBaseError("ExportTracer doesn't support trace().")
 
     def create_arg(self, a: Argument) -> torch.fx.Node:
         if isinstance(a, torch.nn.Module):
@@ -113,11 +111,12 @@ class ExportTracer(PythonKeyTracer):
                     x = torch.dequantize(x)
 
                 try:
+                    assert self.fake_tensor_mode is not None
                     fake_tensor = self.fake_tensor_mode.from_tensor(x)
                 except UnsupportedFakeTensorException:
                     # TODO: This is just a workaround to get over the
                     # x.as_subclass error
-                    logging.error(
+                    print(
                         "Fakeifying a Tensor subclass is not supported \
                         right now. Instead a TensorMetadata is used."
                     )
@@ -138,6 +137,7 @@ class ExportTracer(PythonKeyTracer):
                     x = torch.dequantize(x)
 
                 try:
+                    assert self.fake_tensor_mode is not None
                     _ = self.fake_tensor_mode.from_tensor(x)
                     tensor_meta = None
                 except UnsupportedFakeTensorException:
@@ -155,7 +155,7 @@ class ExportInterpreter(fx.Interpreter):
     """
     Interpreter to callback on any ExportPassBase functions
     """
-    def __init__(self, callback: "ExportPassBase[T]", gm: fx.GraphModule) -> None:
+    def __init__(self, callback: "ExportPassBase", gm: fx.GraphModule) -> None:
         super().__init__(gm)
         self.callback = callback
         self.node: torch.fx.Node = next(iter(gm.graph.nodes))
@@ -202,7 +202,7 @@ class ExportInterpreter(fx.Interpreter):
             pred, true_fn, false_fn, inputs = args
             return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
         elif target == control_flow.map:
-            f, x, *args = args
+            f, x, *args = args  # type: ignore[assignment]
             return self.callback.call_map(f, x, args, meta)
         else:
             raise ExportPassBaseError(f"Unsupported target type: {target}")
@@ -237,21 +237,20 @@ class ExportPassBase(PassBase):
     transformations.
     """
 
-    @abstractmethod
     def get_valid_dialects(self) -> List[Type]:
         """
         Returns a list of valid dialects (operator namespace modules) that this
         pass can run under. Returning an empty list implies this pass can run in
         any dialect.
         """
-        ...
+        return []
 
     def __init__(self) -> None:
         self.interpreter = torch.fx.Interpreter(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = ExportTracer(self, CodeGen())
-        self.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
+        self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
 
@@ -268,13 +267,13 @@ class ExportPassBase(PassBase):
             ProxyValue, lambda x: x.data, (args, kwargs)
         )
         res_data = getattr(interpreter, kind)(target, args_data, kwargs_data)
-        
+
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
         res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy)
         res_proxy.node.meta.update(meta.data)
-        
+
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 
@@ -288,6 +287,7 @@ class ExportPassBase(PassBase):
             if "val" in node.meta:
                 return node.meta["val"]
             elif tensor_meta := node.meta.get("tensor_meta"):
+                assert self.fake_tensor_mode is not None
                 return FakeTensor(
                     self.fake_tensor_mode,
                     torch.empty(
@@ -315,7 +315,6 @@ class ExportPassBase(PassBase):
         pass
 
     def placeholder(self, name: str, arg: Argument, meta: NodeMetadata) -> ProxyValue:
-        # TODO(angelayi): See if this breaks anything....
         arg_proxy = self.tracer.create_proxy("placeholder", name, (), {})
         arg_proxy.node.meta = meta.data
         self.tracer.set_metadata(arg_proxy.node, arg)
@@ -424,6 +423,7 @@ class ExportPassBase(PassBase):
             )
 
         inputs = self.inputs(graph_module)
+
         fake_tensor_mode = None
         for i in inputs:
             if isinstance(i, FakeTensor):
@@ -433,14 +433,15 @@ class ExportPassBase(PassBase):
                 fake_tensor_mode = i.fake_mode
         if fake_tensor_mode is None:
             self.tracer.fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
-            fake_tensor_mode = nullcontext()
-            dispatcher_mode = nullcontext()
+            fake_tensor_mode = nullcontext()  # type: ignore[assignment]
+            dispatcher_mode = nullcontext()  # type: ignore[assignment]
         else:
             self.tracer.fake_tensor_mode = fake_tensor_mode
-            dispatcher_mode = enable_python_dispatcher()
-        with fake_tensor_mode, dispatcher_mode:
-            result = self.call_submodule(graph_module, inputs)
+            dispatcher_mode = enable_python_dispatcher()  # type: ignore[assignment]
+        self.fake_tensor_mode = self.tracer.fake_tensor_mode
 
+        with fake_tensor_mode, dispatcher_mode:  # type: ignore[assignment, union-attr]
+            result = self.call_submodule(graph_module, tuple(inputs))
 
         # TODO(angelayi): Update this with what we decide to do for metadata in
         # the exported graph module
@@ -449,4 +450,3 @@ class ExportPassBase(PassBase):
         # new_graph_module.out_spec = graph_module.out_spec
         # new_graph_module.args = graph_module.args
         return result
-

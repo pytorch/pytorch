@@ -35,8 +35,7 @@ class ProxyValue:
 
     # pyre-ignore
     def __iter__(self):
-        for data in self.data:
-            yield data
+        yield from self.data
 
     def __bool__(self) -> bool:
         return bool(self.data)

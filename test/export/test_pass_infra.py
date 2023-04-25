@@ -21,8 +21,7 @@ class TestPassInfra(TestCase):
             return torch.ops.aten.tensor_split.sections(y, 2)
 
         class NullPass(ExportPassBase):
-            def get_valid_dialects(self) -> List[Type]:
-                return []
+            pass
 
         gm, _ = torchdynamo.export(f, *(torch.ones(3, 2),), aten_graph=True)
         new_gm = NullPass()(gm)
@@ -40,7 +39,7 @@ class TestPassInfra(TestCase):
         for new_node, old_node in zip(new_nodes, old_nodes):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
-    
+
     def test_dialects(self) -> None:
         """
         Test if the dialects are maintained
@@ -54,7 +53,7 @@ class TestPassInfra(TestCase):
             x = torch.ops.aten.add.Tensor(self, other)
             y = torch.ops.aten.relu.default(x)
             return y
-        
+
         class BackendOp:
             def __init__(self, op):
                 self._op = op
@@ -79,9 +78,6 @@ class TestPassInfra(TestCase):
         ).run(gm.code)
 
         class AddReluFusionPass(ExportPassBase):
-            def get_valid_dialects(self) -> List[Type]:
-                return []
-
             def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
                 def pattern(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                     z = torch.ops.aten.add.Tensor(x, y)
@@ -96,7 +92,7 @@ class TestPassInfra(TestCase):
         class BackendNullPass(ExportPassBase):
             def get_valid_dialects(self) -> List[Type]:
                 return [torch.ops.DO_NOT_USE_TEST_ONLY]
-        
+
         class BackendViolatePass(ExportPassBase):
             """
             Violates the dialect by inserting torch.ops.aten ops rather than
@@ -120,13 +116,12 @@ class TestPassInfra(TestCase):
                         meta,
                     )
                 return super().call_operator(op, args, kwargs, meta)
-        
+
         AddReluFusionPass()(gm)
-        print(gm.code)
         FileCheck().check(
             "torch.ops.DO_NOT_USE_TEST_ONLY.add_relu.default"
         ).run(gm.code)
-        
+
         new_gm = BackendNullPass()(gm)
         self.assertIsNotNone(new_gm)
         new_gm = new_gm.graph_module

@@ -18,12 +18,11 @@ class TestPasses(TestCase):
             return model(inp)
 
         gm, _ = torchdynamo.export(f, x, aten_graph=True)
-        print(gm.graph)
-        
+
         new_gm = ReplaceBrokenOpsWithFunctionalOpsPass()(gm)
         self.assertIsNotNone(new_gm)
         new_gm = new_gm.graph_module
-        
+
         count_after = 0
         for node in new_gm.graph.nodes:
             if node.target == torch.ops.aten.view.default:
