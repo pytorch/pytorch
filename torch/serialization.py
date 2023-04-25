@@ -437,7 +437,8 @@ def save(
     f: FILE_LIKE,
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
-    _use_new_zipfile_serialization: bool = True
+    _use_new_zipfile_serialization: bool = True,
+    _disable_byteorder_record: bool = False
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -485,7 +486,7 @@ def save(
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
-            _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record)
             return
     else:
         with _open_file_like(f, 'wb') as opened_file:
@@ -636,7 +637,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
         storage._write_file(f, _should_read_directly(f), True, torch._utils._element_size(dtype))
 
 
-def _save(obj, zip_file, pickle_module, pickle_protocol):
+def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
 
@@ -700,6 +701,13 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
     pickler.dump(obj)
     data_value = data_buf.getvalue()
     zip_file.write_record('data.pkl', data_value, len(data_value))
+
+    # Write byte order marker
+    if not _disable_byteorder_record:
+        if sys.byteorder not in ['little', 'big']:
+            raise ValueError('Unknown endianness type: ' + sys.byteorder)
+
+        zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
     for key in sorted(serialized_storages.keys()):
@@ -1153,10 +1161,23 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
 
     loaded_storages = {}
 
+    # check if byteswapping is needed
+    byteordername = 'byteorder'
+    byteorderdata = None
+    if zip_file.has_record(byteordername):
+        byteorderdata = zip_file.get_record(byteordername)
+        if byteorderdata not in [b'little', b'big']:
+            raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
+
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
 
         storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
+        # swap here if byteswapping is needed
+        if byteorderdata is not None:
+            if byteorderdata.decode() != sys.byteorder:
+                storage.byteswap(dtype)
+
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
         typed_storage = torch.storage.TypedStorage(
