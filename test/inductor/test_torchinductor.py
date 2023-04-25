@@ -5025,9 +5025,15 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
+        # Unrolled reduction
+        t1 = torch.randint(2, size=(6, 6))
+        self.common(fn, (t1,))
+
+        # Persistent reduction
         t1 = torch.randint(8, size=(32, 32))
         self.common(fn, (t1,))
 
+        # Non-persistent reduction
         t1 = torch.randint(8, size=(1024, 1024))
         self.common(fn, (t1,))
 
@@ -5040,14 +5046,22 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
+        # Unrolled reduction
+        t1 = torch.randn((6, 6))
+        t1[:, 1] = float("nan")
+        t1[:, 3] = float("nan")
+        self.common(fn, (t1,))
+
         if self.device == "cpu":
             raise unittest.SkipTest("broken on CPU")
 
-        t1 = torch.randn((10, 10))
+        # Persistent reduction
+        t1 = torch.randn((32, 32))
         t1[:, 4] = float("nan")
         t1[:, 8] = float("nan")
         self.common(fn, (t1,))
 
+        # Non-persistent reduction
         t1 = torch.randn((1024, 1024))
         t1[:, 40] = float("nan")
         t1[:, 100] = float("nan")
