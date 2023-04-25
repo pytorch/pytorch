@@ -137,6 +137,7 @@
 #include <numeric>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -829,6 +830,17 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
+
+  if (source.size(dim) != index.size(0)) {
+    AT_ERROR("source tensor shape along dim does not match index tensor length.");
+  }
+
+  for (int i = 0; i < self.dim(); i++) {
+    if (i == dim) continue;
+    if (i >= source.dim() || source.size(i) != self.size(i)) {
+      AT_ERROR("source tensor shape does not match self tensor shape along non-indexed dimensions.");
+    }
+  }
 
   if (result.dim() > 1) {
     // Equivalent to:
