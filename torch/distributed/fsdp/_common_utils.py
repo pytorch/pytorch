@@ -6,6 +6,7 @@ import traceback
 import warnings
 from enum import auto, Enum
 from typing import (
+    Any,
     Callable,
     Dict,
     Generator,
@@ -14,6 +15,7 @@ from typing import (
     no_type_check,
     Optional,
     Set,
+    Tuple,
 )
 
 import torch
@@ -184,6 +186,25 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
+def _named_parameters_with_duplicates(
+    module: nn.Module, **kwargs: Any
+) -> List[Tuple[str, nn.Parameter]]:
+    """
+    This API is required as some modules overwrite `named_parameters()` but do not support
+    `remove_duplicate`.
+    """
+    assert (
+        "remove_duplicate" not in kwargs
+    ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+    kwargs["remove_duplicate"] = False
+    try:
+        ret = list(module.named_parameters(**kwargs))
+    except AssertionError as e:
+        kwargs.pop("remove_duplicate")
+        ret = list(module.named_parameters(**kwargs))
+    return ret
+
+
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
@@ -205,7 +226,9 @@ def _get_param_to_fqns(
     """
 
     def module_fn(module, prefix, tree_level, param_to_fqns):
-        for param_name, param in module.named_parameters(recurse=False):
+        for param_name, param in _named_parameters_with_duplicates(
+            module, recurse=False
+        ):
             local_fqns = (
                 param._fqns
                 if type(param) is flat_param_file.FlatParameter
@@ -247,7 +270,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
-        [key for key, _ in model.named_parameters()],
+        [key for key, _ in _named_parameters_with_duplicates(model)],
         param_to_unflat_param_names,
     )
 

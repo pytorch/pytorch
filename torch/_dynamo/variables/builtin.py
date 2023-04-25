@@ -491,7 +491,7 @@ class BuiltinVariable(VariableTracker):
                     fn,
                     *proxy_args_kwargs(args, kwargs),
                 )
-                if any([isinstance(arg, FakeItemVariable) for arg in args]):
+                if any(isinstance(arg, FakeItemVariable) for arg in args):
                     return wrap_fx_proxy_cls(
                         FakeItemVariable,
                         tx,
@@ -664,7 +664,7 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
-                if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
+                if any(isinstance(val, FakeItemVariable) for val in [a, b]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -724,8 +724,8 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def _dynamic_args(self, *args, **kwargs):
-        return any([isinstance(x, SymNodeVariable) for x in args]) or any(
-            [isinstance(x, SymNodeVariable) for x in kwargs.values()]
+        return any(isinstance(x, SymNodeVariable) for x in args) or any(
+            isinstance(x, SymNodeVariable) for x in kwargs.values()
         )
 
     def call_slice(self, tx, *args):
@@ -942,11 +942,9 @@ class BuiltinVariable(VariableTracker):
         if (
             isinstance(seq, (variables.ListVariable, variables.TupleVariable))
             and all(
-                [
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, (int, float))
-                    for x in seq.items
-                ]
+                isinstance(x, variables.ConstantVariable)
+                and isinstance(x.value, (int, float))
+                for x in seq.items
             )
             and not kwargs
         ):

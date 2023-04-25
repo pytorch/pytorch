@@ -253,10 +253,13 @@ class FakeTensorConverter:
         source=None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
+        memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
+        if memoized_only:
+            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -325,6 +328,7 @@ class FakeTensorConverter:
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
+        memoized_only=False,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -335,6 +339,7 @@ class FakeTensorConverter:
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
+            memoized_only=memoized_only,
         )
 
 
@@ -440,10 +445,18 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func not in [aten.index.Tensor, aten.nonzero.default]
+    and func
+    not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+
+@register_op_impl(lambda func: func is aten.repeat_interleave.Tensor)
+def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
+    if output_size is None:
+        raise DynamicOutputShapeException(func)
+    return repeats.new_empty(output_size)
 
 
 @register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
@@ -1127,7 +1140,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
-            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
+            any(i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors)
             or len(flat_symints) > 0
         )
 
@@ -1318,7 +1331,7 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+        return any(check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)))
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
@@ -1455,6 +1468,9 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
+        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
+        # seen before.
+        memoized_only=False,
     ):
         shape_env = self.shape_env
         if static_shapes:
@@ -1470,6 +1486,7 @@ class FakeTensorMode(TorchDispatchMode):
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
+            memoized_only=memoized_only,
         )
 
 
