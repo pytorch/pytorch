@@ -316,6 +316,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(huber_loss, huber_loss_batch_rule);
   // huber_loss_backward uses a decomposition for its batch rule
   VMAP_SUPPORT(smooth_l1_loss, smooth_l1_loss_batch_rule);
+  // smooth_l1_loss_backward uses a decomposition for its batch rule
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
