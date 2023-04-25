@@ -476,6 +476,8 @@ def fractional_max_pool2d_with_indices(
         raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
+        if len(output_ratio) > 2:
+            raise ValueError("fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints.")
         _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
@@ -2137,6 +2139,16 @@ def embedding(
     and the output is the corresponding word embeddings.
 
     See :class:`torch.nn.Embedding` for more details.
+
+    .. note::
+        Note that the analytical gradients of this function with respect to
+        entries in :attr:`weight` at the row specified by :attr:`padding_idx`
+        are expected to differ from the numerical ones.
+
+    .. note::
+        Note that `:class:`torch.nn.Embedding` differs from this function in
+        that it initializes the row of :attr:`weight` specified by
+        :attr:`padding_idx` to all zeros on construction.
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
@@ -3853,7 +3865,7 @@ def interpolate(  # noqa: F811
             ``round(input_size * scale_factor)`` (correct way) instead of ``int(input_size * scale_factor)``
             (old incorrect way).
             See the note below for further details. If `round_with_scale_factor` is ``None``,
-            a warning is raised and computation is done as ``round_with_scale_factor=True``.
+            a warning is raised and computation is done as ``round_with_scale_factor=False``.
             If ``False``, old incorrect way to compute the output size is used for backward compatibility.
             By default, ``None``.
 
@@ -3871,11 +3883,11 @@ def interpolate(  # noqa: F811
 
     .. note::
         ``round_with_scale_factor`` argument fixes the output size issue when ``scale_factor`` is
-        provided. Historically, the output size is computed as ``output_size = int(input_size * scale_factor)`
-        which does not match with OpenCV, Scikit-Image, Scipy. Correct way to compute the output size is to
-        ``output_size = round(input_size * scale_factor)``. The difference of +1 in the output size is
+        provided. Historically, the output size is computed as ``output_size = int(input_size * scale_factor)``
+        which does not match with OpenCV, Scikit-Image, Scipy implementations. Correct way to compute the
+        output size is ``output_size = round(input_size * scale_factor)``. The difference of +1 in the output size is
         visible for floating ``scale_factor`` values.
-        Related issue: https://github.com/pytorch/pytorch/issues/62396
+        More details please see `related issue <https://github.com/pytorch/pytorch/issues/62396>`_.
 
     Note:
         {backward_reproducibility_note}
@@ -3944,15 +3956,37 @@ def interpolate(  # noqa: F811
             scale_factors = [scale_factor for _ in range(dim)]
 
         if round_with_scale_factor is None:
-            correct_output_size = [
-                int(0.5 + input.size(i + 2) * scale_factors[i]) for i in range(dim)
-            ]
-            incorrect_output_size = [
-                int(input.size(i + 2) * scale_factors[i]) for i in range(dim)
-            ]
-            if correct_output_size != incorrect_output_size:
-                # TODO: Write a deprecation message
-                warnings.warn("...")
+            if not torch.jit.is_scripting() and torch._C._get_tracing_state():
+                correct_output_size = [
+                    (torch.floor(0.5 + (input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
+                    for i in range(dim)
+                ]
+                incorrect_output_size = [
+                    (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
+                    for i in range(dim)
+                ]
+            elif torch.jit.is_scripting():
+                correct_output_size = [
+                    int(math.floor(0.5 + float(input.size(i + 2)) * scale_factors[i]))
+                    for i in range(dim)
+                ]
+                incorrect_output_size = [
+                    int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                    for i in range(dim)
+                ]
+            else:
+                correct_output_size = [
+                    _sym_int(0.5 + input.size(i + 2) * scale_factors[i]) for i in range(dim)
+                ]
+                incorrect_output_size = [
+                    _sym_int(input.size(i + 2) * scale_factors[i]) for i in range(dim)
+                ]
+            if isinstance(correct_output_size[0], (int, torch.Tensor)) and correct_output_size != incorrect_output_size:
+                warnings.warn(
+                    "Default behavior for round_with_scale_factor=None will change for the cases when "
+                    "round(input_size * scale_factor) differs from int(input_size * scale_factor). "
+                    "Use round_with_scale_factor=False if the old behavior is desired."
+                )
     else:
         raise ValueError("either size or scale_factor should be defined")
 
@@ -3994,7 +4028,7 @@ def interpolate(  # noqa: F811
         raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
 
     if round_with_scale_factor is None:
-        round_with_scale_factor = True
+        round_with_scale_factor = False
 
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors, round_with_scale_factor)
@@ -4720,7 +4754,7 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (int): the dimension to reduce. Default: 1
+        dim (int or tuple of ints): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.

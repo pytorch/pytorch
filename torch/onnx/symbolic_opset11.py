@@ -179,7 +179,6 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 @_onnx_symbolic("aten::relu6")
 @_beartype.beartype
 def relu6(g: jit_utils.GraphContext, input):
-    relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     scalar_type = _type_utils.JitScalarType.from_value(
         input, _type_utils.JitScalarType.FLOAT
     )
@@ -191,7 +190,7 @@ def relu6(g: jit_utils.GraphContext, input):
         "Constant",
         value_t=torch.tensor(6, dtype=scalar_type.dtype()),
     )
-    return clamp(g, relu_, min_val, max_val)
+    return clamp(g, input, min_val, max_val)
 
 
 @_onnx_symbolic("aten::select")
@@ -387,6 +386,7 @@ def __interpolate(
     align_corners,
     recompute_scale_factor,
     antialias,
+    round_with_scale_factor,
 ):
     return symbolic_helper.__interpolate_helper(
         g, input, size, scale_factor, mode, align_corners, recompute_scale_factor

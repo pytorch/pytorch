@@ -315,6 +315,7 @@ def __interpolate(
     align_corners,
     recompute_scale_factor,
     antialias,
+    round_with_scale_factor,
 ):
     scales, mode = symbolic_helper._interpolate_get_scales_and_mode(
         g, input, size, scale_factor, mode, align_corners

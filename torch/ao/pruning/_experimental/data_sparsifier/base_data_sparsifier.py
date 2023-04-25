@@ -1,7 +1,7 @@
 import abc
 import torch
 from typing import Optional, Tuple, List, Any, Dict
-from ...sparsifier.base_pruner import BasePruner
+from ...sparsifier import base_sparsifier
 from collections import defaultdict
 from torch import nn
 import copy
@@ -32,7 +32,7 @@ class _Container(nn.Module):
     pass
 
 
-class BaseDataSparsifier(BasePruner):
+class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
     r"""
     Base Data Sparsifier class for all Data sparsifiers.
     The abstract class accepts raw torch tensors / embedding / embedding bags (refer to SUPPORTED_TYPES above)
