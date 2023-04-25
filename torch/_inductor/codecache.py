@@ -477,10 +477,8 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
-def optimization_flags(cuda=False):
+def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
-    if cuda:
-        return base_flags
 
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
@@ -513,13 +511,12 @@ def get_include_and_linking_paths(
             sysconfig.get_config_var("LIBDIR")
         ]
         libs = ["c10", "torch", "torch_cpu", "torch_python"]
+        libs += ["gomp"]
+        macros = vec_isa.build_macro()
+        if macros:
+            macros = f"-D{macros}"
         if cuda:
             libs += ["c10_cuda", "cuda", "torch_cuda"]
-        else:
-            libs += ["gomp"]
-            macros = vec_isa.build_macro()
-            if macros:
-                macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -570,7 +567,7 @@ def cpp_compile_command(
             {cpp_compiler()} {input} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            {optimization_flags(cuda)}
+            {optimization_flags()}
             {use_custom_generated_macros()}
             -o {output}
         """,

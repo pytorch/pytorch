@@ -3009,10 +3009,12 @@ class DeviceCopy(ExternKernelOut):
         assert len(args) == 1
         if self.output_view:
             wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]})"
+                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
             )
         else:
-            wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
+            wrapper.writeline(
+                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
+            )
 
 
 class DynamicScalar(IRNode):

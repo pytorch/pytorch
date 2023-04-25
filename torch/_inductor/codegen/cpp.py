@@ -2444,9 +2444,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str)
+        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args)
+        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
 
 
 class CppWrapperKernelGroup(KernelGroup):

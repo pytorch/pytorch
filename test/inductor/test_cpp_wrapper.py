@@ -122,6 +122,7 @@ if RUN_CUDA:
         BaseTest("test_linear2"),
         # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
+        BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
