@@ -14,14 +14,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-def is_expr_static_and_true(expr: Union[Expr, int]) -> bool:
-    return is_expr_static(expr) and expr
-
-
-def is_expr_static(expr: Union[Expr, int]) -> bool:
-    return isinstance(expr, (int, sympy.Integer, sympy.logic.boolalg.Boolean))
-
-
 class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
@@ -252,16 +244,23 @@ class SizeVarAllocator:
     #       return False # No guard, no optim
 
     # See Note - [On Statically Known]
+
+    def is_expr_static_and_true(self, expr: Union[Expr, int]) -> bool:
+        if expr in (True, False):
+            return expr
+        
+        simplified = self.shape_env._maybe_evaluate_static(expr)
+        if simplified is not None:
+            return bool(simplified)
+        return False
+    
     def statically_known_equals(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
         if left == right:
             return True
-        expr = sympy.Eq(left, right)
-        simplified = self.shape_env._maybe_evaluate_static(expr)
-
-        return is_expr_static_and_true(simplified)
+        return self.is_expr_static_and_true(sympy.Eq(left, right))
 
     # See Note - [On Statically Known]
     def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
@@ -280,9 +279,7 @@ class SizeVarAllocator:
         Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
         """
         expr = left <= right
-        simplified = self.shape_env._maybe_evaluate_static(expr)
-
-        return is_expr_static_and_true(simplified)
+        return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
     def statically_known_lt(self, left: Expr, right: Expr) -> bool:
@@ -290,9 +287,7 @@ class SizeVarAllocator:
         Returns a bool indicating if it is sound to optimize as if left is less than right.
         """
         expr = left < right
-        simplified = self.shape_env._maybe_evaluate_static(expr)
-
-        return is_expr_static_and_true(simplified)
+        return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
     def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
@@ -303,9 +298,7 @@ class SizeVarAllocator:
             # can prove it symbolically
             return True
         expr = sympy.Eq(numerator % denominator, 0)
-        simplified = self.shape_env._maybe_evaluate_static(expr)
-
-        return is_expr_static_and_true(simplified)
+        return self.is_expr_static_and_true(expr)
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
