@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import os
 import warnings
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
@@ -22,7 +23,6 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
-from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
@@ -1103,7 +1103,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and IS_CI:
+    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
