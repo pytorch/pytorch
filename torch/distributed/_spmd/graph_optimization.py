@@ -110,7 +110,7 @@ def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
                 else:
                     dump_graphs_to_files({prefix: gm}, _dump_graph_folder)
 
-            logger.info(f"Spent %f seconds applying %s", time.time() - begin, func_key)
+            logger.info("Spent %f seconds applying %s", time.time() - begin, func_key)
 
         return pass_wrapper
 
