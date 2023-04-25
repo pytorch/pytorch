@@ -1,9 +1,9 @@
 #include <ATen/native/verbose_wrapper.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/verbose.h>
 
 namespace torch {
 
-// NOLINTNEXTLINE(clang-diagnostic-missing-prototypes)
 void initVerboseBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
