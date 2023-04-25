@@ -420,6 +420,7 @@
   - gchanan
   - ezyang
   - dzhulgakov
+  - malfet
   mandatory_checks_name:
   - EasyCLA
   - Lint
