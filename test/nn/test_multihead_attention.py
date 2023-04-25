@@ -593,8 +593,8 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         if device not in ['cpu', 'cuda']:
             self.skipTest("Fastpath only runs on CPU and CUDA.")
         with torch.autocast(device_type=device, enabled=False):
-            embed_dim = 14
-            num_heads = 7
+            embed_dim = 16
+            num_heads = 8
             batch_size = 8
             src_len = 5
 
