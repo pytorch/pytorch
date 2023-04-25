@@ -114,13 +114,13 @@ struct TORCH_API DispatchStubImpl {
     void* cuda_dispatch_ptr;
     void* hip_dispatch_ptr;
     void* mps_dispatch_ptr;
-    void* private_use1_dispatch_ptr;
+    void* privateuse1_dispatch_ptr;
   #else
     std::atomic<void*> cpu_dispatch_ptr{nullptr};
     void* cuda_dispatch_ptr = nullptr;
     void* hip_dispatch_ptr = nullptr;
     void* mps_dispatch_ptr = nullptr;
-    void* private_use1_dispatch_ptr = nullptr;
+    void* privateuse1_dispatch_ptr = nullptr;
   #endif
 };
 
@@ -172,8 +172,8 @@ public:
     impl.mps_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
-  void set_private_use1_dispatch_ptr(FnPtr fn_ptr) {
-    impl.private_use1_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
+  void set_privateuse1_dispatch_ptr(FnPtr fn_ptr) {
+    impl.privateuse1_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
   static TORCH_API FnPtr DEFAULT;
@@ -213,6 +213,13 @@ struct RegisterHIPDispatch {
   RegisterHIPDispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
     // TODO: make this point at hip_dispatch_ptr
     stub.set_cuda_dispatch_ptr(value);
+  }
+};
+
+template <typename DispatchStub>
+struct RegisterPRIVATEUSE1Dispatch {
+  RegisterPRIVATEUSE1Dispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
+    stub.set_privateuse1_dispatch_ptr(value);
   }
 };
 
@@ -279,6 +286,9 @@ struct RegisterHIPDispatch {
 
 #define REGISTER_MPS_DISPATCH(name, fn) \
   static RegisterMPSDispatch<struct name> name ## __register(name, fn);
+
+#define REGISTER_PRIVATEUSE1_DISPATCH(name, fn) \
+  static RegisterPRIVATEUSE1Dispatch<struct name> name ## __register(name, fn);
 
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!

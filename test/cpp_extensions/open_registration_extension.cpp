@@ -9,6 +9,9 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 
@@ -24,11 +27,111 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::
 
 }} // namespace at::detail
 
+struct CustomBackendMetadata : public c10::BackendMeta {
+  // for testing this field will mutate when clone() is called by shallow_copy_from.
+  int backend_version_format_{-1};
+  int format_number_{-1};
+  mutable bool cloned_{false};
+  // define the constructor
+  CustomBackendMetadata(int backend_version_format, int format_number): backend_version_format_(backend_version_format), format_number_(format_number) {}
+  c10::intrusive_ptr<c10::BackendMeta> clone(const c10::intrusive_ptr<c10::BackendMeta>& ptr) const override {
+    cloned_ = true;
+    return c10::BackendMeta::clone(ptr);
+  }
+};
+
+// we need to register two functions for serialization
+void for_serialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
+  if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr() == nullptr) {
+    return;
+  }
+  CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
+  if (tmeta->backend_version_format_ == 1) {
+    m["backend_version_format"] = true;
+  }
+  if (tmeta->format_number_ == 29) {
+    m["format_number"] = true;
+  }
+}
+
+void for_deserialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
+  int backend_version_format{-1};
+  int format_number{-1};
+  if (m.find("backend_version_format") != m.end()) {
+    backend_version_format = 1;
+  }
+  if (m.find("format_number") != m.end()) {
+    format_number = 29;
+  }
+  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata(backend_version_format, format_number))};
+  t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
+}
+
+void custom_serialization_registry(){
+torch::jit::TensorBackendMetaRegistry(c10::DeviceType::PrivateUse1, &for_serialization, &for_deserialization);
+}
+
+//check if BackendMeta serialization correctly
+bool check_backend_meta(const at::Tensor& t) {
+  if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
+    CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
+    if (tmeta->backend_version_format_==1 && tmeta->format_number_==29) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// a fake set function is exposed to the Python side
+void custom_set_backend_meta(const at::Tensor& t) {
+  int backend_version_format{1};
+  int format_number{29};
+  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata(backend_version_format, format_number))};
+  t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
+}
+
+namespace {
+
+template <typename T>
+static T abs_impl(T v) {
+  return std::abs(v);
+}
+
+template <>
+C10_UNUSED uint8_t abs_impl(uint8_t v) {
+  return v;
+}
+
+void abs_kernel(TensorIteratorBase& iter) {
+  auto dtype = iter.dtype();
+  if (dtype == kComplexHalf) {
+    using scalar_t = c10::complex<Half>;
+    using opmath_t = at::opmath_type<scalar_t>;
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return abs_impl(a); },
+          [=](Vectorized<scalar_t> a) { return a.abs(); });
+    });
+  }
+}
+
+REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
+
+} // namespace
+
 // basic dummy add function
 at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
   add_counter += 1;
   // Since this custom device is just for testing, not bothering to implement kernels.
   return at::empty(self.sizes(), self.options());
+}
+
+// basic abs function
+at::Tensor & abs_out(at::Tensor & out, const at::Tensor & self) {
+  return at::native::abs_out(self, out);
 }
 
 // A dummy allocator for our custom device, that secretly uses the CPU
@@ -153,6 +256,7 @@ const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
 // This macro registers your kernels to the PyTorch Dispatcher.
 // More details on the dispatcher can be found at http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/.
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("abs.out", &abs_out);
   m.impl("add.Tensor", &custom_add_Tensor);
   m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
