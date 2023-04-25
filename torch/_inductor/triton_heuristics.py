@@ -53,6 +53,14 @@ class HeuristicType(Enum):
     TEMPLATE = auto()
 
 
+def disable_pointwise_autotuning():
+    # Autotuning can give different benchmarking results from run to run, and
+    # therefore we disable autotuning when use_deterministic flag is on.
+    if torch.are_deterministic_algorithms_enabled():
+        return True
+    return not config.triton.autotune_pointwise
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -686,9 +694,9 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             filename=filename,
         )
     if len(size_hints) == 2:
-        if (
-            not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
-        ) and not (config.max_autotune or config.max_autotune_pointwise):
+        if (disable_pointwise_autotuning() or tile_hint == TileHint.SQUARE) and not (
+            config.max_autotune or config.max_autotune_pointwise
+        ):
             return cached_autotune(
                 [triton_config(size_hints, 32, 32)],
                 meta=meta,
@@ -709,7 +717,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             heuristic_type=HeuristicType.POINTWISE,
         )
     if len(size_hints) == 3:
-        if not config.triton.autotune_pointwise:
+        if disable_pointwise_autotuning():
             return cached_autotune(
                 [triton_config(size_hints, 16, 16, 16)],
                 meta=meta,
@@ -768,7 +776,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
-        if not config.triton.autotune_pointwise:
+        if disable_pointwise_autotuning():
             return cached_autotune(
                 [triton_config_reduction(size_hints, 32, 128)],
                 meta=meta,
@@ -810,10 +818,12 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
-
     for c in configs:
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
+
+    if disable_pointwise_autotuning():
+        configs = configs[:1]
 
     return cached_autotune(
         configs,
