@@ -736,6 +736,15 @@ Tensor mean_backward(
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
 }
 
+std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list) {
+  auto result = std::vector<c10::SymInt>();
+  result.reserve(list.size());
+  for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
+    result.push_back(*iter);
+  }
+  return result;
+}
+
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
   auto result = std::vector<int64_t>();
   result.reserve(list.size());
@@ -1970,6 +1979,15 @@ Tensor max_pool_double_backward(
   else {
     return at::empty_like(indices, grad.options());
   }
+}
+
+Tensor error_for_max_pool2d_double_backward() { // This is mps-only.
+  TORCH_CHECK(
+      false,
+      "max_pool2d with `return_indices=False` is not infinitely differentiable.",
+      " If you want to calculate higher order derivatives, e.g. second order,",
+      " set `return_indices=True`.");
+  return Tensor();
 }
 
 Tensor glu_double_backward(
@@ -4303,9 +4321,9 @@ Tensor fft_c2r_backward(
   //               = 1, 2, ..., N - onesided_length
   auto gI = at::_fft_r2c(grad, dim, normalization, /*onesided=*/true);
 
-  auto double_length = grad.size(dim.back()) - gI.size(dim.back());
+  auto double_length = grad.sym_size(dim.back()) - gI.sym_size(dim.back());
   if (double_length > 0) { // also covers case when signal size is zero
-    gI.narrow(dim.back(), 1, double_length).mul_(2);
+    gI.narrow_symint(dim.back(), 1, double_length).mul_(2);
   }
   return gI;
 }

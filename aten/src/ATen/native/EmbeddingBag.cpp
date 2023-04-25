@@ -179,16 +179,17 @@ void fbgemm_spmdm_report_error_(
           0 <= idx && idx < N,
           "Index ",
           i,
-          " is out of bounds: ",
+          " of input takes value ",
           idx,
-          ", range 0 to ",
-          N);
+          " which is not in the valid range [0, ",
+          N,
+          ")");
     }
   }
   TORCH_CHECK(
       offsets[output_size] == index_size,
-      "Yout input seems to be incorrect: the last offset value should be "
-      "the size of the indices tensor, but it appears not.");
+      "Your input appears to be incorrect: the last offset value should be "
+       "the size of the indices tensor, but it seems not to be the case.");
 }
 } // namespace
 
@@ -226,7 +227,7 @@ index_select_add(
       if (offsets.numel() > 0) {
         std::memcpy(
             offsets_include_last.data(),
-            offsets.data_ptr<index_t>(),
+            offsets.const_data_ptr<index_t>(),
             sizeof(index_t) * offsets.numel());
       }
       offsets_include_last[offsets.numel()] = select_indices.numel();
@@ -405,7 +406,7 @@ index_select_add(const Tensor &select_indices,
       if (offsets.numel() > 0) {
         std::memcpy(
             offsets_include_last.data(),
-            offsets.data_ptr<index_t>(),
+            offsets.const_data_ptr<index_t>(),
             sizeof(index_t) * offsets.numel());
       }
       offsets_include_last[offsets.numel()] = select_indices.numel();
@@ -596,7 +597,7 @@ index_select_scale_add(
       offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
           offsets_include_last.data(),
-          offsets.data_ptr<index_t>(),
+          offsets.const_data_ptr<index_t>(),
           sizeof(index_t) * offsets.numel());
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
@@ -786,7 +787,7 @@ index_select_scale_add(const Tensor &select_indices,
       offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
           offsets_include_last.data(),
-          offsets.data_ptr<index_t>(),
+          offsets.const_data_ptr<index_t>(),
           sizeof(index_t) * offsets.numel());
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
@@ -902,8 +903,8 @@ void check_arguments(
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
     if (offsets.size(0) > 0) {
-      index_t offset_0 = offsets.data_ptr<index_t>()[0];
-      index_t offset_n = offsets.data_ptr<index_t>()[offsets.size(0)-1];
+      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
+      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.size(0)-1];
       TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
                                 "in the mini-batch has to start from position 0. "
                                 "However, got ", offsets[0]);

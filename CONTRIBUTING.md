@@ -1060,7 +1060,7 @@ Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/
 linter and static analysis tool based on the clang compiler. We run clang-tidy
 in our CI to make sure that new C++ code is safe, sane and efficient. See the
 [`clang-tidy` job in our GitHub Workflow's
-lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
+lint.yml file](https://github.com/pytorch/pytorch/blob/main/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
@@ -1100,7 +1100,7 @@ If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  flake8 $(git diff --name-only $(git merge-base --fork-point main))
   ```
 
 You'll need to install an appropriately configured flake8; see
@@ -1241,11 +1241,11 @@ our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-f
 
 ### Which commit is used in CI?
 
-For CI run on `master`, this repository is checked out for a given `master`
+For CI run on `main`, this repository is checked out for a given `main`
 commit, and CI is run on that commit (there isn't really any other choice).
 
 For PRs, however, it's a bit more complicated. Consider this commit graph, where
-`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+`main` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
 commit `B`:
 
 ```
@@ -1253,7 +1253,7 @@ commit `B`:
       /         \
      /           C (refs/pull/42/merge)
     /           /
----o---o---o---A (merge-destination) - usually master
+---o---o---o---A (merge-destination) - usually main
 ```
 
 There are two possible choices for which commit to use:
@@ -1261,7 +1261,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `master`).
+   were merged into it's destination (usually `main`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
@@ -1269,7 +1269,7 @@ commit `B` (choice **1**).
 However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
 a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
-PR and the `master` branch. But only the workflow files get taken from that merged
+PR and the `main` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
 
