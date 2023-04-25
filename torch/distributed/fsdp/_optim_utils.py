@@ -28,6 +28,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
     _module_handles,
+    _named_parameters_with_duplicates,
     clean_tensor_name,
 )
 from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
@@ -977,7 +978,9 @@ def _get_param_id_to_param_from_optim_input(
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
     def module_fn(module, prefix, tree_level, flat_param_to_fqn):
-        for param_name, param in module.named_parameters(recurse=False):
+        for param_name, param in _named_parameters_with_duplicates(
+            module, recurse=False
+        ):
             if type(param) is not FlatParameter:
                 continue
             fqn = clean_tensor_name(prefix + param_name)
@@ -991,7 +994,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         model,
         module_fn,
         return_fn,
-        [fqn for fqn, _ in model.named_parameters()],
+        [fqn for fqn, _ in _named_parameters_with_duplicates(model)],
         flat_param_to_fqn_ret,
     )
 
@@ -1015,7 +1018,7 @@ def _get_param_key_to_param(
             param_to_fqns is not None and flat_param_to_fqn is not None
         ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
         assert model is not None
-        for key, _ in model.named_parameters():
+        for key, _ in _named_parameters_with_duplicates(model):
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
     param_key_to_param: Dict[Union[str, int], nn.Parameter] = {}
@@ -1444,7 +1447,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         model,
         module_fn,
         return_fn,
-        [fqn for fqn, _ in model.named_parameters()],
+        [fqn for fqn, _ in _named_parameters_with_duplicates(model)],
         fqn_to_param_info,
     )
 

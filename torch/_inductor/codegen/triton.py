@@ -74,10 +74,13 @@ def config_of(args):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
-            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            if isinstance(x.expr, (int, sympy.Integer)):
+                return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            else:
+                return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+    if config.triton.divisible_by_16:
         divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     else:
         divisible_by_16 = []
@@ -696,12 +699,15 @@ class TritonKernel(Kernel):
         """
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
-        if dynamo_config.dynamic_shapes:
-            return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
-        hint = V.graph.sizevars.size_hint(self.numels[-1])
+        last_numel = self.numels[-1]
+        if dynamo_config.dynamic_shapes:
+            if not isinstance(last_numel, (int, sympy.Integer)):
+                # Not static
+                return False
+        hint = V.graph.sizevars.size_hint(last_numel)
         if hint > threshold:
             return False
         # will need to recompile if we cross a larger power of 2 boundary
@@ -1121,7 +1127,11 @@ class TritonKernel(Kernel):
             load_buffer = self.loads
 
         # Assert that the loaded indices will not read garbage
-        if indirect_indexing and config.triton.assert_indirect_indexing:
+        if (
+            indirect_indexing
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        ):
             self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
 
         result_var = self.cse.generate(load_buffer, line)
@@ -1142,7 +1152,11 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
 
-        if indirect_indexing and config.triton.assert_indirect_indexing:
+        if (
+            indirect_indexing
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
         if mode is None:
