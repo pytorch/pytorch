@@ -1103,6 +1103,33 @@ class TestFSDPStateDict(FSDPTest):
                 else:
                     self.assertEqual(v, state_dict[k])
 
+    @skip_if_lt_x_gpu(2)
+    def test_shared_module_and_shared_parameter(self):
+        class TestDummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch.manual_seed(0)
+                self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
+                self.net2 = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
+                self.net3 = self.net2
+                self.random_parameter = nn.Parameter(torch.Tensor(10))
+                self.shared_parameter = self.random_parameter
+
+            def forward(self, x):
+                return self.net3(self.net2(self.net1(x)))
+
+            def get_input(self):
+                return torch.rand(8, 8, device="cuda")
+
+        model = FSDP(TestDummyModel().cuda())
+        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
+            state_dict = model.state_dict()
+            self.assertEqual(
+                state_dict["random_parameter"], state_dict["shared_parameter"]
+            )
+            self.assertEqual(state_dict["net2.0.bias"], state_dict["net3.0.bias"])
+            self.assertEqual(state_dict["net2.0.weight"], state_dict["net3.0.weight"])
+
 
 instantiate_parametrized_tests(TestFSDPStateDict)
 
