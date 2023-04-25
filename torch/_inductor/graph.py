@@ -144,6 +144,16 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode=False,
     ):
         super().__init__(gm)
+
+        # it's hard to optimize layout for models with both normal conv
+        # and group conv. Normal conv prefers channels last while grouped
+        # conv prefers contiguous. For such model like timm_regnet we can
+        # make inference faster but training will slow down so far.
+        # Simply disable layout optimization for such model for now.
+        if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 for n in gm.graph.nodes):
+            config.layout_opt = False
+
+
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
@@ -199,7 +209,10 @@ class GraphLowering(torch.fx.Interpreter):
         """
         output_set = set()
         for n in reversed(self.module.graph.nodes):
-            if n.target == torch.ops.aten.convolution.default:
+            # convolution schema: 
+            # - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, SymInt[] padding, int[] dilation, bool transposed, SymInt[] output_padding, int groups) -> Tensor
+            # skip grouped convolution.
+            if n.target == torch.ops.aten.convolution.default and n.args[-1] == 1:
                 output_set.add(n)
                 continue
 
@@ -715,7 +728,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
-        if config.benchmark_kernel:
+        if config.benchmark_kernel or True:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")

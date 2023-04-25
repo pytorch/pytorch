@@ -603,6 +603,13 @@ def compile_fx_aot(
 
 _graph_counter = itertools.count(0)
 
+def view_to_reshape(gm):
+    """
+    Needed for timm_resnest
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default
 
 def compile_fx(
     model_: torch.fx.GraphModule,
@@ -679,6 +686,11 @@ def compile_fx(
             joint_graph_passes(model)
 
         fixed = len(example_inputs) - num_example_inputs
+        if config.layout_opt:
+            view_to_reshape(model)
+            with open("/tmp/fwd.fx", "w") as f:
+                f.write(model.print_readable(False))
+
         return inner_compile(
             model,
             example_inputs,
@@ -705,6 +717,10 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+        if config.layout_opt:
+            view_to_reshape(model)
+            with open("/tmp/bwd.fx", "w") as f:
+                f.write(model.print_readable(False))
         with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
             fixed = count_tangents(model)
             return inner_compile(

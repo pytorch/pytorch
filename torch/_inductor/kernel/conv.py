@@ -336,7 +336,7 @@ def convolution(
     x.realize()
     weight.realize()
 
-    if config.layout_opt:
+    if config.layout_opt and groups == 1:
         x = ir.ExternKernel.require_channels_last(x)
         # NOTE: it's fine that weight is not channels last.
         # We can make it contiguous if that's necessary.
