@@ -8,6 +8,7 @@ from itertools import accumulate, chain
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -28,6 +29,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
+    _named_parameters_with_duplicates,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -523,8 +525,10 @@ class FlatParamHandle:
         param_extensions: List[Any] = []
         is_padding_mask: List[bool] = []
         total_numel = total_numel_without_padding = 0
-        for submodule_name, submodule in module.named_modules():
-            for param_name, param in submodule.named_parameters(recurse=False):
+        for submodule_name, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
                 if param not in params_set:
                     continue
                 if param in shared_param_memo:  # shared reference
@@ -553,7 +557,8 @@ class FlatParamHandle:
                             is_padding_mask.append(True)
                             numels.append(numel_to_pad)
                             total_numel += numel_to_pad
-                    param, extension = _ext_pre_flatten_transform(param)
+                    transform_t, extension = _ext_pre_flatten_transform(param)
+                    param = cast(nn.Parameter, transform_t)
                     param_extensions.append(extension)
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
                     params_to_flatten.append(param)

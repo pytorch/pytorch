@@ -42,6 +42,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# Optimize away split cat patterns (Experimental)
+split_cat_fx_passes = True
+
 # enable reordering pass
 reordering = False
 
