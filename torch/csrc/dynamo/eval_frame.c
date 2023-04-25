@@ -463,20 +463,22 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(code);
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
-  PyObject* result = NULL;
-
   #if IS_PYTHON_3_11_PLUS
 
   DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
   DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
 
-  PyFunctionObject *func = _PyFunction_CopyWithNewCode((PyFunctionObject *) frame->f_func, code);
+  // Generate Python function object and _PyInterpreterFrame in a way similar to
+  // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
+  PyFunctionObject* func = _PyFunction_CopyWithNewCode((PyFunctionObject*) frame->f_func, code);
   if (func == NULL) {
     return NULL;
   }
 
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
-  THP_EVAL_API_FRAME_OBJECT* shadow = malloc(size);
+  // THP_EVAL_API_FRAME_OBJECT (_PyInterpreterFrame) is a regular C struct, so
+  // it should be safe to use system malloc over Python malloc, e.g. PyMem_Malloc
+  THP_EVAL_API_FRAME_OBJECT* shadow = malloc(size * sizeof(PyObject*));
   if (shadow == NULL) {
     Py_DECREF(func);
     return NULL;
@@ -501,7 +503,10 @@ inline static PyObject* eval_custom_code(
   PyObject* name_to_idx = PyDict_New();
   if (name_to_idx == NULL) {
     DEBUG_TRACE0("unable to create localsplus name dict");
-    goto cleanup;
+    _PyFrame_Clear(shadow);
+    free(shadow);
+    Py_DECREF(func);
+    return NULL;
   }
 
   for (Py_ssize_t i = 0; i < code->co_nlocalsplus; i++) {
@@ -509,7 +514,10 @@ inline static PyObject* eval_custom_code(
     PyObject *idx = PyLong_FromSsize_t(i);
     if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
       Py_DECREF(name_to_idx);
-      goto cleanup;
+      _PyFrame_Clear(shadow);
+      free(shadow);
+      Py_DECREF(func);
+      return NULL;
     }
   }
 
@@ -519,7 +527,10 @@ inline static PyObject* eval_custom_code(
     Py_ssize_t new_i = PyLong_AsSsize_t(idx);
     if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
       Py_DECREF(name_to_idx);
-      goto cleanup;
+      _PyFrame_Clear(shadow);
+      free(shadow);
+      Py_DECREF(func);
+      return NULL;
     }
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[new_i] = fastlocals_old[i];
@@ -552,15 +563,18 @@ inline static PyObject* eval_custom_code(
 
   #endif
 
-  result = eval_frame_default(tstate, shadow, throw_flag);
+  PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 
   #if IS_PYTHON_3_11_PLUS
- cleanup:
+
   _PyFrame_Clear(shadow);
   free(shadow);
   Py_DECREF(func);
+
   #else
+
   Py_DECREF(shadow);
+
   #endif
 
   return result;
