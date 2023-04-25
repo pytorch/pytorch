@@ -1922,7 +1922,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         _warn_not_in_group("all_reduce_coalesced")
         return
 
-    if any([t.is_complex() for t in tensors]) and not supports_complex(op):
+    if any(t.is_complex() for t in tensors) and not supports_complex(op):
         raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
 
     tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
