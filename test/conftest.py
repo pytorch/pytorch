@@ -7,7 +7,7 @@ from _pytest.config import filename_arg
 from _pytest.config import Config
 from _pytest._code.code import ReprFileLocation
 from _pytest.python import Module
-from typing import Union
+from typing import Any, List, Union
 from typing import Optional
 from types import MethodType
 import xml.etree.ElementTree as ET
@@ -18,9 +18,24 @@ import sys
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
 xml_key = StashKey["LogXMLReruns"]()
+STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 
 def pytest_addoption(parser: Parser) -> None:
+    group = parser.getgroup("general")
+    group.addoption(
+        "--scs",
+        action="store",
+        default=None,
+        dest="stepcurrent_skip",
+    )
+    group.addoption(
+        "--sc",
+        action="store",
+        default=None,
+        dest="stepcurrent",
+    )
+
     parser.addoption("--use-main-module", action='store_true')
     group = parser.getgroup("terminal reporting")
     group.addoption(
@@ -81,6 +96,10 @@ def pytest_configure(config: Config) -> None:
             config.getini("junit_log_passing_tests_reruns"),
         )
         config.pluginmanager.register(config.stash[xml_key])
+    if config.getoption("stepcurrent_skip"):
+        config.option.stepcurrent = config.getoption("stepcurrent_skip")
+    if config.getoption("stepcurrent"):
+        config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -193,3 +212,49 @@ def pytest_report_teststatus(report, config):
         pluggy_result.force_result(
             (outcome, letter, f"{verbose} [{report.duration:.4f}s]")
         )
+
+
+class StepcurrentPlugin:
+    # Modified fromo _pytest/stepwise.py in order to save the currently running
+    # test instead of the last failed test
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.report_status = ""
+        assert config.cache is not None
+        self.cache: pytest.Cache = config.cache
+        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun: Optional[str] = self.cache.get(self.directory, None)
+        self.skip: bool = config.getoption("stepcurrent_skip")
+
+    def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
+        if not self.lastrun:
+            self.report_status = "Cannot find last run test, not skipping"
+            return
+
+        # check all item nodes until we find a match on last run
+        failed_index = None
+        for index, item in enumerate(items):
+            if item.nodeid == self.lastrun:
+                failed_index = index
+                if self.skip:
+                    failed_index += 1
+                break
+
+        # If the previously failed test was not found among the test items,
+        # do not skip any tests.
+        if failed_index is None:
+            self.report_status = "previously run test not found, not skipping."
+        else:
+            self.report_status = f"skipping {failed_index} already run items."
+            deselected = items[:failed_index]
+            del items[:failed_index]
+            config.hook.pytest_deselected(items=deselected)
+
+    def pytest_report_collectionfinish(self) -> Optional[str]:
+        if self.config.getoption("verbose") >= 0 and self.report_status:
+            return f"stepcurrent: {self.report_status}"
+        return None
+
+    def pytest_runtest_logreport(self, report: TestReport) -> None:
+        self.lastrun = report.nodeid
+        self.cache.set(self.directory, self.lastrun)
