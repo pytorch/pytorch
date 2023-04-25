@@ -149,7 +149,10 @@ class SchemaCheckMode(TorchDispatchMode):
                         # Only mutable ops e.g. (add_, add.out) are allowed to directly return inputs.
                         if not schema_info.is_mutable(
                             SchemaArgument(SchemaArgType.input, i)
-                        ) and func not in [torch.ops.aten.lift.default, torch.ops.aten.lift_fresh.default]:
+                        ) and func not in [
+                            torch.ops.aten.lift.default,
+                            torch.ops.aten.lift_fresh.default,
+                        ]:
                             raise RuntimeError(
                                 f"""\
 Dispatcher operators below autograd are not allowed to directly return inputs.
