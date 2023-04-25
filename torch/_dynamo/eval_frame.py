@@ -681,6 +681,7 @@ def export(
     ] = None,
     tracing_mode: str = "real",
     constraints: List[Constraint] = None,
+    assume_static_by_default: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -793,7 +794,9 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        summarize_dim_constraints=True, specialize_int=True
+        summarize_dim_constraints=True,
+        specialize_int=True,
+        assume_static_by_default=assume_static_by_default,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
