@@ -560,10 +560,6 @@ class LazyParentModule(LazyModuleMixin, torch.nn.Module):
     def impl(self, x):
         return x.cos() + self._val
 
-    def initialize_parameters(self, input):
-        with torch.no_grad():
-            self._val = torch.nn.Parameter(torch.ones(2, 2))
-
 
 class LazyChildModuleNoClsToBecome(LazyParentModule):
     def __init__(self):
@@ -571,6 +567,9 @@ class LazyChildModuleNoClsToBecome(LazyParentModule):
 
     def forward(self, x):
         return super().impl(x.sin())
+
+    def initialize_parameters(self, input):
+        self._val = torch.nn.Parameter(torch.ones(2, 2))
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
