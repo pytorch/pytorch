@@ -848,7 +848,9 @@ class TorchHigherOrderOperator(VariableTracker):
                 closure_vars = [
                     name
                     for name in closure_vars
-                    if not isinstance(scope[name], (UserFunctionVariable, NestedUserFunctionVariable))
+                    if not isinstance(
+                        scope[name], (UserFunctionVariable, NestedUserFunctionVariable)
+                    )
                 ]
                 if closure_vars:
                     code = f.get_code()
