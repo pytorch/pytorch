@@ -1588,22 +1588,24 @@ class ForeachKernel(Kernel):
     overrides = TritonOverrides
 
     @staticmethod
-    def create_kernels(layouts, node_schedule):
+    def create_kernels(foreach_node):
         """Creates one or more ForeachKernels if the number of args exceeds CUDA limits."""
-        num_args = sum([node.list_arg_count() * len(layouts) for node in node_schedule])
-        MAX_NUM_ARGS = 500  # 500 8 byte args is the CUDA limit, each arg is a pointer
-        if num_args > MAX_NUM_ARGS:
-            kernels = []
-            for i in range(0, num_args, MAX_NUM_ARGS):
-                kernels.append(
-                    ForeachKernel(
-                        layouts,
-                        sublist_indices=(i, min(i + MAX_NUM_ARGS, num_args)),
-                    )
+        node_schedule = foreach_node.get_nodes()
+        assert len(node_schedule) >= 1
+        layouts = node_schedule[0].node.get_layouts()
+        list_length = len(layouts)
+        num_lists = sum([node.node.list_arg_count() for node in node_schedule])
+
+        MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
+        kernels = []
+        max_list_length = int(MAX_NUM_ARGS / num_lists)
+        for i in range(0, list_length, max_list_length):
+            kernels.append(
+                ForeachKernel(
+                    layouts, sublist_indices=(i, min(i + max_list_length, list_length))
                 )
-            return kernels
-        else:
-            return [ForeachKernel(layouts)]
+            )
+        return kernels
 
     def __init__(self, layouts, sublist_indices=None):
         sublist_indices = sublist_indices if sublist_indices else (0, len(layouts))
@@ -2121,17 +2123,17 @@ class TritonScheduling:
             return
 
         node_schedule = foreach_node.get_nodes()
+        kernels = ForeachKernel.create_kernels(foreach_node)
 
-        kernel = ForeachKernel(node_schedule[0].node.get_layouts())
+        for kernel in kernels:
+            with kernel:
+                for node in node_schedule:
+                    node.mark_run()
+                    node.codegen()
+                src_code = kernel.codegen_kernel()
+            kernel_name = self.define_kernel(src_code, [foreach_node])
+            kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        # warm up to track all loads and stores
-        with kernel:
-            for node in node_schedule:
-                node.mark_run()
-                node.codegen()
-            src_code = kernel.codegen_kernel()
-        kernel_name = self.define_kernel(src_code, [foreach_node])
-        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()
 
     @staticmethod
