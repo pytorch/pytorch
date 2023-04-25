@@ -2263,8 +2263,19 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
-        torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), 2 <= dynamic_dim(z, 0)]
+        gm, _ = torch._dynamo.export(
+            my_dyn_fn,
+            x,
+            y,
+            z,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+        self.assertEqual(gm.meta["input_shape_constraints"], constraints)
+        self.assertTrue("example_inputs" in gm.meta)
+        self.assertTrue("node_range_constraints" in gm.meta)
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):

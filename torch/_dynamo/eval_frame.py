@@ -777,6 +777,7 @@ def export(
         nonlocal fake_mode, example_inputs
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
+        graph.meta["node_range_constraints"] = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -814,6 +815,8 @@ def export(
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
+
+    node_range_constraints = graph.meta["node_range_constraints"]
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -883,6 +886,10 @@ def export(
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    new_graph.meta["example_inputs"] = example_inputs
+    new_graph.meta["input_shape_constraints"] = constraints
+    new_graph.meta["node_range_constraints"] = node_range_constraints
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
