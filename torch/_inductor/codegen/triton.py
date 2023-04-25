@@ -1201,9 +1201,9 @@ class TritonKernel(Kernel):
             else:
                 updated = value
                 if reduction_type == "min":
-                    updated = "triton_helpers.minimum({accumulator}, {value})"
+                    updated = f"triton_helpers.minimum({accumulator}, {value})"
                 elif reduction_type == "max":
-                    updated = "triton_helpers.maximum({accumulator}, {value})"
+                    updated = f"triton_helpers.maximum({accumulator}, {value})"
                 elif reduction_type == "sum":
                     updated = f"{accumulator} + {value}"
                 elif reduction_type == "prod":
