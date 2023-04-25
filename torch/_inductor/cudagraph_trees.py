@@ -1442,7 +1442,9 @@ def format_tb(caching_allocator_trace):
 
 
 def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
-    assert all([isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs])
+    assert all(
+        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
+    )  # noqa: C419
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
 
     # check if there is a divergence first, then do the expensive snapshot call after
@@ -1478,8 +1480,10 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
             )
             formatted.append(f"Data Pointer: {dp}, history: \n{trace}")
         formatted_s = "\n".join(formatted)
-        msg = f"These live storage data ptrs are in the cudagraph pool but not " \
-              f"accounted for as an output of cudagraph trees: \n\n{formatted_s}"
+        msg = (
+            f"These live storage data ptrs are in the cudagraph pool but not "
+            f"accounted for as an output of cudagraph trees: \n\n{formatted_s}"
+        )
         raise RuntimeError(msg)
 
 

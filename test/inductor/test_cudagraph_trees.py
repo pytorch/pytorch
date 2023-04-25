@@ -12,13 +12,13 @@ import torch
 import torch._dynamo
 import torch.nn as nn
 from torch._inductor import config
-from torch.testing import FileCheck
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     IS_CI,
-    IS_WINDOWS,
     IS_LINUX,
+    IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -729,7 +729,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-
         @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
@@ -737,7 +736,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             prev = torch._inductor.cudagraph_trees.clear_cublas_manager
 
             try:
-                torch._inductor.cudagraph_trees.clear_cublas_manager = contextlib.nullcontext
+                torch._inductor.cudagraph_trees.clear_cublas_manager = (
+                    contextlib.nullcontext
+                )
 
                 @torch.compile()
                 def foo(x, y):
@@ -750,14 +751,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    FileCheck().check("at::cuda::getNewWorkspace").check("at::cuda::blas::gemm<float>").run(str(e))
+                    FileCheck().check("at::cuda::getNewWorkspace").check(
+                        "at::cuda::blas::gemm<float>"
+                    ).run(str(e))
 
                 self.assertTrue(thrown)
 
             finally:
                 torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
-
 
         def test_peristed_output_livenes(self):
             @torch.compile
