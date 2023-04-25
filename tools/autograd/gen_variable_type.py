@@ -552,11 +552,6 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "_nested_tensor_size",
     "_nested_tensor_strides",
     "_nested_tensor_storage_offsets",
-    # Functional collectives keep an internal ref through the Work object
-    "all_reduce",
-    "all_gather_into_tensor",
-    "reduce_scatter_tensor",
-    "wait_tensor",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -858,12 +853,12 @@ def gen_variable_type_func(
 
         if (
             fn.info is None
-            and not str(f.func.name.name) in RESET_GRAD_ACCUMULATOR
-            and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE
+            and str(f.func.name.name) not in RESET_GRAD_ACCUMULATOR
+            and get_base_name(f) not in DONT_REQUIRE_DERIVATIVE
             and len(gen_differentiable_outputs(fn)) > 0
-            and not cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE
-            and not type_wrapper_name(f) in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT
-            and not type_wrapper_name(f) in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT
+            and cpp.name(f.func) not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE
+            and type_wrapper_name(f) not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT
+            and type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT
         ):
             # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
             #
@@ -1345,7 +1340,7 @@ def emit_body(
         )
 
         # Check properties of outputs (enforce (2), (3))
-        if not f.func.kind() in (SchemaKind.inplace, SchemaKind.out):
+        if f.func.kind() not in (SchemaKind.inplace, SchemaKind.out):
             base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
             aliased_arg_name = ALL_VIEW_FUNCTIONS.get(base_name, None)
             if aliased_arg_name is not None:
