@@ -23,6 +23,7 @@ import platform
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -582,6 +583,15 @@ def wait_for_process(p, timeout=None):
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except subprocess.TimeoutExpired:
+        # send SIGINT to give pytest a chance to make xml
+        p.send_signal(signal.SIGINT)
         exit_status = p.wait(timeout=5)
         if exit_status is not None:
             return exit_status
