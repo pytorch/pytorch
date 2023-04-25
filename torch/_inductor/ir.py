@@ -3590,19 +3590,38 @@ class LinearBinary(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._linear_pointwise.binary",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._linear_pointwise.binary",
+            cpp_kernel="mkldnn::_linear_pointwise",
+        )
+        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_key = "linear_pointwise_binary"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& other_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                c10::string_view attr)
+        """
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        wrapper.generate_fusion_ops_code(
+            self.get_name(),
+            self.kernel,
+            self.codegen_args(),
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overlad_name,
         )
 
     @classmethod
     def create(cls, x, y, w, b, attr):
-        kernel = "torch.ops.mkldnn._linear_pointwise.binary"
         x = cls.require_stride1(cls.realize_input(x))
         y = cls.require_stride1(cls.realize_input(y))
         w = cls.require_stride1(cls.realize_input(w))
@@ -3626,7 +3645,6 @@ class LinearBinary(ExternKernelAlloc):
             ),
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
     def apply_constraint(self):
