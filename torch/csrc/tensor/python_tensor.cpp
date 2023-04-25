@@ -78,6 +78,11 @@ static PyObject* Tensor_new(
   if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(tensor_type);
   }
+  if (tensor_type.is_cuda) {
+    TORCH_WARN_ONCE(
+        "The torch.cuda.*DtypeTensor constructors are no longer recommended. "
+        "It's best to use methods such as torch.tensor(data, dtype=*, device='cuda') to create tensors.")
+  }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(
       tensor_type.get_dispatch_key(),
       tensor_type.get_scalar_type(),
@@ -431,6 +436,9 @@ static bool PyTensorType_Check(PyObject* obj) {
 
 void py_set_default_tensor_type(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  TORCH_WARN_ONCE(
+      "torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, "
+      "please use torch.set_default_dtype() and torch.set_default_device() as alternatives.")
   TORCH_CHECK_TYPE(
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");
