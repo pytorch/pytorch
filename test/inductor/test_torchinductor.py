@@ -5031,6 +5031,28 @@ class CommonTemplate:
         t1 = torch.randint(8, size=(1024, 1024))
         self.common(fn, (t1,))
 
+    def test_argmax_argmin_with_nan(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        if self.device == "cpu":
+            raise unittest.SkipTest("broken on CPU")
+
+        t1 = torch.randn((10, 10))
+        t1[:, 4] = float('nan')
+        t1[:, 8] = float('nan')
+        self.common(fn, (t1,))
+
+        t1 = torch.randn((1024, 1024))
+        t1[:, 40] = float('nan')
+        t1[:, 100] = float('nan')
+        self.common(fn, (t1,))
+
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
             out1 = aten.convolution_backward(
