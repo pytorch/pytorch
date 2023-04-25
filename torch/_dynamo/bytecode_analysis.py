@@ -195,7 +195,6 @@ class StackSize:
             self.fixed_point.value = False
 
 
-
 def stacksize_analysis(instructions):
     assert instructions
     fixed_point = FixedPointBox()

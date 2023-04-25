@@ -106,7 +106,7 @@ class TestProfilerCUDA(TestCase):
         # with CUDA events leaking the increase in memory was ~7 MB between
         # profiler invocations above
         is_increasing = all(
-            [last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss))])
+            last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss)))
         max_diff = -1
         for idx in range(1, len(last_rss)):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
@@ -530,11 +530,11 @@ class TestProfiler(TestCase):
 
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
-                self.assertTrue(any(["test_profiler" in entry for entry in e.stack]))
-                self.assertTrue(any([(
+                self.assertTrue(any("test_profiler" in entry for entry in e.stack))
+                self.assertTrue(any((
                     "test_source" in entry or
                     "ts_method_1" in entry or
-                    "ts_method_2" in entry) for entry in e.stack]))
+                    "ts_method_2" in entry) for entry in e.stack))
 
         # TODO: https://github.com/pytorch/kineto/issues/617
         if kineto_available() and not IS_WINDOWS:
@@ -1429,7 +1429,7 @@ class TestProfiler(TestCase):
                 f_ts_1 = flow_f_to_ts[1]
                 s_ts_2 = flow_s_to_ts[2]
                 f_ts_2 = flow_f_to_ts[2]
-                self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
+                self.assertTrue(all(ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 
