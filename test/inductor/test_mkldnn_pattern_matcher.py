@@ -346,6 +346,33 @@ class TestPaternMatcher(TestCase):
                 )
                 counters.clear()
 
+    # https://github.com/pytorch/pytorch/issues/99838.
+    def test_conv2d_add_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                out_conv = self.conv(x)
+                out = torch.add(out_conv, 1.0)
+                return out
+
+        with torch.no_grad():
+            mod = Model().eval()
+            v = torch.randn(1, 3, 28, 28)
+            expected = mod(v)
+            actual = torch.compile(mod)(v)
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+            self.assertEqual(
+                counters["inductor"]["pattern_matcher_nodes"],
+                0,
+            )
+            counters.clear()
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch._C.has_mkldnn:
