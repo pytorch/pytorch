@@ -2431,7 +2431,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         keep_var_setting = False
 
         def my_state_dict_pre_hook(module, prefix, keep_vars):
-            nonlocal keep_var_setting
             self.assertEqual(keep_vars, keep_var_setting)
             nonlocal state_dict_pre_hook_count
             state_dict_pre_hook_count += 1
@@ -2442,7 +2441,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
 
         def check_results(model):
-            nonlocal _state_dict_prefix, state_dict_pre_hook_count, keep_var_setting
+            nonlocal state_dict_pre_hook_count
             for keep_var_setting in [True, False]:
                 _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
                 self.assertEqual(2, state_dict_pre_hook_count)
