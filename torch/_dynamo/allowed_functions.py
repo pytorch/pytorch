@@ -168,6 +168,11 @@ def _allowed_function_ids():
         torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
+                # Don't handle HigherOrderOperator as builtin
+                import torch._ops
+
+                if isinstance(obj, torch._ops.HigherOrderOperator):
+                    continue
                 if isinstance(obj, types.ModuleType):
                     if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
                         obj

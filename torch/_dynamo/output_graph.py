@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import copy
 import functools
 import itertools
@@ -18,6 +19,7 @@ import torch._guards
 import torch._logging
 
 import torch.nn
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._guards import (
     Checkpointable,
@@ -289,7 +291,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.real_value_cache
 
     def create_graph_input(self, *args, **kwargs):
-        return self.current_tracer.create_graph_input(*args, **kwargs)
+        return self.root_tracer.create_graph_input(*args, **kwargs)
 
     def create_proxy(self, *args, **kwargs):
         return self.current_tracer.create_proxy(*args, **kwargs)
@@ -302,6 +304,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def create_arg(self, *args, **kwargs):
         return self.current_tracer.create_arg(*args, **kwargs)
+
+    @contextlib.contextmanager
+    def new_subtracer(self):
+        try:
+            tracer = SubgraphTracer(self, parent=self.current_tracer)
+            self.tracers.append(tracer)
+            yield tracer
+        finally:
+            self.tracers.pop()
 
     @property
     def output(self):
@@ -454,6 +465,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
+            if len(self.tracers) > 1:
+                unimplemented(
+                    "accessing attribute of nn.Module inside HigherOrderOperator"
+                )
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -920,7 +935,7 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(self, output_graph):
+    def __init__(self, output_graph, parent=None):
         super(SubgraphTracer, self).__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
@@ -930,6 +945,18 @@ class SubgraphTracer(fx.Tracer):
         self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
+
+        # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
+        self.parent = parent
+        # A list of proxies that exist in the graph being traced. We use this
+        # list to determine that, when tracing the body function of a HigherOrderOperator,
+        # if a new proxy is actually a free variable.
+        self.seen_proxies = set({})
+        # A list of previously free variables that we lifted to being inputs
+        # of the graph. If we are tracing a HigherOrderOperator's body_fn,
+        # then we need to keep track of this so we can rewrite the
+        # HigherOrderOperator call using the traced body_fn.
+        self.lifted_freevars = set({})
 
     def create_proxy(
         self,
@@ -941,6 +968,21 @@ class SubgraphTracer(fx.Tracer):
         type_expr=None,
         proxy_factory_fn=None,
     ):
+        # If there are any freevars, lift them to being inputs
+        if self.parent is not None:
+            flat_args, _ = pytree.tree_flatten(args)
+            for arg in flat_args:
+                if not isinstance(arg, torch.fx.Proxy):
+                    # Is a constant
+                    continue
+                if arg in self.seen_proxies:
+                    continue
+                if not hasattr(arg, "node"):
+                    continue
+                if arg.node.name in self.input_name_to_proxy:
+                    continue
+                self.lift_freevar_to_input(arg)
+
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
@@ -955,6 +997,8 @@ class SubgraphTracer(fx.Tracer):
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
         elif kind == "call_module":
+            if self.parent is not None:
+                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
             # For modules we store the class
             rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
@@ -969,6 +1013,7 @@ class SubgraphTracer(fx.Tracer):
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
         rv.node.stack_trace = "".join(msgs)
 
+        self.seen_proxies.add(rv)
         return rv
 
     def create_node(self, *args, **kwargs):
@@ -1015,3 +1060,51 @@ class SubgraphTracer(fx.Tracer):
             else:
                 self.input_name_to_proxy[name] = proxy
             return proxy
+
+    def is_name_bound(self, name):
+        if name in self.input_name_to_proxy:
+            return True
+        for proxy in self.seen_proxies:
+            if proxy.node.name == name:
+                return True
+        return False
+
+    def lift_freevar_to_input(self, proxy):
+        self.create_graph_input(proxy.node.name)
+        self.lifted_freevars.add(proxy)
+        if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
+            self.parent.lift_freevar_to_input(proxy)
+
+
+# NOTE: [HigherOrderOperator tracing design]
+# Ignoring HigherOrderOperators for a moment,
+# OutputGraph represents the graph being built by Dynamo that may be compiled
+# and executed. It holds a root SubgraphTracer where the FX graph is built.
+#
+# HigherOrderOperators are operators that take functions (represented by
+# torch.fx.GraphModule) as their arguments. When Dynamo encounters a
+# HigherOrderOperator, then it attempts to introspect the function passed
+# to it (call this the "body function"), capture it into a GraphModule,
+# and rewrite the call to the HigherOrderOperator to use the GraphModule.
+#
+# The way we handle the capture of body functions is through having
+# (possibly nested) SubgraphTracers, one per body function.
+#
+# Mechanically, we do the introspection by:
+# - Creating a new SubgraphTracer via OutputGraph.new_subtracer
+# - Executing the body function.
+# This constructs the graph of the body function in the new SubgraphTracer
+# while modifying the state of the OutputGraph. For example:
+# - the OutputGraph can receive new GraphArgs (if we discover any new
+#   untracked Tensors)
+# - side effects from the body function get accumulated into
+#   OutputGraph.side_effects
+# - guards produced by the body function get accumulated into OutputGraph.guards
+#
+# The traced function has some special properties that make it easier for us
+# to transform later down the line:
+# - we lift all free variables to being inputs.
+#
+# If the introspection fails (due to the existence of graph breaks), then
+# we roll back the current OutputGraph state and graph break on the
+# HigherOrderOperator.

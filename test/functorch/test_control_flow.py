@@ -773,5 +773,6 @@ class TestControlFlowTraced(TestCase):
         x = torch.ones(4, 3, 2)
         self.assertEqual(foo(x), gm(x))
 
+
 if __name__ == '__main__':
     run_tests()
