@@ -333,7 +333,7 @@
   result: (-self_p * other_t + other_p * self_t) / (self_p.pow(2) + other_p.pow(2))
 
 - name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta.conj())
+  self: handle_r_to_c(self.scalar_type(), maybe_multiply(grad, beta.conj()))
   batch1: maybe_multiply(grad.bmm(batch2.transpose(1, 2).conj()), alpha.conj())
   batch2: maybe_multiply(batch1.transpose(1, 2).conj().bmm(grad), alpha.conj())
   result: maybe_multiply(self_t, beta) + maybe_multiply(batch1_t.bmm(batch2_p), alpha) + maybe_multiply(batch1_p.bmm(batch2_t), alpha)
@@ -541,8 +541,8 @@
   result: auto_linear
 
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
-  self: norm_backward(grad, self - other, p, result)
-  other: -norm_backward(grad, self - other, p, result)
+  self: handle_r_to_c(self.scalar_type(), norm_backward(grad, self - other, p, result))
+  other: handle_r_to_c(other.scalar_type(), -norm_backward(grad, self - other, p, result))
   result: norm_jvp(self_p - other_p, self_t - other_t, p, result, {}, false)
 
 # The backward formula is done in this order to improve numerical stability
