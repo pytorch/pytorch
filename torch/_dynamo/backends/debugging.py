@@ -17,6 +17,7 @@ This file contains TorchDynamo backends intended for debugging uses.
 def eager(gm, fake_tensor_inputs):
     return gm
 
+
 @register_backend
 def eager_debug(gm, fake_tensor_inputs):
     from torch._subclasses.schema_check_mode import SchemaCheckMode
@@ -27,6 +28,7 @@ def eager_debug(gm, fake_tensor_inputs):
     def inner(*args):
         with SchemaCheckMode():
             return torch.fx.Interpreter(gm).run(*args)
+
     return inner
 
 
