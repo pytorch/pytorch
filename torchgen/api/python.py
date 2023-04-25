@@ -931,7 +931,9 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "memory_format"
         elif t.name == BaseTy.Dimname:
             ret = "Union[str, ellipsis, None]"
-        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Storage, BaseTy.Stream]:
+        elif t.name == BaseTy.Storage:
+            ret = "Union[Storage, UntypedStorage]"
+        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 

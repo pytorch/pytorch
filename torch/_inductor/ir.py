@@ -677,6 +677,11 @@ class Reduction(Loops):
             def combine_fn(a, b):
                 return ops.add(a, b)
 
+        elif reduction_type == "prod":
+
+            def combine_fn(a, b):
+                return ops.mul(a, b)
+
         elif reduction_type == "xor_sum":
 
             def combine_fn(a, b):
@@ -911,6 +916,7 @@ class Reduction(Loops):
 
         return {
             "sum": 0,
+            "prod": 1,
             "xor_sum": 0,
             "any": 0,
         }[reduction_type]
