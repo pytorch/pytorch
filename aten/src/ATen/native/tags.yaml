@@ -27,7 +27,7 @@
           This tag indicates if an operator is nondeterministically seeded
           (i.e., is random) such that the operator intentionally produces
           different results when run twice on the same inputs, but this randomness
-          is controlled by a Generator which, if reseeded would giv eyou the
+          is controlled by a Generator which, if reseeded would give you the
           same result.
 - tag: nondeterministic_bitwise
   desc: |
