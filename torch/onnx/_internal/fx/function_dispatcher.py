@@ -8,7 +8,7 @@ from typing import Callable, Dict, Mapping, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import ops  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 
 import torch
 from torch.onnx._internal import _beartype
