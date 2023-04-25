@@ -4666,7 +4666,7 @@ class DistributedTest:
                 ddp_model().backward(create_graph=True)
                 # grad tensors should require grad.
                 self.assertTrue(
-                    all([param.requires_grad for param in ddp_model.parameters()])
+                    all(param.requires_grad for param in ddp_model.parameters())
                 )
 
         @skip_but_pass_in_sandcastle_if(
