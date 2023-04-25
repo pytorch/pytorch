@@ -2004,7 +2004,9 @@ def uniform_(self, low=0, high=1, generator=None):
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
-def upsample_compute_output_size(input_size, output_size, scale_factors):
+def upsample_compute_output_size(
+    input_size, output_size, scale_factors, round_with_scale_factor=False
+):
     spatial_dimensions = len(input_size) - 2
     if output_size is not None:
         utils.check(
@@ -2021,11 +2023,12 @@ def upsample_compute_output_size(input_size, output_size, scale_factors):
         )
         utils.check(len(scale_factors) == spatial_dimensions, lambda: "")
         output_size = []
+        d = 0.5 if round_with_scale_factor else 0.0
         for i, s in enumerate(scale_factors):
             if int(s) == s:
                 output_size.append(input_size[i + 2] * int(s))
             else:
-                output_size.append(sym_int(input_size[i + 2] * s))
+                output_size.append(sym_int(d + input_size[i + 2] * s))
         return output_size
     utils.check(
         False, lambda: "Must specify exactly one of output_size and scale_factors"
@@ -2041,8 +2044,15 @@ def get_scale_value(scales, idx):
 @register_decomposition(aten.upsample_nearest1d.vec)
 @aten.upsample_nearest1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.vec.py_impl(DispatchKey.Autograd)
-def upsample_nearest1d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+def upsample_nearest1d_vec(
+    input, output_size, scale_factors, round_with_scale_factor=False
+):
+    osize = upsample_compute_output_size(
+        input.size(),
+        output_size,
+        scale_factors,
+        round_with_scale_factor=round_with_scale_factor,
+    )
     scale = get_scale_value(scale_factors, 0)
 
     return upsample_nearest1d(input, osize, scale)
@@ -2051,8 +2061,15 @@ def upsample_nearest1d_vec(input, output_size, scale_factors):
 @register_decomposition(aten.upsample_nearest2d.vec)
 @aten.upsample_nearest2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest2d.vec.py_impl(DispatchKey.Autograd)
-def upsample_nearest2d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+def upsample_nearest2d_vec(
+    input, output_size, scale_factors, round_with_scale_factor=False
+):
+    osize = upsample_compute_output_size(
+        input.size(),
+        output_size,
+        scale_factors,
+        round_with_scale_factor=round_with_scale_factor,
+    )
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
@@ -2062,8 +2079,15 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
 @register_decomposition(aten.upsample_nearest3d.vec)
 @aten.upsample_nearest3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest3d.vec.py_impl(DispatchKey.Autograd)
-def upsample_nearest3d_vec(input, output_size, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+def upsample_nearest3d_vec(
+    input, output_size, scale_factors, round_with_scale_factor=False
+):
+    osize = upsample_compute_output_size(
+        input.size(),
+        output_size,
+        scale_factors,
+        round_with_scale_factor=round_with_scale_factor,
+    )
     scale_d = get_scale_value(scale_factors, 0)
     scale_h = get_scale_value(scale_factors, 1)
     scale_w = get_scale_value(scale_factors, 2)
@@ -2705,8 +2729,15 @@ def gru_impl(
 @register_decomposition(aten._upsample_bilinear2d_aa.vec)
 @aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.Autograd)
-def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+def upsample_bilinear2d_aa_vec(
+    input, output_size, align_corners, scale_factors, round_with_scale_factor=False
+):
+    osize = upsample_compute_output_size(
+        input.size(),
+        output_size,
+        scale_factors,
+        round_with_scale_factor=round_with_scale_factor,
+    )
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
     return torch.ops.aten._upsample_bilinear2d_aa(
@@ -2717,8 +2748,15 @@ def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors)
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
-def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
-    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+def upsample_bilinear2d_vec(
+    input, output_size, align_corners, scale_factors, round_with_scale_factor=False
+):
+    osize = upsample_compute_output_size(
+        input.size(),
+        output_size,
+        scale_factors,
+        round_with_scale_factor=round_with_scale_factor,
+    )
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)

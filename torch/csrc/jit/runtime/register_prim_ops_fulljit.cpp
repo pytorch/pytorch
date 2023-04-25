@@ -715,6 +715,7 @@ void interpolate_op(Stack& stack) {
   IValue align_corners;
   IValue recompute_scale_factor;
   bool antialias = false;
+  IValue round_with_scale_factor;
   pop(stack,
       input,
       size,
@@ -722,7 +723,8 @@ void interpolate_op(Stack& stack) {
       mode,
       align_corners,
       recompute_scale_factor,
-      antialias);
+      antialias,
+      round_with_scale_factor);
   if (antialias) {
     throw std::runtime_error("Antialias is not yet supported");
   }
@@ -801,19 +803,19 @@ void upsample_bilinear_op(Stack& stack) {
 // These ops are no longer generated, but remain here for BC
 RegisterOperators reg3({
     Operator(
-        "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
+        "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False, bool? round_with_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate.size_list_scale_list(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
+        "aten::__interpolate.size_list_scale_list(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False, bool? round_with_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False, bool? round_with_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate.size_list(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
+        "aten::__interpolate.size_list(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False, bool? round_with_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
 

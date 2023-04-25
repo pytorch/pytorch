@@ -386,6 +386,7 @@ def __interpolate(
     align_corners,
     recompute_scale_factor,
     antialias,
+    round_with_scale_factor,
 ):
     return symbolic_helper.__interpolate_helper(
         g, input, size, scale_factor, mode, align_corners, recompute_scale_factor
