@@ -1587,13 +1587,37 @@ class TritonKernel(Kernel):
 class ForeachKernel(Kernel):
     overrides = TritonOverrides
 
-    def __init__(self, layouts):
+    @staticmethod
+    def create_kernels(layouts, node_schedule):
+        """Creates one or more ForeachKernels if the number of args exceeds CUDA limits."""
+        num_args = sum([node.list_arg_count() * len(layouts) for node in node_schedule])
+        MAX_NUM_ARGS = 500  # 500 8 byte args is the CUDA limit, each arg is a pointer
+        if num_args > MAX_NUM_ARGS:
+            kernels = []
+            for i in range(0, num_args, MAX_NUM_ARGS):
+                kernels.append(
+                    ForeachKernel(
+                        layouts,
+                        sublist_indices=(i, min(i + MAX_NUM_ARGS, num_args)),
+                    )
+                )
+            return kernels
+        else:
+            return [ForeachKernel(layouts)]
+
+    def __init__(self, layouts, sublist_indices=None):
+        sublist_indices = sublist_indices if sublist_indices else (0, len(layouts))
+        if sublist_indices[0] > sublist_indices[1]:
+            raise ValueError(
+                f"Invalid list slice bounds in ForeachKernel: {sublist_indices}"
+            )
         super().__init__()
+        self.sublist_indices = sublist_indices
         self.list_name_to_var_name = {}
-        self.arg_name_to_list_var = {}
-        self.buffer_name_to_arg_name = {}
+        self.list_name_to_arg_names = collections.defaultdict(list)
         self.tensor_elem_counts = [
-            int(sympy_product(layout.size)) for layout in layouts
+            int(sympy_product(layout.size))
+            for layout in layouts[sublist_indices[0] : sublist_indices[1]]
         ]
         self.block_size = 1024
         self.grid = (
@@ -1612,38 +1636,38 @@ class ForeachKernel(Kernel):
 
         return num_blocks
 
-    def _gen_tile_ptrs(
-        self,
-        arg_names,
-        block_ind,
-        num_elems,
-        block_size,
-        code,
-    ):
-        num_blocks = ceildiv(num_elems, block_size)
-        upper_bound_pid = block_ind + num_blocks
-        last_block_elem_count = block_size - (num_blocks * block_size - num_elems)
+    def _gen_tile_ptrs(self, code):
+        block_count = 0
+        for index, num_elems in enumerate(self.tensor_elem_counts):
+            num_blocks = ceildiv(num_elems, self.block_size)
+            upper_bound_pid = block_count + num_blocks
+            lower_bound_pid = block_count
+            last_block_elem_count = self.block_size - (
+                num_blocks * self.block_size - num_elems
+            )
 
-        if block_ind == 0:
-            cond = "if"
-            # initialize tile ptrs
-            for name in arg_names:
-                code.splice(f"{self.arg_name_to_list_var[name]}_tile_ptr = {name}")
-        else:
-            cond = "elif"
+            if block_count == 0:
+                cond = "if"
+                # initialize tile ptrs
+                for list_name, arg_names in self.list_name_to_arg_names.items():
+                    var = self.list_name_to_var_name[list_name]
+                    code.splice(f"{var}_tile_ptr = {arg_names[index]}")
+            else:
+                cond = "elif"
 
-        code.splice(f"{cond} pid >= {block_ind} and pid < {upper_bound_pid}:")
-        with code.indent():
-            code.splice(f"elem_ind_offset = (pid - {block_ind}) * BLOCK_SIZE")
-            for name in arg_names:
-                code.splice(
-                    f"{self.arg_name_to_list_var[name]}_tile_ptr = {name} + elem_ind_offset"
-                )
-            code.splice(f"if pid == {upper_bound_pid - 1}:")
+            code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
             with code.indent():
-                code.splice(f"elem_count = {last_block_elem_count}")
+                code.splice(f"elem_ind_offset = (pid - {lower_bound_pid}) * BLOCK_SIZE")
+                for list_name, arg_names in self.list_name_to_arg_names.items():
+                    var = self.list_name_to_var_name[list_name]
+                    code.splice(
+                        f"{var}_tile_ptr = {arg_names[index]} + elem_ind_offset"
+                    )
+                code.splice(f"if pid == {upper_bound_pid - 1}:")
+                with code.indent():
+                    code.splice(f"elem_count = {last_block_elem_count}")
 
-        return block_ind + num_blocks
+            block_count += num_blocks
 
     def jit_line(self):
         _, _, signature = self.args.python_argdefs()
@@ -1658,15 +1682,19 @@ class ForeachKernel(Kernel):
             + "@triton.jit"
         )
 
+    def get_list(self, list_name):
+        return V.graph.lists[list_name][
+            self.sublist_indices[0] : self.sublist_indices[1]
+        ]
+
     def load(self, list_name: str, _):
         if list_name not in self.list_name_to_var_name:
             var = self.cse.newvar()
             self.list_name_to_var_name[list_name] = var
 
-            for buffer_name in V.graph.lists[list_name]:
+            for buffer_name in self.get_list(list_name):
                 arg_name = self.args.input(buffer_name)
-                self.arg_name_to_list_var[arg_name] = var
-                self.buffer_name_to_arg_name[buffer_name] = arg_name
+                self.list_name_to_arg_names[list_name].append(arg_name)
 
             self.loads.writeline(
                 f"{var} = tl.load({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), mask=mask)"
@@ -1679,10 +1707,9 @@ class ForeachKernel(Kernel):
             var = self.cse.newvar()
             self.list_name_to_var_name[list_name] = var
 
-            for buffer_name in V.graph.lists[list_name]:
+            for buffer_name in self.get_list(list_name):
                 arg_name = self.args.output(buffer_name)
-                self.arg_name_to_list_var[arg_name] = var
-                self.buffer_name_to_arg_name[buffer_name] = arg_name
+                self.list_name_to_arg_names[list_name].append(arg_name)
 
             self.stores.writeline(
                 f"tl.store({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), {value}, mask=mask)"
@@ -1715,25 +1742,12 @@ class ForeachKernel(Kernel):
                 """
             )
 
-        block_ind = 0
         with code.indent():
-
-            def map_to_arg_names(buffer_names):
-                return [self.buffer_name_to_arg_name[name] for name in buffer_names]
-
-            arg_lists = [
-                map_to_arg_names(V.graph.lists[list_name])
-                for list_name in self.list_name_to_var_name.keys()
-            ]
-
             code.splice("pid = tl.program_id(0)")
             code.splice(f"BLOCK_SIZE: tl.constexpr = {self.block_size}")
             code.splice(f"elem_count = {self.block_size}")
 
-            for elem_count, arg_names in zip(self.tensor_elem_counts, zip(*arg_lists)):
-                block_ind = self._gen_tile_ptrs(
-                    arg_names, block_ind, elem_count, self.block_size, code
-                )
+            self._gen_tile_ptrs(code)
 
             code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
             code.splice(self.loads)
@@ -1748,7 +1762,6 @@ class ForeachKernel(Kernel):
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-        grid = [self.grid]
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name, call_args, V.graph.scheduler.current_device.index
@@ -2111,6 +2124,7 @@ class TritonScheduling:
 
         kernel = ForeachKernel(node_schedule[0].node.get_layouts())
 
+        # warm up to track all loads and stores
         with kernel:
             for node in node_schedule:
                 node.mark_run()

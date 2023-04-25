@@ -259,6 +259,42 @@ class RecordLoadStore(V.KernelFormatterHandler):
         super().__init__(parent_handler=parent_handler)
 
 
+class RecordListLoadStores(V.MockHandler):
+    def __init__(self):
+        super().__init__()
+        self._reads: Set[Dep] = set()
+        self._list_reads: Set[str] = set()
+        self._writes: Set[Dep] = set()
+        self._list_writes: Set[str] = set()
+
+    def load(self, name: str, index: sympy.Expr) -> str:
+        self._list_reads.add(name)
+        for buf_name in V.graph.lists[name]:
+            buffer = V.graph.get_buffer(buf_name)
+            (
+                _,
+                index,
+                _,
+            ) = index_vars_squeeze(buffer.layout.size)
+            indexer = buffer.layout.make_indexer()
+            self._reads.add(
+                MemoryDep(buf_name, indexer(*index), tuple(buffer.layout.size))
+            )
+
+    def store(self, name: str, index: sympy.Expr, value: str) -> None:
+        for buf_name in V.graph.lists[name]:
+            buffer = V.graph.get_buffer(buf_name)
+            (
+                _,
+                index,
+                _,
+            ) = index_vars_squeeze(buffer.layout.size)
+            indexer = buffer.layout.make_indexer()
+            self._writes.add(
+                MemoryDep(buf_name, indexer(*index), tuple(buffer.layout.size))
+            )
+
+
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = collections.OrderedDict()

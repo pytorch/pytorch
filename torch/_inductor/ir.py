@@ -2120,57 +2120,30 @@ class BufferList(IRNode):
     def get_mutation_names(self):
         return ()
 
-    def get_read_writes(self):
-        return self.normalized_read_writes()
+    def list_arg_count(self):
+        _, (list_reads, list_writes) = self.extract_read_writes()
+        return len(list_reads) + len(list_writes)
 
     @cache_on_self
     def normalized_read_writes(self):
-        class RecordListLoadStores(V.MockHandler):
-            def __init__(self):
-                super().__init__()
-                self._reads: Set[dependencies.Dep] = set()
-                self._writes: Set[dependencies.Dep] = set()
+        return self.extract_read_writes()[0]
 
-            def load(self, name: str, index: sympy.Expr) -> str:
-                for name in V.graph.lists[name]:
-                    buffer = V.graph.get_buffer(name)
-                    (
-                        _,
-                        index,
-                        _,
-                    ) = dependencies.index_vars_squeeze(buffer.layout.size)
-                    indexer = buffer.layout.make_indexer()
-                    self._reads.add(
-                        dependencies.MemoryDep(
-                            name, indexer(*index), tuple(buffer.layout.size)
-                        )
-                    )
+    @cache_on_self
+    def extract_read_writes(self):
+        list_load_extractor = dependencies.RecordListLoadStores()
 
-            def store(self, name: str, index: sympy.Expr, value: str) -> None:
-                for name in V.graph.lists[name]:
-                    buffer = V.graph.get_buffer(name)
-                    (
-                        _,
-                        index,
-                        _,
-                    ) = dependencies.index_vars_squeeze(buffer.layout.size)
-                    indexer = buffer.layout.make_indexer()
-                    self._writes.add(
-                        dependencies.MemoryDep(
-                            name, indexer(*index), tuple(buffer.layout.size)
-                        )
-                    )
-
-        list_load_extractor = RecordListLoadStores()
         with V.set_ops_handler(list_load_extractor):
             self.get_store_function()(self.make_loader()())
 
-        return dependencies.ReadWrites(
-            list_load_extractor._reads, list_load_extractor._writes, set()
+        return (
+            dependencies.ReadWrites(
+                list_load_extractor._reads, list_load_extractor._writes, set()
+            ),
+            (list_load_extractor._list_reads, list_load_extractor._list_writes),
         )
 
-    def get_reads(self):
-        return self.get_read_writes().reads
+    def get_read_writes(self):
+        return self.normalized_read_writes()
 
     def realize(self):
         pass
