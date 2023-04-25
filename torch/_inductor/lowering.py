@@ -507,11 +507,13 @@ def squeeze(x, dim=None):
     dim = canonicalize_dims(len(x.get_size()), dim)
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
-    new_shape = [
-        s
-        for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.guard_equals(s, 1))
-    ]
+    new_shape = []
+    for d, s in enumerate(x.get_size()):
+        if not (d in dims and V.graph.sizevars.statically_known_equals(s, 1)):
+            new_shape.append(s)
+        if V.graph.sizevars.statically_known_equals(s, 1):
+            V.graph.sizevars.guard_equals(s, 1)
+
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
 
