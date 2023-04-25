@@ -424,6 +424,7 @@ class ExportPassBase(PassBase):
             )
 
         inputs = self.inputs(graph_module)
+
         fake_tensor_mode = None
         for i in inputs:
             if isinstance(i, FakeTensor):

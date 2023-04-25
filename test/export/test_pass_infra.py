@@ -92,6 +92,10 @@ class TestPassInfra(TestCase):
         class BackendNullPass(ExportPassBase):
             def get_valid_dialects(self) -> List[Type]:
                 return [torch.ops.DO_NOT_USE_TEST_ONLY]
+<<<<<<< HEAD
+=======
+
+>>>>>>> lint
         class BackendViolatePass(ExportPassBase):
             """
             Violates the dialect by inserting torch.ops.aten ops rather than
