@@ -31,25 +31,36 @@ import ctypes
 import hashlib
 import os.path
 import struct
-from typing import Optional
+from typing import Dict, Optional, Set
 
 import torch
 import torch._prims as prims
 import torch._utils
 import torch.nn.functional as F
+from torch._C import default_generator
 
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
-def hash_storage(storage, *, stable_hash=False):
+# Returns a hex digest of the data in the storage.  Guaranteed to be
+# SHA-1 if stable_hash=True, otherwise it will consistent for a single
+# process run but not necessarily across processes.
+def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
     # TODO: factor this into a helper
     import torch._dynamo
-    compile_supported = torch._dynamo.is_dynamo_supported()
-    if storage.device.type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
-        compile_supported = has_triton()
 
-    if stable_hash or compile_supported:
+    compile_supported = torch._dynamo.is_dynamo_supported()
+    device_type = storage.device.type
+    if device_type == "cpu":
+        pass
+    elif device_type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+
+        compile_supported = has_triton()
+    else:
+        compile_supported = False
+
+    if stable_hash or not compile_supported:
         cpu_storage = storage.cpu()
         # TODO: make storage support buffer protocol so this isn't
         # necessary
@@ -60,9 +71,10 @@ def hash_storage(storage, *, stable_hash=False):
         sha1.update(buf)
         return sha1.hexdigest()
 
-
     # Use of torch.compile is mandatory for (1) good memory usage
-    # and (2) xor_sum implementation
+    # and (2) xor_sum implementation.  This is our first instance of
+    # using PT2 to implement a kernel in PyTorch; if we get AOT capabilities
+    # it would be good to apply it here.
     @torch.compile(dynamic=True)
     def kernel(x):
         # The randint calls are carefully written to hit things we
@@ -88,11 +100,19 @@ def hash_storage(storage, *, stable_hash=False):
         # by the length of tensor as well
         return prims.xor_sum((a * x + b).int(), [0])
 
-    with torch.random.fork_rng(
-        [storage.device] if storage.device.type != "cpu" else []
-    ):
-        torch.manual_seed(0)  # this can be anything, just needs to be fixed
-        x = torch.empty(0, dtype=torch.uint8, device=storage.device).set_(storage)
+    # TODO: factor this into a random utility
+    if device_type == "cpu":
+        generator = default_generator
+    elif device_type == "cuda":
+        import torch.cuda
+
+        generator = torch.cuda.default_generators[storage.device.index]
+    else:
+        raise AssertionError(f"unhandled device type {device_type}")
+    state = generator.get_state()
+    try:
+        generator.manual_seed(0)
+        x = torch.empty(0, dtype=torch.uint8, device=storage.device).set_(storage)  # type: ignore[call-overload]
         # The dtype-casting view cannot be compiled, and so the
         # padding/reshaping also needs to be done externally even
         # though it could be profitably fused
@@ -106,6 +126,8 @@ def hash_storage(storage, *, stable_hash=False):
         ITER = 5
         cs = [kernel(x).item() for _ in range(ITER)]
         return struct.pack(">" + "i" * ITER, *cs).hex()
+    finally:
+        generator.set_state(state)
 
 
 class ContentStoreWriter:
@@ -115,24 +137,13 @@ class ContentStoreWriter:
     #       0000..00
     #   tensors/
     #     name
-    def __init__(self, loc, stable_hash=False):
-        self.loc = loc
-        self.seen_storage_hashes = set()
+    def __init__(self, loc: str, stable_hash: bool = False) -> None:
+        self.loc: str = loc
+        self.seen_storage_hashes: Set[str] = set()
         self.stable_hash = stable_hash
 
-    def write_storage(self, storage):
-        if self.stable_hash:
-            cpu_storage = storage.cpu()
-            # TODO: make storage support buffer protocol so this isn't
-            # necessary
-            buf = (ctypes.c_byte * cpu_storage.nbytes()).from_address(
-                cpu_storage.data_ptr()
-            )
-            sha1 = hashlib.sha1()
-            sha1.update(buf)
-            h = sha1.hexdigest()
-        else:
-            h = hash_storage(storage)
+    def write_storage(self, storage: torch.UntypedStorage) -> str:
+        h = hash_storage(storage, stable_hash=self.stable_hash)
         if h in self.seen_storage_hashes:
             return h
         # TODO: consider not using torch.save for this; we don't actually
@@ -143,7 +154,7 @@ class ContentStoreWriter:
         self.seen_storage_hashes.add(h)
         return h
 
-    def write_tensor(self, name, t):
+    def write_tensor(self, name: str, t: torch.Tensor) -> None:
         storage = t.untyped_storage()
         h = self.write_storage(storage)
         # TODO: Support more advanced snapshotting of requires_grad/grad/etc
@@ -161,11 +172,11 @@ class ContentStoreWriter:
 
 
 class ContentStoreReader:
-    def __init__(self, loc):
+    def __init__(self, loc: str) -> None:
         self.loc = loc
-        self.storage_cache = {}
+        self.storage_cache: Dict[str, StorageWeakRef] = {}
 
-    def read_storage(self, h):
+    def read_storage(self, h: str) -> torch.UntypedStorage:
         ws = self.storage_cache.get(h)
         s: Optional[torch.UntypedStorage]
         if ws is not None:
@@ -175,10 +186,11 @@ class ContentStoreReader:
         s = torch.load(
             os.path.join(self.loc, "storages", h), weights_only=True
         )._untyped_storage
+        assert s is not None
         self.storage_cache[h] = StorageWeakRef(s)
         return s
 
-    def read_tensor(self, name):
+    def read_tensor(self, name: str) -> torch.Tensor:
         dtype, h, storage_offset, size, stride, metadata = torch.load(
             os.path.join(self.loc, "tensors", name), weights_only=True
         )

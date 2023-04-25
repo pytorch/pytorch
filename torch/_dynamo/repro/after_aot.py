@@ -213,7 +213,7 @@ class InputReader:
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
         device = _device_or_default(device)
         dtype_hint = _dtype_or_default(dtype_hint)
-        if self.store is not None:
+        if self.store is not None and storage_hash is not None:
             try:
                 storage = self.store.read_storage(storage_hash)
             except FileNotFoundError:
@@ -282,7 +282,9 @@ class InputWriter:
     # Storages are untyped, but we need to initialize them with data if
     # we don't have the real data, so we give a hint saying what kind
     # of initialization may be appropriate
-    def storage(self, untyped_storage, *, dtype_hint=None) -> str:
+    #
+    # If we had a FakeTensor, device_hint tells us what device should be
+    def storage(self, untyped_storage, *, dtype_hint=None, device_hint=None) -> str:
         ws = StorageWeakRef(untyped_storage)
         v = self.seen_storages.get(ws)
         if v is not None:
@@ -294,11 +296,15 @@ class InputWriter:
         # TODO: being optional on device is kind of pointless as the default
         # is CPU but most repros we care about are CUDA
         maybe_device = ""
-        if _device_or_default(None) != untyped_storage.device:
-            maybe_device = f", device={untyped_storage.device!r}"
+        device = untyped_storage.device
+        if device.type == "meta":
+            assert device_hint is not None
+            device = device_hint
+        if _device_or_default(None) != device:
+            maybe_device = f", device={device!r}"
         nbytes = untyped_storage.nbytes()
         storage_hash = None
-        if self.store is not None:
+        if self.store is not None and untyped_storage.device.type != "meta":
             storage_hash = self.store.write_storage(untyped_storage)
         self.lines.append(
             f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
@@ -307,7 +313,7 @@ class InputWriter:
         return v
 
     def tensor(self, t) -> str:
-        storage = self.storage(t.untyped_storage(), dtype_hint=t.dtype)
+        storage = self.storage(t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device)
         maybe_stride = ""
         if _stride_or_default(None, shape=t.shape) != t.stride():
             maybe_stride = f", {tuple(t.stride())}"
@@ -507,7 +513,10 @@ env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
 minifier(
     mod,
     args,
-    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}", patch_code=isolate_fails_code_str, save_dir={subdir!r}),
+    module_fails=partial(
+        isolate_fails, env=env_variables, compiler_name="{compiler_name}",
+        patch_code=isolate_fails_code_str, save_dir={subdir!r}
+    ),
     dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
 )
         """
@@ -515,7 +524,9 @@ minifier(
     return helper_for_dump_minify(contents)
 
 
-def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None, save_dir=None):
+def isolate_fails(
+    fx_g, args, compiler_name: str, env=None, patch_code=None, save_dir=None
+):
     if env is None:
         env = {}
     subdir = os.path.join(os.getcwd(), "isolate")
