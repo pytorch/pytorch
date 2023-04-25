@@ -558,15 +558,19 @@ class LazyParentModule(LazyModuleMixin, torch.nn.Module):
         super().__init__()
 
     def impl(self, x):
-        return x.cos()
+        return x.cos() + self._val
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._val = torch.nn.Parameter(torch.ones(2, 2))
 
 
 class LazyChildModuleNoClsToBecome(LazyParentModule):
     def __init__(self):
         super().__init__()
 
-    def forward(self, input):
-        return super().impl(input.sin())
+    def forward(self, x):
+        return super().impl(x.sin())
 
 
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
@@ -1254,7 +1258,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_lazy_module_no_cls_to_become(self):
         # make sure super() works in the case where cls_to_become is None
         m = LazyChildModuleNoClsToBecome()
-        x = [torch.rand([5, 5])] * 3 + [None]
+        x = torch.rand(2, 2)
         opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
         res = opt_m(x)
         ref = m(x)
