@@ -5,7 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
-#include <ATen/native/MathBitFallThroughLists.h>
+#include <ATen/view/MathBitFallThroughLists.h>
 
 namespace at {
 
