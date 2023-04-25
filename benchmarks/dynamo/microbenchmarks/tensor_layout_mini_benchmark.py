@@ -22,6 +22,7 @@ def bench_conv(with_stack=True):
         "x_size": (256, 3, 224, 224),
         "w_size": (64, 3, 7, 7),
     }
+    # baseline 1.5337920188903809 test 2.5311999320983887 speedup 0.606x
     args = {
         "x_size": (32, 224, 112, 112),
         "w_size": (224, 112, 3, 3),
