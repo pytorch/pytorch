@@ -25,12 +25,12 @@
 @property (readwrite, nonatomic) NSUInteger groups;
 
 @end
+
 // TODO: Remove me when moved to MacOS 13
 #if !defined(__MAC_13_0) && \
     (!defined(MAC_OS_X_VERSION_13_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_13_0))
 
 @compatibility_alias MPSGraphConvolution3DOpDescriptor unsupported_MPSGraphConvolution3DOpDescriptor;
-
 
 #endif
 
@@ -48,8 +48,6 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
     MPSGraphResizeNearestRoundingModeRoundToEven       =  4L,
     MPSGraphResizeNearestRoundingModeRoundToOdd        =  5L,
 };
-
-
 
 - (MPSGraphTensor * _Nonnull) convolution3DWithSourceTensor:(MPSGraphTensor * _Nonnull) source
                                     weightsTensor:(MPSGraphTensor * _Nonnull) weights
