@@ -778,7 +778,7 @@ def export(
         nonlocal fake_mode, example_inputs, node_range_constraints
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
-        if fake_mode.shape_env is not None:
+        if fake_mode and fake_mode.shape_env:
             node_range_constraints = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
