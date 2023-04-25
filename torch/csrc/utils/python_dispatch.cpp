@@ -527,9 +527,9 @@ void initDispatchBindings(PyObject* module) {
     std::vector<c10::DispatchKey> keys;
     if (c10::isPerBackendFunctionalityKey(key)) {
       auto ks = c10::DispatchKeySet(key) |
-          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
-      for (c10::DispatchKey k : ks) {
-        keys.push_back(k);
+          DispatchKeySet(DispatchKeySet::RAW, c10::full_backend_mask);
+      for (auto iter = ks.begin(); iter != ks.end(); ++iter) {
+        keys.push_back(*iter);
       }
     } else {
       keys.push_back(key);
