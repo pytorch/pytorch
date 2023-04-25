@@ -509,10 +509,8 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (d in dims and V.graph.sizevars.statically_known_equals(s, 1)):
+        if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
             new_shape.append(s)
-        if V.graph.sizevars.statically_known_equals(s, 1):
-            V.graph.sizevars.guard_equals(s, 1)
 
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
