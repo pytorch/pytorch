@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
-
+import sys
+import unittest
 import torch
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -13,6 +14,19 @@ from unittest.mock import patch
 import functools
 import torch.utils.checkpoint
 
+
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+)
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "torch.compile not supported on windows"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("torch.compile not supported on windows")
 
 def count_philox_rand(gm, args, freq):
     assert [node.target for node in gm.graph.nodes].count(torch.ops.rngprims.philox_rand.default) == freq
