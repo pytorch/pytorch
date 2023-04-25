@@ -337,6 +337,9 @@ class _open_zipfile_writer_file(_opener):
         try:
             self.name.encode('ascii')
         except UnicodeEncodeError:
+            # PyTorchFileWriter only supports ascii filename.
+            # For filenames with non-ascii characters, we use a
+            # temporary buffer that is copied into the user file on exit.
             self.buffer = io.BytesIO()
             super().__init__(torch._C.PyTorchFileWriter(self.buffer))
         else:
