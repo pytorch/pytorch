@@ -37,6 +37,7 @@ To get started, simply move your Tensor and Module to the ``mps`` device:
         y = x * 2
 
         # Move your model to mps just like any other device
+        # NOTE: `YourFavoriteNet()` is placeholder name for user defined models
         model = YourFavoriteNet()
         model.to(mps_device)
 
