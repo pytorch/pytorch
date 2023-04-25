@@ -238,7 +238,7 @@ if torch._C.has_mkldnn:
             ):
                 matched = False
             else:  # inp is a Number
-                matched = True
+                matched = min_value <= max_value
             computation_args = list(args)
             if matched:
                 computation_args = computation_args[:-3] + [
