@@ -32,6 +32,7 @@ import weakref
 import torch
 import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
+import torch.ao.quantization._pt2e.qat_utils
 import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer
 
 from . import comptime, config, external_utils
@@ -123,6 +124,11 @@ FILENAME_ALLOWLIST |= {
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
+# Do trace through match and replace patterns used in PT2E QAT
+# Note: These patterns are comprised of torch ops and for internal use only.
+# They are exported to aten graphs before being passed to the FX subgraph rewriter.
+FILENAME_ALLOWLIST |= {torch.ao.quantization._pt2e.qat_utils.__file__}
+
 
 SKIP_DIRS_RE = None
 
@@ -173,8 +179,6 @@ def check(filename, allow_torch=False):
 
 # skip common third party libs
 for _name in (
-    "einops",
-    "einops_exts",
     "functorch",
     "fx2trt_oss",
     "intel_extension_for_pytorch",

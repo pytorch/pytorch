@@ -4,9 +4,12 @@ from torch.ao.quantization._pt2e.quantizer.quantizer import (
     QuantizationConfig,
     QuantizationSpec,
 )
+from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
     PlaceholderObserver,
 )
@@ -35,14 +38,21 @@ def get_act_obs_or_fq_ctr(quantization_config: QuantizationConfig):
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
     ]
-    if not quantization_spec.is_dynamic:
-        return create_observer(
-            HistogramObserver, quantization_spec, reduce_range=False, eps=2**-12
-        )
-    else:
+    if quantization_spec.is_dynamic:
         # TODO: extend this helper function to support dynamic quantization
         raise Exception(
             "Unsupported quantization_spec for activation: {}".format(quantization_spec)
+        )
+    if quantization_config.is_qat:
+        return create_observer(
+            FusedMovingAvgObsFakeQuantize,
+            quantization_spec,
+            reduce_range=False,
+            eps=2**-12,
+        )
+    else:  # ptq
+        return create_observer(
+            HistogramObserver, quantization_spec, reduce_range=False, eps=2**-12
         )
 
 
@@ -61,9 +71,16 @@ def get_weight_obs_or_fq_ctr(quantization_config: QuantizationConfig):
             f"Unsupported quantization_spec {quantization_spec} for weight"
         )
     observer_type = MinMaxObserver
-    if quantization_spec.qscheme == torch.per_channel_symmetric:
+    extra_args = {}
+    if quantization_config.is_qat:
+        observer_type = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
+        if quantization_spec.qscheme == torch.per_tensor_symmetric:
+            extra_args = {"observer": MovingAverageMinMaxObserver}
+        else:
+            extra_args = {"observer": MovingAveragePerChannelMinMaxObserver}
+    elif quantization_spec.qscheme == torch.per_channel_symmetric:
         observer_type = PerChannelMinMaxObserver  # type: ignore[assignment]
-    return create_observer(observer_type, quantization_spec, eps=2**-12)
+    return create_observer(observer_type, quantization_spec, eps=2**-12, **extra_args)
 
 
 def get_bias_obs_or_fq_ctr(quantization_config: QuantizationConfig):

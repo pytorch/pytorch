@@ -181,8 +181,8 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name == "resize_" and self.source is not None:
-            unimplemented("calling resize_() on graph input")
+        if name in ("resize_", "unsqueeze_") and self.source is not None:
+            unimplemented(f"calling {name}() on graph input")
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is

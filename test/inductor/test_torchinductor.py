@@ -1027,6 +1027,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_views5(self):
+        # tensor with shape 0 in any dimension
+        def forward(x):
+            y = x[:, 4:]
+            return y.view(len(y), -1, 4)
+
+        self.common(
+            forward,
+            (torch.randn(4, 4, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -4599,6 +4610,36 @@ class CommonTemplate:
 
         self.common(fn, [torch.zeros([20, 20])])
 
+    def test_like_rands2(self):
+        # rand_like with kwargs `device` of str type
+        d = self.device
+        assert isinstance(d, str)
+
+        @torch.compile
+        def fn(x):
+            return torch.rand_like(x, device=d)
+
+        x = torch.ones(10, device=self.device, dtype=torch.float32)
+        a0 = fn(x).clone()
+        a1 = fn(x).clone()
+        self.assertFalse(torch.allclose(a0, a1))
+
+    @requires_cuda()
+    def test_like_rands3(self):
+        # rand_like with `device` which is different from `x.device`
+        def test_like_rands_on_different_device(device1, device2):
+            @torch.compile
+            def fn(x, device):
+                return torch.rand_like(x, device=device)
+
+            x = torch.ones(10, device=device1, dtype=torch.float32)
+            return fn(x, device2).clone()
+
+        a0 = test_like_rands_on_different_device("cpu", "cuda")
+        a1 = test_like_rands_on_different_device("cuda", "cpu")
+        self.assertTrue(a0.device.type == "cuda")
+        self.assertTrue(a1.device.type == "cpu")
+
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -5751,6 +5792,52 @@ class CommonTemplate:
         self.assertEqual(get_data_type(bitwise_not), torch.int64)
         self.assertEqual(get_data_type(bitwise_or), torch.bool)
         self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
+
+    def test_AllenaiLongformerBase_repro(self):
+        def fn(query, scores, window_overlap):
+            batch_size, seq_len, num_heads, _ = query.size()
+            chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
+            diagonal_attention_scores = scores.new_zeros(
+                (
+                    batch_size * num_heads,
+                    chunks_count + 1,
+                    window_overlap,
+                    window_overlap * 2 + 1,
+                )
+            )
+            diagonal_attention_scores[:, :-1, :, window_overlap:] = scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
+            input_tensor = diagonal_attention_scores.view(
+                batch_size, num_heads, seq_len, 2 * window_overlap + 1
+            ).transpose(2, 1)
+            beginning_input = input_tensor[:, :window_overlap, :, : window_overlap + 1]
+            input_tensor[:, :window_overlap, :, : window_overlap + 1] = torch.full_like(
+                beginning_input, -float("inf")
+            )
+            return input_tensor
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                args = [
+                    ((4, 1024, 12, 64), (768, 3072, 64, 1), torch.float32, "cpu"),
+                    ((48, 3, 512, 513), (787968, 262656, 513, 1), torch.float32, "cpu"),
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(*args, 256), opt_fn(*args, 256))
+
+    def test_slice(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x, 2), opt_fn(x, 2))
 
 
 @dataclasses.dataclass
