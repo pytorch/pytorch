@@ -254,7 +254,7 @@ algorithms.
     lr_scheduler.OneCycleLR
     lr_scheduler.CosineAnnealingWarmRestarts
 
-randomstuf Weight Averaging
+Stochastic Weight Averaging
 ---------------------------
 
 :mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA). In particular,
