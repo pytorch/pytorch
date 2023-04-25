@@ -679,7 +679,7 @@ def export(
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
-    tracing_mode: str = "real",
+    tracing_mode: str = "symbolic",
     constraints: List[Constraint] = None,
     assume_static_by_default: bool = False,
     **kwargs,
@@ -718,7 +718,7 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None or tracing_mode != "real":
+    if decomposition_table is not None:
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
