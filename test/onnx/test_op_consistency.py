@@ -360,6 +360,12 @@ SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,
     ),
     fixme(
+        "tile",
+        matcher=lambda sample: any(dim == 0 for dim in sample.input.shape)
+        or not sample.input.shape,
+        reason="Logic not implemented for size 0 inputs in op.Reshape",
+    ),
+    fixme(
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
