@@ -45,7 +45,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, skipfiles, utils
-from .exc import ResetRequired
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -843,12 +843,16 @@ def export(
                 return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-                tracing_mode="real",
-                _allow_non_fake_inputs=True,
-            )(*example_fake_inputs)
+            try:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="real",
+                    _allow_non_fake_inputs=True,
+                )(*example_fake_inputs)
+            except CondOpArgsMismatchError as e:
+                # Wrap the internal error to the user-facing error
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
         graph,
