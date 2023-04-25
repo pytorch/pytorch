@@ -240,6 +240,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+        self.tracked_fakes_id_to_source = {}
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()

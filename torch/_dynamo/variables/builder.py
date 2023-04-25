@@ -1168,21 +1168,27 @@ def wrap_to_fake_tensor_and_record(
         # do a linear scan every time here
         t_id = id(e)
         dim2constraint = {}
+
+        def update_dim2constraint(dim, constraint_range):
+            if dim in dim2constraint:
+                from torch.fx.experimental.symbolic_shapes import (
+                    StrictMinMaxConstraint,
+                )
+
+                dim2constraint[dim] = StrictMinMaxConstraint(
+                    vr=constraint_range.vr & dim2constraint[dim].vr,
+                    warn_only=False,
+                )
+            else:
+                dim2constraint[dim] = constraint_range
+
         if tx.output.export_constraints:
             for constraint in tx.output.export_constraints:
                 if constraint.t_id == t_id:
-                    if constraint.dim in dim2constraint:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
+                    update_dim2constraint(constraint.dim, constraint.constraint_range)
+                if constraint.shared is not None and constraint.shared.t_id == t_id:
+                    update_dim2constraint(constraint.shared.dim, constraint.constraint_range)
 
-                        dim2constraint[constraint.dim] = StrictMinMaxConstraint(
-                            vr=constraint.constraint_range.vr
-                            & dim2constraint[constraint.dim].vr,
-                            warn_only=False,
-                        )
-                    else:
-                        dim2constraint[constraint.dim] = constraint.constraint_range
 
         dynamic_dims = None
         constraint_dims = None
@@ -1250,6 +1256,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+            tx.output.tracked_fakes_id_to_source[t_id] = source
         return fake_e
     else:
         return e

@@ -15,6 +15,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
+from torch._dynamo.source import TensorPropertySource, TensorProperty
 
 from torch._guards import (
     DuplicateInputs,
@@ -24,7 +25,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, SYMPY_INTERP, EqualityConstraint
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -472,10 +473,27 @@ class GuardBuilder(GuardBuilderBase):
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
         constraint_inputs = [a.constraint_dims for a in fs]
+
+        def get_source(t_id, dim):
+            source = output_graph.tracked_fakes_id_to_source[t_id]
+            return TensorPropertySource(source, TensorProperty.SIZE, dim)
+
+        equalities_inputs = EqualityConstraint(
+            source_pairs=[
+                (
+                    get_source(constraint.t_id, constraint.dim),
+                    get_source(constraint.shared.t_id, constraint.shared.dim),
+                )
+                for constraint in output_graph.export_constraints
+                if constraint.shared is not None
+            ],
+            warn_only=False
+        )
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
+            equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
             # Export keeps static.
             ignore_static=(not self.check_fn_manager.output_graph.export),

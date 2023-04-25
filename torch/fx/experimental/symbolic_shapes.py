@@ -523,6 +523,35 @@ class RelaxedUnspecConstraint(Constraint):
 # it wants (including fully specializing the value).
 DimConstraint = Union[StrictMinMaxConstraint, RelaxedUnspecConstraint, None]
 
+@dataclass(frozen=True)
+class EqualityConstraint(Constraint):
+    source_pairs: List[Tuple[Source, Source]]
+
+    def __post_init__(self):
+        object.__setattr__(self, "_parents", {})
+        for source1, source2 in self.source_pairs:
+            self._union(self._find(source1), self._find(source2))
+
+    def _find(self, source):
+        if source in self._parents:
+            return self._find(self._parents[source])
+        else:
+            return source
+
+    def _union(self, root1, root2):
+        if root1 != root2:
+            self._parents[root1] = root2
+
+    def render(self):
+        return " & ".join(
+            f"{source1.name()} == {source2.name()}"
+            for (source1, source2) in self.source_pairs
+        )
+
+    def is_equal(self, source1, source2):
+        return self._find(source1) == self._find(source2)
+
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -2020,6 +2049,7 @@ class ShapeEnv:
         # DimList[DimConstraint]).  Whenever Optional is accepted, that
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
+        equalities_inputs: Optional[Set[Tuple[Source, Source]]] = None,
         _simplified=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
@@ -2115,9 +2145,8 @@ class ShapeEnv:
         dynamic_sources = []
         constraint_violations : List[Tuple[Constraint, Callable[[], str]]] = []
 
-        def record_constraint_violation(constraint, msg_fn):
-            assert callable(msg_fn)
-            constraint_violations.append((constraint, msg_fn))
+        def record_constraint_violation(constraint, msg):
+            constraint_violations.append((constraint, lambda: msg))
 
         def is_dim(src):
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
@@ -2159,7 +2188,7 @@ class ShapeEnv:
                             else:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
-                        record_constraint_violation(constraint, lambda: (
+                        record_constraint_violation(constraint, (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
                             f"{s}.  {hint()}"
@@ -2170,7 +2199,7 @@ class ShapeEnv:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 if constraint is not None:
-                    record_constraint_violation(constraint, lambda: (
+                    record_constraint_violation(constraint, (
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
                         # TODO: fold this into TORCH_LOGS
@@ -2225,6 +2254,20 @@ class ShapeEnv:
 
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
+                if (
+                    isinstance(expr, sympy.Symbol) and
+                    expr in symbol_to_constraints and
+                    isinstance(source, TensorPropertySource)
+                    and source.prop is TensorProperty.SIZE
+                ):
+                    constraints = symbol_to_constraints[expr]
+                    constraint = constraints[0]
+                    if not equalities_inputs.is_equal(source, symbol_to_source[expr][0]):
+                        msg = (
+                            f"The equalities {equalities_inputs.render()} are not sufficient as "
+                            f"we need {source_ref(source)} == {sexpr}."
+                        )
+                        record_constraint_violation(constraint, msg)
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -2250,7 +2293,7 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            record_constraint_violation(c, lambda: (
+                            record_constraint_violation(c, (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "
                                 f"was allocated at:\n{tb}"
@@ -2286,15 +2329,12 @@ class ShapeEnv:
                         # applied the constraint when we allocated the symbol
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
-                        if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
-                            record_constraint_violation(c_vr, lambda: (
+                        if not (c_vr.lower <= r.lower and c_vr.upper >= r.upper):
+                            msg = (
                                 f"Could not validate constraint {c.render(sources[0])} as "
                                 f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
-                                "This is actually supposed to be impossible to "
-                                "trigger right now as we do not refine ranges; maybe you called "
-                                "constrain_range manually, or we forgot to update this error message? "
-                                "In any case, please file a bug report."
-                            ))
+                            )
+                            record_constraint_violation(c, msg)
 
                 assert sources
                 assert symbol.is_integer
