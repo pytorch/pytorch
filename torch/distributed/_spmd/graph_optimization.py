@@ -39,12 +39,12 @@ logger: logging.Logger = logging.getLogger("graph_optimization")
 aten = torch.ops.aten
 fake_tensor_mode = FakeTensorMode()
 
-_optimized_func: Set[Callable] = set()
+_optimized_func: Set[str] = set()
 # The key is the target pass and the value is the prerequisites of the pass.
 _prerequisite_sets: DefaultDict[Callable, Set[str]] = collections.defaultdict(set)
 # The key is the target pass and the value is the passes that must applied before
 # the key.
-_apply_before_sets: DefaultDict[Callable, Set[str]] = collections.defaultdict(set)
+_apply_before_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
 _dump_graph_folder: str = ""
 
 
@@ -113,8 +113,8 @@ def graph_optimization_pass(
                 not invalid_passes
             ), f"{invalid_passes} must be applied after {func_key}."
             assert _prerequisite_sets[func_key].issubset(_optimized_func), (
-                f"{_prerequisite_sets[func_key] - _optimized_func} are the prerequisites of "
-                f"{func_key} but are not applified. "
+                f"{_prerequisite_sets[func_key] - _optimized_func} are the "
+                f"prerequisites of {func_key} but are not applified. "
                 f"Applied passes are {_optimized_func}."
             )
 
@@ -138,7 +138,7 @@ def graph_optimization_pass(
                 else:
                     dump_graphs_to_files({prefix: gm}, _dump_graph_folder)
 
-            logger.info(f"Spent {time.time() - begin} seconds applying {func_key}")
+            logger.info(f"Spent %f seconds applying %s", time.time() - begin, func_key)
 
         return pass_wrapper
 
