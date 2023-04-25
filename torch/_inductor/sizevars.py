@@ -248,12 +248,16 @@ class SizeVarAllocator:
     def is_expr_static_and_true(self, expr: Union[Expr, int]) -> bool:
         if expr in (True, False):
             return expr
-        
-        simplified = self.shape_env._maybe_evaluate_static(expr)
-        if simplified is not None:
-            return bool(simplified)
+
+        try:
+            simplified = self.shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+
         return False
-    
+
     def statically_known_equals(self, left: Expr, right: Expr) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
