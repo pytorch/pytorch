@@ -3115,10 +3115,10 @@ class FallbackKernel(ExternKernelAlloc):
 
         def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
-                return [
+                return type(output)(
                     generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
-                ]
+                )
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
                     FixedLayout(
