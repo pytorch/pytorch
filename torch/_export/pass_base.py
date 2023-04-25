@@ -151,86 +151,6 @@ class ExportTracer(PythonKeyTracer):
         node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
 
-class ExportInterpreter(fx.Interpreter):
-    """
-    Interpreter to callback on any ExportPassBase functions
-    """
-    def __init__(self, callback: "ExportPassBase", gm: fx.GraphModule) -> None:
-        super().__init__(gm)
-        self.callback = callback
-        self.node: torch.fx.Node = next(iter(gm.graph.nodes))
-
-    def placeholder(
-        self,
-        target: str,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-    ) -> ProxyValue:
-        arg = super().placeholder(target, args, kwargs)
-        return self.callback.placeholder(target, arg, NodeMetadata(self.node.meta))
-
-    def output(
-        self,
-        target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-    ) -> ProxyValue:
-        return self.callback.output(args[0], NodeMetadata(self.node.meta)).data
-
-    def call_function(
-        self,
-        target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-    ) -> ProxyValue:
-        meta = NodeMetadata(self.node.meta)
-
-        if target == operator.getitem:
-            value, key = args
-            return self.callback.call_getitem(value, key, meta)
-        elif getattr(target, "__module__", None) == "_operator":
-            assert callable(target)
-            return self.callback.call_sym(target, args, meta)
-        elif isinstance(target, torch._ops.OpOverload):
-            return self.callback.call_operator(
-                target,
-                args,
-                kwargs,
-                meta,
-            )
-        elif target == control_flow.cond:
-            pred, true_fn, false_fn, inputs = args
-            return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-        elif target == control_flow.map:
-            f, x, *args = args  # type: ignore[assignment]
-            return self.callback.call_map(f, x, args, meta)
-        else:
-            raise ExportPassBaseError(f"Unsupported target type: {target}")
-
-    def get_attr(
-        self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
-    ) -> Argument:
-        return super().get_attr(target, args, kwargs)
-
-    def call_module(
-        self,
-        target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-    ) -> None:
-        raise ExportPassBaseError("call_module is not supported.")
-
-    def call_method(
-        self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
-    ) -> None:
-        raise ExportPassBaseError("call_method is not supported.")
-
-    def run_node(self, n: torch.fx.Node) -> Argument:
-        self.node = n
-        self.callback.node_debug_str = n.format_node()
-        return super().run_node(n)
-
-
 class ExportPassBase(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
@@ -244,6 +164,89 @@ class ExportPassBase(PassBase):
         any dialect.
         """
         return []
+
+    class ExportInterpreter(fx.Interpreter):
+        """
+        Interpreter to callback on any ExportPassBase functions
+        """
+        def __init__(self, callback: "ExportPassBase", gm: fx.GraphModule) -> None:
+            super().__init__(gm)
+            self.callback = callback
+            self.node: torch.fx.Node = next(iter(gm.graph.nodes))
+
+        def placeholder(
+            self,
+            target: str,
+            args: Tuple[Argument, ...],
+            kwargs: Dict[str, Argument],
+        ) -> ProxyValue:
+            arg = super().placeholder(target, args, kwargs)
+            return self.callback.placeholder(target, arg, NodeMetadata(self.node.meta))
+
+        def output(
+            self,
+            target: torch.fx.node.Target,
+            args: Tuple[Argument, ...],
+            kwargs: Dict[str, Argument],
+        ) -> ProxyValue:
+            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data
+
+        def call_function(
+            self,
+            target: torch.fx.node.Target,
+            args: Tuple[Argument, ...],
+            kwargs: Dict[str, Argument],
+        ) -> ProxyValue:
+            meta = NodeMetadata(self.node.meta)
+
+            if target == operator.getitem:
+                value, key = args
+                return self.callback.call_getitem(value, key, meta)
+            elif getattr(target, "__module__", None) == "_operator":
+                assert callable(target)
+                return self.callback.call_sym(target, args, meta)
+            elif isinstance(target, torch._ops.OpOverload):
+                return self.callback.call_operator(
+                    target,
+                    args,
+                    kwargs,
+                    meta,
+                )
+            elif target == control_flow.cond:
+                pred, true_fn, false_fn, inputs = args
+                return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
+            elif target == control_flow.map:
+                f, x, *args = args  # type: ignore[assignment]
+                return self.callback.call_map(f, x, args, meta)
+            else:
+                raise ExportPassBaseError(f"Unsupported target type: {target}")
+
+        def get_attr(
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+        ) -> Argument:
+            return super().get_attr(target, args, kwargs)
+
+        def call_module(
+            self,
+            target: torch.fx.node.Target,
+            args: Tuple[Argument, ...],
+            kwargs: Dict[str, Argument],
+        ) -> None:
+            raise ExportPassBaseError("call_module is not supported.")
+
+        def call_method(
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+        ) -> None:
+            raise ExportPassBaseError("call_method is not supported.")
+
+        def run_node(self, n: torch.fx.Node) -> Argument:
+            self.node = n
+            self.callback.node_debug_str = n.format_node()
+            return super().run_node(n)
+
+    def __init_subclass__(cls, **kwargs):
+        if hasattr(cls, "ExportInterpreter"):
+            ExportPassBase.ExportInterpreter = cls.ExportInterpreter  # type: ignore[misc]
 
     def __init__(self) -> None:
         self.interpreter = torch.fx.Interpreter(
@@ -400,7 +403,7 @@ class ExportPassBase(PassBase):
             self, graph_module.graph._codegen
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
-        interpreter = ExportInterpreter(self, graph_module)
+        interpreter = ExportPassBase.ExportInterpreter(self, graph_module)
         prev_interpreter, self.interpreter = self.interpreter, super(type(interpreter), interpreter)
         inputs_data = pytree.tree_map_only(ProxyValue, lambda x: x.data, inputs)
         with fx_traceback.preserve_node_meta():
