@@ -158,6 +158,15 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten.randperm.default)
+def meta_randperm_default(
+    n, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
+    return torch.empty(
+        n, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 @register_meta(aten.randint.default)
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
