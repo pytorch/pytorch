@@ -253,10 +253,13 @@ class FakeTensorConverter:
         source=None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
+        memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
+        if memoized_only:
+            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -325,6 +328,7 @@ class FakeTensorConverter:
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
+        memoized_only=False,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -335,6 +339,7 @@ class FakeTensorConverter:
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
+            memoized_only=memoized_only,
         )
 
 
@@ -395,6 +400,32 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     return fake_mode.fake_tensor_converter.from_meta_and_device(
         fake_mode, r, out_device
     )
+
+
+# Many of these operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration.
+# TODO: fix registrations, add all existing impls that are correct
+def unsupported_complex_op(op):
+    if op.namespace not in ("aten", "prims"):
+        return False
+    if op is aten._fft_c2c.default:
+        return False
+
+    op_name = op.name()
+    if "fft" in op_name:
+        return True
+    if "_linalg_svd" in op_name:
+        return True
+    if op is torch.ops.prims.svd.default:
+        return True
+    return False
+
+
+# These operators mutate striding in place and output conj depending on input
+# that is not reflected in meta registration
+@register_op_impl(unsupported_complex_op)
+def unsupported_fft(fake_mode, func, *args, **kwargs):
+    raise UnsupportedOperatorException(func)
 
 
 # Dont default to default device handling,
@@ -1243,7 +1274,12 @@ class FakeTensorMode(TorchDispatchMode):
         # and ensure that Meta kernels are dispatched to (see)
         # Fake Tensor Dispatch Keys
         # TODO - we should be use the prim aten impl
-        if "prims::" in func._schema.name and hasattr(func, "prim_meta_impl"):
+        # TODO - fix prims complex ops
+        if (
+            "prims::" in func._schema.name
+            and hasattr(func, "prim_meta_impl")
+            and not unsupported_complex_op(func)
+        ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
@@ -1424,6 +1460,9 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
+        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
+        # seen before.
+        memoized_only=False,
     ):
         shape_env = self.shape_env
         if static_shapes:
@@ -1439,6 +1478,7 @@ class FakeTensorMode(TorchDispatchMode):
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
+            memoized_only=memoized_only,
         )
 
 

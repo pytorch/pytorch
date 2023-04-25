@@ -25,7 +25,7 @@ from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
-from .cuda_properties import get_device_capability
+from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +85,16 @@ def has_torchvision_roi_align():
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def decode_device(device):
+    if device is None:
+        return torch.tensor(0.0).device  # default device
+    if isinstance(device, str):
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=current_device())
+    return device
 
 
 def sympy_product(it):
@@ -1050,3 +1060,38 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         parse_profile_event_list(
             benchmark_name, event_list, wall_time_ms, times * repeat
         )
+
+
+def triton_config_to_hashable(cfg):
+    """
+    Convert triton config to a tuple that can uniquely identify it. We can use
+    the return value as a dictionary key.
+    """
+    items = sorted(cfg.kwargs.items())
+    items.append(("num_warps", cfg.num_warps))
+    items.append(("num_stages", cfg.num_stages))
+    return tuple(items)
+
+def to_contiguous(t):
+    """
+    A contigous tensor with size
+        torch.Size([128, 64, 1, 1])
+    stride
+        (64, 1, 64, 64)
+
+    will be confused by aten.convolution_backward as a channels last tensor.
+    And the output of the op will also be channels last rather than contiguous.
+    Normalize the stride to (64, 1, 1, 1) in this case.
+    """
+    t = t.contiguous()
+    strides = list(t.stride())
+    sizes = list(t.size())
+    nchange = 0
+    for i in range(len(strides)):
+        if sizes[i] == 1 and strides[i] != 1:
+            strides[i] = 1
+            nchange += 1
+    if nchange > 0:
+        t = t.as_strided(sizes, strides)
+
+    return t

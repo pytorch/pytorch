@@ -476,6 +476,14 @@ class WrapperCodeGen(CodeGen):
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
+        # force all inputs to be contiguous
+        if config.force_contiguous_inputs:
+            code.writeline("from torch._inductor.utils import to_contiguous")
+            for name, value in graph_inputs_tensors:
+                code.writeline(
+                    f"{name} = to_contiguous({name}){self.ending}"
+            )
+
     def codegen_precomputed_sizes(self, code: IndentedBuffer):
         for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
             code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")

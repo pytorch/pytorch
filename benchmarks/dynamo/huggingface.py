@@ -114,9 +114,9 @@ BATCH_SIZE_DIVISORS = {
     "BlenderbotSmallForCausalLM": 4,
     "BlenderbotSmallForConditionalGeneration": 2,
     "CamemBert": 2,
-    "DebertaForMaskedLM": 8,
-    "DebertaForQuestionAnswering": 4,
-    "DebertaV2ForMaskedLM": 8,
+    "DebertaForMaskedLM": 4,
+    "DebertaForQuestionAnswering": 2,
+    "DebertaV2ForMaskedLM": 4,
     "DebertaV2ForQuestionAnswering": 4,
     "DistilBertForMaskedLM": 2,
     "DistilBertForQuestionAnswering": 2,
@@ -137,7 +137,7 @@ BATCH_SIZE_DIVISORS = {
     "MT5ForConditionalGeneration": 2,
     "MegatronBertForCausalLM": 4,
     "MegatronBertForQuestionAnswering": 2,
-    "MobileBertForMaskedLM": 4,
+    "MobileBertForMaskedLM": 2,
     "MobileBertForQuestionAnswering": 2,
     "OPTForCausalLM": 2,
     "PLBartForCausalLM": 2,
@@ -221,13 +221,16 @@ def generate_inputs_for_model(
     vocab_size = model.config.vocab_size
     if model_name.endswith("MultipleChoice"):
         input = rand_int_tensor(device, 0, vocab_size, (bs, num_choices, seq_length))
-        torch._dynamo.mark_dynamic(input, 2)
+        if seq_length > 1:
+            torch._dynamo.mark_dynamic(input, 2)
     elif model_name.startswith("Roberta"):
         input = rand_int_tensor(device, 0, 1, (bs, seq_length))
-        torch._dynamo.mark_dynamic(input, 1)
+        if seq_length > 1:
+            torch._dynamo.mark_dynamic(input, 1)
     else:
         input = rand_int_tensor(device, 0, vocab_size, (bs, seq_length))
-        torch._dynamo.mark_dynamic(input, 1)
+        if seq_length > 1:
+            torch._dynamo.mark_dynamic(input, 1)
 
     if "Bart" in model_name:
         input[:, -1] = model.config.eos_token_id

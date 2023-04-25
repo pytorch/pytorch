@@ -22,7 +22,7 @@ dce = False
 static_weight_shapes = True
 
 # put correctness assertions in generated code
-size_asserts = True
+size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -42,6 +42,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# Optimize away split cat patterns (Experimental)
+split_cat_fx_passes = True
+
 # enable reordering pass
 reordering = False
 
@@ -60,7 +63,12 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
+coordinate_descent_tuning = (
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
+)
+
 layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
+force_contiguous_inputs = os.environ.get("TORCHINDUCTOR_FORCE_CONTIGUOUS_INPUTS", "0") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have
@@ -250,7 +258,9 @@ class triton:
     descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = True
+    persistent_reductions = (
+        os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
+    )
 
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
@@ -261,6 +271,13 @@ class triton:
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
+
+    # the max number of spills we allow for the configs we benchmark.
+    # Setting this to 0 means we skip a config if it spills even a single
+    # register.
+    # Settting it to a larger value allows a config spilling a small amount
+    # of registers being benchmarked.
+    spill_threshold = 0
 
 
 # create a directory containing lots of debug information

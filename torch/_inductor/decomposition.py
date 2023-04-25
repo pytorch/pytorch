@@ -5,6 +5,7 @@ import numbers
 
 import torch
 import torch._decomp as decomp
+import torch.ao.quantization.fx._decomposed
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
@@ -15,6 +16,7 @@ from . import config, utils
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
@@ -439,6 +441,64 @@ def native_dropout(input: Tensor, p: float, train: bool):
         return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
     # intentionally don't decompose to improve pattern matching
     return NotImplemented
+
+
+# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.quantize_per_tensor.default)
+def quantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.default)
+def dequantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition(quantized_decomposed.quantize_per_tensor.tensor)
+def quantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.tensor)
+def dequantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
 
 
 """
