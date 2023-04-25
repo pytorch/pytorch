@@ -638,6 +638,7 @@ class ConstraintTarget:
     t_id: int
     dim: int
 
+
 @dataclasses.dataclass
 class Constraint(ConstraintTarget):
     """
@@ -655,7 +656,9 @@ class Constraint(ConstraintTarget):
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range, self.shared)
+        return Constraint(
+            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
+        )
 
     def __ge__(self, lower):
         return self._clone_with_range(lower=lower)
@@ -690,7 +693,7 @@ class Constraint(ConstraintTarget):
             self.t_id,
             self.dim,
             constraint_range,
-            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim)
+            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim),
         )
 
 

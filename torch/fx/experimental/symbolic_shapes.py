@@ -2259,16 +2259,16 @@ class ShapeEnv:
                     expr in symbol_to_constraints and
                     isinstance(source, TensorPropertySource)
                     and source.prop is TensorProperty.SIZE
+                    and equalities_inputs and
+                    not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
                 ):
                     constraints = symbol_to_constraints[expr]
                     constraint = constraints[0]
-                    assert equalities_inputs
-                    if not equalities_inputs.is_equal(source, symbol_to_source[expr][0]):
-                        msg = (
-                            f"The equalities {equalities_inputs.render()} are not sufficient as "
-                            f"we need {source_ref(source)} == {sexpr}."
-                        )
-                        record_constraint_violation(constraint, msg)
+                    msg = (
+                        f"The equalities {equalities_inputs.render()} are not sufficient as "
+                        f"we need {source_ref(source)} == {sexpr}."
+                    )
+                    record_constraint_violation(constraint, msg)
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only

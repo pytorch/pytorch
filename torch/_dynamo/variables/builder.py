@@ -1171,9 +1171,7 @@ def wrap_to_fake_tensor_and_record(
 
         def update_dim2constraint(dim, constraint_range):
             if dim in dim2constraint:
-                from torch.fx.experimental.symbolic_shapes import (
-                    StrictMinMaxConstraint,
-                )
+                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
                 dim2constraint[dim] = StrictMinMaxConstraint(
                     vr=constraint_range.vr & dim2constraint[dim].vr,
@@ -1187,7 +1185,9 @@ def wrap_to_fake_tensor_and_record(
                 if constraint.t_id == t_id:
                     update_dim2constraint(constraint.dim, constraint.constraint_range)
                 if constraint.shared is not None and constraint.shared.t_id == t_id:
-                    update_dim2constraint(constraint.shared.dim, constraint.constraint_range)
+                    update_dim2constraint(
+                        constraint.shared.dim, constraint.constraint_range
+                    )
 
 
         dynamic_dims = None

@@ -15,7 +15,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
-from torch._dynamo.source import TensorPropertySource, TensorProperty
+from torch._dynamo.source import TensorProperty, TensorPropertySource
 
 from torch._guards import (
     DuplicateInputs,
@@ -25,7 +25,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, SYMPY_INTERP, EqualityConstraint
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_concrete_int,
+    SYMPY_INTERP,
+)
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -488,7 +492,7 @@ class GuardBuilder(GuardBuilderBase):
                     for constraint in output_graph.export_constraints
                     if constraint.shared is not None
                 ],
-                warn_only=False
+                warn_only=False,
             )
         else:
             equalities_inputs = None
