@@ -51,7 +51,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
     fwd_device_ids = list({arg.get_device() for arg in args
-                        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
+                          if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
     device_types = list({arg.device.type for arg in args
                         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
     if len(device_types) > 1:
