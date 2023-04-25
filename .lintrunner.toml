@@ -5,6 +5,7 @@ code = 'FLAKE8'
 include_patterns = ['**/*.py']
 exclude_patterns = [
     '.git/**',
+    'torch/_subclasses/schema_check_mode.py',
     'build_test_custom_build/**',
     'build/**',
     'caffe2/**',
