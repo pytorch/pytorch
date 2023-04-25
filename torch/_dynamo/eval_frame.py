@@ -764,6 +764,7 @@ def export(
 
     fake_mode = None
     example_inputs = []
+    node_range_constraints = {}
 
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, inner_example_inputs
@@ -774,10 +775,11 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal fake_mode, example_inputs
+        nonlocal fake_mode, example_inputs, node_range_constraints
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
-        graph.meta["node_range_constraints"] = fake_mode.shape_env.var_to_range
+        if fake_mode.shape_env is not None:
+            node_range_constraints = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -815,8 +817,6 @@ def export(
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
-
-    node_range_constraints = graph.meta["node_range_constraints"]
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
