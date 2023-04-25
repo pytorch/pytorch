@@ -539,6 +539,8 @@ def _fused_adam(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
+    if not params:
+        return
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
