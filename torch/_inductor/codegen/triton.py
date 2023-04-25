@@ -1188,9 +1188,8 @@ class TritonKernel(Kernel):
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
-            default_value = f" + {default}" if default != 0 else ""
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
+                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_compute_type(src_dtype)})"
             )
 
             if reduction_type in {"argmax", "argmin"}:
@@ -1202,7 +1201,7 @@ class TritonKernel(Kernel):
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
 
                 self.compute.splice(
-                    f"""
+                    f"""\
                 {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
                     {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
                 )
