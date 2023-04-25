@@ -11,6 +11,7 @@ import torch.nn as nn
 
 import torch.utils._pytree as pytree
 
+import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 
 from torch.distributed._tensor._utils import compute_local_shape
@@ -283,8 +284,20 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     """
     util function to generate a partial strategy
     """
+    if mesh.device_type == "cuda":
+        # ONLY DeviceMesh CUDA (NCCL backend) by default supports
+        # average reduction, avg reduction is needed depending on
+        # the loss function, for most loss function it should do
+        # gradient averaging. There might be certain cases it should
+        # not do gradient averaging (i.e. sum) but it's pretty rare.
+        reduce_op = c10d.ReduceOp.AVG
+    else:
+        # TODO: we should figure out a way to support avg reduction
+        # for non-NCCL backend (i.e. Gloo)
+        reduce_op = c10d.ReduceOp.SUM
+
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial()]),
+        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial(reduce_op)]),
     )
 
 
