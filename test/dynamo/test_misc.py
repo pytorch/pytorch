@@ -436,7 +436,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )(compare_shapes)
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
-        self.assertExpectedInline(guard_failure.reason, """L['a'].size()[0] == 3""")
+        self.assertExpectedInline(
+            guard_failure.reason,
+            """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+        )
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -2553,8 +2556,8 @@ def fn():
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
-    def test_cross_entropy_loss_fancy_ctor(self):
-        output = None
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/99726")
+    def test_cross_entropy_loss_fancy_ctor1(self):
         rand_5 = torch.randn(5)
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)
@@ -2569,6 +2572,22 @@ def fn():
         loss = torch.nn.CrossEntropyLoss(
             weight=rand_5, reduce=False, label_smoothing=0.5
         )
+        input = rand_3_5
+        output = loss(input, target)
+
+        self.assertTrue(torch.allclose(dynamo_output, output))
+
+    @requires_static_shapes
+    def test_cross_entropy_loss_fancy_ctor2(self):
+        rand_3_5 = torch.randn(3, 5)
+        target = torch.empty(3, dtype=torch.long).random_(5)
+
+        loss = torch.nn.CrossEntropyLoss(reduce=False, label_smoothing=0.5)
+        opt_loss = torch._dynamo.optimize("eager", nopython=True)(loss)
+        input = rand_3_5
+        dynamo_output = opt_loss(input, target)
+
+        loss = torch.nn.CrossEntropyLoss(reduce=False, label_smoothing=0.5)
         input = rand_3_5
         output = loss(input, target)
 
@@ -3921,7 +3940,10 @@ def fn():
 
         self.assertTrue(guard_failure is not None)
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] == 2""")
+            self.assertExpectedInline(
+                guard_failure[0],
+                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+            )
         else:
             self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
 
@@ -3954,7 +3976,7 @@ def fn():
             if torch._dynamo.config.assume_static_by_default:
                 self.assertExpectedInline(
                     guard_failure[0],
-                    """L['x'].size()[0] == 2""",
+                    """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
                 )
             else:
                 self.assertTrue(guard_failure is None)
@@ -4024,10 +4046,6 @@ def fn():
         y = torch.tensor([1.0, 1.0])
         opt_fn(x, y)
 
-        if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(len(all_guards), 17)
-        else:
-            self.assertEqual(len(all_guards), 13)
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")

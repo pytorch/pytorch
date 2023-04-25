@@ -1133,6 +1133,7 @@ SUPPORTED_RETURN_TYPES = {
     "double",
     "at::IntArrayRef",
     "at::ScalarType",
+    "at::Stream",
 }
 
 
