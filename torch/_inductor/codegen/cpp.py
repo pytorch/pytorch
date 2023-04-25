@@ -16,6 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
+from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
@@ -74,6 +75,7 @@ INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
     "sum": "+",
+    "prod": "*",
     "min": "min",
     "max": "max",
     "argmin": "argmin",
@@ -89,6 +91,8 @@ def reduction_init(reduction_type, dtype):
         dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
+    if reduction_type == "prod":
+        return 1
     if reduction_type in {"max", "argmax"}:
         return (
             f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
@@ -107,6 +111,8 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "prod":
+        return f"{var} *= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
@@ -119,6 +125,8 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} = at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
         return f"{var} += {next_value}"
+    elif reduction_type == "prod":
+        return f"{var} *= {next_value}"
     else:
         raise NotImplementedError()
 
@@ -1246,7 +1254,7 @@ class CppVecKernel(CppKernel):
                 assert opt_ctx.is_bf16_mem_copy
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
         elif (V.graph.get_dtype(name) in [torch.uint8]) and (
-            opt_ctx.is_store_fp32_as_uint8
+            opt_ctx.is_store_float_as_uint8
         ):
             # TODO(Leslie): Optimize the implementation of store_float_as_uint8
             # * Pattern match of quantization op in the loop body.
@@ -1270,7 +1278,7 @@ class CppVecKernel(CppKernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum"}
+        assert reduction_type in {"max", "min", "sum", "prod"}
         assert dtype == torch.float
         assert src_dtype == torch.float
         reduce_map = {"max": "maximum", "min": "minimum"}
@@ -1283,6 +1291,8 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
             if reduction_type == "sum":
                 vec_reduc_prefix += "omp_out += omp_in"
+            elif reduction_type == "prod":
+                vec_reduc_prefix += "omp_out *= omp_in"
             else:
                 vec_reduc_prefix += (
                     f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
@@ -1317,6 +1327,8 @@ class CppVecKernel(CppKernel):
             reduce_all_body = "{"
             if reduction_type == "sum":
                 reduce_all_body += "return x + y;"
+            elif reduction_type == "prod":
+                reduce_all_body += "return x * y;"
             else:
                 reduce_all_body += (
                     f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
@@ -1635,6 +1647,17 @@ class CppVecKernelChecker(CppVecKernel):
 
         return False
 
+    def is_load_integer_scalar_tensor(self, name: str, index: sympy.Expr):
+        load_dtype = V.graph.get_dtype(name)
+        buffer = V.graph.get_buffer(name)
+        return (
+            load_dtype in [torch.int32, torch.int64]
+            and isinstance(buffer, TensorBox)
+            and isinstance(buffer.data, StorageBox)
+            and (len(buffer.data.layout.size) == 0)
+            and (index == 0)
+        )
+
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
             load_dtype = V.graph.get_dtype(name)
@@ -1657,7 +1680,9 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"{load_dtype} not loaded as float")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes:
+            if (
+                load_dtype not in self.load_supported_dtypes
+            ) and not self.is_load_integer_scalar_tensor(name, index):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -1698,10 +1723,10 @@ class CppVecKernelChecker(CppVecKernel):
                     return self.simd_vec
             elif store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_uint8 = self.can_store_fp32_as_uint8(
+                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
                     name, value_node
                 )
-                if not opt_ctx.is_store_fp32_as_uint8:
+                if not opt_ctx.is_store_float_as_uint8:
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -1720,7 +1745,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum"]
+            and reduction_type in ["max", "min", "sum", "prod"]
         ):
             pass
         else:
@@ -1787,7 +1812,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
-                    if not (name in self.fast_vec_list):
+                    if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
                     return self.simd_vec
 
@@ -1959,6 +1984,18 @@ class CppVecKernelChecker(CppVecKernel):
                                 opt_ctx.is_load_uint8_as_float = True
                             elif dtype == torch.float:
                                 pass
+                            elif (
+                                dtype in [torch.int32, torch.int64]
+                                and input_value.target == "load"
+                            ):
+                                buffer = V.graph.get_buffer(input_value.args[1])
+                                # Check if load of a scalar tensor of integer
+                                if not (
+                                    isinstance(buffer, TensorBox)
+                                    and isinstance(buffer.data, StorageBox)
+                                    and len(buffer.data.layout.size) == 0
+                                ):
+                                    self.disable_vec(f"to_dtype: dtype {dtype}")
                             else:
                                 self.disable_vec(f"to_dtype: dtype {dtype}")
                     elif dtype == torch.bfloat16:
