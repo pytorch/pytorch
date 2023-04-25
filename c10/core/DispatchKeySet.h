@@ -856,7 +856,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
     case BackendComponent::CUDABit:
       return autocast_cuda_ks;
     case BackendComponent::XLABit:
-      return autocast_xla_ks; 
+      return autocast_xla_ks;
     case BackendComponent::PrivateUse1Bit:
       return autocast_privateuse1_ks;
     default:
