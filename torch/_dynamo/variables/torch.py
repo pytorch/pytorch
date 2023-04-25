@@ -472,16 +472,10 @@ class TorchVariable(VariableTracker):
                 tx, [args[0], result], {}
             )
         else:
-            any_symints_or_symfloats = any(
-                [isinstance(x, SymNodeVariable) for x in args]
-            )
+            any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
-                [
-                    isinstance(
-                        x, (variables.ConstantVariable, variables.SymNodeVariable)
-                    )
-                    for x in args
-                ]
+                isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
+                for x in args
             )
             bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
@@ -571,7 +565,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
             fn_ = self.value
-            if any([isinstance(x, SymNodeVariable) for x in args]):
+            if any(isinstance(x, SymNodeVariable) for x in args):
                 if self.value == math.sqrt:
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
@@ -852,6 +846,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         f"at {code.co_filename}:{code.co_firstlineno} because "
                         f"it closes over variables {closure_vars}. Please rewrite "
                         f"'{code.co_name}' to take {closure_vars} as additional args.",
+                        ref_case_id=26,
                     )
 
             # Setup the subgraph we're going to capture into
