@@ -542,6 +542,44 @@ def unsafe_chunk(g: jit_utils.GraphContext, self, chunks, dim, _outputs=None):
 @_onnx_symbolic("aten::tile")
 @_beartype.beartype
 def tile(g: jit_utils.GraphContext, self, dims):
+    self_shape = g.op("Shape", self)
+    self_rank = g.op("Size", self_shape)
+    dims_rank = g.op("Size", dims)
+    diff = g.op("Sub", self_rank, dims_rank)
+
+    cond_greater = g.op("Greater", diff, g.op("Constant", value_t=torch.tensor([0])))
+    if_op_greater, (if_context_greater,), _ = jit_utils.add_op_with_blocks(
+        g, "If", cond_greater, n_blocks=1
+    )
+    # dims is shorter than self.shape
+    # pad dims with 1
+    diff_1d = if_context_greater.op(
+        "Reshape", diff, if_context_greater.op("Constant", value_t=torch.tensor([1]))
+    )
+    exapnd_ones = if_context_greater.op(
+        "Expand", if_context_greater.op("Constant", value_t=torch.tensor([1])), diff_1d
+    )
+    dims = if_context_greater.op("Concat", exapnd_ones, dims, axis_i=0)
+    utils._add_output_to_block(if_context_greater.block, dims)
+
+    cond_lesser = g.op("Lesser", diff, g.op("Constant", value_t=torch.tensor([0])))
+    if_op_lesser, (if_context_lesser,), _ = jit_utils.add_op_with_blocks(
+        g, "If", cond_lesser, n_blocks=1
+    )
+    # dims is longer than self.shape
+    # pad self.shape with 1
+    diff_1d = if_context_lesser.op(
+        "Reshape",
+        if_context_lesser.op("Abs", diff),
+        if_context_lesser.op("Constant", value_t=torch.tensor([1])),
+    )
+    exapnd_ones = if_context_lesser.op(
+        "Expand", if_context_lesser.op("Constant", value_t=torch.tensor([1])), diff_1d
+    )
+    self_final_shape = if_context_lesser.op("Concat", exapnd_ones, self_shape, axis_i=0)
+    self = if_context_lesser.op("Reshape", self, self_final_shape)
+    utils._add_output_to_block(if_context_lesser.block, self)
+
     return g.op("Tile", self, dims)
 
 
