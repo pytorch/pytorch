@@ -128,7 +128,7 @@ def contract(state_cls: Type[_State] = _State):
                 f"nn.Module, but got {type(updated)}"
             )
 
-            def check_fqn(orig_fqns: List[str], new_fqns: List[str]):
+            def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
                 if orig_fqns == new_fqns:
                     return
 
@@ -137,6 +137,7 @@ def contract(state_cls: Type[_State] = _State):
                 new_only = new_fqn_set - orig_fqn_set
                 if len(orig_only) or len(new_only):
                     raise RuntimeError(
+                        f"{check_key}"
                         "Composable distributed API implementations cannot modify "
                         "FQNs.\n"
                         f"Only in original FQNs: {orig_only},\n"
@@ -144,15 +145,28 @@ def contract(state_cls: Type[_State] = _State):
                     )
                 else:
                     raise RuntimeError(
+                        f"{check_key}"
                         "Composable distributed API implementations cannot modify "
                         "the order of FQNs.\n"
                         f"Original FQNs: {orig_only}\n"
                         f"New FQNs: {new_only}"
                     )
 
-            check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
-            check_fqn(list(orig_named_buffers.keys()), list(new_named_buffers.keys()))
-            check_fqn(list(orig_named_modules.keys()), list(new_named_modules.keys()))
+            check_fqn(
+                list(orig_named_params.keys()),
+                list(new_named_params.keys()),
+                "Check parameters, ",
+            )
+            check_fqn(
+                list(orig_named_buffers.keys()),
+                list(new_named_buffers.keys()),
+                "Check buffer, ",
+            )
+            check_fqn(
+                list(orig_named_modules.keys()),
+                list(new_named_modules.keys()),
+                "Check modules, ",
+            )
 
             # TODO: a stricter verification should also reject changing module
             # types and monkey-patching forward() method implementations.

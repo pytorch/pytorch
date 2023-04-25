@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from functools import wraps
-from typing import Any, List
+from typing import Any, List, Type
 
 import numpy as np
 import torch
@@ -274,30 +274,6 @@ class TraceModuleTest(DTensorTestBase):
         model = nn.LayerNorm(input.shape[1:]).to(self.device_type)
         pt_input = torch.tensor(input, dtype=torch.float).to(self.device_type)
         self._test_trace_replicate(model, pt_input)
-
-    @with_comms
-    def test_baked_in_shape(self):
-        class LCE(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(5)
-                self.w = torch.nn.Parameter(torch.rand((5, 10)))
-                self.b = torch.nn.Parameter(torch.rand((5)))
-
-            def forward(self, x, *args, **kwargs):
-                # the code below will bake in the shape of x_t as arguments to expand
-                x_t = x.permute(0, 2, 1)
-                y_t = kwargs["dict_test"]["value"].expand(x_t.shape) + args[0][
-                    0
-                ].expand(x_t.shape)
-                # code below triggers an "expand" with shape baked in.
-                return torch.nn.functional.linear(y_t, self.w, self.b)
-
-        model = LCE().to(self.device_type)
-        x = torch.randn(2, 10, 80).to(self.device_type)
-        y = torch.randn(2, 80, 10).to(self.device_type)
-        z = torch.randn(2, 80, 10).to(self.device_type)
-        self._test_trace_replicate(model, x, [y], dict_test={"value": z})
 
     @with_comms
     def test_sequential(self):
@@ -596,9 +572,7 @@ class TraceTrainStepTest(DTensorTestBase):
     def test_adam_fused(self):
         self._test_adam(foreach=False, fused=True)
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_train_step_override(self):
+    def _test_train_step_override(self, module_override_key):
         transform_targets = []
 
         class DDMOverride(Override):
@@ -629,7 +603,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={DataDependentModule: DDMOverride()})
+        @compile(module_override={module_override_key: DDMOverride()})
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -645,6 +619,16 @@ class TraceTrainStepTest(DTensorTestBase):
             transform_targets,
             [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default],
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_type_override(self):
+        self._test_train_step_override(module_override_key=DataDependentModule)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_fqn_override(self):
+        self._test_train_step_override(module_override_key="ddm")
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -724,6 +708,24 @@ class TraceTrainStepTest(DTensorTestBase):
 
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
         self.assertEqual(mod.dummy_buffer, ddp_mod.module.dummy_buffer)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_expand_dimension(self):
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = nn.Linear(10, 10, bias=True).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+        for node in train_step._compiled_obj.gm.graph.nodes:
+            if node.target == torch.ops.aten.expand.default:
+                # backward grad expandion op should match local batch size
+                # instead of global batch size.
+                self.assertEqual(node.args[1], [2, 10])
 
 
 class CoverageTest(DTensorTestBase):
@@ -836,6 +838,131 @@ class CoverageTest(DTensorTestBase):
         tgt = torch.empty(B, dtype=torch.long).random_(0, D).to(self.rank)
 
         self._test_train_step(train_step, mod, ids, tgt)
+
+    def _test_op_with_train_step(self, Model: Type[nn.Module]):
+        torch.manual_seed(0)
+        mod = Model().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        inp = torch.randn(2, 10).cuda(self.rank)
+        self._test_train_step(train_step, mod, inp)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_full(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.full(x.shape, 7, device=x.device)
+                return y + self.fc(x)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_arange(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.arange(x.numel(), device=x.device).view(x.shape)
+                z = torch.arange(0, x.numel(), device=x.device).view(x.shape)
+                return self.fc(x) + y + z
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_numel(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.numel()
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_stride(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.stride(0)
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_scalar(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                # FIXME: torch.tensor(x.numel()) is captured as a tensor constant
+                y = torch.ops.aten.scalar_tensor.default(
+                    7, dtype=x.dtype, device=x.device
+                )
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_stack(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.stack([x, self.fc(x)], dim=1)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_arithmetic_ops_on_symint(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x) + x.shape[0] * x.numel() - x.shape[0] // 2
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_slice(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x)[:, :1]
+
+        self._test_op_with_train_step(Model)
 
 
 if __name__ == "__main__":

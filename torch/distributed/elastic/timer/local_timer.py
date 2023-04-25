@@ -121,5 +121,5 @@ class LocalTimerServer(TimerServer):
             log.info("Process with pid=%s does not exist. Skipping", worker_id)
             return True
         except Exception as e:
-            log.error(f"Error terminating pid={worker_id}", exc_info=e)
+            log.error("Error terminating pid=%s", worker_id, exc_info=e)
         return False

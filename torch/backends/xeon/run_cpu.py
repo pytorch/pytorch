@@ -332,10 +332,10 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             if find_je:
                 logger.info("Use JeMalloc memory allocator")
                 return
-            logger.warning(f"""Neither TCMalloc nor JeMalloc is found in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib
+            logger.warning("""Neither TCMalloc nor JeMalloc is found in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib
                             or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or
-                           {expanduser("~")}/.local/lib/ so the LD_PRELOAD environment variable will not be set.
-                           This may drop the performance""")
+                           %s/.local/lib/ so the LD_PRELOAD environment variable will not be set.
+                           This may drop the performance""", expanduser("~"))
 
     def log_env_var(self, env_var_name=""):
         if env_var_name in os.environ:
@@ -676,7 +676,7 @@ def main(args):
     launcher = _Launcher()
     launcher.launch(args)
     for x in sorted(set(os.environ.keys()) - env_before):
-        logger.debug("{x}={os.environ[x]}")
+        logger.debug("%s=%s", x, os.environ[x])
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable "
