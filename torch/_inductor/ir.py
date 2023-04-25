@@ -3115,17 +3115,12 @@ class FallbackKernel(ExternKernelAlloc):
             unflatten_args,
         )
 
-        def generate_output(output, index=""):
-            if isinstance(output, list):
+        def generate_output(output, indices):
+            if isinstance(output, (list, tuple)):
                 return [
-                    generate_output(output[i], f"{index}[{i}]")
+                    generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
                 ]
-            elif isinstance(output, tuple):
-                return tuple(
-                    generate_output(output[i], f"{index}<{i}>")
-                    for i in range(len(output))
-                )
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
                     FixedLayout(
@@ -3135,7 +3130,7 @@ class FallbackKernel(ExternKernelAlloc):
                         convert_shape_to_inductor(output.stride()),
                     ),
                     packed,
-                    index,
+                    indices,
                 )
             elif isinstance(output, int):
                 return output
@@ -3143,7 +3138,7 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output)
+        return generate_output(example_output, [])
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3155,38 +3150,33 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
-    def gen_list_tuple_access(self, basename, index):
-        # cpp wrapper code needs to use std::get<> to access a tuple
-        if index.startswith("["):
-            pos = index.find("]")
-            current_index = index[1:pos]
-            remaining_index = index[pos + 1 :]
-            return self.gen_list_tuple_access(
-                f"{basename}[{current_index}]", remaining_index
-            )
-        elif index.startswith("<"):
-            pos = index.find(">")
-            current_index = index[1:pos]
-            remaining_index = index[pos + 1 :]
-            tuple_access = V.graph.wrapper_code.codegen_tuple_access(
-                basename, current_index
-            )
-            return self.gen_list_tuple_access(tuple_access, remaining_index)
+    def codegen_list_tuple_access(self, basename, indices):
+        if len(indices) > 0:
+            itype, i = indices[0]
+            if itype == list:
+                return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
+            elif itype == tuple:
+                # cpp wrapper code needs to use std::get<> to access a tuple
+                tuple_access = V.graph.wrapper_code.codegen_tuple_access(
+                    basename, str(i)
+                )
+                return self.codegen_list_tuple_access(tuple_access, indices[1:])
+            else:
+                raise AssertionError("non supported index type")
         else:
-            assert len(index) == 0, "Invalid index expression"
             return basename
 
     def codegen(self, wrapper):
         line = V.graph.wrapper_code.declare
-        line += f"{self.get_name()} = {self.gen_list_tuple_access(self.inputs[0].get_name(), self.index)}"
+        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
         line += V.graph.wrapper_code.ending
         V.graph.wrapper_code.writeline(line)
         self.codegen_size_asserts(V.graph.wrapper_code)
 
-    def __init__(self, layout, input, index: str):
+    def __init__(self, layout, input, indices: List[Tuple]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
-        self.index = index
+        self.indices = indices
 
     def should_allocate(self):
         return False
