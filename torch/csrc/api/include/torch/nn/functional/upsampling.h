@@ -17,13 +17,19 @@ inline std::vector<int64_t> _interp_output_size(
         Tensor,
         c10::optional<std::vector<int64_t>>,
         c10::optional<std::vector<double>>,
+        c10::optional<bool>,
         c10::optional<bool>> closed_over_args) {
   Tensor input;
   c10::optional<std::vector<int64_t>> size;
   c10::optional<std::vector<double>> scale_factor;
   c10::optional<bool> recompute_scale_factor;
-  std::tie(input, size, scale_factor, recompute_scale_factor) =
-      closed_over_args;
+  c10::optional<bool> round_with_scale_factor;
+  std::tie(
+      input,
+      size,
+      scale_factor,
+      recompute_scale_factor,
+      round_with_scale_factor) = closed_over_args;
   if (size == c10::nullopt && scale_factor == c10::nullopt) {
     TORCH_CHECK(false, "either size or scale_factor should be defined");
   }
@@ -69,9 +75,12 @@ inline std::vector<int64_t> _interp_output_size(
   }
 
   std::vector<int64_t> ret;
+  auto round_with_scale_factor_val =
+      round_with_scale_factor ? *round_with_scale_factor : false;
+  auto d = round_with_scale_factor_val ? 0.5 : 0.0;
   for (const auto i : c10::irange(dim)) {
     ret.emplace_back(static_cast<int64_t>(
-        floor(static_cast<double>(input.size(i + 2)) * scale_factors[i])));
+        floor(d + static_cast<double>(input.size(i + 2)) * scale_factors[i])));
   }
   return ret;
 }
@@ -85,7 +94,8 @@ inline Tensor interpolate(
     InterpolateFuncOptions::mode_t mode,
     c10::optional<bool> align_corners,
     c10::optional<bool> recompute_scale_factor,
-    bool antialias) {
+    bool antialias,
+    c10::optional<bool> round_with_scale_factor) {
   if (c10::get_if<enumtype::kNearest>(&mode) ||
       c10::get_if<enumtype::kArea>(&mode)) {
     if (align_corners != c10::nullopt) {
@@ -116,6 +126,26 @@ inline Tensor interpolate(
     for (const auto& elem : _scale_factor_repeated) {
       scale_factor_list.emplace_back(elem);
     }
+
+    if (round_with_scale_factor == c10::nullopt) {
+      bool should_warn = false;
+      for (const auto i : c10::irange(scale_factor_len)) {
+        auto correct_output_size = static_cast<int64_t>(floor(
+            0.5 +
+            static_cast<double>(input.size(i + 2)) * (*scale_factor_list[i])));
+        auto incorrect_output_size = static_cast<int64_t>(floor(
+            static_cast<double>(input.size(i + 2)) * (*scale_factor_list[i])));
+        if (correct_output_size != incorrect_output_size) {
+          should_warn |= true;
+        }
+      }
+      if (should_warn) {
+        TORCH_WARN(
+            "Default behavior for round_with_scale_factor=None will change for the cases when "
+            "round(input_size * scale_factor) differs from int(input_size * scale_factor). "
+            "Use round_with_scale_factor=False if the old behavior is desired.");
+      }
+    }
   }
 
   if (antialias &&
@@ -127,8 +157,12 @@ inline Tensor interpolate(
         "Anti-alias option is only supported for bilinear and bicubic modes");
   }
 
-  auto closed_over_args =
-      std::make_tuple(input, size, scale_factor, recompute_scale_factor);
+  auto closed_over_args = std::make_tuple(
+      input,
+      size,
+      scale_factor,
+      recompute_scale_factor,
+      round_with_scale_factor);
   if (input.dim() == 3 && c10::get_if<enumtype::kNearest>(&mode)) {
     return torch::upsample_nearest1d(
         input,
@@ -272,7 +306,8 @@ inline Tensor interpolate(
       options.mode(),
       options.align_corners(),
       options.recompute_scale_factor(),
-      options.antialias());
+      options.antialias(),
+      options.round_with_scale_factor());
 }
 
 } // namespace functional
