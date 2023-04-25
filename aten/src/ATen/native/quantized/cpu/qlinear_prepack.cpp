@@ -212,8 +212,7 @@ inline ideep::tensor pack_weight(
     const at::Tensor& weight,
     torch::List<int64_t>& input_shape) {
   std::vector<int64_t> w_dims = weight.sizes().vec();
-  auto weight_copy = weight.clone();
-  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
+  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
   wei.transpose_(0, 1); // ONEDNN requires transposed weight
   ideep::dims input_dims = input_shape.vec();
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wei.get_dims(), dnnl::memory::data_type::s8,
@@ -290,7 +289,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 
   // Prepack weight
   auto input_shape = torch::List<int64_t>();
-  auto exp_wgt = pack_weight(weight, input_shape);
+  auto weight_copy = weight.clone();
+  auto exp_wgt = pack_weight(weight_copy, input_shape);
   ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
@@ -323,7 +323,8 @@ prepack_linear_int8_weight_bias_to_mkldnn_tensors(
       weight.dim() == 2,
       "Prepack qlinear weight: Expected 2-dimensional weight tensor.");
   // Weight
-  auto wgt = pack_weight(weight, input_shape);
+  auto weight_copy = weight.clone();
+  auto wgt = pack_weight(weight_copy, input_shape);
   auto packed_weight = at::native::new_with_itensor_mkldnn(
       std::move(wgt),
       optTypeMetaToScalarType(weight.options().dtype_opt()),
