@@ -481,11 +481,16 @@ def _multi_tensor_adamw(
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([
         params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
-    for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
-         device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
+    for ((
+        device_params,
+        device_grads,
+        device_exp_avgs,
+        device_exp_avg_sqs,
+        device_max_exp_avg_sqs,
+        device_state_steps,
+    ), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
-
 
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
@@ -592,6 +597,8 @@ def _fused_adamw(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
+    if not params:
+        return
     if differentiable:
         raise RuntimeError("_fused_adamw is not differentiable")
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
@@ -599,14 +606,14 @@ def _fused_adamw(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
-        (
+        ((
             device_params,
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
             device_max_exp_avg_sqs,
             device_state_steps,
-        ) = grouped_tensors[(device, dtype)]
+        ), _) = grouped_tensors[(device, dtype)]
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
