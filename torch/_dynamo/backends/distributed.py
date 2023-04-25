@@ -10,7 +10,7 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
-
+ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
 def args_str(args):
     # a debug helper
@@ -223,7 +223,7 @@ class DDPOptimizer:
                 # only print the submod graphs, not their children
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
-        log.debug(debug_str)
+        ddp_graph_log.debug(debug_str)
 
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
