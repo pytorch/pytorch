@@ -40,6 +40,7 @@ class TestPassInfra(TestCase):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_dialects(self) -> None:
         """
         Test if the dialects are maintained
