@@ -304,7 +304,10 @@ def _fused_adam_decomp(
         found_inf=found_inf,
     )
 
-    for orig, updated in zip(orig_tuple, updated_tuple):
+    for idx, (orig, updated) in enumerate(zip(orig_tuple, updated_tuple)):
+        if idx == 1:
+            # skip gradient copying as we don't need to copy gradients back
+            continue
         for o, u in zip(orig, updated):
             o.copy_(u)
 
