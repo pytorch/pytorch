@@ -7,9 +7,14 @@ from typing import Dict, List, Optional, Set
 
 import torch
 import torch.nn.functional as F
+from torch.ao.quantization.fake_quantize import (
+    FusedMovingAvgObsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
     PlaceholderObserver,
 )
@@ -56,7 +61,9 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [
         get_symmetric_quantization_config(),
+        get_symmetric_quantization_config(is_qat=True),
         get_symmetric_quantization_config(is_per_channel=True),
+        get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
     ]:
         ops = supported_symmetric_quantized_operators()
         for op_string, pattern_list in ops.items():
@@ -66,7 +73,10 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
     return copy.deepcopy(supported_config_and_operators)
 
 
-def get_symmetric_quantization_config(is_per_channel=False):
+def get_symmetric_quantization_config(
+    is_per_channel: bool = False,
+    is_qat: bool = False,
+):
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
@@ -87,7 +97,7 @@ def get_symmetric_quantization_config(is_per_channel=False):
     )
     bias_quantization_spec = QuantizationSpec(dtype=torch.float)
     quantization_config = QuantizationConfig(
-        act_quantization_spec, weight_quantization_spec, bias_quantization_spec
+        act_quantization_spec, weight_quantization_spec, bias_quantization_spec, is_qat
     )
     return quantization_config
 
@@ -124,18 +134,25 @@ def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
     ]
-    if not quantization_spec.is_dynamic:
+    if quantization_spec.is_dynamic:
+        # TODO: extend this helper function to support dynamic quantization
+        raise Exception("Unsupported quantization_spec for activation: {}".format(quantization_spec))
+    if quantization_config.is_qat:
+        return FusedMovingAvgObsFakeQuantize.with_args(
+            observer=MovingAverageMinMaxObserver,
+            dtype=qdtype,
+            quant_min=quantization_spec.quant_min,
+            quant_max=quantization_spec.quant_max,
+            reduce_range=False,
+            eps=2 ** -12,
+        )
+    else:  # ptq
         return HistogramObserver.with_args(
             dtype=qdtype,
             quant_min=quantization_spec.quant_min,
             quant_max=quantization_spec.quant_max,
             reduce_range=False,
             eps=2**-12,
-        )
-    else:
-        # TODO: extend this helper function to support dynamic quantization
-        raise Exception(
-            "Unsupported quantization_spec for activation: {}".format(quantization_spec)
         )
 
 
@@ -147,26 +164,46 @@ def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig])
         return None
     quantization_spec: QuantizationSpec = quantization_config.weight
     qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
-    if quantization_spec.qscheme == torch.per_tensor_symmetric:
-        return MinMaxObserver.with_args(
-            qscheme=quantization_spec.qscheme,
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-            eps=2**-12,
-        )
-    elif quantization_spec.qscheme == torch.per_channel_symmetric:
-        return PerChannelMinMaxObserver.with_args(
-            qscheme=quantization_spec.qscheme,
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-            eps=2**-12,
-        )
-    else:
-        raise Exception(
-            "Unsupported quantization_spec for weight: {}".format(quantization_spec)
-        )
+    if quantization_config.is_qat:
+        if quantization_spec.qscheme == torch.per_tensor_symmetric:
+            return FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAverageMinMaxObserver,
+                qscheme=quantization_spec.qscheme,
+                dtype=qdtype,
+                quant_min=quantization_spec.quant_min,
+                quant_max=quantization_spec.quant_max,
+                eps=2 ** -12,
+            )
+        elif quantization_spec.qscheme == torch.per_channel_symmetric:
+            return FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAveragePerChannelMinMaxObserver,
+                qscheme=quantization_spec.qscheme,
+                dtype=qdtype,
+                quant_min=quantization_spec.quant_min,
+                quant_max=quantization_spec.quant_max,
+                eps=2 ** -12,
+            )
+        else:
+            raise Exception("Unsupported quantization_spec for weight: {}".format(quantization_spec))
+    else:  # ptq
+        if quantization_spec.qscheme == torch.per_tensor_symmetric:
+            return MinMaxObserver.with_args(
+                qscheme=quantization_spec.qscheme,
+                dtype=qdtype,
+                quant_min=quantization_spec.quant_min,
+                quant_max=quantization_spec.quant_max,
+                eps=2**-12,
+            )
+        elif quantization_spec.qscheme == torch.per_channel_symmetric:
+            return PerChannelMinMaxObserver.with_args(
+                qscheme=quantization_spec.qscheme,
+                dtype=qdtype,
+                quant_min=quantization_spec.quant_min,
+                quant_max=quantization_spec.quant_max,
+                eps=2**-12,
+            )
+        else:
+            raise Exception("Unsupported quantization_spec for weight: {}".format(quantization_spec))
 
 
 def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
@@ -259,6 +296,7 @@ class QNNPackQuantizer(Quantizer):
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
+            self._annotate_conv2d_bn(node, global_config)
             self._annotate_conv2d_relu(node, global_config)
             self._annotate_conv2d(node, global_config)
             self._annotate_linear(node, global_config)
@@ -267,6 +305,56 @@ class QNNPackQuantizer(Quantizer):
             self._annotate_add(node, global_config)
 
         return model
+
+    def _annotate_conv2d_bn(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+        """
+        Match the following pattern:
+
+          ... -> conv -> bn -> getitem[0] - ...
+
+        Annotate it to get the following pattern after prepare:
+
+                weight -> obs1
+                           |
+          ...  -> obs0 -> conv -> bn -> getitem[0] -> obs2 -> ...
+
+        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+        """
+        if node.op != "call_function" or node.target != operator.getitem or node.args[1] != 0:
+            return
+        getitem_node = node
+        bn_node = getitem_node.args[0]
+        assert isinstance(bn_node, Node)
+        if bn_node.op != "call_function" or bn_node.target != torch.ops.aten._native_batch_norm_legit.default:
+            return
+        conv_node = bn_node.args[0]
+        assert isinstance(conv_node, Node)
+        if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
+            return
+        if _is_annotated([getitem_node, bn_node, conv_node]):
+            return
+
+        conv_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
+            "weight_index": 1,
+            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
+            "bias_index": 2,
+            "_annotated": True,
+        }
+        bn_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "_annotated": True,
+        }
+        getitem_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "_annotated": True,
+        }
 
     def _annotate_conv2d_relu(
         self, node: Node, quantization_config: Optional[QuantizationConfig]
