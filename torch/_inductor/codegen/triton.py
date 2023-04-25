@@ -776,7 +776,6 @@ class TritonKernel(Kernel):
             if not sv.statically_known_multiple_of(remaining[i], expr):
                 raise CantSplit()
             # guard on the last item out
-            sv.statically_known_equals(remaining[i], expr)
             remaining[i] = ir.FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
             return next(var_count)
