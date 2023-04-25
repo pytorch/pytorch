@@ -153,6 +153,11 @@ class Foo:  # noqa: B209
         self.a = a
         self.b = b
 
+@torch.fx.has_side_effect
+@torch.fx.wrap
+def side_effect_func(x: torch.Tensor):
+    print(x)
+
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -2317,6 +2322,88 @@ class TestFX(JitTestCase):
         x, y = torch.randn(3, 4), torch.randn(3, 4)
         self.checkGraphModule(foo, (x, y))
 
+
+    def test_trace_return_dataclass(self):
+        """
+        Test case for Module that return dataclass
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyOutput:
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class ModuleReturnDataclass(torch.nn.Module):
+            def forward(self, d : torch.Tensor):
+                return MyOutput(foo=d + d, bar=d * 3)
+
+        module = ModuleReturnDataclass()
+        traced_graph = symbolic_trace(module).graph
+        print(traced_graph)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+
+        self.assertEqual(module(x), gm(x))
+
+    def test_trace_return_dataclass_nested(self):
+        """
+        Test case for Module that return dataclass
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyOutput:
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class ModuleReturnDataclass(torch.nn.Module):
+            def forward(self, d : torch.Tensor):
+                return MyOutput(foo=d + d, bar=d * 3)
+
+        class CallsModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = ModuleReturnDataclass()
+
+            def forward(self, x):
+                tmp = self.m(x)
+                return MyOutput(foo=tmp.foo, bar=tmp.bar)
+
+        module = CallsModule()
+        traced_graph = symbolic_trace(module).graph
+        print(traced_graph)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+
+        self.assertEqual(module(x), gm(x))
+
+
+    def test_trace_return_namedtuple(self):
+        """
+        Test case for Module that return namedtuple
+        """
+        class MyOutput(NamedTuple):
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class ModuleReturnNamedTuple(torch.nn.Module):
+            def forward(self, d : torch.Tensor):
+                return MyOutput(foo=d, bar=d)
+
+
+        module = ModuleReturnNamedTuple()
+
+        traced_graph = symbolic_trace(module).graph
+        print(traced_graph)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+
+        self.assertEqual(module(x), gm(x))
+
     def test_trace_dict_int_keys(self):
         class ModWithDictArg(torch.nn.Module):
             def forward(self, d : Dict[int, torch.Tensor]):
@@ -3903,6 +3990,24 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                                  f"backwards-compatibility classification! Please decorate these "
                                  f"API(s) with `@torch.fx._compatibility.compatibility` to specify "
                                  f"BC guarantees.")
+
+    def test_adding_side_effect_function(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                side_effect_func(x)
+                return x
+
+        gm = torch.fx.symbolic_trace(TestModule())
+        self.assertEqual(len(gm.graph.nodes), 3)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(len(gm.graph.nodes), 3)
+        found = False
+        for node in gm.graph.nodes:
+            if node.op == 'call_function' and node.target == side_effect_func:
+                found = True
+        self.assertTrue(found)
+
 
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
