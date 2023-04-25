@@ -332,25 +332,24 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name) -> None:
-        self.buffer = None
+        self.file_stream = None
         self.name = str(name)
         try:
             self.name.encode('ascii')
         except UnicodeEncodeError:
             # PyTorchFileWriter only supports ascii filename.
-            # For filenames with non-ascii characters, we use a
-            # temporary buffer that is copied into the user file on exit.
-            self.buffer = io.BytesIO()
-            super().__init__(torch._C.PyTorchFileWriter(self.buffer))
+            # For filenames with non-ascii characters, we rely on Python
+            # for writing out the file.
+            self.file_stream = io.FileIO(self.name, mode='w')
+            super().__init__(torch._C.PyTorchFileWriter(self.file_stream))
         else:
             super().__init__(torch._C.PyTorchFileWriter(self.name))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
-        if self.buffer is not None:
-            self.buffer.flush()
-            with open(self.name, 'wb') as non_ascii_file:
-                non_ascii_file.write(self.buffer.getbuffer())
+        if self.file_stream is not None:
+            self.file_stream.close()
+
 
 class _open_zipfile_writer_buffer(_opener):
     def __init__(self, buffer) -> None:
