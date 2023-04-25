@@ -572,6 +572,12 @@ def _canonical_mask(
     check_other: bool = True,
 ) -> Optional[Tensor]: ...
 def _none_or_dtype(input: Optional[Tensor]) -> Optional[_dtype]: ...
+class KeyValueCache:
+    keys: Tensor
+    values: Tensor
+    @property
+    def empty(self) -> bool: ...
+    def __init__(self, keys: Tensor = ..., values: Tensor = ...) -> None: ...
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -598,6 +604,7 @@ def multi_head_attention_forward(
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
+    cache: Optional[KeyValueCache] = ...,
 ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
 ${imported_hints}

@@ -1047,7 +1047,7 @@ class MultiheadAttention(Module):
             need_weights: bool = True,
             attn_mask: Optional[Tensor] = None,
             average_attn_weights: bool = True,
-            is_causal : bool = False, 
+            is_causal : bool = False,
             cache: Optional[F.KeyValueCache] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
@@ -1195,8 +1195,7 @@ class MultiheadAttention(Module):
                         merged_mask,
                         need_weights,
                         average_attn_weights,
-                        mask_type)
-                        # , cache) TODO: implement in CPP later
+                        mask_type)  # , cache) TODO: implement in CPP later
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1239,7 +1238,7 @@ class MultiheadAttention(Module):
                 attn_mask=attn_mask,
                 average_attn_weights=average_attn_weights,
                 is_causal=is_causal, cache=cache)
-        
+
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:

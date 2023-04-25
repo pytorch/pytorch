@@ -14,7 +14,8 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
-__all__ = ['Transformer', 'TransformerEncoder', 'TransformerIncrementalDecoder', 'TransformerEncoderLayer', 'TransformerIncrementalDecoderLayer']
+__all__ = ['Transformer', 'TransformerEncoder', 'TransformerIncrementalDecoder',
+           'TransformerEncoderLayer', 'TransformerIncrementalDecoderLayer']
 
 
 
@@ -89,8 +90,8 @@ class Transformer(Module):
             self.decoder = custom_decoder
         else:
             decoder_layer = TransformerIncrementalDecoderLayer(d_model, nhead, dim_feedforward, dropout,
-                                                    activation, layer_norm_eps, batch_first, norm_first,
-                                                    **factory_kwargs)
+                                                               activation, layer_norm_eps, batch_first, norm_first,
+                                                               **factory_kwargs)
             decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
             self.decoder = TransformerIncrementalDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
@@ -103,7 +104,7 @@ class Transformer(Module):
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None, 
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None,
                 cache: Optional[List[TransformerIncrementalDecoderLayerCache]] = None) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
@@ -165,12 +166,12 @@ class Transformer(Module):
 
         if cache is None:
             memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
-        else: # cache contains the mapped memory
+        else:  # cache contains the mapped memory
             assert len(cache) == self.decoder.num_layers, \
                 ("cache is expected to have as many elements as there are "
                  f"layers in the decoder, expecting {self.decoder.num_layers}, got {len(cache)}")
             memory = None
-        
+
         output = self.decoder(tgt, memory, cache, tgt_mask=tgt_mask, memory_mask=memory_mask,
                               tgt_key_padding_mask=tgt_key_padding_mask,
                               memory_key_padding_mask=memory_key_padding_mask)
@@ -763,8 +764,8 @@ class TransformerIncrementalDecoderLayer(Module):
         return x
 
     # self-attention block
-    def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool, cache: Optional[F.KeyValueCache]) -> Tensor:
+    def _sa_block(self, x: Tensor, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor],
+                  is_causal: bool, cache: Optional[F.KeyValueCache]) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
@@ -773,8 +774,8 @@ class TransformerIncrementalDecoderLayer(Module):
         return self.dropout1(x)
 
     # multihead attention block
-    def _mha_block(self, x: Tensor, mem: Tensor,
-                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool, cache: Optional[F.KeyValueCache]) -> Tensor:
+    def _mha_block(self, x: Tensor, mem: Tensor, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor],
+                   is_causal: bool, cache: Optional[F.KeyValueCache]) -> Tensor:
         x = self.multihead_attn(x, mem, mem,
                                 attn_mask=attn_mask,
                                 key_padding_mask=key_padding_mask,

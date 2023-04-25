@@ -4817,15 +4817,16 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            if not cache or cache.empty:
+            if cache is None or cache.empty:
                 proj = linear(q, w, b)
                 # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
                 proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
                 return proj[0], proj[1], proj[2]
             else:
-                for input, cached, name in zip((k, v), (cache.keys, cache.values), ("keys", "values")):
+                for input, cac, name in zip((k, v), (cache.keys, cache.values), ("keys", "values")):
                     expected_shape = (input.shape[0] - 1, *input.shape[1:])
-                    assert cached.shape == expected_shape, f"expecting cached {name} shape of {expected_shape}, but got {cached.shape}"
+                    assert cac.shape == expected_shape,\
+                        f"expecting cached {name} shape of {expected_shape}, but got {cac.shape}"
                 w_q, w_k, w_v = w.chunk(3)
                 if b is None:
                     b_q = b_k = b_v = None
@@ -4850,8 +4851,9 @@ def _in_projection_packed(
                 # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
                 kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
             else:
-                assert cache.keys.shape == k.shape, f"expecting cached keys shape of {k.shape}, but got {cache.keys.shape}"
-                assert cache.values.shape == v.shape, f"expecting cached values shape of {v.shape}, but got {cache.values.shape}"
+                for input, cac, name in zip((k, v), (cache.keys, cache.values), ("keys", "values")):
+                    assert cac.shape == input.shape,\
+                        f"expecting cached {name} shape of {input.shape}, but got {cac.shape}"
                 kv_proj = (cache.keys, cache.values)
             return (q_proj, kv_proj[0], kv_proj[1])
     else:
@@ -4918,7 +4920,8 @@ def _in_projection(
     if cache is not None and not cache.empty:
         for cached, input, name in zip((cache.keys, cache.values), (k, v), ("key", "value")):
             expected_shape = (*input[:-1].shape, Eq)
-            assert cached.shape == expected_shape, f"expecting cached {name} shape of {expected_shape}, but got {cached.shape}"
+            assert cached.shape == expected_shape,\
+                f"expecting cached {name} shape of {expected_shape}, but got {cached.shape}"
         return linear(q, w_q, b_q), cache.keys, cache.values
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
@@ -5205,7 +5208,8 @@ def multi_head_attention_forward(
     """
     cached_keys = cache.keys if cache else None
     cached_values = cache.values if cache else None
-    tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias, cached_keys, cached_values)
+    tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias,
+                cached_keys, cached_values)
     if has_torch_function(tens_ops):
         return handle_torch_function(
             multi_head_attention_forward,
@@ -5323,8 +5327,9 @@ def multi_head_attention_forward(
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = in_proj_bias.chunk(3)
-        q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v, cache)
-    
+        q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k,
+                                 b_v, cache)
+
 
     # update cache
     if cache:
