@@ -401,12 +401,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__func__, self, source=source, **options
             )
         elif isinstance(subobj, types.FunctionType):
-            assert (
-                name in type(self.value).__dict__
-            ), f"{name} missing from __dict__ for {type(self.value)}"
             # Check `__dict__` to bypass the function descriptor protocol to
             # accurately check for static method
-            is_staticmethod = isinstance(type(self.value).__dict__[name], staticmethod)
+            is_staticmethod = name in type(self.value).__dict__ and isinstance(
+                type(self.value).__dict__[name], staticmethod
+            )
             if is_staticmethod:
                 # Use `GetAttrVariable` to avoid doubly passing in `self` as an
                 # argument, which happens if using `UserMethodVariable`
