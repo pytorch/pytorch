@@ -1113,12 +1113,12 @@ class TestPrims(TestCase):
             torch.cuda.manual_seed(123)
             for idx in range(repeats):
                 seed, offset = rng_states[idx]
-                result = torch.ops.rngprims.philox_rand((size,),
-                                                        seed=seed,
-                                                        offset=offset,
-                                                        stride=None,
-                                                        device=device,
-                                                        dtype=dtype)
+                result, _ = torch.ops.rngprims.philox_rand((size,),
+                                                           seed=seed,
+                                                           offset=offset,
+                                                           stride=None,
+                                                           device=device,
+                                                           dtype=dtype)
                 results.append(result)
 
             for a, b in zip(references, results):

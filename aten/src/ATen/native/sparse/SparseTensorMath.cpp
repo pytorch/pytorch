@@ -1772,7 +1772,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   TORCH_CHECK(!input_.is_cuda(), "_sparse_sum_backward_cpu: expected 'input_' to be CPU tensor, but got CUDA tensor");
 
   // Short circuit if grad is either zero or empty.
-  if ((grad_.layout() != kStrided && !grad_._nnz()) || !grad_.numel()) {
+  if (((grad_.is_sparse() || at::sparse_csr::is_sparse_compressed(grad_)) && !grad_._nnz()) || !grad_.numel()) {
     return at::zeros_like(input_);
   }
 
