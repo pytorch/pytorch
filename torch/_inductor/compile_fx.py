@@ -523,9 +523,9 @@ def compile_fx_with_cpp_wrapper(
     # Turns off cpp_wrapper before calling back into compile_fx
     config_patches = {"cpp_wrapper": False}
     devices = (
-        {p.device.type for p in module.parameters()}
-        | {p.device.type for p in module.buffers()}
-        | {p.device.type for p in example_inputs}
+        {t.device.type for t in module.parameters()}
+        | {t.device.type for t in module.buffers()}
+        | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
     )
 
     if "cuda" not in devices:
