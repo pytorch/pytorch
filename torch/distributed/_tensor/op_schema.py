@@ -87,9 +87,9 @@ class TupleStrategy(StrategyType):
     OpStrategy directly in all cases.
     """
 
-    def __init__(self, childs: Tuple[StrategyType]) -> None:
+    def __init__(self, childs: Tuple[StrategyType, ...]) -> None:
         super().__init__()
-        self.childs: Tuple[StrategyType] = childs
+        self.childs: Tuple[StrategyType, ...] = childs
 
     def __str__(self) -> str:
         tuple_strategies_str = "TupleStrategy: "

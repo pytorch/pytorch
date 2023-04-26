@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import os
 import warnings
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
@@ -22,7 +23,6 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
-from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
@@ -1103,7 +1103,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and IS_CI:
+    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -1412,7 +1412,6 @@ make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
-make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
@@ -3783,6 +3782,17 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         dtype = torch.int64
 
     fn = make_reduction("sum", override_return_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
+@register_lowering(aten.prod)
+def prod(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    fn = make_reduction("prod", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
 
