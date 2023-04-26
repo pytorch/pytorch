@@ -1080,6 +1080,12 @@ class TorchPatcher:
 
         proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
 
+        # TODO - Distributed APIs don't work well with torch.compile. There are two todos here
+        # 1) Make the following list more exhaustive, if we decide to disallow distributed ops
+        # 2) Evaluate what can be done to avoid these graph breaks
+        torch._dynamo.disallow_in_graph(torch.distributed.all_gather)
+        torch._dynamo.disallow_in_graph(torch.distributed.broadcast)
+
         optimizers = [
             opt
             for opt in torch.optim.__dict__.values()
