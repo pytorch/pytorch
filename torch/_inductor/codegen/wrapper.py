@@ -486,6 +486,9 @@ class WrapperCodeGen(CodeGen):
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
 
+    def codegen_tuple_access(self, basename: str, index: str) -> str:
+        return f"{basename}[{index}]"
+
     def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_python_sizevar, shape))
         if len(parts) == 0:
@@ -897,6 +900,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         return cexpr(V.graph.sizevars.simplify(x))
 
+    def codegen_tuple_access(self, basename: str, index: str) -> str:
+        return f"std::get<{index}>({basename})"
+
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
         if len(parts) == 0:
@@ -906,7 +912,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def make_buffer_free(self, buffer):
-        return f"{buffer.get_name()}.reset();"
+        return (
+            ""
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            else f"{buffer.get_name()}.reset();"
+        )
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
