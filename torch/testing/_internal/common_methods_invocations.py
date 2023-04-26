@@ -1128,6 +1128,16 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
         # -- not conjugated arg tensors)
         yield SampleInput(make_arg((S, )), make_arg_conj((S, )))
 
+def error_inputs_dot_vdot(op_info, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+
+    yield ErrorInput(SampleInput(make_input(1), args=(make_input(3),)),
+                     error_regex='dot : expected both vectors to have same dtype')
+    yield ErrorInput(SampleInput(make_input(1, 1), args=(make_input(3),)),
+                     error_regex='1D tensors expected')
+    yield ErrorInput(SampleInput(make_input(9), args=(make_input(3),)),
+                     error_regex='inconsistent tensor size')
+
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -9425,6 +9435,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
+           error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -9439,6 +9450,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_dot_vdot,
+           error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
