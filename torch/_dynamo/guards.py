@@ -478,20 +478,22 @@ class GuardBuilder(GuardBuilderBase):
         fs = output_graph.tracked_fakes
         constraint_inputs = [a.constraint_dims for a in fs]
 
-        def get_source(t_id, dim):
-            source = output_graph.tracked_fakes_id_to_source[t_id]
-            return TensorPropertySource(source, TensorProperty.SIZE, dim)
+        def get_sources(t_id, dim):
+            return [
+                TensorPropertySource(source, TensorProperty.SIZE, dim)
+                for source in output_graph.tracked_fakes_id_to_source[t_id]
+            ]
 
         if output_graph.export_constraints:
+            source_pairs = []
+            for constraint in output_graph.export_constraints:
+                source, *other_sources = get_sources(constraint.t_id, constraint.dim)
+                source_pairs.extend((source, other_source) for other_source in other_sources)
+                if constraint.shared is not None:
+                    other_sources = get_sources(constraint.shared.t_id, constraint.shared.dim)
+                    source_pairs.extend((source, other_source) for other_source in other_sources)
             equalities_inputs = EqualityConstraint(
-                source_pairs=[
-                    (
-                        get_source(constraint.t_id, constraint.dim),
-                        get_source(constraint.shared.t_id, constraint.shared.dim),
-                    )
-                    for constraint in output_graph.export_constraints
-                    if constraint.shared is not None
-                ],
+                source_pairs=source_pairs,
                 warn_only=False,
             )
         else:

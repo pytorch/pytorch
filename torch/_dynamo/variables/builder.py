@@ -1189,7 +1189,6 @@ def wrap_to_fake_tensor_and_record(
                         constraint.shared.dim, constraint.constraint_range
                     )
 
-
         dynamic_dims = None
         constraint_dims = None
         if tx.fake_mode.shape_env is not None:
@@ -1256,7 +1255,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
-            tx.output.tracked_fakes_id_to_source[t_id] = source
+            tx.output.tracked_fakes_id_to_source[t_id].append(source)
         return fake_e
     else:
         return e

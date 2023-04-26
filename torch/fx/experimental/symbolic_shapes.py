@@ -543,10 +543,11 @@ class EqualityConstraint(Constraint):
             self._parents[root1] = root2
 
     def render(self):
-        return " & ".join(
+        buf = ", ".join(
             f"{source1.name()} == {source2.name()}"
             for (source1, source2) in self.source_pairs
         )
+        return "{" + buf + "}"
 
     def is_equal(self, source1, source2):
         return self._find(source1) == self._find(source2)
@@ -2265,8 +2266,8 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[expr]
                     constraint = constraints[0]
                     msg = (
-                        f"The equalities {equalities_inputs.render()} are not sufficient as "
-                        f"we need {source_ref(source)} == {sexpr}."
+                        f"The specified set of equalities {equalities_inputs.render()} "
+                        f"is not sufficient; please also specify {source_ref(source)} == {sexpr}."
                     )
                     record_constraint_violation(constraint, msg)
                 # NB: Not necessary to report constraint violations here:

@@ -2183,7 +2183,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_no_raise_on_relationship(self):
+    def test_export_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
 
         def my_dyn_fn(a, b, c):
@@ -2194,6 +2194,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
         constraints = [dynamic_dim(y, 0)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
+        constraints += [
+            dynamic_dim(y, 1) == dynamic_dim(y, 0),
+            dynamic_dim(y, 2) == dynamic_dim(y, 0),
+        ]
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     def test_export_no_raise(self):
@@ -2207,7 +2213,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_multi_dynamic_dim_safe_relationship(self):
+    def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
         z = torch.randn([3, 3, 3])
@@ -2219,7 +2225,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+
 
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
@@ -2253,6 +2263,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
