@@ -63,11 +63,12 @@ def make_test_case(name, device, tests, condition=True):
             tests.tearDownClass()
 
     fn.__name__ = test_name
-    if device == "cuda":
-        setattr(CudaWrapperTemplate, test_name, fn)
-    else:
-        if condition:
-            setattr(CppWrapperTemplate, test_name, fn)
+    if condition:
+        setattr(
+            CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
+            test_name,
+            fn,
+        )
 
 
 if RUN_CPU:
