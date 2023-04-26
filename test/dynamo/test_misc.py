@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import subprocess
 import sys
 import typing
 import unittest
@@ -4696,6 +4697,27 @@ def fn():
         self.assertEquals(tab[0].start, 2)
         self.assertEquals(tab[0].end, 4)
         self.assertEquals(tab[0].target, 6)
+
+    def test_unhandled_exception_in_dynamo(self):
+        # need to run in a separate process to properly test an unhandled
+        # exception raised in dynamo optimized code
+        code = """\
+import torch
+def f(a):
+    a += 1
+    raise RuntimeError("smoge")
+    return a
+
+opt_fn = torch.compile(backend="eager")(f)
+opt_fn(torch.ones(2))
+"""
+        proc = subprocess.run(
+            ["python3", "-c", code],
+            capture_output=True,
+        )
+        # process did not segfault, C assert fail (abort), etc.
+        self.assertGreater(proc.returncode, 0)
+        self.assertIn("smoge", proc.stderr.decode("utf-8"))
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
