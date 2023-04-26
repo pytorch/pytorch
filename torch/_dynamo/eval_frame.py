@@ -45,7 +45,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, skipfiles, utils
-from .exc import ResetRequired
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -53,7 +53,6 @@ from .utils import compile_times
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -349,7 +348,11 @@ class OptimizeContext(_TorchDynamoContext):
 
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self):
-        super().__init__(callback=False)
+        # cudagraph trees relies on generation increment
+        def on_enter():
+            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+
+        super().__init__(callback=False, on_enter=on_enter)
 
 
 class DisableContext(_TorchDynamoContext):
@@ -418,7 +421,7 @@ def _optimize_catch_errors(
 
 
 def get_compiler_fn(compiler_fn):
-    from .debug_utils import wrap_backend_debug
+    from .repro.after_dynamo import wrap_backend_debug
 
     if hasattr(compiler_fn, "compiler_name"):
         compiler_str = compiler_fn.compiler_name
@@ -444,7 +447,7 @@ def check_if_dynamo_supported():
     elif sys.version_info >= (3, 11):
         warnings.warn(
             "torch.compile support of Python 3.11 is experimental. "
-            "Program may generate incorrect results or segfault."
+            "Program may segfault."
         )
 
 
@@ -697,7 +700,6 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
-    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -734,8 +736,11 @@ def export(
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
 
+    fake_mode = None
+    example_inputs = []
+
     def dynamo_normalization_capturing_compiler(
-        gm: torch.fx.GraphModule, example_inputs
+        gm: torch.fx.GraphModule, inner_example_inputs
     ):
         nonlocal graph
         assert (
@@ -743,8 +748,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal example_fake_inputs
-        example_fake_inputs = example_inputs
+        nonlocal fake_mode, example_inputs
+        fake_mode = _guards.detect_fake_mode(inner_example_inputs)
+        example_inputs = inner_example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -761,7 +767,7 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        specialize_int=True
+        summarize_dim_constraints=True, specialize_int=True
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -781,6 +787,7 @@ def export(
         graph is not None
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
+    assert fake_mode is not None
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -826,25 +833,26 @@ def export(
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
+
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        fake_tensor_mode = null_context()
-        for val in example_fake_inputs:
-            if isinstance(val, FakeTensor):
-                fake_tensor_mode = val.fake_mode
-                break
-
-        with enable_python_dispatcher(), fake_tensor_mode:
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-                tracing_mode="real",
-                _allow_non_fake_inputs=True,
-            )(*example_fake_inputs)
+        with enable_python_dispatcher(), fake_mode:
+            try:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="real",
+                    _allow_non_fake_inputs=True,
+                )(*example_fake_inputs)
+            except CondOpArgsMismatchError as e:
+                # Wrap the internal error to the user-facing error
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
         graph,

@@ -3327,7 +3327,7 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled

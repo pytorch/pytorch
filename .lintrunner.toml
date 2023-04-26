@@ -1,4 +1,4 @@
-merge_base_with = "origin/master"
+merge_base_with = "origin/main"
 
 [[linter]]
 code = 'FLAKE8'
@@ -35,7 +35,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'flake8==6.0.0',
     'flake8-bugbear==23.3.23',
-    'flake8-comprehensions==3.11.1',
+    'flake8-comprehensions==3.12.0',
     'flake8-executable==2.1.3',
     'flake8-logging-format==0.9.0',
     'flake8-pyi==23.3.1',
@@ -174,6 +174,8 @@ include_patterns = [
     'torch/_dynamo/optimizations/__init__.py',
     'torch/_dynamo/optimizations/backends.py',
     'torch/_dynamo/optimizations/training.py',
+    'torch/_dynamo/debug_utils.py',
+    'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/graph.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes

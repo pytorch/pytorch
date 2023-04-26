@@ -171,7 +171,7 @@ class C10_API Scalar {
   }
 
   bool isSymbolic() const {
-    return Tag::HAS_si == tag || Tag::HAS_sd == tag;
+    return Tag::HAS_si == tag || Tag::HAS_sd == tag || Tag::HAS_sb == tag;
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) noexcept {
@@ -276,12 +276,12 @@ class C10_API Scalar {
   }
 
   Scalar(c10::SymInt si) {
-    if (si.is_symbolic()) {
+    if (auto m = si.maybe_as_int()) {
+      tag = Tag::HAS_i;
+      v.i = *m;
+    } else {
       tag = Tag::HAS_si;
       v.p = std::move(si).release();
-    } else {
-      tag = Tag::HAS_i;
-      v.i = si.as_int_unchecked();
     }
   }
 

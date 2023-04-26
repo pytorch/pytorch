@@ -2,15 +2,26 @@
 #include <c10/core/Allocator.h>
 
 #include <torch/csrc/Device.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/macros/Macros.h>
 #include <torch/extension.h>
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/Resize.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
+
+// register guard
+namespace at {
+namespace detail {
+
+C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
+
+}} // namespace at::detail
 
 // basic dummy add function
 at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
@@ -79,6 +90,16 @@ at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, 
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
 }
 
+// Some set operations for the basic use case
+at::Tensor& custom_set_source_Storage(at::Tensor& result, c10::Storage src) {
+  int64_t new_size = static_cast<int64_t>(src.nbytes() / result.dtype().itemsize());
+  c10::IntArrayRef stride = {};
+  result.unsafeGetTensorImpl()->set_storage_offset(0);
+  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), new_size, stride_opt, /*resize_storage=*/!result.is_meta());
+  return result;
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -94,6 +115,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
   m.impl("empty_strided", &custom_empty_strided);
+  m.impl("set_.source_Storage", &custom_set_source_Storage);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
