@@ -111,6 +111,12 @@ class UnknownVariable(VariableTracker):
     """
 
 
+class DelayGraphBreakVariable(UnknownVariable):
+    """
+    Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
+    """
+
+
 class ComptimeVariable(VariableTracker):
     """
     This variable is special, it lets you execute arbitrary code at
@@ -498,6 +504,19 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif (
+            self.value is functools.wraps
+            and not kwargs
+            and len(args) == 1
+            and args[0].source
+        ):
+
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    return fn.clone(wraps_source=args[0].source)
+                unimplemented(f"functools.wraps({fn})")
+
+            return variables.LambdaVariable(wraps, **options)
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -576,3 +595,7 @@ class NullVariable(VariableTracker):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         return [create_instruction("PUSH_NULL")]
+
+
+class DeletedVariable(VariableTracker):
+    """Marker used to implement delattr()"""

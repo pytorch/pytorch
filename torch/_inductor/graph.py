@@ -1,4 +1,3 @@
-import functools
 import logging
 import operator
 import os
@@ -112,7 +111,7 @@ class GraphLowering(torch.fx.Interpreter):
             # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
-                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
             (
                 size,
@@ -159,6 +158,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
+        self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -248,18 +248,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def disable_cpp_wrapper(self, cond):
         self.cpp_wrapper = False
-        assert not self.aot_mode, "AOT compilation failed"
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
-    def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
-        if isinstance(buffer, ir.ExternKernel):
-            if not getattr(buffer, "cpp_kernel", False):
-                self.disable_cpp_wrapper("ExternKernel")
-
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if self.cpp_wrapper:
-            self.check_buffer_for_cpp_wrapper(buffer)
-
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -436,6 +427,7 @@ class GraphLowering(torch.fx.Interpreter):
                     type(None),
                     ir.ConstantBuffer,
                     sympy.Expr,
+                    sympy.Rel,
                     int,
                 ),
             )
@@ -579,11 +571,7 @@ class GraphLowering(torch.fx.Interpreter):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    @functools.lru_cache(None)
-    def get_single_device(self):
-        return list(self.device_types)[0] if len(self.device_types) == 1 else None
-
-    def check_input_for_cpp_buffer(self, cuda):
+    def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
             dtype = None
             if isinstance(value, TensorBox):
@@ -591,29 +579,30 @@ class GraphLowering(torch.fx.Interpreter):
             elif isinstance(value, sympy.Symbol):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, cuda):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
 
-    def check_cpp_wrapper(self, cuda):
+    def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
-        self.check_input_for_cpp_buffer(cuda)
+        self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
+        self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            device = self.get_single_device()
-            assert device == "cpu" or device == "cuda"
-            cuda = device == "cuda"
-            self.check_cpp_wrapper(cuda)
+            self.check_cpp_wrapper()
             # Re-check self.cpp_wrapper because it might be disabled due to failed checking
+            if self.cuda:
+                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
+
             if self.cpp_wrapper:
                 self.wrapper_code = (
-                    CudaWrapperCodeGen() if cuda else CppWrapperCodeGen()
+                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
                 )
                 return
 
@@ -696,10 +685,7 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
-            )
-            return lambda dummy: libpath
+            return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
             return self.compile_to_module().call
 
