@@ -136,15 +136,16 @@ __global__ void elementwise_kernel(int N, func_t f) {
   int grid_stride = vt * (gridDim.x * blockDim.x);
 
   #pragma unroll
-  for (int i = start_idx; i < N; i += grid_stride) {
+  for (int i = start_idx; (i+vt) < N; i += grid_stride) {
     # pragma unroll
     for (int k = 0; k < vt; k++)
       f(i+k);
   }
-  if (N % vt != 0 && threadIdx.x == 0 && blockIdx.x == 0) {
-    f(N-1);
-    f(N-2);
-    f(N-3);
+
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    for (int i = 1; i <= (N % vt); i++) {
+      f(N-i);
+    }
   }
 }
 
