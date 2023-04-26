@@ -1672,6 +1672,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             dynamo_result = out_graph(pred, x)
             self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_with_cond_with_closed_function(self):
+        def hello(x):
+            return x + 1
+
+        def hi(x):
+            return x + 2
+
+        def foo(pred, x):
+            def true_fn(x):
+                return hello(x)
+
+            def false_fn(x):
+                return hi(x)
+
+            return cond(pred, true_fn, false_fn, [x])
+
+        x = torch.randn(5)
+        pred = x[0] > 0
+        real_result = foo(pred, x)
+        out_graph, _ = torch._dynamo.export(foo, pred, x)
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
 
@@ -1839,6 +1862,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
+
+    def test_pre_autograd_simple(self):
+        def f(x):
+            y = torch.ones_like(x)
+            return torch.matmul(x, y)
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.randn(5, 5),
+            aten_graph=True,
+            pre_autograd=True,
+            tracing_mode="fake",
+        )
+
+        inp = torch.randn(6, 6)
+        self.assertEqual(gm(inp), f(inp))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    ones_like_default = torch.ops.aten.ones_like.default(arg0, pin_memory = False)
+    matmul_default = torch.ops.aten.matmul.default(arg0, ones_like_default);  arg0 = ones_like_default = None
+    return pytree.tree_unflatten([matmul_default], self._out_spec)""",
+        )
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
@@ -2687,6 +2735,15 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 *example_inputs,
                 aten_graph=True,
             )
+
+    def test_multiple_outputs_op_with_evaluator(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, x):
+                values, _ = torch.topk(x, 3)
+                return torch.sum(values)
+
+        x = torch.arange(1.0, 6.0, requires_grad=True)
+        torch._dynamo.export(TopKModel(), x)
 
     def test_cond_raise_user_error_on_mismatch_return_length(self):
         def true_fn(x):

@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import os
 import warnings
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
@@ -22,7 +23,6 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
-from torch.testing._internal.common_utils import IS_CI
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
@@ -680,9 +680,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(start + dim_size, 0)):
         start = 0
-    if end < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(end + dim_size, 0)):
         end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
@@ -1103,7 +1103,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and IS_CI:
+    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -1125,6 +1125,57 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     if layout_constraint is not None:
         add_layout_constraint(kernel, layout_constraint)
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+
+
+def philox_rand_offset(shape):
+    """
+    TorchInductor offset calculation differs from PyTorch eager offset
+    calculation for random ops (tl.rand vs torch.rand). In future, we should
+    strive for same impl for tl.rand and torch.rand.
+    """
+    numel = 1
+    for s in shape:
+        numel = numel * s
+    return tensor(numel, dtype=torch.int64)
+
+
+@register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
+def philox_rand(size, seed, offset, stride, device, dtype):
+    # stride arg is optional and will be used in future for distributed random
+    # ops. Currently, its ununsed.
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+    offset_loader = offset.make_loader()
+
+    def inner_fn(index):
+        # Both seed and offset in the philox_rand op are tensors.
+        # torch seed and offsets are of type int64, but tl.rand accepts int32
+        seed_index_expr = ops.to_dtype(seed_loader([]), torch.int32)
+        offset_index_expr = ops.to_dtype(offset_loader([]), torch.int32)
+        # Get the offset'd position
+        rand_index_expr = ops.add(
+            ops.index_expr(random_pos(index), torch.int32), offset_index_expr
+        )
+        return ops.rand(
+            seed_index_expr,
+            rand_index_expr,
+            dtype,
+        )
+
+    random_values_node = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
+
+    offset_node = philox_rand_offset(size)
+    return random_values_node, offset_node
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
@@ -1412,7 +1463,6 @@ make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
-make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
@@ -1649,7 +1699,13 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, (float, int)):
+    if isinstance(data, sympy.Symbol):
+        ranges = []
+
+        def inner_fn(index):
+            return ops.index_expr(data, dtype)
+
+    elif isinstance(data, (float, int)):
         ranges = []
 
         def inner_fn(index):
@@ -3783,6 +3839,17 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
         dtype = torch.int64
 
     fn = make_reduction("sum", override_return_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
+@register_lowering(aten.prod)
+def prod(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    fn = make_reduction("prod", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
 
 
