@@ -714,7 +714,6 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
     return;
 
   auto approximate_type = get_gelutype_enum(approximate);
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
