@@ -55,8 +55,6 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
         mask |= a_isnan and not b_isnan
         # Consider NaNs as equal
         equal |= a_isnan and b_isnan
-    else:
-        equal = a_value == b_value
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
@@ -73,8 +71,6 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
         mask |= a_isnan and not b_isnan
         # Consider NaNs as equal
         equal |= a_isnan and b_isnan
-    else:
-        equal = a_value == b_value
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
