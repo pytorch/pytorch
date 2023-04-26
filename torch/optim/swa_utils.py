@@ -59,19 +59,23 @@ def get_swa_avg_fn():
 
 
 class AveragedModel(Module):
-    r"""Implements averaged model for Stochastic Weight Averaging (SWA).
+    r"""Implements averaged model for Stochastic Weight Averaging (SWA) and
+    Exponential Moving Average (EMA).
 
     Stochastic Weight Averaging was proposed in `Averaging Weights Leads to
     Wider Optima and Better Generalization`_ by Pavel Izmailov, Dmitrii
     Podoprikhin, Timur Garipov, Dmitry Vetrov and Andrew Gordon Wilson
     (UAI 2018).
 
+    Exponential Moving Average is a variation of `Polyak averaging`_,
+    but using exponential weights instead of equal weights across iterations.
+
     AveragedModel class creates a copy of the provided module :attr:`model`
     on the device :attr:`device` and allows to compute running averages of the
     parameters of the :attr:`model`.
 
     Args:
-        model (torch.nn.Module): model to use with SWA
+        model (torch.nn.Module): model to use with SWA/EMA
         device (torch.device, optional): if provided, the averaged model will be
             stored on the :attr:`device`
         avg_fn (function, optional): the averaging function used to update
@@ -116,11 +120,11 @@ class AveragedModel(Module):
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
-        >>> swa_model = torch.optim.swa_utils.AveragedModel(model,
+        >>> ema_model = torch.optim.swa_utils.AveragedModel(model,
         >>>             torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
 
     .. note::
-        When using SWA with models containing Batch Normalization you may
+        When using SWA/EMA with models containing Batch Normalization you may
         need to update the activation statistics for Batch Normalization.
         This can be done either by using the :meth:`torch.optim.swa_utils.update_bn`
         or by setting :attr:`use_buffers` to `True`. The first approach updates the
@@ -131,7 +135,7 @@ class AveragedModel(Module):
         approach yields the best results in your problem.
 
     .. note::
-        :attr:`avg_fn` is not saved in the :meth:`state_dict` of the model.
+        :attr:`avg_fn` and `multi_avg_fn` are not saved in the :meth:`state_dict` of the model.
 
     .. note::
         When :meth:`update_parameters` is called for the first time (i.e.
@@ -150,6 +154,8 @@ class AveragedModel(Module):
     .. _Stochastic Weight Averaging in Parallel: Large-Batch Training That
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
+    .. _Polyak averaging:
+        https://paperswithcode.com/method/polyak-averaging
     """
     def __init__(self, model, device=None, avg_fn=None, multi_avg_fn=None, use_buffers=False):
         super().__init__()
