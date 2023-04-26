@@ -1887,6 +1887,13 @@ class TritonScheduling:
         kernel_name = self.define_kernel(src_code, node_schedule)
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+
+        if config.serialize_intermediates_with_origin_node:
+            for node in node_schedule:
+                origin_node = node.node.get_origin_node()
+                if origin_node is not None:
+                    V.graph.wrapper_code.writeline(f"logging.warning('%s %s', {origin_node.name!r}, {node.get_name()})")
+
         self.scheduler.free_buffers()
 
     def define_kernel(self, src_code, node_schedule):

@@ -159,6 +159,13 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
 
+# Print intermediate values when we know what FX node they correspond to
+serialize_intermediates_with_origin_node = False
+
+# Populate traceback field on IRNode; good for debugging why origin_node is
+# not populated, or finding out where an IRNode was constructed
+debug_ir_traceback = False
+
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
