@@ -356,14 +356,12 @@ class GraphLowering(torch.fx.Interpreter):
         if target is operator.getitem and isinstance(args[0], (list, tuple)):
             return super().call_function(target, args, kwargs)
 
-        # TODO (tmanlaibaatar) Skip now because we don't have
-        # inductor lowering for this op.
-        if target == torch.ops.aten._assert_async.msg:
-            return
-
         if hasattr(target, "_inductor_lowering_function"):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
+
+        if target == torch.ops.aten._assert_async.msg:
+            return
 
         if target not in lowerings:
             base_name = target.name().split(".")[0]

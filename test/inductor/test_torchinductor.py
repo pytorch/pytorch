@@ -1890,12 +1890,15 @@ class CommonTemplate:
             fn(torch.randn(1, 5))
 
     def test_inductor_assert(self):
-        @torch._dynamo.optimize("inductor")
+        @torch._dynamo.optimize("inductor", dynamic=True)
         def fn(a):
-            assert a[0] == 3
+            assert a.shape[0] >= 2 and a.shape[1] >= 4
             return a.cos()
 
-        self.assertEqual(fn(torch.Tensor([3, 4, 5])), torch.Tensor([3, 4, 5]).cos())
+        inp = torch.randn(2, 4, 6)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+        self.assertEqual(fn(inp), inp.cos())
 
     def test_split(self):
         def fn(a):
