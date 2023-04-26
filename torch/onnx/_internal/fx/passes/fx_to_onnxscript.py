@@ -116,7 +116,11 @@ def _location_from_fx_stack_trace(
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ):
@@ -298,7 +302,11 @@ def _wrap_fx_args_as_onnxscript_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ) -> Tuple[tuple, dict]:
@@ -323,7 +331,11 @@ def _export_fx_node_to_onnxscript(
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
