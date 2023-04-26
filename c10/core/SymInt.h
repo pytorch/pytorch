@@ -290,11 +290,12 @@ inline c10::SymInt multiply_integers(Iter begin, Iter end) {
       [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-#define DECLARE_SYMINT_OP_INTONLY(scalar_t, RetTy) \
-  C10_API RetTy operator%(const SymInt& a, scalar_t b);    \
+#define DECLARE_SYMINT_OP_INTONLY(scalar_t, RetTy)      \
+  C10_API RetTy operator%(const SymInt& a, scalar_t b); \
   C10_API RetTy operator%(scalar_t a, const SymInt& b);
 
-#define DECLARE_SYMINT_OP(scalar_t, RetTy)  C10_API     \
+#define DECLARE_SYMINT_OP(scalar_t, RetTy)              \
+  C10_API                                               \
   C10_API RetTy operator+(const SymInt& a, scalar_t b); \
   C10_API RetTy operator-(const SymInt& a, scalar_t b); \
   C10_API RetTy operator*(const SymInt& a, scalar_t b); \
