@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
-
+import sys
+import unittest
 import torch
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -13,6 +14,19 @@ from unittest.mock import patch
 import functools
 import torch.utils.checkpoint
 
+
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+)
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "torch.compile not supported on windows"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("torch.compile not supported on windows")
 
 def count_philox_rand(gm, args, freq):
     assert [node.target for node in gm.graph.nodes].count(torch.ops.rngprims.philox_rand.default) == freq
@@ -38,6 +52,51 @@ class TestFunctionalizationRngOps(TestCase):
             res = aot_fn(x)
 
             self.assertEqual(ref, res)
+
+    @dtypes(torch.float32)
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_rand_like_dynamic(self, dtype, device):
+        def fn(x):
+            a = torch.rand_like(x) * x
+            a = torch.rand_like(x) * a
+            return a
+
+        for seed in range(1, 10):
+            shape = (seed, seed)
+            x = torch.rand(shape, device=device, dtype=dtype)
+            torch.cuda.manual_seed(seed)
+            ref = fn(x)
+
+            torch.cuda.manual_seed(seed)
+            opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True)
+            res = opt_fn(x)
+
+            self.assertEqual(ref, res)
+
+
+
+    @dtypes(torch.float32)
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_rand_like_dynamic_bwd(self, dtype, device):
+        def fn(x):
+            a = torch.rand_like(x) * x
+            a = torch.rand_like(x) * a
+            return a
+
+        for seed in range(1, 10):
+            shape = (seed, seed)
+            x = torch.rand(shape, device=device, dtype=dtype, requires_grad=True)
+            torch.cuda.manual_seed(seed)
+            ref = fn(x)
+            ref.sum().backward()
+
+            torch.cuda.manual_seed(seed)
+            opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True)
+            res = opt_fn(x)
+            res.sum().backward()
+
+            self.assertEqual(ref, res)
+
 
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
