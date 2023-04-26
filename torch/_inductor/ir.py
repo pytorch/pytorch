@@ -3,9 +3,9 @@ import dataclasses
 import functools
 import itertools
 import logging
-import traceback
 import re
 import textwrap
+import traceback
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
@@ -356,7 +356,9 @@ class Loops(IRNode):
         tb = kwargs.pop("traceback", None)
         r = cls(*args, **kwargs)
         r.origin_node = origin_node
-        r.traceback = tb or traceback.format_stack() if config.debug_ir_traceback else None
+        r.traceback = (
+            tb or traceback.format_stack() if config.debug_ir_traceback else None
+        )
         return TensorBox.create(r)
 
     @staticmethod

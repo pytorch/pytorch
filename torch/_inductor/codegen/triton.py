@@ -1892,7 +1892,9 @@ class TritonScheduling:
             for node in node_schedule:
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
-                    V.graph.wrapper_code.writeline(f"logging.warning('%s %s', {origin_node.name!r}, {node.get_name()})")
+                    V.graph.wrapper_code.writeline(
+                        f"log.warning('%s %s', {origin_node.name!r}, {node.get_name()})"
+                    )
 
         self.scheduler.free_buffers()
 

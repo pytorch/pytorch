@@ -335,9 +335,7 @@ class WrapperCodeGen(CodeGen):
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
         if config.serialize_intermediates_with_origin_node and origin_node is not None:
-            self.writeline(
-                f"logging.warning('%s %s', {origin_node.name!r}, {output_name})"
-            )
+            self.writeline(f"log.warning('%s %s', {origin_node.name!r}, {output_name})")
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
