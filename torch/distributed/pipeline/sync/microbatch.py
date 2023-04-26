@@ -143,7 +143,7 @@ class Batch:
         self._values = value
 
     def _setitem_by_slice(self, index: slice, value) -> None:
-        if not (index.start is index.stop is index.step is None):  # noqa: E714
+        if not (index.start is index.stop is index.step is None):
             raise NotImplementedError("only slice [:] supported")
 
         if not self.atomic:

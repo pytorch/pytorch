@@ -52,6 +52,6 @@ def get_step_logger(logger):
     step = next(_step_counter)
 
     def log(level, msg):
-        logger.log(level, "Step %s: %s", step, msg)
+        logger.log(level, f"Step {step}: {msg}")
 
     return log

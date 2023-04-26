@@ -38,16 +38,7 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
   return _commandBuffer;
 }
 
-id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
-  if (!_commandEncoder) {
-    _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
-  }
-
-  return _commandEncoder;
-}
-
 void MPSStream::synchronize(SyncType syncType) {
-  endKernelCoalescing();
   if (!_commandBuffer)
     return;
   switch (syncType) {
@@ -99,14 +90,6 @@ void MPSStream::commitAndContinue() {
   [_commandBuffer commitAndContinue];
 }
 
-void MPSStream::endKernelCoalescing() {
-  if (_commandEncoder) {
-    [_commandEncoder endEncoding];
-    [_commandEncoder release];
-    _commandEncoder = nil;
-  }
-}
-
 void MPSStream::flush() {
   if (_commandBuffer) {
     [_commandBuffer commit];
@@ -138,7 +121,6 @@ void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t 
     return;
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
-      endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
 
       [blitEncoder fillBuffer:buffer range:NSMakeRange(offset, length) value:value];
@@ -156,7 +138,6 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
                      SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
-      endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
 
       [blitEncoder copyFromBuffer:srcBuffer
@@ -182,7 +163,6 @@ void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer,
 
 void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
-    endKernelCoalescing();
 #if USE_COMMIT_AND_CONTINUE
     [mpsGraph encodeToCommandBuffer:commandBuffer()
                               feeds:feeds
