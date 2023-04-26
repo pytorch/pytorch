@@ -13,7 +13,6 @@ from datetime import timedelta
 from itertools import product
 from sys import platform
 from typing import Callable, Dict, Optional
-from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -148,7 +147,14 @@ class TimeoutTest(TestCase):
             try:
                 # 1 missing worker will cause it to timeout
                 if rank != world_size - 1:
-                    c10d._store_based_barrier(rank, barrier_store, timeout, logging_interval=timeout / 2)
+                    c10d._store_based_barrier(
+                        rank=rank,
+                        store=barrier_store,
+                        group_name="_",
+                        rendezvous_count=world_size,
+                        timeout=timeout,
+                        logging_interval=timeout / 2
+                    )
             except RuntimeError as e:
                 error_list.append(e)
 
@@ -156,25 +162,22 @@ class TimeoutTest(TestCase):
         error_list = []
         threads = []
         for init_type in ["file", "tcp", "hash"]:
-            # mock get_world_size() in _store_based_barrier so we don't need to initialize a default process group
-            with mock.patch('torch.distributed.distributed_c10d.get_world_size') as mock_get_world_size:
-                mock_get_world_size.return_value = world_size
-                for rank in range(world_size):
-                    t = threading.Thread(
-                        target=thread_work, args=(timedelta(seconds=3), init_type, world_size, rank, error_list,)
-                    )
-                    threads.append(t)
-                    t.start()
+            for rank in range(world_size):
+                t = threading.Thread(
+                    target=thread_work, args=(timedelta(seconds=3), init_type, world_size, rank, error_list,)
+                )
+                threads.append(t)
+                t.start()
 
-                for i, thread in enumerate(threads):
-                    thread.join()
+            for i, thread in enumerate(threads):
+                thread.join()
 
-                # we expect the world_size-1 threads to have failed
-                self.assertEqual(len(error_list), world_size - 1)
-                for error in error_list:
-                    self.assertTrue("Timed out initializing process group in store based barrier" in error.args[0])
-                error_list = []
-                threads = []
+            # we expect the world_size-1 threads to have failed
+            self.assertEqual(len(error_list), world_size - 1)
+            for error in error_list:
+                self.assertTrue("Timed out initializing process group in store based barrier" in error.args[0])
+            error_list = []
+            threads = []
 
 class Net(nn.Module):
     def __init__(self):
