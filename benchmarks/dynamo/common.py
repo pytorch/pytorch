@@ -1746,7 +1746,7 @@ def parse_args(args=None):
         help="Port to bind for for torch.distributed.  Use the default unless it's conflicting with another user",
     )
     parser.add_argument(
-        "--dynamic-shapes",
+        "--static-shapes",
         action="store_true",
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
@@ -2046,13 +2046,11 @@ def run(runner, args, original_dir=None):
         assert args.backend is None
         args.backend = "inductor"
     if args.dynamic_ci_skips_only:
-        args.dynamic_shapes = True
         args.ci = True
     if args.dynamic_batch_only:
-        args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
-    if args.dynamic_shapes:
-        torch._dynamo.config.dynamic_shapes = True
+    if args.static_shapes:
+        torch._dynamo.config.dynamic_shapes = False
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
@@ -2062,14 +2060,14 @@ def run(runner, args, original_dir=None):
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
-            assert args.dynamic_shapes
+            assert not args.static_shapes
             ci = functools.partial(CI, args.backend, training=args.training)
             args.filter = list(
                 set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
         else:
             ci = functools.partial(
-                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+                CI, args.backend, training=args.training, dynamic=(not args.static_shapes)
             )
             for device in args.devices:
                 args.exclude_exact.extend(CI_SKIP[ci(device=device)])

@@ -28,10 +28,6 @@ test_classes = {}
 
 ALL_DYNAMIC_XFAILS = {
     "MiscTests": [],
-    "ReproTests": [
-        # Could not infer dtype of torch._C.SymIntNode
-        "test_convert_boxes_to_pooler_format",
-    ],
     "SubGraphTests": [
         "test_enumerate_not_break_graph",
     ],
@@ -40,12 +36,15 @@ ALL_DYNAMIC_XFAILS = {
 XFAIL_HITS = 0
 
 
-def make_dynamic_cls(cls, *, static_default=False):
-    suffix = "_dynamic_shapes"
+def make_dynamic_cls(cls, *, dynamic=False, static_default=False):
+    if dynamic and static_default:
+        raise("Running default configs, redundant tests.")
+
+    suffix = "_dynamic_shapes" if dynamic else "_static_shapes"
     if static_default:
         suffix += "_static_default"
 
-    cls_prefix = "DynamicShapes"
+    cls_prefix = "DynamicShapes" if dynamic else "StaticShapes"
     if static_default:
         cls_prefix = f"StaticDefault{cls_prefix}"
 
@@ -53,7 +52,7 @@ def make_dynamic_cls(cls, *, static_default=False):
         cls,
         cls_prefix,
         suffix,
-        (config, "dynamic_shapes", True),
+        (config, "dynamic_shapes", dynamic),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
     )
@@ -81,8 +80,8 @@ tests = [
     test_subgraphs.SubGraphTests,
 ]
 for test in tests:
-    make_dynamic_cls(test)
-    make_dynamic_cls(test, static_default=True)
+    make_dynamic_cls(test, dynamic=True, static_default=False)
+    make_dynamic_cls(test, dynamic=False, static_default=False)
 
 assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
 
