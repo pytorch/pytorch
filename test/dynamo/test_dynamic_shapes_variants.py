@@ -26,19 +26,14 @@ import unittest
 
 test_classes = {}
 
-ALL_DYNAMIC_XFAILS = {
-    "MiscTests": [],
-    "SubGraphTests": [
-        "test_enumerate_not_break_graph",
-    ],
-}
+ALL_DYNAMIC_XFAILS = {}
 
 XFAIL_HITS = 0
 
 
 def make_dynamic_cls(cls, *, dynamic=False, static_default=False):
     if dynamic and static_default:
-        raise("Running default configs, redundant tests.")
+        raise RuntimeError("Running default configs, redundant tests.")
 
     suffix = "_dynamic_shapes" if dynamic else "_static_shapes"
     if static_default:
