@@ -14,6 +14,9 @@ from torch.testing._internal.autograd_function_db import (
     sample_inputs_numpy_sort,
     sample_inputs_numpy_take,
 )
+from torch import Tensor
+from torch.types import Number
+from typing import Tuple
 
 # Note: [custom op db]
 #
@@ -24,8 +27,8 @@ from torch.testing._internal.autograd_function_db import (
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
-@custom_op('(Tensor x) -> (Tensor, Tensor)', ns='_torch_testing')
-def numpy_cube(x):
+@custom_op('_torch_testing::numpy_cube')
+def numpy_cube(x: Tensor) -> Tuple[Tensor, Tensor]:
     ...
 
 @numpy_cube.impl('cpu')
@@ -39,8 +42,8 @@ def numpy_cube_impl(x):
 def numpy_cube_abstract(x):
     return x.clone(), x.clone()
 
-@custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
-def numpy_mul(x, y):
+@custom_op('_torch_testing::numpy_mul')
+def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
     ...
 
 @numpy_mul.impl('cpu')
@@ -53,8 +56,8 @@ def numpy_mul_abstract(x, y):
     assert x.device == y.device
     return (x * y).contiguous()
 
-@custom_op('(Tensor x, int dim) -> (Tensor, Tensor, Tensor)', ns='_torch_testing')
-def numpy_sort(x, dim):
+@custom_op('_torch_testing::numpy_sort')
+def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
     ...
 
 @numpy_sort.impl('cpu')
@@ -75,8 +78,8 @@ def numpy_sort_impl(x, dim):
 def numpy_sort_abstract(x, dim):
     return torch.empty_like(x), torch.empty_like(x, dtype=torch.long), torch.empty_like(x, dtype=torch.long)
 
-@custom_op('(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor', ns='_torch_testing')
-def numpy_take(x, ind, ind_inv, dim):
+@custom_op('_torch_testing::numpy_take')
+def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
     ...
 
 @numpy_take.impl('cpu')
@@ -93,8 +96,8 @@ def numpy_take_abstract(x, ind, ind_inv, dim):
     assert x.device == ind_inv.device
     return torch.empty_like(x)
 
-@custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
-def numpy_nonzero(x):
+@custom_op('_torch_testing::numpy_nonzero')
+def numpy_nonzero(x: Tensor) -> Tensor:
     ...
 
 @numpy_nonzero.impl(['cpu', 'cuda'])
@@ -124,8 +127,8 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput(result, args=())
 
 
-@custom_op('(Tensor boxes, Tensor scores, float iou_threshold) -> Tensor', ns='_torch_testing')
-def numpy_nms(boxes, scores, iou_threshold):
+@custom_op('_torch_testing::numpy_nms')
+def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
     ...
 
 @numpy_nms.impl(['cpu', 'cuda'])
