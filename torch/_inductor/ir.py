@@ -625,7 +625,7 @@ class Reduction(Loops):
             indices = []
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
-                if all([r in md.index.free_symbols for r in range_vars]):
+                if all(r in md.index.free_symbols for r in range_vars):
                     indices.append(md.index)
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
@@ -651,7 +651,7 @@ class Reduction(Loops):
         for i in indices:
             i = V.graph.sizevars.simplify_with_ranges(i, ranges)
             strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
-            outer = all([s > 1 for s in strides])
+            outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -676,6 +676,11 @@ class Reduction(Loops):
 
             def combine_fn(a, b):
                 return ops.add(a, b)
+
+        elif reduction_type == "prod":
+
+            def combine_fn(a, b):
+                return ops.mul(a, b)
 
         elif reduction_type == "min":
 
@@ -832,8 +837,8 @@ class Reduction(Loops):
                 return isinstance(x, (int, sympy.Integer))
 
             sr_qualified = (
-                all([_is_static(r) for r in ranges])
-                and all([_is_static(r) for r in reduction_ranges])
+                all(_is_static(r) for r in ranges)
+                and all(_is_static(r) for r in reduction_ranges)
                 and _is_static(reduction_numel)
             )
 
@@ -905,6 +910,7 @@ class Reduction(Loops):
 
         return {
             "sum": 0,
+            "prod": 1,
             "any": 0,
         }[reduction_type]
 
@@ -3045,8 +3051,15 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(nontensor_args),
         )
         if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
-            self.kernel = f"aten.{kernel.__name__}"
+            self.kernel = (
+                f"at::{kernel.__name__}"
+                if V.graph.cpp_wrapper
+                else f"aten.{kernel.__name__}"
+            )
         else:
+            assert (
+                not V.graph.cpp_wrapper
+            ), f"{kernel.__name__} is not supported with cpp wrapper"
             self.kernel = (
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
@@ -3106,10 +3119,10 @@ class FallbackKernel(ExternKernelAlloc):
             unflatten_args,
         )
 
-        def generate_output(output, index=""):
+        def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
                 return type(output)(
-                    generate_output(output[i], f"{index}[{i}]")
+                    generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
                 )
             elif isinstance(output, torch.Tensor):
@@ -3121,7 +3134,7 @@ class FallbackKernel(ExternKernelAlloc):
                         convert_shape_to_inductor(output.stride()),
                     ),
                     packed,
-                    index,
+                    indices,
                 )
             elif isinstance(output, int):
                 return output
@@ -3129,7 +3142,7 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output)
+        return generate_output(example_output, [])
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3141,16 +3154,33 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
-        )
-        self.codegen_size_asserts(wrapper)
+    def codegen_list_tuple_access(self, basename, indices):
+        if len(indices) > 0:
+            itype, i = indices[0]
+            if itype == list:
+                return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
+            elif itype == tuple:
+                # cpp wrapper code needs to use std::get<> to access a tuple
+                tuple_access = V.graph.wrapper_code.codegen_tuple_access(
+                    basename, str(i)
+                )
+                return self.codegen_list_tuple_access(tuple_access, indices[1:])
+            else:
+                raise AssertionError("non supported index type")
+        else:
+            return basename
 
-    def __init__(self, layout, input, index: str):
+    def codegen(self, wrapper):
+        line = V.graph.wrapper_code.declare
+        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
+        line += V.graph.wrapper_code.ending
+        V.graph.wrapper_code.writeline(line)
+        self.codegen_size_asserts(V.graph.wrapper_code)
+
+    def __init__(self, layout, input, indices: List[Tuple]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
-        self.index = index
+        self.indices = indices
 
     def should_allocate(self):
         return False
@@ -3789,7 +3819,7 @@ class StorageBox(MutableBox):
             """
             heavy_ops = ["exp"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
-            return any([(op + "(") in fn_str for op in heavy_ops])
+            return any((op + "(") in fn_str for op in heavy_ops)
 
         if (
             users > 1

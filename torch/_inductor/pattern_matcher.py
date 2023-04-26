@@ -16,6 +16,7 @@ from torch._dynamo.utils import counters
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
 from ..fx import Transformer
@@ -184,14 +185,18 @@ class KeywordArg(PatternExpr):
         return Match(self, kwargs={self.name: node})  # matches anything
 
 
-class CallFunction(PatternExpr):
+class _BaseNodeMatch(PatternExpr):
     """
-    Matches a call_function node in the FX graphs: `fns[i](*args, **kwargs)`
+    Base class for matching a node in a graph
     """
 
+    op = None
+
     def __init__(self, fns, *args, _users=1, **kwargs):
+        if not self.op:
+            raise NotImplementedError("Shouldn't directly use _BaseNodeMatch")
         super().__init__()
-        fns = [fns] if callable(fns) else list(fns)
+        fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in list(fns):
             if isinstance(fn, torch._ops.OpOverloadPacket):
                 fns.extend([getattr(fn, overload) for overload in fn.overloads()])
@@ -243,7 +248,7 @@ class CallFunction(PatternExpr):
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if (
             not isinstance(node, torch.fx.Node)
-            or node.op != "call_function"
+            or node.op != self.op
             or node.target not in self.fns_set
             or len(node.args) != len(self.args)
             or len(node.kwargs) != len(self.kwargs)
@@ -297,11 +302,27 @@ class CallFunction(PatternExpr):
                     for node in other_node.users:
                         if (
                             node not in searched
-                            and node.op == "call_function"
+                            and node.op == self.op
                             and node.target in self.fns_set
                         ):
                             yield node
                             searched.add(node)
+
+
+class CallFunction(_BaseNodeMatch):
+    """
+    Matches a call_function node in the FX graphs: `fns[i](*args, **kwargs)`
+    """
+
+    op = "call_function"
+
+
+class CallMethod(_BaseNodeMatch):
+    """
+    Matches a call_method node in the FX graphs: `fns[i].method(*args, **kwargs)`
+    """
+
+    op = "call_method"
 
 
 class ListOf(PatternExpr):
@@ -535,25 +556,27 @@ def register_replacement(
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
-    argnames = [*inspect.signature(search_fn).parameters.keys()]
-    requires_grad = [
-        isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
-    ]
-    search_gm = trace_fn(search_fn, example_inputs)
-    pattern = fx_to_pattern(
-        search_gm,
-        ignore_types=(int, float, torch.device, torch.dtype),
-        argnames=argnames,
-        scalar_workaround=scalar_workaround,
-    )
-    assert repr(pattern) not in _seen_patterns
-    _seen_patterns.add(repr(pattern))
-    pattern = ReplacementPatternEntry(
-        pattern=pattern,
-        extra_check=check_fn,
-        normalize_args=normalize_args,
-    )
-    pattern.register(pass_dict)
+    # TODO: Revisit the functionalize_rng_ops for lowmem dropout
+    with functorch_config.patch(functionalize_rng_ops=False):
+        argnames = [*inspect.signature(search_fn).parameters.keys()]
+        requires_grad = [
+            isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
+        ]
+        search_gm = trace_fn(search_fn, example_inputs)
+        pattern = fx_to_pattern(
+            search_gm,
+            ignore_types=(int, float, torch.device, torch.dtype),
+            argnames=argnames,
+            scalar_workaround=scalar_workaround,
+        )
+        assert repr(pattern) not in _seen_patterns
+        _seen_patterns.add(repr(pattern))
+        pattern = ReplacementPatternEntry(
+            pattern=pattern,
+            extra_check=check_fn,
+            normalize_args=normalize_args,
+        )
+        pattern.register(pass_dict)
 
 
 def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):
@@ -605,7 +628,10 @@ class PatternMatcherPass:
             return 0
         count = 0
         for node in reversed(graph.nodes):
-            if node.op == "call_function" and node.target in self.patterns:
+            if (
+                node.op in ["call_function", "call_method"]
+                and node.target in self.patterns
+            ):
                 # conservatively not applying pattern for cpu input,
                 # since some of the patterns induce codegen and split nodes.
                 # Note: we will only skip cpu compute if disable_cpp_codegen=True
