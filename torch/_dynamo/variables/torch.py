@@ -1015,9 +1015,8 @@ class TorchHigherOrderOperator(VariableTracker):
             tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
 
             # Add tracking
-
-            tx.output.tensor_id_to_fake_clone |= true_tensor_id_to_fake_clone
-            tx.output.tensor_id_to_fake_clone |= false_tensor_id_to_fake_clone
+            tx.output.tensor_id_to_fake_clone.update(true_tensor_id_to_fake_clone)
+            tx.output.tensor_id_to_fake_clone.update(false_tensor_id_to_fake_clone)
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)
@@ -1081,7 +1080,7 @@ class TorchHigherOrderOperator(VariableTracker):
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
             # Add tracking
-            tx.output.tensor_id_to_fake_clone |= body_tensor_id_to_fake_clone
+            tx.output.tensor_id_to_fake_clone.update(body_tensor_id_to_fake_clone)
 
             body_name = add_subgraph(
                 "body", torch.fx.GraphModule(body_nn_modules, body_graph)
