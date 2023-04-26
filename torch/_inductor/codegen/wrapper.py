@@ -20,7 +20,6 @@ from ..utils import (
     LineContext,
     sympy_dot,
     sympy_product,
-    sympy_symbol,
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
@@ -195,7 +194,6 @@ class WrapperCodeGen(CodeGen):
         self.src_to_kernel = {}
         self.kernel_to_hash = {}
         self.lines = []
-        self.need_seed = False
         self.declare = ""
         self.ending = ""
         self.open_bracket = "["
@@ -296,10 +294,6 @@ class WrapperCodeGen(CodeGen):
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
-            for name in V.graph.randomness_seeds:
-                self.prefix.writeline(
-                    f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
-                )
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
     def append_precomputed_sizes_to_prefix(self):
@@ -418,10 +412,6 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
-        if self.need_seed:
-            code.writeline(
-                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
-            )
 
         @functools.lru_cache(None)
         def sizeof(name):
@@ -725,16 +715,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
 
-    def seed(self):
-        """
-        Seed is a special variable used to hold the rng seed for a graph.
-
-        Note this is only used by the CPU backend, we put seeds in a
-        1-element tensor for the CUDA backend.
-        """
-        self.need_seed = True
-        return sympy_symbol("seed")
-
     def write_header(self):
         if V.graph.aot_mode:
             self.header.splice(
@@ -799,11 +779,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         self.wrapper_call.writeline(f"at::Tensor {input_key};")
                         self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
 
-            for name in V.graph.randomness_seeds:
-                self.wrapper_call.writeline(f"at::Tensor {name};")
-                self.wrapper_call.writeline(
-                    f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
-                )
             self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
 
     def generate(self):

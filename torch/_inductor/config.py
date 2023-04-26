@@ -103,7 +103,7 @@ conv_1x1_as_mm = False
 split_reductions = True
 
 # Only save random seed for backwards rather than full mask
-lowmem_dropout = True
+lowmem_dropout = False
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
@@ -276,6 +276,9 @@ class triton:
     # Settting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
     spill_threshold = 0
+
+    # Vectorize random number generation in a schedule-dependent way
+    vectorize_random = True
 
 
 # create a directory containing lots of debug information

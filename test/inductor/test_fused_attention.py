@@ -14,7 +14,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestSDPAPatternRewriter(TestCase):
-    @config.patch(fallback_random=True, lowmem_dropout=False)
+    @config.patch(fallback_random=True)
     def _check_common(
         self,
         dot_prod_attention,

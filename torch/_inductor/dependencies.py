@@ -151,6 +151,7 @@ class ReadWrites:
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
+    op_counts: collections.Counter = None
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -159,6 +160,7 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
+            op_counts=self.op_counts,
         )
 
     def with_read(self, dep: Dep) -> "ReadWrites":
@@ -169,17 +171,19 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
+            op_counts=self.op_counts,
         )
 
-    def merge(self, other):
+    def merge(self, other: "ReadWrites"):
         reads = set.union(self.reads, other.reads)
         writes = set.union(self.writes, other.writes)
         index_exprs = set.union(self.index_exprs, other.index_exprs)
-        return ReadWrites(
-            reads - writes,
-            writes,
-            index_exprs,
-        )
+        if self.op_counts is not None:
+            op_counts = collections.Counter(self.op_counts)
+            op_counts.update(other.op_counts or {})
+        else:
+            op_counts = other.op_counts
+        return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
 
     def remove_reads(self, rem_reads):
         return ReadWrites(
@@ -188,6 +192,7 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
+            op_counts=self.op_counts,
         )
 
 
@@ -231,6 +236,10 @@ class _RecordLoadStoreInner(V.MockHandler):
         self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
         return f"load({name}, {sympy_str(index)})"
 
+    def load_seed(self, name: str, index: int):
+        assert isinstance(index, int)
+        return self.load(name, sympy.Integer(index))
+
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         canonicalized_index, canonicalized_size = self.canonicalize(index)
         self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
@@ -247,11 +256,25 @@ class _RecordLoadStoreInner(V.MockHandler):
         return f"index_expr({sympy_str(index)}, {dtype})"
 
 
+class _OpCounter:
+    """Shim to count how many times each op is used"""
+
+    def __init__(self, inner):
+        super().__init__()
+        self.parent_handler = inner
+        self._op_counts = collections.Counter()
+
+    def __getattr__(self, name):
+        self._op_counts[name] += 1
+        return getattr(self.parent_handler, name)
+
+
 class RecordLoadStore(V.KernelFormatterHandler):
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         parent_handler = _RecordLoadStoreInner(
             var_ranges=var_ranges, normalize=normalize
         )
+        parent_handler = _OpCounter(parent_handler)
         super().__init__(parent_handler=parent_handler)
 
 
@@ -304,13 +327,14 @@ def extract_read_writes(
     else:
         range_vars = [*itertools.chain(*args)]
 
-    inner = rw.parent_handler
+    inner = rw.parent_handler.parent_handler
     return ReadWrites(
         set(inner._reads),
         set(inner._writes),
         inner._index_exprs,
         range_vars,
         var_ranges,
+        rw.parent_handler._op_counts,
     )
 
 

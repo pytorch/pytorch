@@ -301,6 +301,10 @@ class OpOverrides:
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
+    @staticmethod
+    def load_seed(name, offset):
+        return ops.load(name, sympy.Integer(offset))
+
 
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
@@ -713,6 +717,9 @@ class Kernel(CodeGen):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
+    def vectorized_random(self, seed: str, mode: str):
+        raise NotImplementedError()
+
     def __enter__(self):
         class CSEProxy:
             self.name = "CSEProxy"
@@ -762,6 +769,10 @@ class Kernel(CodeGen):
                 return self.reduction(
                     name, dtype, src_dtype, reduction_type, index, value
                 )
+
+            @staticmethod
+            def vectorized_random(seed, mode):
+                return self.vectorized_random(seed, mode)  # bypass CSE
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

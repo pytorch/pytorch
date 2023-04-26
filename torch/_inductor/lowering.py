@@ -26,7 +26,7 @@ from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_opera
 from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
-from . import config, ir, overrides, test_operators  # NOQA: F401
+from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -1135,10 +1135,7 @@ def native_dropout(x, p, train):
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
         )
     else:
-        bool_mask = gt(rand_like(x), p)
-        bool_mask.realize()
-        res = mul(mul(bool_mask, x), float(1.0 / (1.0 - p)))
-        return res, bool_mask
+        raise AssertionError("should be handled in replace_random.py")
 
 
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
@@ -1176,114 +1173,91 @@ def warn_triton_random():
     _warn_triton_random(V.graph.creation_time)
 
 
-def make_rand(fn_name):
-    def rand_or_randn(
-        *size,
-        dtype=None,
-        layout=0,
-        device=None,
-        pin_memory=False,
-        memory_format=None,
-    ):
-        warn_triton_random()
-        assert not pin_memory
-        assert layout in (0, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
-        device = decode_device(device)
-        dtype = dtype or torch.get_default_dtype()
-        if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
-            size = tuple(size[0])
-        size = [sympy.expand(s) for s in size]
-        offset = V.graph.increment_randomness_offset(sympy_product(size))
-
-        random_pos = ir.FixedLayout(
-            device,
-            dtype,
-            size,
-            ir.FlexibleLayout.contiguous_strides(size),
-            offset=offset,
-        ).make_indexer()
-
-        seed_buffer = V.graph.random_seed_buffer(device).make_loader()
-
-        def inner_fn(index):
-            seed = seed_buffer([])
-            # change seed so that we don't collide with philox_rand_like()
-            # TODO(jansel): migrate everything to philox_rand_like()
-            seed = ops.bitwise_xor(seed, ops.constant(0xFFFF, torch.int32))
-            return getattr(ops, fn_name)(
-                seed,
-                ops.index_expr(random_pos(index), torch.int32),
-                dtype,
-            )
-
-        return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=inner_fn,
-            ranges=list(size),
-        )
-
-    return rand_or_randn
-
-
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
-fast_rand = make_rand("rand")
-fast_randn = make_rand("randn")
 
 
-@register_lowering([aten.rand, torch.rand])
+@register_lowering(aten.rand)
 def rand(*args, **kwargs):
     if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_rand(*args, **kwargs)
-    else:
-        kwargs.pop("generator", None)
-        return fast_rand(*args, **kwargs)
+    raise AssertionError("should have been handled in replace_random.py")
 
 
-@register_lowering([aten.randn, torch.randn])
+@register_lowering(aten.randn)
 def randn(*args, **kwargs):
     if config.fallback_random or kwargs.get("generator", None) is not None:
         return fallback_randn(*args, **kwargs)
-    else:
-        kwargs.pop("generator", None)
-        return fast_randn(*args, **kwargs)
+    raise AssertionError("should have been handled in replace_random.py")
 
 
-@register_lowering(overrides.philox_seed_like._overloadpacket)
-def philox_seed_like(x):
+@register_lowering(inductor_prims.seed, type_promotion_kind=None)
+def inductor_seed(device: torch.device):
+    raise AssertionError("should be handled in fuse_seed_creation_pass()")
+
+
+@register_lowering(inductor_prims.seeds, type_promotion_kind=None)
+def inductor_seeds(count, device):
     warn_triton_random()
-    return V.graph.random_seed_buffer(x.get_device())
+    limits = torch.iinfo(torch.int64)
+    return TensorBox.create(
+        ir.FallbackKernel.create(
+            aten.randint,
+            limits.min,
+            limits.max,
+            [count],
+            device=device,
+            dtype=torch.int64,
+        )
+    )
 
 
-@register_lowering(overrides.philox_rand_like._overloadpacket, type_promotion_kind=None)
-def philox_rand_like(x, seed, offset):
-    device = x.get_device()
-    dtype = x.get_dtype()
-    size = x.get_size()
+@register_lowering(inductor_prims.lookup_seed, type_promotion_kind=None)
+def inductor_lookup_seed(seeds, index):
+    def inner_fn(_):
+        return ops.load_seed(seeds.get_name(), index)
+
+    return Pointwise.create(
+        device=seeds.get_device(),
+        dtype=seeds.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[],
+    )
+
+
+@register_lowering(inductor_prims.random, type_promotion_kind=None)
+def inductor_random(
+    size: List[int], seed: TensorBox, mode: str, vectorize: bool, *, offset: int = 0
+):
+    assert not config.fallback_random
+    assert not vectorize or config.triton.vectorize_random
+    assert mode in ("rand", "randn")
+    size = [*size]
+    dtype = torch.float32
+    device = seed.get_device()
     random_pos = ir.FixedLayout(
-        device,
-        dtype,
-        size,
-        ir.FlexibleLayout.contiguous_strides(size),
-        offset=sympy.expand(offset),
+        device, dtype, size, ir.FlexibleLayout.contiguous_strides(size), offset=offset
     ).make_indexer()
     seed_loader = seed.make_loader()
 
     def inner_fn(index):
-        return ops.rand(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-            dtype,
-        )
+        if vectorize:
+            return ops.vectorized_random(seed_loader([]), mode)
+        else:
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+                dtype,
+            )
 
-    return Pointwise.create(
+    result = Pointwise.create(
         device=device,
         dtype=dtype,
         inner_fn=inner_fn,
-        ranges=list(size),
+        ranges=[*size],
     )
+    result.realize()
+    return result
 
 
 def require_dense(_, *args, **kwargs):
@@ -1821,8 +1795,6 @@ def constant_like(fill_value):
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
 ones_like = create_tensor_like(tensor_constructor(1))
 zeros_like = create_tensor_like(tensor_constructor(0))
-rand_like = register_lowering(aten.rand_like)(create_tensor_like(rand))
-randn_like = register_lowering(aten.randn_like)(create_tensor_like(randn))
 
 
 def new_constant(fill_value):

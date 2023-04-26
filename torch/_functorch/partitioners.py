@@ -560,6 +560,9 @@ def min_cut_rematerialization_partition(
             weight = math.inf
         elif is_non_tensor_node:
             weight = math.inf
+        elif "inductor_lookup_seed" in str(node.target):
+            # force all the seeds to be passed in a single variable
+            weight = math.inf
         else:
             weight = get_node_weight(node)
 

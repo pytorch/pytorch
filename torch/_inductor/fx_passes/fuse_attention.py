@@ -4,7 +4,6 @@ import math
 
 import torch
 from ..._dynamo.utils import counters
-from .. import config
 from ..pattern_matcher import (
     filter_nodes,
     inference_graph,
@@ -164,7 +163,6 @@ def _return_true(match):
 
 
 @functools.lru_cache(None)
-@config.patch(lowmem_dropout=False)
 def _sfdp_init():
     from .joint_graph import patterns
 

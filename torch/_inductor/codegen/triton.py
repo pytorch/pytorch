@@ -24,6 +24,7 @@ from ..utils import (
     get_kernel_metadata,
     instance_descriptor,
     next_power_of_2,
+    sympy_dot,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -318,6 +319,11 @@ class TritonOverrides(OpOverrides):
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
+    def load_seed(name, offset):
+        var = V.kernel.args.input(name)
+        return f"tl.load({var} + {offset})"
+
+    @staticmethod
     def rsqrt(x):
         return f"tl.math.rsqrt({x})"
 
@@ -556,7 +562,7 @@ class IterationRangesRoot(IterationRanges):
         if self.is_loop():
             code.writeline(f"{self.name} = {x}offset + {x}base")
         elif x == "r" and self.kernel.persistent_reduction:
-            # no need to "roffset = "
+            code.writeline("roffset = 0")
             code.writeline(
                 f"{self.name} = {self.ranges_code()}",
             )
@@ -1243,7 +1249,6 @@ class TritonKernel(Kernel):
 
             if accumulator_index:
                 # argmax, argmin
-                idx_dtype = self.index_dtype
                 self.suffix.writelines(
                     [
                         f"{accumulator_index}_reduce = "
@@ -1271,6 +1276,44 @@ class TritonKernel(Kernel):
             self.suffix.writeline(
                 DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
             )
+
+    def vectorized_random(self, seed, mode):
+        prefix = [
+            tree.prefix
+            for tree in self.range_trees
+            if tree.prefix != "r" or self.inside_reduction
+        ]
+        blocks = [f"{p.upper()}BLOCK" for p in prefix]
+        block_size = " * ".join(blocks)
+        strides = ir.FlexibleLayout.contiguous_strides(
+            [
+                sympy.Symbol(
+                    self.cse.generate(
+                        self.compute,
+                        f"(({p}numel + {p.upper()}BLOCK - 1) // {p.upper()}BLOCK) * {p.upper()}BLOCK",
+                    ).name
+                )
+                for p in prefix
+            ]
+        )
+        offset = sympy_dot([sympy.Symbol(f"{p}offset") for p in prefix], strides)
+        offsets = self.cse.generate(
+            self.compute, f"({texpr(offset)}) // 4 + tl.arange(0, {block_size} // 4)"
+        )
+        vn = self.cse.newvar()
+        self.compute.splice(
+            f"""
+            r0, r1, r2, r3 = tl.{mode}4x({seed}, {offsets}.to(tl.uint32))
+            slot = tl.broadcast_to(tl.arange(0, 4)[None, :], [{block_size} // 4, 4])
+            {vn} = tl.where(slot == 0, r0[:, None],
+                   tl.where(slot == 1, r1[:, None],
+                   tl.where(slot == 2, r2[:, None],
+                                       r3[:, None])))
+            {vn} = tl.view({vn}, [{', '.join(blocks)}])
+            """,
+            strip=True,
+        )
+        return vn
 
     def codegen_body(self):
         """
@@ -1637,6 +1680,9 @@ class TritonScheduling:
         """
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
+
+        if node1.is_template() and node2.op_counts().get("vectorized_random") > 0:
+            return False  # vectorized_random does not support templates
 
         if node1.is_reduction() and node2.is_reduction():
             return numel1 == numel2 and rnumel1 == rnumel2

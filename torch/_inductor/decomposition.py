@@ -439,6 +439,20 @@ def native_dropout(input: Tensor, p: float, train: bool):
     return NotImplemented
 
 
+@register_decomposition(aten.rand_like)
+def rand_like(self, *, dtype=None, device=None, **kwargs):
+    return torch.rand(
+        self.size(), dtype=dtype or self.dtype, device=device or self.device, **kwargs
+    )
+
+
+@register_decomposition(aten.randn_like)
+def randn_like(self, *, dtype=None, device=None, **kwargs):
+    return torch.randn(
+        self.size(), dtype=dtype or self.dtype, device=device or self.device, **kwargs
+    )
+
+
 # The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
 # scale and zero_point is scalar or scalar tensor
 @register_decomposition(quantized_decomposed.quantize_per_tensor.default)
