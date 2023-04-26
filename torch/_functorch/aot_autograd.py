@@ -2587,16 +2587,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     num_forward_returns:-num_symints_saved_for_bw
                 ]
                 assert all(
-                    [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
+                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
-                    [
-                        isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
-                        for x in symint_outs
-                    ]
+                    isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
+                    for x in symint_outs
                 )
                 ctx.symints = symint_outs
             else:
@@ -2904,7 +2902,7 @@ def create_aot_dispatcher_function(
         fake_flat_args = process_inputs(flat_args)
 
         needs_autograd = (
-            any([x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)])
+            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             and torch.is_grad_enabled()
         )
         with enable_python_dispatcher():
