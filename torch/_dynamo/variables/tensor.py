@@ -8,7 +8,8 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
-from .. import config, variables
+from .. import config, utils, variables
+from ..bytecode_transformation import create_call_function, Instruction
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
