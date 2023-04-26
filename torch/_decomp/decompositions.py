@@ -3356,8 +3356,7 @@ def nansum(self, dim=None, keepdim=False, *, dtype=None):
     return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
 
 
-@register_decomposition(aten.arange.default)
-@out_wrapper()
+@register_decomposition([aten.arange.default, aten.arange.out])
 def arange_default(
     end: NumberType,
     *,
@@ -3371,8 +3370,7 @@ def arange_default(
     )
 
 
-@register_decomposition(aten.arange.start)
-@out_wrapper()
+@register_decomposition([aten.arange.start, aten.arange.start_out])
 def arange_start(
     start: NumberType,
     end: NumberType,
