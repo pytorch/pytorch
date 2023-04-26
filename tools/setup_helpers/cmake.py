@@ -165,11 +165,14 @@ class CMake:
                         "in the build steps carefully."
                     )
                     sys.exit(1)
+            toolchain_file = os.getenv("CMAKE_TOOLCHAIN_FILE")
+            if toolchain_file:
+                args.append("-DCMAKE_TOOLCHAIN_FILE=" + toolchain_file)
             if IS_64BIT:
                 if platform.machine() == "ARM64":
                     args.append("-A ARM64")
                 else:
-                    args.append("-Ax64")
+                    args.append("-A x64")
                     toolset_dict["host"] = "x64"
             if toolset_dict:
                 toolset_expr = ",".join(
