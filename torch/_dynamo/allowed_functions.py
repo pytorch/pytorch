@@ -108,23 +108,10 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
-
-    try:
+    if torch.distributed.is_available():
         from torch.distributed import _functional_collectives
 
-        remove.extend(
-            [
-                _functional_collectives.all_reduce,
-                _functional_collectives.all_gather_tensor,
-                _functional_collectives.reduce_scatter_tensor,
-                _functional_collectives._expand_group,
-                _functional_collectives._maybe_wrap_tensor,
-                _functional_collectives._are_we_tracing,
-            ]
-        )
-        config.skipfiles_inline_module_allowlist.append(_functional_collectives)
-    except ImportError:
-        pass
+        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
 
     # extract all dtypes from torch
     dtypes = [
@@ -164,7 +151,6 @@ def _allowed_function_ids():
             "torch._C.inductor.",
             "torch.fx.",
             "torch.distributed.fsdp.",
-            "torch.distributed._functional_collectives.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)

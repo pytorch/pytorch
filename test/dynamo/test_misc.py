@@ -1192,7 +1192,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         y = torch.ones(4)
         self.assertTrue(same(f1(x).shape, f2(y).shape))
-        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)  # mul_
 
     def test_dict_mutation_side_effect(self):
         def fn(d):

@@ -76,6 +76,7 @@ INDEX_TYPE = "long"
 RTYPE_TO_CPP = {
     "sum": "+",
     "prod": "*",
+    "xor_sum": "^",
     "min": "min",
     "max": "max",
     "argmin": "argmin",
@@ -89,7 +90,7 @@ def reduction_init(reduction_type, dtype):
         # Since load promotes all half-precision inputs to float, the initial
         # constant for reduction must be promoted as well
         dtype = torch.float32
-    if reduction_type in ("sum", "any"):
+    if reduction_type in ("xor_sum", "sum", "any"):
         return 0
     if reduction_type == "prod":
         return 1
@@ -113,6 +114,8 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} += {next_value}"
     if reduction_type == "prod":
         return f"{var} *= {next_value}"
+    if reduction_type == "xor_sum":
+        return f"{var} ^= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
@@ -127,6 +130,8 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} += {next_value}"
     elif reduction_type == "prod":
         return f"{var} *= {next_value}"
+    elif reduction_type == "xor_sum":
+        return f"{var} ^= {next_value}"
     else:
         raise NotImplementedError()
 
@@ -911,6 +916,10 @@ class CppOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
     @staticmethod
+    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
+
+    @staticmethod
     def sigmoid(x):
         return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
@@ -1278,7 +1287,7 @@ class CppVecKernel(CppKernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum", "prod"}
+        assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
         assert dtype == torch.float
         assert src_dtype == torch.float
         reduce_map = {"max": "maximum", "min": "minimum"}
@@ -1293,6 +1302,8 @@ class CppVecKernel(CppKernel):
                 vec_reduc_prefix += "omp_out += omp_in"
             elif reduction_type == "prod":
                 vec_reduc_prefix += "omp_out *= omp_in"
+            elif reduction_type == "xor_sum":
+                vec_reduc_prefix += "omp_out ^= omp_in"
             else:
                 vec_reduc_prefix += (
                     f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
@@ -1329,6 +1340,8 @@ class CppVecKernel(CppKernel):
                 reduce_all_body += "return x + y;"
             elif reduction_type == "prod":
                 reduce_all_body += "return x * y;"
+            elif reduction_type == "xor_sum":
+                reduce_all_body += "return x ^ y;"
             else:
                 reduce_all_body += (
                     f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
@@ -1745,7 +1758,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum", "prod"]
+            and reduction_type in ["max", "min", "sum", "prod", "xor_sum"]
         ):
             pass
         else:
