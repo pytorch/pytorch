@@ -26,6 +26,9 @@ def replicate(
         >>> replicate(module)
     """
     torch._C._log_api_usage_once("torch.distributed.replicate")
+    if "device_id" in kwargs:
+        if not isinstance(kwargs["device_id"], (int, torch.device)):
+            raise RuntimeError(f"Expected device_id to be int or torch.device, but got {type(kwargs['device_id'])}")
     _ReplicateState(ignored_modules=ignored_modules).mark_module(module, **kwargs)
     return module
 
@@ -107,8 +110,6 @@ class _ReplicateState:
                 self.kwargs["device_ids"] = None
             self.kwargs.pop("device_id")
 
-        dev_ids = self.kwargs['device_ids']
-        print(f"RV: creating DDP with device_ids {dev_ids}")
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 

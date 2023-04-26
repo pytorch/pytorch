@@ -75,7 +75,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 class ReplicateTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
-        return 1
+        return 2
 
     def setUp(self) -> None:
         super().setUp()
@@ -234,14 +234,14 @@ class ReplicateTest(MultiProcessTestCase):
         # DDP instance is attached in first pre forward
         model_cuda(torch.randn(2, 2))
         replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
-        print(replicate_ddp_weakref.device_ids)
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
         # Pass in int as device_id
         model_cuda = deepcopy(model_cuda)
         replicate(model_cuda, device_id=int(torch.cuda.current_device()))
         # DDP instance is attached in first pre forward
         model_cuda(torch.randn(2, 2))
         replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
-        print(replicate_ddp_weakref.device_ids)
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
     def test_replicate_wrong_device_id_type(self):
         dist.init_process_group(
