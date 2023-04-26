@@ -22,6 +22,7 @@ class Seq(torch.nn.Module):
     def forward(self, x):
         return self.layers(x)
 
+
 def init_weights(m):
     if isinstance(m, torch.nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight)
@@ -55,7 +56,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
         correct_loss = train_step(model, inputs)
 
-        opt_train_step = torch.compile(train_step, backend="train_step_eager")
+        opt_train_step = torch.compile(
+            train_step, backend="train_step_eager", trainstep=True
+        )
         opt_loss = opt_train_step(model, inputs)
 
         self.assertTrue(same(correct_loss, opt_loss))
@@ -93,7 +96,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         }
 
         opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", fullgraph=True
+            train_step, backend="train_step_eager", trainstep=True
         )
         opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
         opt_params = {
@@ -139,7 +142,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [torch.randn((128, 10)).cuda()]
 
         opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", fullgraph=True
+            train_step, backend="train_step_eager", trainstep=True
         )
         for step in range(10):
             correct_loss = train_step(model, optimizer, inputs)
@@ -166,9 +169,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             self.assertTrue(opt_params[name].grad is None)
 
     def test_smoke(self):
-        # currently test_sgd and smoke both fail with the same error:
-        # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-        # paste: https://www.internalfb.com/phabricator/paste/view/P682652292
         def train_step(model, optimizer, inputs):
             out = model(*inputs)
             loss = out.sum()
@@ -182,7 +182,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
         inputs = [torch.randn((128, 10))]
         opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", fullgraph=True
+            train_step, backend="train_step_eager", trainstep=True
         )
 
         loss = []
@@ -192,6 +192,67 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             if step > 0:
                 # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
                 self.assertTrue(loss[-2] > loss[-1])
+
+    def test_dynamo_safety_checks(self):
+        """Since dynamo train_step compile traces .backward() call, it's imperative that no .grad_fn exists
+        for inputs to the train_step graph, otherwise their backwards will incorrectly be traced
+        """
+
+        def train_step(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            optimizer.step()
+            model.zero_grad()
+            return loss
+
+        opt_model = Seq()
+        opt_model.apply(init_weights)
+        opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
+
+        # Cause the inputs to the model to have grad_fn
+        pre_inputs = torch.randn((128, 10))
+        pre_input_layer = torch.nn.Linear(10, 10)
+        inputs = [
+            pre_input_layer(pre_inputs),
+        ]
+        opt_train_step = torch.compile(
+            train_step, backend="train_step_eager", trainstep=True
+        )
+
+        with self.assertRaisesRegex(AssertionError, r"an input tensor has a grad_fn"):
+            opt_train_step(opt_model, opt_optimizer, inputs)
+
+        def train_step_multi_backward(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            # ok, not a real double backward, but either way would cause the same assert to fire
+            loss.backward()
+            return loss
+
+        inputs = [
+            torch.randn((128, 10)),
+        ]
+        opt_train_step = torch.compile(
+            train_step_multi_backward, backend="train_step_eager", trainstep=True
+        )
+        with self.assertRaisesRegex(AssertionError, r"multiple \.backward\(\) calls"):
+            opt_train_step(opt_model, opt_optimizer, inputs)
+
+        def train_step_backward_args(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward(loss)
+
+        opt_train_step = torch.compile(
+            train_step_backward_args, backend="train_step_eager", trainstep=True
+        )
+
+        with self.assertRaisesRegex(
+            AssertionError, r"\.backward\(\) call with non-empty args"
+        ):
+            opt_train_step(opt_model, opt_optimizer, inputs)
 
 
 if __name__ == "__main__":

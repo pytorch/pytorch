@@ -72,7 +72,7 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
-    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths]):
+    if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
         nvtoolsext_dll_path = os.path.join(
             os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
     else:
@@ -80,7 +80,7 @@ if sys.platform == 'win32':
 
     from .version import cuda as cuda_version
     import glob
-    if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
+    if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
         default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
@@ -1542,7 +1542,8 @@ def compile(model: Optional[Callable] = None, *,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
-            disable: builtins.bool = False) -> Callable:
+            disable: builtins.bool = False,
+            trainstep: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
@@ -1570,6 +1571,7 @@ def compile(model: Optional[Callable] = None, *,
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
+       trainstep (bool): Supercedes (and implies) fullgraph=True, but supports .backward() and optimizer compilation.
 
     Example::
 
@@ -1590,7 +1592,8 @@ def compile(model: Optional[Callable] = None, *,
                            backend=backend,
                            mode=mode,
                            options=options,
-                           disable=disable)
+                           disable=disable,
+                           trainstep=trainstep)
         return fn
 
     import torch._dynamo
@@ -1601,7 +1604,7 @@ def compile(model: Optional[Callable] = None, *,
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
 
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable, trainstep=trainstep)(model)
 
 
 def _register_device_module(device_type, module):
