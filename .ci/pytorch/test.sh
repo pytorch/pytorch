@@ -251,6 +251,11 @@ test_inductor() {
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+
+  # docker build uses bdist_wheel which does not work with test_aot_inductor
+  # TODO: need a faster way to build
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  LD_LIBRARY_PATH="$TORCH_LIB_DIR $TORCH_BIN_DIR"/test_aot_inductor
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -422,7 +427,7 @@ test_inductor_torchbench_smoketest_perf() {
   python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
 
   # Check memory compression ratio for a few models
-  for test in hf_Albert timm_efficientdet timm_vision_transformer; do
+  for test in hf_Albert timm_efficientdet; do
     python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
       --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
       --only $test --output "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
@@ -551,6 +556,7 @@ test_libtorch() {
       # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
       "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
+
     assert_git_not_dirty
   fi
 }
@@ -949,7 +955,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
+    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench

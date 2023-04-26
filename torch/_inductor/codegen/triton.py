@@ -74,10 +74,13 @@ def config_of(args):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
-            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            if isinstance(x.expr, (int, sympy.Integer)):
+                return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            else:
+                return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+    if config.triton.divisible_by_16:
         divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     else:
         divisible_by_16 = []
@@ -1124,7 +1127,11 @@ class TritonKernel(Kernel):
             load_buffer = self.loads
 
         # Assert that the loaded indices will not read garbage
-        if indirect_indexing and config.triton.assert_indirect_indexing:
+        if (
+            indirect_indexing
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        ):
             self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
 
         result_var = self.cse.generate(load_buffer, line)
@@ -1145,7 +1152,11 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
 
-        if indirect_indexing and config.triton.assert_indirect_indexing:
+        if (
+            indirect_indexing
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
         if mode is None:
