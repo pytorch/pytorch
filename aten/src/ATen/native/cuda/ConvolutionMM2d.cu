@@ -181,12 +181,12 @@ void slow_conv2d_forward(
         // Extract columns:
         at::native::im2col(
           c10::cuda::getCurrentCUDAStream(),
-          input_n.data_ptr<scalar_t>(),
+          input_n.const_data_ptr<scalar_t>(),
           nInputPlane, inputHeight, inputWidth,
           outputHeight, outputWidth,
           kH, kW, padH, padW, dH, dW,
           1, 1,
-          columns.data_ptr<scalar_t>()
+          columns.mutable_data_ptr<scalar_t>()
         );
       }
 
