@@ -201,7 +201,8 @@ class cpp:
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = True
 
-    max_horizontal_fusion_size = max_fusion_size
+    # how many nodes to allow into a single horizontal fusion
+    max_horizontal_fusion_size = 16
 
 
 # config specific to codegen/triton.py
