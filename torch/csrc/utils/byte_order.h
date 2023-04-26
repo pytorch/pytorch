@@ -190,7 +190,7 @@ TORCH_API void THP_encodeDoubleBuffer(
     const double* src,
     THPByteOrder order,
     size_t len);
-TORCH_API void THP_encodeComplexloatBuffer(
+TORCH_API void THP_encodeComplexFloatBuffer(
     uint8_t* dst,
     const c10::complex<float>* src,
     THPByteOrder order,
