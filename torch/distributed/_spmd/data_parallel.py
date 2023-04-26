@@ -148,9 +148,9 @@ class BatchDimAnalyzer:
     def __init__(self, batch_dim: int = 0) -> None:
         self.batch_dim = batch_dim
 
-        if batch_dim != 0:
-            # TODO: see if this make sense or not
-            raise RuntimeError("Data Parallel only supports batch dim on dimension 0!")
+        # if batch_dim != 0:
+        #     # TODO: see if this make sense or not
+        #     raise RuntimeError("Data Parallel only supports batch dim on dimension 0!")
 
         self.batch_dim_map: Dict[fx.Node, int] = {}
         # batch dim size is used to track the batch dim size of the input tensor
