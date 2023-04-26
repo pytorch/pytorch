@@ -61,7 +61,6 @@ def _compile_end():
 
 
 log = logging.getLogger(__name__)
-logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
 @functools.lru_cache(None)
@@ -604,7 +603,7 @@ class AotCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def compile(cls, source_code, cuda):
+    def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         key, input_path = write(
@@ -635,7 +634,11 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        return cls.cache[key]
+        def wrapper_call(*args):
+            assert len(graph.graph_outputs) > 0
+            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
+
+        return wrapper_call
 
 
 class CppCodeCache:
