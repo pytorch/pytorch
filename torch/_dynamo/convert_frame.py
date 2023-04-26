@@ -499,7 +499,9 @@ def _compile(
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks, fake_mode=None):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     breakpoint()
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False, fake_mode=fake_mode)
+    inner_convert = convert_frame_assert(
+        compiler_fn, one_graph=False, fake_mode=fake_mode
+    )
 
     def _convert_frame(
         frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state

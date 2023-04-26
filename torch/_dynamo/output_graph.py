@@ -24,7 +24,6 @@ from torch._guards import (
     GuardsCheckpointState,
     Source,
     TracingContext,
-    detect_fake_mode
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 
@@ -53,7 +52,6 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
-    assert_no_fake_params_or_buffers,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -68,7 +66,8 @@ from .utils import (
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
-from .variables.nn_module import NNModuleVariable, OptimizerVariable
+from .variables.nn_module import NNModuleVariable
+from .variables.optim import OptimizerVariable
 from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -224,18 +223,16 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         shape_env = ShapeEnv(
-                    allow_scalar_outputs=config.capture_scalar_outputs,
-                    allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                    frame_id=frame_state["_id"],
-                )
+            allow_scalar_outputs=config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            frame_id=frame_state["_id"],
+        )
         if fake_mode:
             fake_mode.shape_env = shape_env if config.dynamic_shapes else None
-            fake_mode.allow_non_fake_inputs=True if self.export else False
+            fake_mode.allow_non_fake_inputs = True if self.export else False
         else:
             fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=shape_env
-                if config.dynamic_shapes
-                else None,
+                shape_env=shape_env if config.dynamic_shapes else None,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=True if self.export else False,
             )

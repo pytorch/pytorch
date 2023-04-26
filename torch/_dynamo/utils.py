@@ -850,6 +850,7 @@ def deepcopy_to_fake_tensor(obj, fake_mode):
     def is_already_fake(obj):
         # hacky, but precise handling just for deferred init modules
         return hasattr(obj, "_deferred")
+
     if is_already_fake(obj):
         return obj
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
@@ -1202,6 +1203,7 @@ def get_fake_value(node, tx):
     args = tree_map(fake_wrapper, args)
     kwargs = tree_map(fake_wrapper, kwargs)
 
+    # TODO(whc) can I avoid having these hacks here?
     if op == "call_method" and node.target == "backward":
         # We don't want to run .backward() during dynamo tracing even if under a fake mode, since
         # it may affect the state of the autograd system and we must preserve it for later tracing.
@@ -1210,7 +1212,7 @@ def get_fake_value(node, tx):
 
     if (
         op == "call_method"
-        and node.target == "step"
+        and (node.target == "step" or node.target == "zero_grad")
         and len(node.args) == 1
         and node.args[0].op == "get_attr"
         and "__optimizer_" in node.args[0].target
@@ -1351,6 +1353,7 @@ def check_all_fake(gm):
         if not isinstance(param, torch._subclasses.FakeTensor):
             all_fake = False
     return all_fake
+
 
 def assert_no_fake_params_or_buffers(gm):
     from torch._subclasses.fake_tensor import FakeTensorConfig

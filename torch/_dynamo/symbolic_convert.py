@@ -1903,7 +1903,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 export,
                 export_constraints,
                 frame_state,
-                fake_mode
+                fake_mode,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -1916,9 +1916,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
-        self.output.tracing_context.trainstep = trainstep
-
         with tracing(self.output.tracing_context):
+            if trainstep:
+                TracingContext.trace_train_step()
+
             self.one_graph: bool = one_graph
             self.export = export
             self.mutated_closure_cell_contents = mutated_closure_cell_contents
@@ -1933,12 +1934,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.symbolic_locals = collections.OrderedDict(
                 (
                     k,
-                    VariableBuilder(
-                        self,
-                        LocalSource(k)
-                        if k in code_options["co_varnames"]
-                        else LocalSource((k)),
-                    )(f_locals[k]),
+                    VariableBuilder(self, LocalSource(k))(f_locals[k]),
                 )
                 for k in vars
                 if k in f_locals

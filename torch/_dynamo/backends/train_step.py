@@ -1,26 +1,27 @@
 from contextlib import contextmanager
-from copy import copy, deepcopy
+from copy import copy
 from typing import Any, Dict, List
-from unittest import mock
 
 import torch
-from torch._dynamo.utils import assert_no_fake_params_or_buffers, check_all_fake
-from torch.fx.graph import Graph
-from torch.fx.graph_module import GraphModule
+
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._dynamo.utils import assert_no_fake_params_or_buffers, check_all_fake
+from torch._guards import detect_fake_mode, TracingContext
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.func import functionalize
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, PythonKeyTracer, make_fx
-from torch._guards import detect_fake_mode
+from torch.fx.experimental.proxy_tensor import (
+    make_fx,
+    ProxyTorchDispatchMode,
+    PythonKeyTracer,
+)
+from torch.fx.graph import Graph
+from torch.fx.graph_module import GraphModule
 from torch.nn.utils import stateless
 
-import torch.utils._pytree as pytree
 
 @contextmanager
 def _rematerialize_optimizer(
@@ -53,6 +54,7 @@ def _rematerialize_optimizer(
     finally:
         param_group["params"] = orig_params
         opt.state.update(orig_states)
+
 
 def get_deferred_modes():
     fx_tracer = PythonKeyTracer()
@@ -93,6 +95,12 @@ def train_step_compiler(backend_compile_fn):
         assert len(real_inputs) > 0, "Expected at least one input"
         fake_mode = detect_fake_mode()
 
+        tc = TracingContext.train_step_context(assert_if_missing=True)
+        assert tc.optimizers_stepped == tc.optimizers_zeroed_grad, (
+            "Not all calls to optimizer.step() were paired with a call to .zero_grad()."
+            " Calling .zero_grad() is required for train_step compilation, since it enforces parity in behavior"
+            " between compiled and eager mode.  Compiled mode never mutates the .grad fields of the outside module."
+        )
         assert isinstance(fake_mode, FakeTensorMode), "Expected a valid FakeTensorMode"
 
         def fakeify_tensors(flat_args):
@@ -118,7 +126,9 @@ def train_step_compiler(backend_compile_fn):
         }
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
-        fake_params_flat = params_flat if deferred_init else fakeify_tensors(params_flat)
+        fake_params_flat = (
+            params_flat if deferred_init else fakeify_tensors(params_flat)
+        )
         fake_inputs = fakeify_tensors(real_inputs)
         assert (
             "optimizers" in mod.meta
@@ -185,25 +195,29 @@ def train_step_compiler(backend_compile_fn):
                         exp_avgs,
                         exp_avg_sqs,
                         max_exp_avg_sqs,
-                        state_steps)
+                        state_steps,
+                    )
                 # Convert the fake optimizer states to real
                 outputs = []
                 for param in fake_params_flat:
-                    assert param in opt.state, "all params expected handled by one optimizer, multi-opt NYI"
+                    assert (
+                        param in opt.state
+                    ), "all params expected handled by one optimizer, multi-opt NYI"
                     for name, state in opt.state[param].items():
                         if hasattr(state, "proxy"):
                             print(f"Has proxy: {name} {state}")
-                            outputs.append(state.proxy.node) 
+                            outputs.append(state.proxy.node)
                         else:
                             print(f"Missing proxy: {name} {state}")
 
                 optimizer_fx_tracer.graph.output(outputs)
                 optimizer_fx_tracer.graph.eliminate_dead_code()  # hmmm
-                opt_deferred_init = GraphModule(optimizer_fx_tracer.root, optimizer_fx_tracer.graph)
+                opt_deferred_init = GraphModule(
+                    optimizer_fx_tracer.root, optimizer_fx_tracer.graph
+                )
                 results = opt_deferred_init()
                 breakpoint()
                 print()
-
 
             # Build a mapping to use for reparametrizing the optimizer during tracing
             named_states = {}
@@ -233,7 +247,6 @@ def train_step_compiler(backend_compile_fn):
         Step 4: Call the backend compiler
         """
 
-
         """
         Step 5: Make the model 'real' if it was deferred
         """
@@ -244,7 +257,6 @@ def train_step_compiler(backend_compile_fn):
                 continue
             params_flat[i] = next(results_iter)
 
-        
         """
         Step 6: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo.

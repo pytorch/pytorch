@@ -494,7 +494,7 @@ def optimize(
     disable=False,
     dynamic=False,
     trainstep=False,
-    fake_mode=None
+    fake_mode=None,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -541,7 +541,11 @@ def optimize(
 
     if nopython or trainstep:
         return optimize_assert(
-            backend, dynamic=dynamic, hooks=hooks, trainstep=trainstep, fake_mode=fake_mode,
+            backend,
+            dynamic=dynamic,
+            hooks=hooks,
+            trainstep=trainstep,
+            fake_mode=fake_mode,
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
@@ -1012,7 +1016,7 @@ def optimize_assert(
     export_constraints=None,
     dynamic=False,
     trainstep=False,
-    fake_mode=None
+    fake_mode=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`

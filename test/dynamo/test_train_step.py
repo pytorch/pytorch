@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 from copy import deepcopy
 
 import torch
@@ -7,16 +6,10 @@ import torch
 import torch._dynamo
 import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
-from torch._dynamo.testing import same
-
-
-import torch
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import PythonKeyTracer, ProxyTorchDispatchMode
-from torch.fx import Graph, GraphModule
-from torch.nn.utils import stateless
-import torch.utils._pytree as pytree
 from torch._dynamo.backends.train_step import get_deferred_modes
+from torch._dynamo.testing import same
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx import GraphModule
 
 # Limitations:
 #   - initialization cannot refer to external tensors
@@ -27,8 +20,6 @@ from torch._dynamo.backends.train_step import get_deferred_modes
 #   - only top level module is rematerialized
 #   - we lose parameter-ness and requires_grad-ness
 #   - no version counter safety to guard against input mutation
-
-
 
 
 class Seq(torch.nn.Module):
@@ -59,9 +50,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
     3) inside train_step_compiler, we reparameterize the optimizer
 
     WIP/Issues
-    - handle an optimizer with actual states
-    - dynamo asserts empty backward tape before trace
-    - train_step backend asserts full_graph mode was used
     - handle more than one optimizer (e.g. for different submodules)
     """
 
@@ -104,7 +92,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             # uses for module tracing
             optimizer.step()
 
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         # copy the model/optimizer up front so we don't have to reset them between eager/compile runs
@@ -155,7 +143,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             # uses for module tracing
             optimizer.step()
 
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         # copy the model/optimizer up front so we don't have to reset them between eager/compile runs
@@ -190,7 +178,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             self.assertTrue(correct_params[name].grad is None)
             self.assertTrue(opt_params[name].grad is None)
 
-
     def test_deferred_smoke(self):
         # currently test_sgd and smoke both fail with the same error:
         # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
@@ -203,11 +190,10 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             model.zero_grad()
             return loss
 
-
         inputs = [torch.randn((128, 10))]
 
         fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
-        
+
         """
         Grab an init graph for the model, make it a GM that returns real params,
         stash it on the model for train_step compiler to use later
@@ -217,7 +203,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         with fake_tensor_mode, model_proxy_mode:
             deferred_model = Seq()
             deferred_model.apply(init_weights)
- 
+
         outputs = []
 
         def mark_for_materialize(tensors):
@@ -225,21 +211,26 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
                 if t is None:
                     continue
                 outputs.append(t.proxy.node)
-        
+
         mark_for_materialize(dict(deferred_model.named_parameters()))
         mark_for_materialize(dict(deferred_model.named_buffers()))
 
         model_fx_tracer.graph.output(outputs)
         model_fx_tracer.graph.eliminate_dead_code()  # hmmm
-        deferred_model._deferred_init = GraphModule(model_fx_tracer.root, model_fx_tracer.graph)
+        deferred_model._deferred_init = GraphModule(
+            model_fx_tracer.root, model_fx_tracer.graph
+        )
 
         """
         Same thing for the optimizer, but do it in train_step compile so that params have grads set
         """
         opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
- 
+
         opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", trainstep=True, fake_mode=fake_tensor_mode
+            train_step,
+            backend="train_step_eager",
+            trainstep=True,
+            fake_mode=fake_tensor_mode,
         )
 
         # materialize_module(m)
@@ -251,14 +242,13 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
                 # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
                 self.assertTrue(loss[-2] > loss[-1])
 
-
     def test_smoke(self):
         def train_step(model, optimizer, inputs):
             out = model(*inputs)
             loss = out.sum()
             loss.backward()
             optimizer.step()
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         opt_model = Seq()
@@ -287,7 +277,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss = out.sum()
             loss.backward()
             optimizer.step()
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         opt_model = Seq()

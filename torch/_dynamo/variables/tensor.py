@@ -184,7 +184,8 @@ class TensorVariable(VariableTracker):
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
         if name in ("resize_", "unsqueeze_") and self.source is not None:
-            unimplemented(f"calling {name}() on graph input")
+            # Delay the graph break to the actual call of unsqueeze_/resize_
+            return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -437,8 +438,7 @@ class TensorVariable(VariableTracker):
             return result.call_method(tx, "item", [], {})
         else:
             if name == "backward":
-                tc = TracingContext.get()
-                if not tc.trainstep:
+                if not TracingContext.train_step_context():
                     # go back to graph-break behavior
                     unimplemented("Tensor.backward only supported with trainstep=True")
 
@@ -460,11 +460,11 @@ class TensorVariable(VariableTracker):
                 tree_map_only(torch.Tensor, check_no_grad, tx.f_locals)
                 tree_map_only(torch.Tensor, check_no_grad, tx.f_globals)
 
-                tc = TracingContext.get()
+                tc = TracingContext.train_step_context(assert_if_missing=True)
                 assert (
-                    not tc.traced_backward
+                    not tc.backward_called
                 ), "Compiling multiple .backward() calls NYI"
-                tc.traced_backward = True
+                tc.backward_called = True
                 assert (
                     len(args) == 0
                 ), "train step compile of .backward() call with non-empty args is not supported."
