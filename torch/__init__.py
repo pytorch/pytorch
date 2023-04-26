@@ -1606,7 +1606,9 @@ def compile(model: Optional[Callable] = None, *,
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
 
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable, trainstep=trainstep, fake_mode=fake_mode)(model)
+    return torch._dynamo.optimize(
+        backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable, trainstep=trainstep, fake_mode=fake_mode
+    )(model)
 
 
 def _register_device_module(device_type, module):
