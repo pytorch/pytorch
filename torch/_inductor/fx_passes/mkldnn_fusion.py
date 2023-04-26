@@ -352,7 +352,7 @@ if torch._C.has_mkldnn:
 
         return fn
 
-    def _register_binary_unary_inplace_fusion_lowering(
+    def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
         computation_op,
         binary_op,
@@ -453,7 +453,7 @@ if torch._C.has_mkldnn:
         for binary_op in binary_ops:
             binary_v1 = _binary_fusion_v1(computation_call, binary_op)
             binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
-            _register_binary_unary_inplace_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v1,
                 computation_op,
                 binary_op,
@@ -462,7 +462,7 @@ if torch._C.has_mkldnn:
                 other_index=0,
                 unary_attr=UnaryAttr("relu"),
             )
-            _register_binary_unary_inplace_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v1,
                 computation_op,
                 binary_op,
@@ -472,7 +472,7 @@ if torch._C.has_mkldnn:
             )
             binary_v2 = _binary_fusion_v2(computation_call, binary_op)
             binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
-            _register_binary_unary_inplace_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v2,
                 computation_op,
                 binary_op,
@@ -481,7 +481,7 @@ if torch._C.has_mkldnn:
                 other_index=1,
                 unary_attr=UnaryAttr("relu"),
             )
-            _register_binary_unary_inplace_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v2,
                 computation_op,
                 binary_op,

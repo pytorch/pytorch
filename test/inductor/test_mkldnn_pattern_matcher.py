@@ -436,15 +436,15 @@ class TestPaternMatcher(TestCase):
                 super(Model, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
-        def forward(self, input_tensor):
-            x = self.conv(input_tensor)
-            x = F.relu(x + torch.ones(x.size()))
-            return x
+            def forward(self, input_tensor):
+                x = self.conv(input_tensor)
+                x = F.relu(x + torch.ones(x.size()))
+                return x
 
         input = torch.randn(1, 3, 14, 14)
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
-        self._test_code_common(mod, (input, other, alpha), include_ops, [])
+        self._test_code_common(mod, (input,), include_ops, [])
 
 
 if __name__ == "__main__":
