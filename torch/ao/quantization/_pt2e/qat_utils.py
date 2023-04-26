@@ -75,7 +75,6 @@ def _get_aten_graph_module(
         pattern,
         *copy.deepcopy(example_inputs),
         aten_graph=True,
-        tracing_mode="real",
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()

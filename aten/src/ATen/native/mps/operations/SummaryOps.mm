@@ -15,40 +15,54 @@ Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tensor& out
   };
 
   MPSStream* stream = getCurrentMPSStream();
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   bool has_weights = weights.defined();
 
   @autoreleasepool {
     string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* scatterDataTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(output.scalar_type()));
+    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    if (!cachedGraph) {
+      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
-      MPSGraphTensor* updatesTensor = nil;
-      if (has_weights) {
-        updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, weights);
-      } else {
-        updatesTensor = [mpsGraph constantWithScalar:1.0f shape:getMPSShape(self) dataType:getMPSDataType(output)];
-      }
+        @autoreleasepool {
+          // Initialize graph
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* scatterDataTensor =
+              mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(output.scalar_type()));
 
-      MPSGraphTensor* castedInputTensor = inputTensor;
-      if (self.scalar_type() == kByte) {
-        castedInputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"castInputTensor"];
-      }
+          MPSGraphTensor* updatesTensor = nil;
+          if (has_weights) {
+            updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, weights);
+          } else {
+            updatesTensor = [mpsGraph constantWithScalar:1.0f shape:getMPSShape(self) dataType:getMPSDataType(output)];
+          }
 
-      MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:scatterDataTensor
-                                                       updatesTensor:updatesTensor
-                                                       indicesTensor:castedInputTensor
-                                                                axis:0
-                                                                mode:MPSGraphScatterModeAdd
-                                                                name:nil];
+          MPSGraphTensor* castedInputTensor = inputTensor;
+          if (self.scalar_type() == kByte) {
+            castedInputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"castInputTensor"];
+          }
 
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->scatterDataTensor_ = scatterDataTensor;
-      if (has_weights) {
-        newCachedGraph->weightsTensor_ = updatesTensor;
-      }
-    });
+          MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:scatterDataTensor
+                                                           updatesTensor:updatesTensor
+                                                           indicesTensor:castedInputTensor
+                                                                    axis:0
+                                                                    mode:MPSGraphScatterModeAdd
+                                                                    name:nil];
+
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->scatterDataTensor_ = scatterDataTensor;
+          if (has_weights) {
+            newCachedGraph->weightsTensor_ = updatesTensor;
+          }
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
+    }
 
     // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self);

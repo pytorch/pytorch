@@ -1672,7 +1672,7 @@ class DimConstraints:
         for s, congruences in reduced_congruences.items():
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
-                if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
+                if not (s in self._substitutions) or not sympy.checksol(congruence, {s: self._substitutions[s]}):
                     self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
 
     def prettify_results(self):
@@ -2336,7 +2336,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(f"Constraints violated!\n{err}")
             elif len(warn_msgs) > 0:
-                log.debug("%s Warning only constraints violated", len(warn_msgs))
+                log.warning("%s Warning only constraints violated", len(warn_msgs))
 
         return exprs
 

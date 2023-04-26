@@ -253,13 +253,10 @@ class FakeTensorConverter:
         source=None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
-        memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        if memoized_only:
-            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -328,7 +325,6 @@ class FakeTensorConverter:
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
-        memoized_only=False,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -339,7 +335,6 @@ class FakeTensorConverter:
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
-            memoized_only=memoized_only,
         )
 
 
@@ -1460,9 +1455,6 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
-        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
-        # seen before.
-        memoized_only=False,
     ):
         shape_env = self.shape_env
         if static_shapes:
@@ -1478,7 +1470,6 @@ class FakeTensorMode(TorchDispatchMode):
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
-            memoized_only=memoized_only,
         )
 
 

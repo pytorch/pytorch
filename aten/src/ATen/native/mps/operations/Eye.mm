@@ -6,7 +6,6 @@
 #else
 #include <ATen/ops/eye_native.h>
 #endif
-
 // Steps to add op for MPS backend:
 // 1. Register the op in aten/src/ATen/native/native_functions.yaml with the "MPS" dispatch key
 // 2. Define the function interface for the MPS backend similar to other
@@ -36,8 +35,6 @@ Tensor& eye_out_mps(int64_t n, Tensor& result) {
   return eye_out_mps(n, n, result);
 }
 
-using namespace mps;
-
 Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   // This is one example of boiler-plate error checking, taking after CPU/CUDA counterparts
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
@@ -51,6 +48,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     return result;
 
   // Get MPS stream
+  using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
 
   auto outputDataType = result.scalar_type();
@@ -72,25 +70,38 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     MPSGraphTensor* outputTensor_ = nil;
   };
 
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
   @autoreleasepool {
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types
     // etc match the earlier created MPSGraph
     string key = "eye_out_mps:" + getTensorsStringKey({result});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
-                                                          shape:getMPSShape(result)
-                                                       dataType:getMPSDataType(inputDataType)];
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    if (!cachedGraph) {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
-      // Here we can call the MPSGraph API needed to execute the operation.
-      // The API details can be found here:
-      // https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph
-      MPSGraphTensor* outputTensor = [mpsGraph bandPartWithTensor:onesTensor numLower:0 numUpper:0 name:nil];
+        @autoreleasepool {
+          // Initialize graph
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+          MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
+                                                              shape:getMPSShape(result)
+                                                           dataType:getMPSDataType(inputDataType)];
 
-      if ([outputTensor dataType] != getMPSDataType(outputDataType)) {
-        outputTensor = castMPSTensor(mpsGraph, outputTensor, outputDataType);
-      }
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
+          // Here we can call the MPSGraph API needed to execute the operation.
+          // The API details can be found here:
+          // https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph
+          MPSGraphTensor* outputTensor = [mpsGraph bandPartWithTensor:onesTensor numLower:0 numUpper:0 name:nil];
+
+          if ([outputTensor dataType] != getMPSDataType(outputDataType)) {
+            outputTensor = castMPSTensor(mpsGraph, outputTensor, outputDataType);
+          }
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+    }
 
     // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);

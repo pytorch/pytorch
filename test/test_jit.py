@@ -6125,7 +6125,7 @@ a")
 
         @torch.jit.script
         def test_bool_arith_not(lhs):
-            if lhs is not None:
+            if not (lhs is None):
                 return 1
             else:
                 return 2
