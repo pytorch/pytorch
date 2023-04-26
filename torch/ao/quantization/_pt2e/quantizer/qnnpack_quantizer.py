@@ -264,10 +264,9 @@ class QNNPackQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -275,13 +274,10 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
         bn_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         getitem_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
             "_annotated": True,
         }
 
@@ -308,7 +304,6 @@ class QNNPackQuantizer(Quantizer):
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
             "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -316,7 +311,6 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
@@ -371,7 +365,6 @@ class QNNPackQuantizer(Quantizer):
         # bias and output act
         addmm_node.meta["target_dtype_info"] = {
             "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "bias_index": 0,
             "_annotated": True,
@@ -379,13 +372,11 @@ class QNNPackQuantizer(Quantizer):
         # input act
         view_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         # weight
         t_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
 
@@ -413,11 +404,9 @@ class QNNPackQuantizer(Quantizer):
 
         maxpool_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         getitem_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "input_output_share_observers": True,
             "_annotated": True,
@@ -490,11 +479,9 @@ class QNNPackQuantizer(Quantizer):
 
         add_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
