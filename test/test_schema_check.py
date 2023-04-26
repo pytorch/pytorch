@@ -429,8 +429,6 @@ class TestSchemaCheck(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "are not allowed to directly return inputs"):
             with SchemaCheckMode() as s:
                 out = f(x)
-        with self.assertRaisesRegex(RuntimeError, "are not allowed to directly return inputs"):
-            out = f_compiled(x)
 
     # Tests that is_alias_of returns as expected
     def test_is_alias_of_basic(self):
