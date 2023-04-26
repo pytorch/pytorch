@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -92,6 +93,8 @@ class TORCH_API TCPStore : public Store {
   std::uint16_t getPort() const noexcept {
     return addr_.port;
   }
+
+  std::chrono::seconds getClientTimeout() const;
 
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);

@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -862,10 +863,15 @@ class TCPClient {
 
   void setTimeout(std::chrono::milliseconds value);
 
-  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
+  std::chrono::seconds getTimeout() const {
+    return timeout_;
+  };
+
+  explicit TCPClient(Socket&& socket, std::chrono::seconds timeout) : socket_{std::move(socket)}, timeout_(timeout) {}
 
  private:
   Socket socket_;
+  std::chrono::seconds timeout_;
 };
 
 std::unique_ptr<TCPClient> TCPClient::connect(
@@ -875,7 +881,7 @@ std::unique_ptr<TCPClient> TCPClient::connect(
   Socket socket = Socket::connect(
       addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
-  return std::make_unique<TCPClient>(std::move(socket));
+  return std::make_unique<TCPClient>(std::move(socket), std::move(timeout));
 }
 
 void TCPClient::sendCommandForKey(QueryType type, const std::string& key) {
@@ -922,6 +928,8 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       SO_RCVTIMEO,
       reinterpret_cast<char*>(&timeoutTV),
       sizeof(timeoutTV)));
+
+  timeout_ = std::chrono::duration_cast<std::chrono::seconds>(value);
 }
 
 class TCPCallbackClient {
@@ -1107,6 +1115,10 @@ int64_t TCPStore::getNumKeys() {
   return client_->receiveValue<std::int64_t>();
 }
 
+std::chrono::seconds TCPStore::getClientTimeout() const {
+  return client_->getTimeout();
+}
+
 bool TCPStore::check(const std::vector<std::string>& keys) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys{};
@@ -1148,8 +1160,12 @@ void TCPStore::wait(
 void TCPStore::doWait(
     c10::ArrayRef<std::string> keys,
     std::chrono::milliseconds timeout) {
-  // TODO: Should we revert to the original timeout at the end of the call?
-  client_->setTimeout(timeout);
+  const std::chrono::milliseconds orig_timeout = client_->getTimeout();
+  bool timeoutChanged = (orig_timeout.count() != timeout.count());
+
+  if (timeoutChanged) {
+    client_->setTimeout(timeout);
+  }
 
   client_->sendCommand(detail::QueryType::WAIT);
   client_->sendStrings(keys);
@@ -1157,6 +1173,10 @@ void TCPStore::doWait(
   auto response = client_->receiveValue<detail::WaitResponseType>();
   if (response != detail::WaitResponseType::STOP_WAITING) {
     TORCH_CHECK(false, "Stop_waiting response is expected");
+  }
+  // recover original timeout
+  if (timeoutChanged) {
+    client_->setTimeout(orig_timeout);
   }
 }
 

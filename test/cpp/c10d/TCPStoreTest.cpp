@@ -392,3 +392,37 @@ TEST(TCPStoreTest, testMultiTenantStores) {
   c10d::test::set(*store1, "key0", "value0");
   c10d::test::check(*store1, "key0", "value0");
 }
+
+TEST(TCPStoreTest, resetTimeoutAfterWait) {
+  int numWorkers = 2;
+
+  auto serverTCPStore = std::make_unique<c10d::TCPStore>(
+      "127.0.0.1",
+      0,
+      numWorkers,
+      true,
+      std::chrono::seconds(defaultTimeout),
+      /* wait */ false);
+
+  auto clientTCPStore = c10::make_intrusive<c10d::TCPStore>(
+      "127.0.0.1",
+      c10d::TCPStoreOptions{
+          /* port */ serverTCPStore->getPort(),
+          /* isServer */ false,
+          numWorkers,
+          /* waitWorkers */ false,
+          /* timeout */ std::chrono::seconds(defaultTimeout)});
+
+  auto clientThread = std::thread([&clientTCPStore] {
+    clientTCPStore->wait({"key"}, std::chrono::seconds(10));
+  });
+
+  c10d::test::set(*serverTCPStore, "key", "val");
+
+  clientThread.join();
+  EXPECT_EQ(clientTCPStore->getClientTimeout().count(), std::chrono::seconds(defaultTimeout).count());
+
+  // start server shutdown during a client request
+  serverTCPStore = nullptr;
+
+}
