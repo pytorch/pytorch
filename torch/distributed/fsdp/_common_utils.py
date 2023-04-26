@@ -42,7 +42,7 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
-class _FSDPDeviceHandler:
+class _FSDPDeviceHandle:
     """
     This is a simple abstraction for FSDP computing devices,
     which enables custom backends that implement CUDA-like
@@ -62,15 +62,15 @@ class _FSDPDeviceHandler:
             self.__backend = backend
 
     @classmethod
-    def from_device(cls, device: torch.device) -> "_FSDPDeviceHandler":
+    def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
         Return an device handle corresponding to the device, and through this handle,
         operations with the same semantics as CUDA can be performed on the device.
-        Just return torch.cuda if the device is cuda for performance issue.
+        Just return torch.cuda if the device is cuda to make attribute-access faster.
         Custom backend must first register a module with the same name with {device.type} on torch.
         """
         if device.type == "cuda":
-            return cast(_FSDPDeviceHandler, torch.cuda)
+            return cast(_FSDPDeviceHandle, torch.cuda)
         return cls(device)
 
     def __getattr__(self, __name: str) -> Any:
@@ -82,12 +82,12 @@ class _FSDPDeviceHandler:
             )
 
 
-class _UninitializedDeviceHandler(_FSDPDeviceHandler):
+class _UninitializedDeviceHandle(_FSDPDeviceHandle):
     def __init__(self):
         pass
 
     def __getattribute__(self, __name: str) -> Any:
-        raise RuntimeError("Try using an uninitialized device handler.")
+        raise RuntimeError("Try to use an uninitialized device handle.")
 
 
 class _FSDPState(_State):
@@ -112,9 +112,9 @@ class _FSDPState(_State):
             nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
-        # Abstract device handler for fsdp compute device. For now,
+        # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
-        self.device_handler: _FSDPDeviceHandler = _UninitializedDeviceHandler()
+        self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
