@@ -1746,15 +1746,12 @@ class TestSparse(TestSparseBase):
         _test_spadd()
         _test_spadd_hybrid()
 
-    @onlyCUDA
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.float)
     def test_sparse_add_out_bfloat16(self, device, dtype, coalesced):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
         y, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
-        x = x.float().cuda()
-        y = y.float().cuda()
         res_fp32 = torch.add(x, y)
 
         # bfloat16

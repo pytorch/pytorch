@@ -846,6 +846,8 @@ class TestExtensionUtils(TestCase):
         with torch.autocast(device_type=custom_backend_name):
             pass
 
+        self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
+        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
 
 class TestDeviceUtils(TestCase):
     def test_basic(self):

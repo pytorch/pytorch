@@ -234,6 +234,12 @@ class ShardedGradScaler(GradScaler):
                             per_device_found_inf.get(device),
                             per_device_inv_scale.get(device),
                         )
+        # There exist contexts (e.g. w/ `use_orig_params=True`) wherein some
+        # ranks may have no (non-zero sized) parameter shards, necessitating the
+        # initialization of `per_device_found_inf._per_device_tensors` here
+        if not per_device_found_inf._per_device_tensors:
+            assert self._scale is not None
+            per_device_found_inf.get(self._scale.device)
         return per_device_found_inf._per_device_tensors
 
     def unscale_(self, optimizer: SGD) -> None:

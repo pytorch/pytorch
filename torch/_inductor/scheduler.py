@@ -1150,7 +1150,7 @@ class Scheduler:
             from .codegen.cpp import CppScheduling
 
             return CppScheduling(self)
-        else:
+        elif device.type == "cuda":
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
                 if device_props.major < 7:
@@ -1164,6 +1164,8 @@ class Scheduler:
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
+        else:
+            raise RuntimeError(f"Unsupported device type: {device.type}")
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:

@@ -8,6 +8,7 @@ from itertools import accumulate, chain
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -28,6 +29,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
+    _named_parameters_with_duplicates,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -429,6 +431,7 @@ class FlatParamHandle:
                 "for parameter or gradient writeback. Changing parameter or "
                 "gradient storages may lead to silent correctness errors.",
             )
+        # Only align addresses for `use_orig_params=True` (for now)
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
@@ -522,8 +525,10 @@ class FlatParamHandle:
         param_extensions: List[Any] = []
         is_padding_mask: List[bool] = []
         total_numel = total_numel_without_padding = 0
-        for submodule_name, submodule in module.named_modules():
-            for param_name, param in submodule.named_parameters(recurse=False):
+        for submodule_name, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
                 if param not in params_set:
                     continue
                 if param in shared_param_memo:  # shared reference
@@ -552,7 +557,8 @@ class FlatParamHandle:
                             is_padding_mask.append(True)
                             numels.append(numel_to_pad)
                             total_numel += numel_to_pad
-                    param, extension = _ext_pre_flatten_transform(param)
+                    transform_t, extension = _ext_pre_flatten_transform(param)
+                    param = cast(nn.Parameter, transform_t)
                     param_extensions.append(extension)
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
                     params_to_flatten.append(param)
@@ -579,10 +585,30 @@ class FlatParamHandle:
             and total_numel != total_numel_without_padding
         ):
             log.info(
-                f"FSDP FlatParameter address alignment created "
-                f"{total_numel - total_numel_without_padding} "
-                f"numel of padding ({total_numel} vs. {total_numel_without_padding})"
+                "FSDP FlatParameter address alignment created "
+                "%s numel of padding (%s vs. %s)",
+                total_numel - total_numel_without_padding,
+                total_numel,
+                total_numel_without_padding,
             )
+        if aligned_numel > 0:
+            # Pad to be divisible by world size to avoid a copy for the
+            # post-backward reduce-scatter
+            numel_to_pad = self.world_size - (total_numel % self.world_size)
+            if numel_to_pad > 0 and numel_to_pad < self.world_size:
+                if self.rank == 0:
+                    log.info(
+                        "FSDP FlatParameter world size divisibility created "
+                        "%s numel of padding",
+                        numel_to_pad,
+                    )
+                padding_tensor = _construct_padding_tensor(
+                    numel_to_pad, dtype, False, device
+                )
+                params_to_flatten.append(padding_tensor)
+                is_padding_mask.append(True)
+                numels.append(numel_to_pad)
+                total_numel += numel_to_pad
         # Pass `aligned_numel=0` since we already included padding tensors
         self.flat_param: FlatParameter = self.flatten_tensors_into_flat_param(
             params_to_flatten,
@@ -677,6 +703,13 @@ class FlatParamHandle:
                     total_numel += numel_to_pad
                 flat_tensors.append(torch.flatten(_detach_if_needed(tensor)))
                 total_numel += tensor.numel()
+            numel_to_pad = self.world_size - (total_numel % self.world_size)
+            if numel_to_pad > 0 and numel_to_pad < self.world_size:
+                padding_tensor = _construct_padding_tensor(
+                    numel_to_pad, dtype, False, device
+                )
+                flat_tensors.append(padding_tensor)
+                total_numel += numel_to_pad
         else:
             flat_tensors = [
                 torch.flatten(_detach_if_needed(tensor)) for tensor in tensors
@@ -1168,7 +1201,7 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         flat_param = self.flat_param
-        if self._force_full_precision:
+        if self._force_full_precision and self._uses_param_mixed_precision:
             # When parameter mixed precision is enabled, we use a different
             # tensor as the all-gather destination to preserve the invariant
             # that  `_full_param_padded` is in the low precision
@@ -1398,7 +1431,8 @@ class FlatParamHandle:
         """
 
         def cast_grad_to_param_dtype_if_needed(flat_param):
-            if self._keep_low_precision_grads:
+            # TODO (rohan-varma): test for full precision with keep_low_precision_grads
+            if not self._force_full_precision and self._keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
                 if flat_param.grad.dtype != self._fwd_bwd_param_dtype:
                     flat_param.grad.data = flat_param.grad.to(self._fwd_bwd_param_dtype)
@@ -1487,7 +1521,9 @@ class FlatParamHandle:
         """
         Runs the reshard logic. This includes freeing the unsharded flat
         parameter if ``free_unsharded_flat_param`` and switching to using the
-        sharded flat parameter.
+        sharded flat parameter. Note that this also implicitly offloads
+        the sharded flat parameter (if CPU offload is enabled) by pointing
+        it to the ``_local_shard`` attribute which resides on CPU.
         """
         # Switch to the sharded `FlatParameter` before freeing to prevent
         # "use-after-free"-type bugs with external profiling tools, where for
@@ -2331,8 +2367,12 @@ class FlatParamHandle:
     @property
     def _force_full_precision(self) -> bool:
         return (
+            self._uses_param_mixed_precision or self._uses_reduce_mixed_precision
+        ) and (
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
-            and self._uses_param_mixed_precision
+            or
+            # Also disable mixed precision in model eval mode
+            not self._fully_sharded_module.training
         )
 
 
