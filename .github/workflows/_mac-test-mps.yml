@@ -83,6 +83,26 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
+      - name: Disable XProtect and MDS
+        continue-on-error: true
+        run: |
+          # Like Windows Defender, XProtect could interfere with the test
+          set +e
+          set -x
+
+          SERVICES=(
+            "com.apple.XProtect.daemon.scan"
+            "com.apple.XprotectFramework.PluginService"
+            "com.apple.XprotectFramework.scan"
+            "com.apple.metadata.mds"
+            "com.apple.metadata.mds.index"
+          )
+          # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
+          for SERVICE in "${SERVICES[@]}"; do
+            sudo launchctl stop "${SERVICE}"
+            sudo launchctl disable "system/${SERVICE}"
+          done
+
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
@@ -99,6 +119,7 @@ jobs:
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
@@ -117,9 +138,20 @@ jobs:
           ${CONDA_RUN} which python
           ${CONDA_RUN} python --version
 
-          # As wheels are cross-compiled they are reported as x86_64 ones
-          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          pushd "${RUNNER_TEMP}"
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          RC=$?
+          popd
+
+          if [ "${RC}" -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
@@ -142,3 +174,18 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Archive conda environments
+        if: failure()
+        shell: bash
+        run: |
+          zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
+
+      - name: Store conda environments on GHA for debugging
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}-${{ steps.get-job-id.outputs.job-id }}-temp
+          retention-days: 14
+          if-no-files-found: warn
+          path: runner_temp.zip

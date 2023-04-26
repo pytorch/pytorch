@@ -625,7 +625,7 @@ class Reduction(Loops):
             indices = []
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
-                if all([r in md.index.free_symbols for r in range_vars]):
+                if all(r in md.index.free_symbols for r in range_vars):
                     indices.append(md.index)
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
@@ -651,7 +651,7 @@ class Reduction(Loops):
         for i in indices:
             i = V.graph.sizevars.simplify_with_ranges(i, ranges)
             strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
-            outer = all([s > 1 for s in strides])
+            outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -676,6 +676,11 @@ class Reduction(Loops):
 
             def combine_fn(a, b):
                 return ops.add(a, b)
+
+        elif reduction_type == "prod":
+
+            def combine_fn(a, b):
+                return ops.mul(a, b)
 
         elif reduction_type == "min":
 
@@ -832,8 +837,8 @@ class Reduction(Loops):
                 return isinstance(x, (int, sympy.Integer))
 
             sr_qualified = (
-                all([_is_static(r) for r in ranges])
-                and all([_is_static(r) for r in reduction_ranges])
+                all(_is_static(r) for r in ranges)
+                and all(_is_static(r) for r in reduction_ranges)
                 and _is_static(reduction_numel)
             )
 
@@ -905,6 +910,7 @@ class Reduction(Loops):
 
         return {
             "sum": 0,
+            "prod": 1,
             "any": 0,
         }[reduction_type]
 
@@ -1330,8 +1336,18 @@ class View(BaseView):
         if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
             return x
 
+        if 0 in new_size and is_storage_and_layout(x):
+            storage, old_layout = as_storage_and_layout(x, freeze=False)
+            new_layout = FixedLayout(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                FlexibleLayout.contiguous_strides(new_size),
+                old_layout.offset,
+            )
+            return ReinterpretView(storage, new_layout)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        if is_contiguous_storage_and_layout(x) and not isinstance(
+        elif is_contiguous_storage_and_layout(x) and not isinstance(
             x.data, ExternKernelAlloc
         ):
             storage, old_layout = as_contiguous_storage_and_layout(x)
@@ -3132,9 +3148,10 @@ class MultiOutputLayout(IRNode):
 
 class MultiOutput(ExternKernel):
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
-        )
+        line = V.graph.wrapper_code.declare
+        line += f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        line += V.graph.wrapper_code.ending
+        wrapper.writeline(line)
         self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, index: str):
@@ -3779,7 +3796,7 @@ class StorageBox(MutableBox):
             """
             heavy_ops = ["exp"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
-            return any([(op + "(") in fn_str for op in heavy_ops])
+            return any((op + "(") in fn_str for op in heavy_ops)
 
         if (
             users > 1

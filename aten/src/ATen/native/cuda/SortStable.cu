@@ -231,7 +231,7 @@ void launch_stable_sort_kernel(
   int64_t nsort = self.size(dim);
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
-  int64_t* indices_ptr = indices.data_ptr<int64_t>();
+  int64_t* indices_ptr = indices.mutable_data_ptr<int64_t>();
 
 #if (defined(USE_ROCM) && ROCM_VERSION < 40500)
   constexpr bool is_rocm_bf16_sort_unsupported = true;
@@ -245,8 +245,8 @@ void launch_stable_sort_kernel(
             is_rocm_bf16_sort_unsupported &&
             std::is_same<scalar_t, c10::BFloat16>::value)>(
             [&](auto _) {
-              const scalar_t* self_ptr = self.data_ptr<scalar_t>();
-              scalar_t* values_ptr = values.data_ptr<scalar_t>();
+              const scalar_t* self_ptr = self.const_data_ptr<scalar_t>();
+              scalar_t* values_ptr = values.mutable_data_ptr<scalar_t>();
               int64_t remaining = _(numel);
               while (remaining > 0) {
                 int64_t n = std::min(remaining, nbatch);
