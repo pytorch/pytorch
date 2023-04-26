@@ -9,6 +9,7 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
+from typing import Optional, Sequence
 
 import torch
 import torch._prims_common as utils
@@ -185,19 +186,25 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def _stride_or_default(stride, *, shape):
+# Helper functions for computing what the default values of tensor
+# values should be.  These all coincide with factory functions, e.g., torch.empty
+
+
+def _stride_or_default(
+    stride: Optional[Sequence[int]], *, shape: Sequence[int]
+) -> Sequence[int]:
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 
-def _dtype_or_default(dtype):
+def _dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
     return dtype if dtype is not None else torch.float32
 
 
-def _device_or_default(device):
+def _device_or_default(device: Optional[torch.device]) -> torch.device:
     return device if device is not None else torch.device("cpu")
 
 
-def _storage_offset_or_default(storage_offset):
+def _storage_offset_or_default(storage_offset: Optional[int]) -> int:
     return storage_offset if storage_offset is not None else 0
 
 
@@ -205,7 +212,10 @@ def _storage_offset_or_default(storage_offset):
 # transferring around
 class InputReader:
     def __init__(self, save_dir=None):
-        # If None, we will generate random data instead
+        # If None, we will generate random data instead.  It's important
+        # to natively support this use case as it will allow people to
+        # share repros without including the real data, if the problem
+        # reproduces even on random data.
         if save_dir is None:
             log.warning("no save_dir specified, will generate random data")
         self.store = ContentStoreReader(save_dir) if save_dir is not None else None
@@ -257,7 +267,9 @@ class InputReader:
 #  2. You can now deterministically randomize the inputs, or reload
 #     the inputs from disk
 #  3. You can YOLO run the script without the inputs, in which case
-#     we'll fill the inputs with random data and pray
+#     we'll fill the inputs with random data and pray.  This is the
+#     legacy behavior, but it's also useful if you want to find out
+#     if we're so broken even random inputs trigger it
 #  4. We could offer an in process "check if the randomized thing
 #     works too" but this is delicate so we don't do it
 
@@ -610,7 +622,7 @@ def inductor_fails(fx_g, args, check_str=None):
     try:
         result = fx_g(*args)
         assert isinstance(result, (tuple, list))
-        assert not any([isinstance(x, (tuple, list)) for x in result])
+        assert not any(isinstance(x, (tuple, list)) for x in result)
     except Exception:
         return False
 
