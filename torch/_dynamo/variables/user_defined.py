@@ -173,6 +173,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
+        breakpoint()
 
     def __str__(self):
         inner = self.value_type.__name__

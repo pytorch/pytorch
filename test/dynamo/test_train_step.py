@@ -37,9 +37,6 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
     3) inside train_step_compiler, we reparameterize the optimizer
 
     WIP/Issues
-    - handle an optimizer with actual states
-    - dynamo asserts empty backward tape before trace
-    - train_step backend asserts full_graph mode was used
     - handle more than one optimizer (e.g. for different submodules)
     """
 
@@ -82,7 +79,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             # uses for module tracing
             optimizer.step()
 
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         # copy the model/optimizer up front so we don't have to reset them between eager/compile runs
@@ -133,7 +130,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             # uses for module tracing
             optimizer.step()
 
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         # copy the model/optimizer up front so we don't have to reset them between eager/compile runs
@@ -174,7 +171,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss = out.sum()
             loss.backward()
             optimizer.step()
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         opt_model = Seq()
@@ -203,7 +200,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss = out.sum()
             loss.backward()
             optimizer.step()
-            model.zero_grad()
+            optimizer.zero_grad()
             return loss
 
         opt_model = Seq()

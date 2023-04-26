@@ -67,7 +67,8 @@ from .utils import (
 )
 from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
-from .variables.nn_module import NNModuleVariable, OptimizerVariable
+from .variables.nn_module import NNModuleVariable
+from .variables.optim import OptimizerVariable
 from .variables.tensor import (
     SymNodeVariable,
     TensorVariable,
