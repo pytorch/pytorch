@@ -1,4 +1,4 @@
-load("@fbsource//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
+load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:expect.bzl", "expect")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")

@@ -42,6 +42,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
+    DefaultDeviceSource,
     DeterministicAlgorithmsSource,
     is_constant_source,
     LocalSource,
@@ -230,6 +231,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 GuardBuilder.DETERMINISTIC_ALGORITHMS
             )
         )
+
+        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -746,9 +749,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["calls_captured"] += ncalls
 
         # free a bit of memory
-        for node in self.graph.nodes:
-            if "example_value" in node.meta:
-                del node.meta["example_value"]
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
@@ -849,8 +849,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
             # I'm not really sure why you need to delete these from the
             # node since the node is going to get removed
-            if "example_value" in node.meta:
-                del node.meta["example_value"]
             del node.meta["grapharg"]
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
@@ -907,8 +905,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
-            if "example_value" in node.meta:
-                del node.meta["example_value"]
             if "grapharg" in node.meta:
                 del node.meta["grapharg"]
         self.real_value_cache.clear()
