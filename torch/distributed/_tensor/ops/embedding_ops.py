@@ -74,9 +74,7 @@ def embedding_dense_backward_rules(op_schema: OpSchema) -> OutputSharding:
         return OutputSharding(
             output_spec=DTensorSpec(mesh=indices.mesh, placements=[_Partial()])
         )
-    elif (
-        grad_output.placements[0].is_partial() and indices.placements[0].is_replicate()
-    ):
+    elif grad_output.placements == [_Partial()] and indices.placements == [Replicate()]:
         # The embedding table is replicated and the indices is also replicated
         # (local is a more precise term). This is postional embedding. In this
         # case, gradients for the embmedding table should be Partial.
