@@ -22,14 +22,9 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import (
-    config_of,
-    signature_of,
-    texpr,
-    TritonKernel,
-    TritonPrinter,
-    TritonScheduling,
-)
+from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
+
+from .codegen.triton_utils import config_of, signature_of
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
