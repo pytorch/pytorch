@@ -32,7 +32,7 @@ comprehensive than autograd.Function, which only supports implementing gradient
 computation and vmap rules.
 """
 
-__all__ = ["custom_op", "CustomOp", "get_ctx", "FakeTensorImplCtx"]
+__all__ = ["custom_op", "CustomOp", "get_ctx", "AbstractImplCtx"]
 
 
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
@@ -166,7 +166,7 @@ class CustomOp:
         # this is _opname but with namespace. e.g. "custom::foo"
         self._qualname: str = name
         self.__name__ = None  # mypy requires this
-        self._fake_impl: typing.Optional[FuncAndLocation] = None
+        self._abstract_impl: typing.Optional[FuncAndLocation] = None
 
         global_registry[self._qualname] = self
 
@@ -232,20 +232,22 @@ class CustomOp:
 
         return inner
 
-    def impl_fake(self) -> typing.Callable:
-        r"""Register a fake implementation for this operator.
+    def impl_abstract(self) -> typing.Callable:
+        r"""Register an abstract implementation for this operator.
 
-        A "fake implementation" specifies the behavior of this operator on
+        An "abstract implementation" specifies the behavior of this operator on
         Tensors that carry no data. Given some input Tensors with certain properties
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
-        The fake implementation has the same signature as the operator.
-        It is run for both FakeTensors and meta tensors. To write a fake
+        The abstract implementation has the same signature as the operator.
+        It is run for both FakeTensors and meta tensors. To write an abstract
         implementation, assume that all Tensor inputs to the operator are
-        instead FakeTensors and that you are trying to return a FakeTensor
-        with the same properties (sizes/strides/storage_offset/device) that
-        would be returned if all Tensor inputs were instead regular Tensors.
+        regular CPU/CUDA/Meta tensors, but they do not have storage, and
+        you are trying to return regular CPU/CUDA/Meta tensor(s) as output.
+        The abstract implementation must consist of only PyTorch operations
+        (and may not directly access the storage or data of any input or
+        intermediate Tensors).
 
         This API is used as a decorator (see examples).
 
@@ -257,13 +259,14 @@ class CustomOp:
             >>> def custom_linear(x, weight, bias):
             >>>     ...
             >>>
-            >>> @custom_linear.impl_fake():
-            >>> def custom_linear_fake(x, weight):
+            >>> @custom_linear.impl_abstract():
+            >>> def custom_linear_abstract(x, weight):
             >>>     assert x.dim() == 2
             >>>     assert weight.dim() == 2
             >>>     assert bias.dim() == 1
             >>>     assert x.shape[1] == weight.shape[1]
             >>>     assert weight.shape[0] == bias.shape[0]
+            >>>     assert x.device == weight.device
             >>>
             >>>     return (x @ weight.t()) + bias
             >>>
@@ -272,11 +275,14 @@ class CustomOp:
             >>> def custom_nonzero(x):
             >>>     ...
             >>>
-            >>> @custom_nonzero.impl_fake():
-            >>> def custom_nonzero_fake(x):
-            >>>     # Number of nonzero-elements is data-dependent
+            >>> @custom_nonzero.impl_abstract():
+            >>> def custom_nonzero_abstract(x):
+            >>>     # Number of nonzero-elements is data-dependent.
+            >>>     # Since we cannot peek at the data in an abstract impl,
+            >>>     # we use the ctx object to construct a new symint that
+            >>>     # represents the data-dependent size.
             >>>     ctx = torch._custom_op.get_ctx()
-            >>>     nnz = ctx.new_data_dependent_symint()
+            >>>     nnz = ctx.create_unbacked_symint()
             >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
             >>>     # range to at least 2. Note that the operator implementation
             >>>     # must also do this.
@@ -299,16 +305,16 @@ class CustomOp:
 
         def inner(f):
             frame = inspect.stack()[1]
-            if self._fake_impl is not None:
+            if self._abstract_impl is not None:
                 raise RuntimeError(
-                    f"Attempting to register a FakeTensor rule for operator {self._qualname} "
-                    f"that already has a FakeTensor rule registered from Python at "
-                    f"{self._fake_impl.location}. This is not supported."
+                    f"Attempting to register an abstract impl for operator {self._qualname} "
+                    f"that already has an abstract impl registered from Python at "
+                    f"{self._abstract_impl.location}. This is not supported."
                 )
             new_location = f"{frame.filename}:{frame.lineno}"
 
-            # FakeTensor will look at _fake_impl
-            self._fake_impl = FuncAndLocation(f, new_location)
+            # FakeTensor will look at _abstract_impl
+            self._abstract_impl = FuncAndLocation(f, new_location)
 
             qualname = self._qualname
 
@@ -323,7 +329,7 @@ class CustomOp:
                         f"has a data-dependent output shape; if so, there is no "
                         f"such meta implementation and this error is the correct "
                         f"behavior. Otherwise, please remove the call to get_ctx() "
-                        f"in the implementation registered with impl_fake "
+                        f"in the implementation registered with impl_abstract "
                         f"at {new_location}"
                     )
 
@@ -472,10 +478,10 @@ global_ctx_getter: typing.Callable = get_none
 #
 # This is done via us setting the global_ctx_getter function every time a fake
 # implementation is invoked.
-def get_ctx() -> "FakeTensorImplCtx":
-    """get_ctx() returns the current FakeTensorImplCtx object.
+def get_ctx() -> "AbstractImplCtx":
+    """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of a fake implementation.
+    Calling ``get_ctx()`` is only valid inside of an abstract implementation.
     """
     return global_ctx_getter()
 
@@ -491,19 +497,19 @@ def set_ctx_getter(ctx_getter):
         global_ctx_getter = prev
 
 
-class FakeTensorImplCtx:
+class AbstractImplCtx:
     """
-    Context object for writing FakeTensor rules for custom operators.
+    Context object for writing abstract implementations for custom operators.
     """
 
     def __init__(self, _shape_env, _op):
         self._shape_env = _shape_env
         self._op = _op
 
-    def new_data_dependent_symint(self, *, min=2, max=None) -> torch.SymInt:
+    def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
         """Constructs a new symint (symbolic int) representing a data-dependent value.
 
-        This is useful for writing the fake implementation (which is necessary
+        This is useful for writing the abstract implementation (which is necessary
         for torch.compile) for a CustomOp where an output Tensor has a size
         that depends on the data of the input Tensors.
 
@@ -518,7 +524,8 @@ class FakeTensorImplCtx:
 
             It is important that the ``min`` and ``max`` (if not None) values are set
             correctly, otherwise, there will be undefined behavior under
-            torch.compile. The default value of ``min`` is 2.
+            torch.compile. The default value of ``min`` is 2 due to torch.compile
+            specializing on 0/1 sizes.
 
             You must also verify that your implementation on concrete Tensors
             (e.g. CPU/CUDA) only returns Tensors where the size that corresponds
@@ -533,11 +540,11 @@ class FakeTensorImplCtx:
             >>> def custom_nonzero(x):
             >>>     ...
             >>>
-            >>> @custom_nonzero.impl_fake():
-            >>> def custom_nonzero_fake(x):
+            >>> @custom_nonzero.impl_abstract():
+            >>> def custom_nonzero_abstract(x):
             >>>     # Number of nonzero-elements is data-dependent
             >>>     ctx = torch._custom_op.get_ctx()
-            >>>     nnz = ctx.new_data_dependent_symint()
+            >>>     nnz = ctx.create_unbacked_symint()
             >>>     shape = [x.dim(), nnz]
             >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
@@ -546,7 +553,7 @@ class FakeTensorImplCtx:
             >>> def custom_nonzero_impl(x):
             >>>     x_np = to_numpy(x)
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
-            >>>     # the size associated with ctx.new_data_dependent_symint()
+            >>>     # the size associated with ctx.create_unbacked_symint()
             >>>     # must be constrained in the same way, so we add an assertion here.
             >>>     if res.shape[0] < 2 or res.shape[0] > x.numel():
             >>>         raise RuntimeError("not supported")
@@ -561,15 +568,17 @@ class FakeTensorImplCtx:
 
         if isinstance(min, torch.SymInt) or isinstance(max, torch.SymInt):
             raise ValueError(
-                f"ctx.new_data_dependent_symint(min={min}, max={max}): expected "
+                f"ctx.create_unbacked_symint(min={min}, max={max}): expected "
                 f"min and max to be statically known ints but got SymInt. "
-                f"This is not supported.")
+                f"This is not supported."
+            )
 
         if min < 2:
             raise ValueError(
-                f"ctx.new_data_dependent_symint(min={min}, ...): expected min to be "
+                f"ctx.create_unbacked_symint(min={min}, ...): expected min to be "
                 f"greater than or equal to 2. PyTorch only supports new "
-                f"data-dependent sizes of >= 2")
+                f"data-dependent sizes of >= 2"
+            )
 
         result = self._shape_env.create_unbacked_symint()
         torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max)

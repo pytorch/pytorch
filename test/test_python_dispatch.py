@@ -621,7 +621,7 @@ class TestCustomOp(TestCase):
         def foo(x, dim):
             ...
 
-        @foo.impl_fake()
+        @foo.impl_abstract()
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -637,15 +637,15 @@ class TestCustomOp(TestCase):
         def foo999(x):
             ...
 
-        @foo999.impl_fake()
+        @foo999.impl_abstract()
         def foo999_meta(x):
             ctx = torch._custom_op.get_ctx()
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
-                ctx.new_data_dependent_symint(min=1)
+                ctx.create_unbacked_symint(min=1)
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
-                ctx.new_data_dependent_symint(min=-1)
+                ctx.create_unbacked_symint(min=-1)
             with self.assertRaisesRegex(ValueError, "SymInt"):
-                ctx.new_data_dependent_symint(max=x.numel())
+                ctx.create_unbacked_symint(max=x.numel())
             return torch.clone(x)
 
         x = torch.randn(2, 3, device='cpu')
@@ -666,7 +666,7 @@ class TestCustomOp(TestCase):
         def foo(x):
             ...
 
-        @foo.impl_fake()
+        @foo.impl_abstract()
         def foo_meta(x):
             return x.sum()
 
@@ -675,8 +675,8 @@ class TestCustomOp(TestCase):
         self.assertTrue('_torch_testing.foo' in gm.code)
         del foo
 
-    def test_fake_registration_location(self):
-        loc = torch.testing._internal.custom_op_db.numpy_nonzero._fake_impl.location
+    def test_abstract_registration_location(self):
+        loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
         matches = re.match(r'.*/custom_op_db.py:\d+', loc)
         self.assertIsNotNone(matches)
 

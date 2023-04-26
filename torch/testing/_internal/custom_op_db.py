@@ -35,8 +35,8 @@ def numpy_cube_impl(x):
     dx = torch.tensor(3 * x_np ** 2, device=x.device)
     return torch.tensor(x_np ** 3, device=x.device), dx
 
-@numpy_cube.impl_fake()
-def numpy_cube_fake(x):
+@numpy_cube.impl_abstract()
+def numpy_cube_abstract(x):
     return x.clone(), x.clone()
 
 @custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
@@ -48,8 +48,9 @@ def numpy_mul(x, y):
 def numpy_mul_impl(x, y):
     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
 
-@numpy_mul.impl_fake()
-def numpy_mul_fake(x, y):
+@numpy_mul.impl_abstract()
+def numpy_mul_abstract(x, y):
+    assert x.device == y.device
     return (x * y).contiguous()
 
 @custom_op('(Tensor x, int dim) -> (Tensor, Tensor, Tensor)', ns='_torch_testing')
@@ -70,8 +71,8 @@ def numpy_sort_impl(x, dim):
         torch.tensor(ind_inv, device=device),
     )
 
-@numpy_sort.impl_fake()
-def numpy_sort_fake(x, dim):
+@numpy_sort.impl_abstract()
+def numpy_sort_abstract(x, dim):
     return torch.empty_like(x), torch.empty_like(x, dtype=torch.long), torch.empty_like(x, dtype=torch.long)
 
 @custom_op('(Tensor x, Tensor ind, Tensor ind_inv, int dim) -> Tensor', ns='_torch_testing')
@@ -86,8 +87,10 @@ def numpy_take_impl(x, ind, ind_inv, dim):
     ind = to_numpy(ind)
     return torch.tensor(np.take_along_axis(x, ind, dim), device=device)
 
-@numpy_take.impl_fake()
-def numpy_take_fake(x, ind, ind_inv, dim):
+@numpy_take.impl_abstract()
+def numpy_take_abstract(x, ind, ind_inv, dim):
+    assert x.device == ind.device
+    assert x.device == ind_inv.device
     return torch.empty_like(x)
 
 @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
@@ -102,10 +105,10 @@ def numpy_nonzero_impl(x):
         raise RuntimeError("not supported")
     return torch.tensor(res, device=x.device)
 
-@numpy_nonzero.impl_fake()
-def numpy_nonzero_fake(x):
+@numpy_nonzero.impl_abstract()
+def numpy_nonzero_abstract(x):
     ctx = torch._custom_op.get_ctx()
-    i0 = ctx.new_data_dependent_symint()
+    i0 = ctx.create_unbacked_symint()
     shape = [x.dim(), i0]
     result = x.new_empty(shape, dtype=torch.long)
     return result
@@ -170,15 +173,15 @@ def numpy_nms_impl(boxes, scores, iou_threshold):
     assert result.size(0) >= 2
     return result
 
-@numpy_nms.impl_fake()
-def numpy_nms_fake(boxes, scores, iou_threshold):
+@numpy_nms.impl_abstract()
+def numpy_nms_abstract(boxes, scores, iou_threshold):
     assert boxes.device == scores.device
     N = boxes.shape[0]
     assert boxes.shape == (N, 4)
     assert scores.shape == (N,)
 
     ctx = torch._custom_op.get_ctx()
-    i0 = ctx.new_data_dependent_symint()
+    i0 = ctx.create_unbacked_symint()
     result = boxes.new_empty([i0, 4])
     return result
 
