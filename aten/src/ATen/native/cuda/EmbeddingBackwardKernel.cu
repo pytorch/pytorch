@@ -240,10 +240,9 @@ Tensor embedding_backward_cuda_kernel(
   });
 #else
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
-    auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
     cuda::cub::unique_by_key(
       sorted_indices.const_data_ptr<index_t>(), thrust::make_counting_iterator(0),
-      nullptr, segment_offsets.const_data_ptr<index_t>(),
+      nullptr, segment_offsets.mutable_data_ptr<index_t>(),
       num_of_segments_ptr, sorted_indices.numel());
   });
 #endif
