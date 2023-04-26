@@ -1363,7 +1363,7 @@ def meta__foreach_binop_scalar(self, scalar=1):
 )
 def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
     check(
-        all([isinstance(l, List) for l in [self, tensor1, tensor2]]),
+        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
         lambda: (
             "All arguments of _foreach_addc*_ must be List[Tensor], "
             f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
@@ -1384,7 +1384,7 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
 )
 def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
     check(
-        all([isinstance(l, List) for l in [self, tensor1, tensor2]]),
+        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
         lambda: (
             "All arguments must be List[Tensor], "
             f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
@@ -2631,7 +2631,7 @@ def upsample_common_check(input_size, output_size, num_spatial_dims):
     )
 
     check(
-        all([s > 0 for s in input_size[2:]]) and all([s > 0 for s in output_size]),
+        all(s > 0 for s in input_size[2:]) and all(s > 0 for s in output_size),
         lambda: f"Input and output sizes should be greater than 0, but got "
         f"input size {input_size} and output size {output_size}",
     )
@@ -3062,7 +3062,7 @@ def meta_upsample_bilinear2d_aa(
         input.size(), output_size, num_spatial_dims=2
     )
     check(
-        input.numel() != 0 or all([size > 0 for size in input.size()[1:]]),
+        input.numel() != 0 or all(size > 0 for size in input.size()[1:]),
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
