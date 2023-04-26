@@ -207,8 +207,8 @@ Tensor threshold_backward_sparse(
     const Tensor& self,
     const Scalar& threshold) {
   const auto grad = [&]() {
-    if (!grad_output._nnz() && grad_output._nnz() != self._nnz()) {
-      return at::sparse::zeros_with_indices_like(self);
+    if (!grad_output._nnz() && self._nnz() > 0) {
+      return at::sparse::zeros_like_with_indices(self);
     } else {
       return grad_output;
     }
@@ -231,8 +231,8 @@ Tensor& threshold_backward_sparse_out(
     const Scalar& threshold,
     Tensor& grad_input) {
   const auto grad = [&]() {
-    if (!grad_output._nnz() && grad_output._nnz() != self._nnz()) {
-      return at::sparse::zeros_with_indices_like(self);
+    if (!grad_output._nnz() && self._nnz() > 0) {
+      return at::sparse::zeros_like_with_indices(self);
     } else {
       return grad_output;
     }
