@@ -302,7 +302,7 @@ def _create_onnx_friendly_decomposition_table() -> (
 
 # This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
 # op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
-# function in the _DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE.
-_DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: Dict[
+# function in the DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE.
+DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: Dict[
     torch._ops.OpOverload, Callable
 ] = _create_onnx_friendly_decomposition_table()

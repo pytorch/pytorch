@@ -93,46 +93,54 @@ class ResolvedExportOptions(ExportOptions):
 
     # Private only attributes
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
-    """Dictionary with all ATen operators supported by the exporter."""
+    """A dictionary that maps operators to their decomposition functions."""
 
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
     @_beartype.beartype
-    def __init__(self, options: Optional[ExportOptions]):
+    def __init__(
+        self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
+    ):
         if options is None:
             options = ExportOptions()
+        if isinstance(options, ResolvedExportOptions):
+            self.opset_version = options.opset_version
+            self.dynamic_shapes = options.dynamic_shapes
+            self.op_level_debug = options.op_level_debug
+            self.logger = options.logger
+            self.fx_tracer = options.fx_tracer
+            self.decomposition_table = options.decomposition_table
+        else:
+            T = TypeVar("T")
 
-        T = TypeVar("T")
+            @_beartype.beartype
+            def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
+                if value is not None:
+                    return value
+                if callable(fallback):
+                    return fallback()
+                return fallback
 
-        @_beartype.beartype
-        def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
-            if value is not None:
-                return value
-            if callable(fallback):
-                return fallback()
-            return fallback
+            self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
+            self.dynamic_shapes = resolve(options.dynamic_shapes, False)
+            import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
+            from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
+                function_dispatcher,
+            )
 
-        self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
-        self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-        # TODO: Prevent circular dep + [onnx]script dep
-        import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor
-        from torch.onnx._internal.fx import (  # TODO: onnxscript is not available on Pytorch CI yet
-            function_dispatcher,
-        )
+            self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+            self.decomposition_table = (
+                function_dispatcher.DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE
+            )
+            self.op_level_debug = resolve(options.op_level_debug, False)
+            self.logger = resolve(
+                options.logger, lambda: logging.getLogger().getChild("torch.onnx")
+            )
 
-        self.fx_tracer = dynamo_graph_extractor.DynamoExport()
-        self.decomposition_table = (
-            function_dispatcher._DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE
-        )
-        self.op_level_debug = resolve(options.op_level_debug, False)
-        self.logger = resolve(
-            options.logger, lambda: logging.getLogger().getChild("torch.onnx")
-        )
-
-        for key in dir(options):
-            if not key.startswith("_"):  # skip private attributes
-                assert hasattr(self, key), f"Unresolved option '{key}'"
+            for key in dir(options):
+                if not key.startswith("_"):  # skip private attributes
+                    assert hasattr(self, key), f"Unresolved option '{key}'"
 
 
 @runtime_checkable
@@ -456,6 +464,7 @@ class FXGraphExtractor(abc.ABC):
         fx_module: torch.fx.GraphModule,
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
+        # TODO: Import here to prevent circular dependency
         import torch.onnx._internal.fx.fx_exporter as fx_exporter
         import torch.onnx._internal.fx.passes as passes
 
@@ -566,7 +575,7 @@ class FXGraphExtractor(abc.ABC):
         # But FXSymbolicTracer modifies model data, which will be needed
         # to produce the ONNX proto in the next layer.
         # TODO: Refactor after https://github.com/pytorch/pytorch/pull/98421
-        pass
+        ...
 
 
 class Exporter:
@@ -578,10 +587,7 @@ class Exporter:
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
-        if isinstance(options, ResolvedExportOptions):
-            self.options = options
-        elif isinstance(options, ExportOptions):
-            self.options = ResolvedExportOptions(options)
+        self.options = ResolvedExportOptions(options)
         assert self.options is not None
 
         self.model = model
