@@ -12,7 +12,8 @@ set PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt\bin\x64;%TMP_DIR_WIN%\bu
 
 set TEST_API_OUT_DIR=%TEST_OUT_DIR%\test_api
 md %TEST_API_OUT_DIR%
-test_api.exe --gtest_filter="-IntegrationTest.MNIST*" --gtest_output=xml:%TEST_API_OUT_DIR%\test_api.xml
+python run_test.py --cpp --verbose -i cpp/test_api
+:: test_api.exe --gtest_filter="-IntegrationTest.MNIST*" --gtest_output=xml:%TEST_API_OUT_DIR%\test_api.xml
 if errorlevel 1 exit /b 1
 if not errorlevel 0 exit /b 1
 
@@ -42,12 +43,14 @@ if "%~1" == "utility_ops_gpu_test" goto :eof
 
 echo Running "%~2"
 if "%~1" == "c10_intrusive_ptr_benchmark" (
-  call "%~2"
+  python run_test.py --cpp --verbose -i cpp/"%~1"
+  :: call "%~2"
   goto :eof
 )
 :: Differentiating the test report directories is crucial for test time reporting.
 md %TEST_OUT_DIR%\%~n2
-call "%~2" --gtest_output=xml:%TEST_OUT_DIR%\%~n2\%~1.xml
+python run_test.py --cpp --verbose -i cpp/"%~1"
+:: call "%~2" --gtest_output=xml:%TEST_OUT_DIR%\%~n2\%~1.xml
 if errorlevel 1 (
   echo %1 failed with exit code %errorlevel%
   exit /b 1
