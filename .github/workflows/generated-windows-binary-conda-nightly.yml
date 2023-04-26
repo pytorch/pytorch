@@ -34,7 +34,7 @@ concurrency:
 jobs:
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -143,7 +143,7 @@ jobs:
   conda-py3_8-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-build
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -268,7 +268,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -505,7 +505,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -742,7 +742,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -851,7 +851,7 @@ jobs:
   conda-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-build
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -976,7 +976,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1213,7 +1213,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1450,7 +1450,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1559,7 +1559,7 @@ jobs:
   conda-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-build
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1684,7 +1684,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1921,7 +1921,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2158,7 +2158,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2267,7 +2267,7 @@ jobs:
   conda-py3_11-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_11-cpu-build
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2392,7 +2392,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda11_7-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2629,7 +2629,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   conda-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
