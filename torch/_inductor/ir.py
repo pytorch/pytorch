@@ -3051,8 +3051,15 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(nontensor_args),
         )
         if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
-            self.kernel = f"aten.{kernel.__name__}"
+            self.kernel = (
+                f"at::{kernel.__name__}"
+                if V.graph.cpp_wrapper
+                else f"aten.{kernel.__name__}"
+            )
         else:
+            assert (
+                not V.graph.cpp_wrapper
+            ), f"{kernel.__name__} is not supported with cpp wrapper"
             self.kernel = (
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
@@ -3112,10 +3119,10 @@ class FallbackKernel(ExternKernelAlloc):
             unflatten_args,
         )
 
-        def generate_output(output, index=""):
+        def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
                 return type(output)(
-                    generate_output(output[i], f"{index}[{i}]")
+                    generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
                 )
             elif isinstance(output, torch.Tensor):
@@ -3127,7 +3134,7 @@ class FallbackKernel(ExternKernelAlloc):
                         convert_shape_to_inductor(output.stride()),
                     ),
                     packed,
-                    index,
+                    indices,
                 )
             elif isinstance(output, int):
                 return output
@@ -3135,7 +3142,7 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output)
+        return generate_output(example_output, [])
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3147,17 +3154,33 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
+    def codegen_list_tuple_access(self, basename, indices):
+        if len(indices) > 0:
+            itype, i = indices[0]
+            if itype == list:
+                return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
+            elif itype == tuple:
+                # cpp wrapper code needs to use std::get<> to access a tuple
+                tuple_access = V.graph.wrapper_code.codegen_tuple_access(
+                    basename, str(i)
+                )
+                return self.codegen_list_tuple_access(tuple_access, indices[1:])
+            else:
+                raise AssertionError("non supported index type")
+        else:
+            return basename
+
     def codegen(self, wrapper):
         line = V.graph.wrapper_code.declare
-        line += f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
         line += V.graph.wrapper_code.ending
-        wrapper.writeline(line)
-        self.codegen_size_asserts(wrapper)
+        V.graph.wrapper_code.writeline(line)
+        self.codegen_size_asserts(V.graph.wrapper_code)
 
-    def __init__(self, layout, input, index: str):
+    def __init__(self, layout, input, indices: List[Tuple]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
-        self.index = index
+        self.indices = indices
 
     def should_allocate(self):
         return False
