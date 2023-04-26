@@ -77,7 +77,7 @@ def get_weight_obs_or_fq_ctr(quantization_config: QuantizationConfig):
         if quantization_spec.qscheme == torch.per_tensor_symmetric:
             extra_args = {"observer": MovingAverageMinMaxObserver}
         else:
-            extra_args = {"observer": MovingAveragePerChannelMinMaxObserver}
+            extra_args = {"observer": MovingAveragePerChannelMinMaxObserver} # type: ignore[dict-item]
     elif quantization_spec.qscheme == torch.per_channel_symmetric:
         observer_type = PerChannelMinMaxObserver  # type: ignore[assignment]
     return create_observer(observer_type, quantization_spec, eps=2**-12, **extra_args)

@@ -155,6 +155,19 @@ class BatchDimAnalyzer:
         # batch dim size is used to track the batch dim size of the input tensor
         self.batch_dim_size = -1
 
+        # reduction ops that is used to detect whether there's a reduction over batch
+        # dimension operation, if there is, we mark the output as sharded instead of
+        # partial placement
+        self.reduction_ops = [
+            aten.binary_cross_entropy.default,
+            aten.binary_cross_entropy_with_logits.default,
+            aten.mean.default,
+            aten.mse_loss.default,
+            aten.nll_loss_forward.default,
+            aten.soft_margin_loss.default,
+            aten.sum.default,
+        ]
+
     def init_batch_dim_size(self, batch_dim_size: int) -> None:
         """
         initialize batch dim size base on the first input batch size
@@ -220,9 +233,8 @@ class BatchDimAnalyzer:
         # do full reduction across batch dimension, it would still
         # keep the reduction activation as sharded.
         reduction_over_batch = False
-        reduction_ops = [aten.sum.default, aten.mean.default]
         shape = node.meta["val"].shape
-        if node.target in reduction_ops and len(shape) == 0:
+        if node.target in self.reduction_ops and len(shape) == 0:
             operand = node.all_input_nodes[0]
             if operand in self.batch_dim_map:
                 operand_batch_dim = self.get_batch_dim(operand)
@@ -299,6 +311,8 @@ def build_data_parallel_strategies(
         operator.getitem,
     ]
 
+    tuple_strategy_ops = [aten._fused_adam.default]
+
     dp_strategy_map: Dict[fx.Node, StrategyType] = {}
     batch_dim_analyzer = BatchDimAnalyzer(batch_dim)
     placeholder_idx = 0
@@ -356,18 +370,11 @@ def build_data_parallel_strategies(
             elif placeholder_idx < activation_idx:
                 # optimizer states follow the same strategy as
                 # the corresponding parameters
-                placement_strategies: List[PlacementStrategy] = []
-
                 replica_strategy = _gen_replicate_strategy(mesh)
-                placement_strategies.append(replica_strategy)
+                shard_strategy = _gen_shard_strategy(mesh, 0)
 
-                if node.meta["val"].ndim > 0:
-                    # if the state is a scalar, we don't want to shard it
-                    # i.e. param state step is usually a scalar tensor
-                    shard_strategy = _gen_shard_strategy(mesh, 0)
-                    placement_strategies.append(shard_strategy)
                 dp_strategy_map[node] = DataParallelStrategy(
-                    NodeType.STATE, placement_strategies
+                    NodeType.STATE, [replica_strategy, shard_strategy]
                 )
             else:
                 activation_batch_dim_size = node.meta["val"].shape[batch_dim]
@@ -391,6 +398,7 @@ def build_data_parallel_strategies(
             # param + activation (param must be replicate, act be sharded) -> out: activation
             # param/state + grad (param/state/grad be the same spec) -> out: param/state
             # param + state -> out: param
+
             if node.target in non_compute_ops:
                 # At this point, we should have removed all the `tag_grad` nodes in the graph
                 assert node.target != torch.ops._spmd.tag_grad.default
@@ -399,7 +407,6 @@ def build_data_parallel_strategies(
                 assert (
                     len(input_nodes) == 1
                 ), f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
-
                 arg_strategy = dp_strategy_map[input_nodes[0]]
 
                 if node.target == operator.getitem:
@@ -482,6 +489,38 @@ def build_data_parallel_strategies(
                 if has_activation:
                     assert len(produce_param_grad_strat) == 1
                     produce_param_grad_strat[0].input_specs = input_specs
+            elif node.target in tuple_strategy_ops:
+                # ops that need to build tuple strategy instead of normal strategy
+                # This should happen rarely and only needed when we need to generate
+                # different node strategy for multiple outputs (i.e. fused_adam op)
+                # TODO: Currently this specializes to fused optimizer ops, but we need
+                # to see how to generalize this strategy building logic
+                output_strategy_len = len(node.args) - 1
+                tuple_strategies = []
+                for i in range(output_strategy_len):
+                    if not isinstance(node.args[i], list):
+                        raise RuntimeError(
+                            f"Expecting list as arg to build Tuple Strategy, but found type {type(node.args[i])}!"
+                        )
+                    # for list/tuple arg, use the first one to find out the node type
+                    if len(node.args[i]) > 0:
+                        arg_strategy = dp_strategy_map[node.args[i][0]]
+                        assert isinstance(arg_strategy, DataParallelStrategy)
+                        assert arg_strategy.node_type in [
+                            NodeType.PARAM,
+                            NodeType.GRAD,
+                            NodeType.STATE,
+                        ], "Expecting param/grad/state as arg to build Tuple Strategy!"
+                        replica_strategy = _gen_replicate_strategy(mesh)
+                        shard_strategy = _gen_shard_strategy(mesh, shard_dim=0)
+                        out_node_strategy: StrategyType = DataParallelStrategy(
+                            arg_strategy.node_type, [replica_strategy, shard_strategy]
+                        )
+
+                        tuple_strategies.append(out_node_strategy)
+
+                output_tuple_strategy = TupleStrategy(tuple(tuple_strategies))
+                dp_strategy_map[node] = output_tuple_strategy
             else:
                 # NOTE: This is the common region for all regular computation ops
 
@@ -635,7 +674,7 @@ def mark_data_parallel_shardings(
             if isinstance(node_strategy, TupleStrategy):
                 # For tuple strategy in the data parallel mode, it should have the same strategy
                 # for all tuple elements, assert that then use the first element's strategy as sharding
-                first_strategy = cast(node_strategy.childs[0], DataParallelStrategy)  # type: ignore[name-defined]
+                first_strategy = cast(DataParallelStrategy, node_strategy.childs[0])
                 for child_strategy in node_strategy.childs:
                     assert isinstance(child_strategy, DataParallelStrategy)
                     assert child_strategy.strategies == first_strategy.strategies
@@ -673,28 +712,32 @@ def mark_data_parallel_shardings(
             raise RuntimeError(f"op code {node.op} not supported")
 
 
-def _to_local_shard(
-    full_tensor: torch.Tensor, spec: DTensorSpec, from_local: bool = False
-) -> torch.Tensor:
+def _partition_val(val: Any, spec: DTensorSpec) -> Any:
     """
-    util function to convert a full tensor to its local component
+    util function to convert a full tensor val to its local component
     """
-    local_shard = full_tensor
-    if from_local:
-        # flag indicate the tensor is already local, we don't need to do anything
-        return local_shard
+    if isinstance(val, torch.Tensor):
+        local_shard = val
+        if val.ndim == 0:
+            # If it's already a scalar tensor, it is already local, we don't
+            # need to do anything
+            return local_shard
 
-    for idx, placement in enumerate(spec.placements):
-        if placement.is_shard():
-            placement = cast(Shard, placement)
-            num_chunks = spec.mesh.size(dim=idx)
-            my_coord = spec.mesh.get_coordinate()
-            assert my_coord is not None, "current rank not in mesh!"
-            my_coord_on_mesh_dim = my_coord[idx]
-            local_shard = placement._split_tensor(
-                local_shard, num_chunks, contiguous=False
-            )[0][my_coord_on_mesh_dim]
-    return local_shard
+        for idx, placement in enumerate(spec.placements):
+            if placement.is_shard():
+                placement = cast(Shard, placement)
+                num_chunks = spec.mesh.size(dim=idx)
+                my_coord = spec.mesh.get_coordinate()
+                assert my_coord is not None, "current rank not in mesh!"
+                my_coord_on_mesh_dim = my_coord[idx]
+                local_shard = placement._split_tensor(
+                    local_shard, num_chunks, contiguous=False
+                )[0][my_coord_on_mesh_dim]
+        return local_shard
+    elif isinstance(val, (tuple, list)):
+        return val.__class__(_partition_val(v, spec) for v in val)
+    else:
+        raise RuntimeError(f"val type {type(val)} not supported")
 
 
 def partitioner(graph: GraphModule) -> GraphModule:
@@ -702,7 +745,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
     Graph partitioner that partitions the single device graph
     to distributed graph
     """
-
     shape_adjustment_ops = [
         aten.view.default,
         aten.reshape.default,
@@ -718,18 +760,18 @@ def partitioner(graph: GraphModule) -> GraphModule:
         if node.op == "placeholder":
             out_spec = node_sharding.output_spec
             if not hasattr(out_spec, "from_local"):
-                local_val = _to_local_shard(node.meta["val"], out_spec)
+                local_val = _partition_val(node.meta["val"], out_spec)
                 # update node value
                 node.meta["val"] = local_val
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
-            output_val = node.meta["val"]
 
             # check if there's misaligned sharding, insert reshard if there is
             expected_input_specs = node_sharding.input_specs
             for idx, input_arg in enumerate(node.all_input_nodes):
-                input_arg_spec = input_arg.meta["sharding"].output_spec
-                input_arg_tensor = input_arg.meta["val"]
+                input_arg_sharding = input_arg.meta["sharding"]
+
+                input_arg_spec = input_arg_sharding.output_spec
                 desired_spec = (
                     out_spec
                     if expected_input_specs is None
@@ -737,6 +779,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
                 )
                 if input_arg_spec != desired_spec:
                     input_full_shape = input_arg.meta["tensor_meta"].shape
+                    input_arg_tensor = input_arg.meta["val"]
 
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
@@ -759,29 +802,19 @@ def partitioner(graph: GraphModule) -> GraphModule:
                             },
                         )
                     node.replace_input_with(input_arg, output_node)
+
+            output_val = node.meta["val"]
+
             if node.target in shape_adjustment_ops:
-                # for view related op that needs shape, adjust shape if needed
+                # for view related op that needs shape, adjust shape to local shape if needed
                 assert isinstance(output_val, torch.Tensor)
                 local_shape = compute_local_shape(
                     output_val.shape, out_spec.mesh, out_spec.placements
                 )
                 node.update_arg(1, local_shape)
 
-            # convert output tensor to local shard
-            # note that if the output is already local, we don't need to convert
-            if isinstance(output_val, list):
-                new_local_list = []
-                for tensor_val in output_val:
-                    local_val = _to_local_shard(tensor_val, out_spec)
-                    new_local_list.append(local_val)
-                node.meta["val"] = new_local_list
-            else:
-                if isinstance(output_val, torch.Tensor):
-                    if not hasattr(out_spec, "from_local"):
-                        local_val = _to_local_shard(output_val, out_spec)
-                        node.meta["val"] = local_val
-                else:
-                    raise RuntimeError(f"Output type {type(output_val)} not supported!")
+            # convert output val to its local component
+            node.meta["val"] = _partition_val(output_val, out_spec)
 
         elif node.op == "output":
             break
@@ -811,6 +844,7 @@ def partition_data_parallel(
     kwargs: Dict[str, Any],
     mesh: DeviceMesh,
     parallel_style: DataParallelStyle,
+    input_batch_dim: int,
 ) -> GraphModule:
     """
     The entry point function to partition the graph to data parallel
@@ -821,9 +855,13 @@ def partition_data_parallel(
     flattened_states = pytree.tree_flatten(named_states)[0]
     num_states = len(flattened_states)
 
+    changed = graph.graph.eliminate_dead_code()
+    if changed:
+        graph.recompile()
+
     # 1. First build up data parallel strategies for the whole graph
     strategy_map = build_data_parallel_strategies(
-        graph, num_params_buffers, num_states, mesh=mesh
+        graph, num_params_buffers, num_states, mesh=mesh, batch_dim=input_batch_dim
     )
 
     # 2. Next we mark the data parallel strategy for each node base on
@@ -864,7 +902,9 @@ def partition_data_parallel(
             param_states = named_states[param_key]
             param_dtensor_states = {}
             for state_key, state_val in param_states.items():
-                if isinstance(state_val, torch.Tensor):
+                if isinstance(state_val, torch.Tensor) and state_val.ndim > 0:
+                    # shard/replicate non-scalar tensors, for scalar tensor, we
+                    # don't do anything
                     dtensor_state = distribute_tensor(state_val, mesh, [placement])
                     param_dtensor_states[state_key] = dtensor_state
                     param_states[state_key] = dtensor_state.to_local()
