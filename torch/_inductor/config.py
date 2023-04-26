@@ -278,7 +278,7 @@ class triton:
     spill_threshold = 0
 
     # Vectorize random number generation in a schedule-dependent way
-    vectorize_random = True
+    vectorize_random = False
 
 
 # create a directory containing lots of debug information

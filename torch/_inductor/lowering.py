@@ -507,11 +507,11 @@ def squeeze(x, dim=None):
     dim = canonicalize_dims(len(x.get_size()), dim)
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
-    new_shape = [
-        s
-        for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
-    ]
+    new_shape = []
+    for d, s in enumerate(x.get_size()):
+        if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
+            new_shape.append(s)
+
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
 
@@ -1127,6 +1127,57 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
+def philox_rand_offset(shape):
+    """
+    TorchInductor offset calculation differs from PyTorch eager offset
+    calculation for random ops (tl.rand vs torch.rand). In future, we should
+    strive for same impl for tl.rand and torch.rand.
+    """
+    numel = 1
+    for s in shape:
+        numel = numel * s
+    return tensor(numel, dtype=torch.int64)
+
+
+@register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
+def philox_rand(size, seed, offset, stride, device, dtype):
+    # stride arg is optional and will be used in future for distributed random
+    # ops. Currently, its ununsed.
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+    offset_loader = offset.make_loader()
+
+    def inner_fn(index):
+        # Both seed and offset in the philox_rand op are tensors.
+        # torch seed and offsets are of type int64, but tl.rand accepts int32
+        seed_index_expr = ops.to_dtype(seed_loader([]), torch.int32)
+        offset_index_expr = ops.to_dtype(offset_loader([]), torch.int32)
+        # Get the offset'd position
+        rand_index_expr = ops.add(
+            ops.index_expr(random_pos(index), torch.int32), offset_index_expr
+        )
+        return ops.rand(
+            seed_index_expr,
+            rand_index_expr,
+            dtype,
+        )
+
+    random_values_node = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
+
+    offset_node = philox_rand_offset(size)
+    return random_values_node, offset_node
+
+
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
     assert train and p not in (0, 1), "inference should have been handled as a decomp"
@@ -1545,7 +1596,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = end + dim_size
     if start is None:
         start = 0
-    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
         end = dim_size
 
     src_size = list(x.get_size())
@@ -1622,7 +1673,13 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, (float, int)):
+    if isinstance(data, sympy.Symbol):
+        ranges = []
+
+        def inner_fn(index):
+            return ops.index_expr(data, dtype)
+
+    elif isinstance(data, (float, int)):
         ranges = []
 
         def inner_fn(index):

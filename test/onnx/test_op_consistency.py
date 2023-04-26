@@ -305,6 +305,8 @@ def reason_flaky() -> str:
 # Ops to be tested for numerical consistency between onnx and pytorch
 TESTED_OPS: frozenset[str] = frozenset(
     [
+        "atan",
+        "atan2",
         "ceil",
         "flatten",
         "logical_not",
@@ -329,6 +331,16 @@ TESTED_OPS: frozenset[str] = frozenset(
 #    Use dont_care if we don't care about the test passing, e.g. ONNX doesn't support the usage.
 #    Use xfail if a test fails now and we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
+    dont_care(
+        "atan", dtypes=BOOL_TYPES + INT_TYPES,
+        reason=reason_onnx_does_not_support("Atan")
+    ),
+    fixme("atan", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    dont_care(
+        "atan2", dtypes=BOOL_TYPES + INT_TYPES,
+        reason=reason_onnx_does_not_support("Atan")
+    ),
+    fixme("atan2", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Atan", ["f64"])),
     dont_care(
         "ceil", dtypes=BOOL_TYPES + INT_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
