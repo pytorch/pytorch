@@ -445,10 +445,18 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func not in [aten.index.Tensor, aten.nonzero.default]
+    and func
+    not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+
+@register_op_impl(lambda func: func is aten.repeat_interleave.Tensor)
+def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
+    if output_size is None:
+        raise DynamicOutputShapeException(func)
+    return repeats.new_empty(output_size)
 
 
 @register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
@@ -1132,7 +1140,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
-            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
+            any(i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors)
             or len(flat_symints) > 0
         )
 
@@ -1323,7 +1331,7 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+        return any(check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)))
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
