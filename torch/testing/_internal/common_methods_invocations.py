@@ -1139,7 +1139,7 @@ def error_inputs_dot_vdot(op_info, device, **kwargs):
                      error_regex='inconsistent tensor size')
     if device != "cpu":
         ErrorInput(SampleInput(make_input(3), args=(make_input(3, device="cpu"),)),
-                     error_regex='Expected all tensors to be on the same device')
+                   error_regex='Expected all tensors to be on the same device')
 
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
