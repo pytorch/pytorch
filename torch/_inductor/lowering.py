@@ -1572,6 +1572,7 @@ if torch.version.hip is not None:
     # tl.reduce not available yet in ROCm's version of triton
     make_fallback(aten.prod, warn=False)
 
+
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=0):
     # TODO(jansel): memory format
