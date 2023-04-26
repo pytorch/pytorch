@@ -2030,7 +2030,7 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
         self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
         _, outs = get_ins_outs(fw_graph)
-        self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
+        self.assertTrue(all(is_sym_node(n) for n in outs[1:]))
 
     def test_default_partitioner_output_tensor_shape_tensor(self):
 
@@ -2648,7 +2648,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
         reset_grads()
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all([x is None for x in orig_grad]):
+        if all(x is None for x in orig_grad):
             with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f)
         else:
@@ -2669,7 +2669,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
         reset_grads()
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all([x is None for x in orig_grad]):
+        if all(x is None for x in orig_grad):
             with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f)
         else:
