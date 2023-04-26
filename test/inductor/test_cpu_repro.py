@@ -1391,6 +1391,7 @@ class CPUReproTests(TestCase):
             idx = torch.zeros(size=[4], dtype=torch.int64)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             opt_fn(a, b, c, idx)
+            self.assertEqual(metrics.generated_kernel_count, 3)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
         with config.patch({"cpp.max_horizontal_fusion_size": 1}):
@@ -1401,6 +1402,7 @@ class CPUReproTests(TestCase):
             idx = torch.zeros(size=[4], dtype=torch.int64)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             opt_fn(a, b, c, idx)
+            self.assertEqual(metrics.generated_kernel_count, 3)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
         with config.patch({"cpp.max_horizontal_fusion_size": 2}):
@@ -1411,6 +1413,8 @@ class CPUReproTests(TestCase):
             idx = torch.zeros(size=[4], dtype=torch.int64)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             opt_fn(a, b, c, idx)
+            print(metrics.generated_kernel_count)
+            self.assertEqual(metrics.generated_kernel_count, 2)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
         with config.patch({"cpp.max_horizontal_fusion_size": 3}):
@@ -1421,6 +1425,7 @@ class CPUReproTests(TestCase):
             idx = torch.zeros(size=[4], dtype=torch.int64)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             opt_fn(a, b, c, idx)
+            self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
     def test_bf16_neg_abs(self):
