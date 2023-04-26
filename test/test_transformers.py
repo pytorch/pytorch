@@ -636,7 +636,6 @@ class TestTransformers(NNTestCase):
         fast_path = True
         use_pad_mask = (bias % 2) == 1
 
-
         mha = nn.MultiheadAttention(
             embed_dim=F,
             num_heads=nb_heads,
@@ -994,7 +993,6 @@ class TestTransformers(NNTestCase):
         ).eval()
 
         torch.jit.script(mha)
-
 
 
 class TestSDPA(NNTestCase):
@@ -1760,7 +1758,7 @@ class TestSDPA(NNTestCase):
         if isSm86or89Device and head_dim in range(65, 129):
             self.assertRaises(RuntimeError, lambda: torch.ops.aten._scaled_dot_product_flash_attention(
                 query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True))
-            return 
+            return
         output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
             query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         out = output_tuple[0]
