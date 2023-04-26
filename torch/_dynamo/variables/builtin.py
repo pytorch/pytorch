@@ -30,6 +30,7 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
@@ -272,10 +273,17 @@ class BuiltinVariable(VariableTracker):
         def tuple_add_handler(tx, a, b, options):
             return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
 
+        def size_add_handler(tx, a, b, options):
+            return SizeVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+
         list_like_addition_handlers = [
             # NB: Prefer the tuple-specific logic over base logic because of
             # some SizeVariable weirdness. Specifically, the tuple-specific logic
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
+            (
+                (SizeVariable, SizeVariable),
+                size_add_handler,
+            ),
             (
                 (TupleVariable, TupleVariable),
                 tuple_add_handler,
