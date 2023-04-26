@@ -31,7 +31,7 @@ static PyObject* THPVariable_nested_tensor(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef nested_functions_manual[] = {
     {"nested_tensor",
-     castPyCFunctionWithKeywords(THPVariable_nested_tensor),
+     castPyCFunctionWithKeywords<THPVariable_nested_tensor>(),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
 };

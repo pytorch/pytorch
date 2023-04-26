@@ -391,7 +391,7 @@ PyObject* THPEngine_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPEngine_methods[] = {
     {(char*)"run_backward",
-     castPyCFunctionWithKeywords(THPEngine_run_backward),
+     castPyCFunctionWithKeywords<THPEngine_run_backward>(),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},

@@ -184,7 +184,7 @@ static struct PyGetSetDef THCPEvent_properties[] = {
 // cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef THCPEvent_methods[] = {
     {(char*)"from_ipc_handle",
-     castPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),
+     castPyCFunctionWithKeywords<THCPEvent_from_ipc_handle>(),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {(char*)"record", THCPEvent_record, METH_O, nullptr},

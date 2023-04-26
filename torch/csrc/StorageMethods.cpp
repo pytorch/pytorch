@@ -524,7 +524,7 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
-     castPyCFunctionWithKeywords(THPStorage_copy_),
+     castPyCFunctionWithKeywords<THPStorage_copy_>(),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"element_size", THPStorage_elementSize, METH_NOARGS, nullptr},
@@ -541,11 +541,11 @@ static PyMethodDef THPStorage_methods[] = {
      nullptr},
     {"_set_from_file", THPStorage_setFromFile, METH_VARARGS, nullptr},
     {"from_buffer",
-     castPyCFunctionWithKeywords(THPStorage_fromBuffer),
+     castPyCFunctionWithKeywords<THPStorage_fromBuffer>(),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"from_file",
-     castPyCFunctionWithKeywords(THPStorage_fromFile),
+     castPyCFunctionWithKeywords<THPStorage_fromFile>(),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},

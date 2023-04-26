@@ -1088,7 +1088,7 @@ static PyMethodDef TorchMethods[] = {
      METH_NOARGS,
      nullptr},
     {"_set_deterministic_algorithms",
-     castPyCFunctionWithKeywords(THPModule_setDeterministicAlgorithms),
+     castPyCFunctionWithKeywords<THPModule_setDeterministicAlgorithms>(),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},

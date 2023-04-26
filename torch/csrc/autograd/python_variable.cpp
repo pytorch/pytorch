@@ -1509,15 +1509,15 @@ static PyMappingMethods THPVariable_as_mapping = {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef extra_methods[] = {
     {"as_subclass",
-     castPyCFunctionWithKeywords(THPVariable_as_subclass),
+     castPyCFunctionWithKeywords<THPVariable_as_subclass>(),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_make_subclass",
-     castPyCFunctionWithKeywords(THPVariable_make_subclass),
+     castPyCFunctionWithKeywords<THPVariable_make_subclass>(),
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_make_wrapper_subclass",
-     castPyCFunctionWithKeywords(THPVariable_make_wrapper_subclass),
+     castPyCFunctionWithKeywords<THPVariable_make_wrapper_subclass>(),
      METH_STATIC | METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},

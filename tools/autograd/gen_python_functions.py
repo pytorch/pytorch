@@ -1018,7 +1018,7 @@ def method_def(
     if is_noarg(overloads):
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
     else:
-        pycname = f"castPyCFunctionWithKeywords({pycname})"
+        pycname = f"castPyCFunctionWithKeywords<{pycname}>()"
         flags = "METH_VARARGS | METH_KEYWORDS"
 
     if module == "torch":

@@ -2,7 +2,9 @@
 
 #include <Python.h>
 
-inline PyCFunction castPyCFunctionWithKeywords(PyCFunctionWithKeywords func) {
-  // NOLINTNEXTLINE(modernize-redundant-void-arg)
-  return (PyCFunction)(void (*)(void))func;
+template <PyCFunctionWithKeywords func>
+inline PyCFunction castPyCFunctionWithKeywords() {
+  return +[](PyObject* self, PyObject* args) {
+    return func(self, args, /*kwargs=*/nullptr); 
+  };
 }

@@ -1379,7 +1379,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_cuda_setStream",
-     castPyCFunctionWithKeywords(THCPModule_setStream_wrap),
+     castPyCFunctionWithKeywords<THCPModule_setStream_wrap>(),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_cuda_getCompiledVersion",
