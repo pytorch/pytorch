@@ -107,13 +107,24 @@ def _disallowed_function_ids():
         torch.set_autocast_gpu_dtype,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
-        torch.distributed._functional_collectives.all_reduce,
-        torch.distributed._functional_collectives.all_gather_tensor,
-        torch.distributed._functional_collectives.reduce_scatter_tensor,
-        torch.distributed._functional_collectives._expand_group,
-        torch.distributed._functional_collectives._maybe_wrap_tensor,
-        torch.distributed._functional_collectives._are_we_tracing,
     ]
+
+    try:
+        from torch.distributed import _functional_collectives
+
+        remove.extend(
+            [
+                _functional_collectives.all_reduce,
+                _functional_collectives.all_gather_tensor,
+                _functional_collectives.reduce_scatter_tensor,
+                _functional_collectives._expand_group,
+                _functional_collectives._maybe_wrap_tensor,
+                _functional_collectives._are_we_tracing,
+            ]
+        )
+    except ImportError:
+        pass
+
     # extract all dtypes from torch
     dtypes = [
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
