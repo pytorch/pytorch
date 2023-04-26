@@ -5,65 +5,88 @@ import contextlib
 import copy
 import functools
 import inspect
+import io
 import math
 import numbers
-import io
 import operator
 import os
 import pickle
 import sys
-import torch
 import traceback
-import typing
 import types
-import warnings
+import typing
 import unittest
-from math import sqrt
-from functorch.experimental import control_flow
-from torch.multiprocessing import Process
-from torch.testing import FileCheck
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-import torch.utils._pytree as pytree
-import torch.fx._pytree as fx_pytree
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
-from torch.fx.node import Target, Argument, _format_arg
-from torch.fx.passes import shape_prop
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.operator_schemas import get_signature_for_torch_op
-from copy import deepcopy
+import warnings
 from collections import namedtuple
+from copy import deepcopy
+from math import sqrt
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
-from torch.fx.proxy import TraceError
-from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
+import torch
+import torch.fx._pytree as fx_pytree
+import torch.utils._pytree as pytree
+from functorch.experimental import control_flow
 
-from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
-from fx.test_dce_pass import TestDCE  # noqa: F401
-from fx.test_fx_const_fold import TestConstFold  # noqa: F401
-from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
-from fx.test_pass_infra import TestPassManager  # noqa: F401
+from fx.named_tup import MyNamedTup
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
-from fx.test_matcher_utils import TestMatcher  # noqa: F401
-from fx.test_verifier import VerifierTest  # noqa: F401
+from fx.test_dce_pass import TestDCE  # noqa: F401
+from fx.test_fx_const_fold import TestConstFold  # noqa: F401
+from fx.test_fx_param_shape_control_flow import (  # noqa: F401
+    TestConstParamShapeInControlFlow,
+)
 
-from fx.test_gradual_type import AnnotationsTest  # noqa: F401
-from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
-from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
+from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
+    AnnotationsTest,
+    TypeCheckerTest,
+)
+from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_pass_infra import TestPassManager  # noqa: F401
+
+from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+from fx.test_verifier import VerifierTest  # noqa: F401
+from torch.fx import (
+    CodeGen,
+    Graph,
+    GraphModule,
+    Interpreter,
+    Node,
+    PH,
+    Proxy,
+    symbolic_trace,
+    Tracer,
+    Transformer,
+    wrap,
+)
+from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
+from torch.fx._symbolic_trace import PHBase
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.node import _format_arg, Argument, Target
+from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx.passes import shape_prop
+
+from torch.fx.proxy import TraceError
+from torch.multiprocessing import Process
+from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    ops,
+)
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    find_library_location,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
-    find_library_location,
     run_tests,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
-from fx.named_tup import MyNamedTup
-
 try:
     from torchvision import models as torchvision_models
+
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
