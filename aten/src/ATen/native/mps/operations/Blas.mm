@@ -24,43 +24,57 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using CachedGraph = MPSBinaryCachedGraph;
   auto output = at::empty({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
   MPSStream* stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
     string key = "dot_mps" + getTensorsStringKey({self, other});
 
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, other);
+    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    if (!cachedGraph) {
+      mps::MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^mps::MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
-      MPSGraphTensor* castSelf = nil;
-      MPSGraphTensor* castOther = nil;
+        @autoreleasepool {
+          MPSGraph* mpsGraph = mps::make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
 
-      if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
-          self.scalar_type() == ScalarType::Char) {
-        castSelf = [mpsGraph castTensor:selfTensor toType:MPSDataTypeInt32 name:@"castSelfTensor"];
-        castOther = [mpsGraph castTensor:otherTensor toType:MPSDataTypeInt32 name:@"castOtherTensor"];
-      } else {
-        castSelf = selfTensor;
-        castOther = otherTensor;
-      }
+          MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* otherTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, other);
 
-      MPSGraphTensor* dot = [mpsGraph multiplicationWithPrimaryTensor:castSelf
-                                                      secondaryTensor:castOther
-                                                                 name:@"multiplication"];
+          MPSGraphTensor* castSelf = nil;
+          MPSGraphTensor* castOther = nil;
 
-      MPSGraphTensor* dotProductTensor = [mpsGraph reductionSumWithTensor:dot axes:nil name:@"dotProduct"];
+          if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
+              self.scalar_type() == ScalarType::Char) {
+            castSelf = [mpsGraph castTensor:selfTensor toType:MPSDataTypeInt32 name:@"castSelfTensor"];
+            castOther = [mpsGraph castTensor:otherTensor toType:MPSDataTypeInt32 name:@"castOtherTensor"];
+          } else {
+            castSelf = selfTensor;
+            castOther = otherTensor;
+          }
 
-      if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
-          self.scalar_type() == ScalarType::Char)
-        dotProductTensor = [mpsGraph castTensor:dotProductTensor
-                                         toType:getMPSDataType(self)
-                                           name:@"castDotProductTensor"];
+          MPSGraphTensor* dot = [mpsGraph multiplicationWithPrimaryTensor:castSelf
+                                                          secondaryTensor:castOther
+                                                                     name:@"multiplication"];
 
-      newCachedGraph->inputTensor_ = selfTensor;
-      newCachedGraph->otherTensor_ = otherTensor;
-      newCachedGraph->outputTensor_ = dotProductTensor;
-    });
+          MPSGraphTensor* dotProductTensor = [mpsGraph reductionSumWithTensor:dot axes:nil name:@"dotProduct"];
+
+          if (self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte ||
+              self.scalar_type() == ScalarType::Char)
+            dotProductTensor = [mpsGraph castTensor:dotProductTensor
+                                             toType:getMPSDataType(self)
+                                               name:@"castDotProductTensor"];
+
+          newCachedGraph->inputTensor_ = selfTensor;
+          newCachedGraph->otherTensor_ = otherTensor;
+          newCachedGraph->outputTensor_ = dotProductTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
+    }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
@@ -96,12 +110,13 @@ Tensor& addmv_out_mps_impl(const Tensor& self,
   c10::MaybeOwned<Tensor> self_ = expand_size(self, {mat.size(0)});
   auto betaval = beta_.toComplexDouble();
 
-  struct CachedGraph : public MPSCachedGraph {
+  struct CachedGraph : public mps::MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* selfTensor_ = nil;
     MPSGraphTensor* matMulVecTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
   };
+  mps::MPSGraphCache* cache_ = mps::MPSGraphCache::getInstance();
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
@@ -109,38 +124,50 @@ Tensor& addmv_out_mps_impl(const Tensor& self,
   @autoreleasepool {
     string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" + to_string(beta_.toDouble()) +
         ":" + to_string(alpha_.toDouble());
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* matMulVecTensor = mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);
-      MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+    CachedGraph* cachedGraph = nil;
+    if (!cachedGraph) {
+      mps::MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^mps::MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
-      // Intermediates for beta and alpha
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha_.toDouble()
-                                                        dataType:getMPSScalarType(mat.scalar_type())];
+        @autoreleasepool {
+          MPSGraph* mpsGraph = mps::make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
 
-      // Intermediates for multiplying by beta and alpha
-      MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:matMulVecTensor
-                                                                          secondaryTensor:alphaTensor
-                                                                                     name:@"MM/alpha*(mat@vec)"];
-      newCachedGraph->outputTensor_ = productTimesAlphaTensor;
+          MPSGraphTensor* matMulVecTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);
+          MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-      if (betaval != 0.0) {
-        MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta_.toDouble()
-                                                         dataType:getMPSScalarType(self.scalar_type())];
+          // Intermediates for beta and alpha
+          MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha_.toDouble()
+                                                            dataType:getMPSScalarType(mat.scalar_type())];
 
-        MPSGraphTensor* selfTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:selfTensor
-                                                                        secondaryTensor:betaTensor
-                                                                                   name:@"MM/beta*input"];
+          // Intermediates for multiplying by beta and alpha
+          MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:matMulVecTensor
+                                                                              secondaryTensor:alphaTensor
+                                                                                         name:@"MM/alpha*(mat@vec)"];
+          newCachedGraph->outputTensor_ = productTimesAlphaTensor;
 
-        MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:productTimesAlphaTensor
-                                                           secondaryTensor:selfTimesBetaTensor
-                                                                      name:@"MM/beta*input + alpha*(mat@vec)"];
+          if (betaval != 0.0) {
+            MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta_.toDouble()
+                                                             dataType:getMPSScalarType(self.scalar_type())];
 
-        newCachedGraph->outputTensor_ = outputTensor;
-      }
+            MPSGraphTensor* selfTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:selfTensor
+                                                                            secondaryTensor:betaTensor
+                                                                                       name:@"MM/beta*input"];
 
-      newCachedGraph->selfTensor_ = selfTensor;
-      newCachedGraph->matMulVecTensor_ = matMulVecTensor;
-    });
+            MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:productTimesAlphaTensor
+                                                               secondaryTensor:selfTimesBetaTensor
+                                                                          name:@"MM/beta*input + alpha*(mat@vec)"];
+
+            newCachedGraph->outputTensor_ = outputTensor;
+          }
+
+          newCachedGraph->selfTensor_ = selfTensor;
+          newCachedGraph->matMulVecTensor_ = matMulVecTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
+    }
 
     Placeholder matMulVecPlaceholder = Placeholder(cachedGraph->matMulVecTensor_, matMulVec);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
@@ -155,7 +182,7 @@ Tensor& addmv_out_mps_impl(const Tensor& self,
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
   return result;
