@@ -21,6 +21,7 @@ import torch.distributed._spmd.experimental_ops
 import torch.fx as fx
 import torch.nn as nn
 from torch._functorch.aot_autograd import aot_module, make_boxed_func
+from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.aot_function_patch import patched_aot_function
 from torch.distributed._spmd.comm_tensor import _get_tracer
@@ -647,13 +648,11 @@ def _rebuild_graph(
                 else:
                     value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
                     if all(
-                        [
-                            isinstance(n.target, torch._ops.OpOverload)
-                            and n.target._schema.name.startswith(
-                                ("aten::_foreach", "aten::_fused_adam")
-                            )
-                            for n in [dtn, node]
-                        ]
+                        isinstance(n.target, torch._ops.OpOverload)
+                        and n.target._schema.name.startswith(
+                            ("aten::_foreach", "aten::_fused_adam")
+                        )
+                        for n in [dtn, node]
                     ):
                         # FIXME(@mrshenli): This is a temporary solution enable
                         # foreach ops. The problem is that foreach ops returns
@@ -913,7 +912,9 @@ def distribute(
     flat_kwargs, _ = tree_flatten(kwargs)
     input_set: Set[Any] = set(flat_args + flat_kwargs)
 
-    fake_mode: FakeTensorMode = FakeTensorMode()
+    fake_mode: FakeTensorMode = detect_fake_mode(input_set)
+    if fake_mode is None:
+        fake_mode = FakeTensorMode()
 
     # will update this to the original forward inputs
     original_inputs: List[Optional[Sequence[Any]]] = [None]
