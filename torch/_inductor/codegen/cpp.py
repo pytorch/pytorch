@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from pathlib import Path
-from typing import ClassVar, Dict, List
+from typing import Dict, List
 
 import numpy
 import sympy
@@ -16,6 +16,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor import dependencies
+from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
@@ -27,12 +28,14 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
+    data_type_propagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
     OpOverrides,
+    OptimizationContext,
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -72,6 +75,7 @@ INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
     "sum": "+",
+    "prod": "*",
     "min": "min",
     "max": "max",
     "argmin": "argmin",
@@ -87,6 +91,8 @@ def reduction_init(reduction_type, dtype):
         dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
+    if reduction_type == "prod":
+        return 1
     if reduction_type in {"max", "argmax"}:
         return (
             f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
@@ -105,6 +111,8 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "prod":
+        return f"{var} *= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
@@ -117,6 +125,8 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} = at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
         return f"{var} += {next_value}"
+    elif reduction_type == "prod":
+        return f"{var} *= {next_value}"
     else:
         raise NotImplementedError()
 
@@ -199,10 +209,16 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
 
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"std::floor({self._print(expr.args[0])})"
+
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
+        if exp == 0.5:
+            return f"std::sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -228,25 +244,6 @@ cexpr = CppPrinter().doprint
 
 def cexpr_index(index):
     return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
-
-
-@dataclasses.dataclass
-class OptimizationContext:
-    key: ClassVar[str] = "opt_ctx"
-
-    # Load value as mask
-    is_load_as_mask: bool = False
-    # Load bfloat16 value as float32
-    is_load_bf16_as_fp32: bool = False
-    # Store float32 value as bfloat16
-    is_store_fp32_as_bf16: bool = False
-    # do not  need type cast for
-    # for mem copy only node bf16 load -> bf16 store,
-    is_bf16_mem_copy: bool = False
-
-    dtype: torch.dtype = torch.float
-    ops_name: str = ""
-    is_most_inner_loop_irrevelant: bool = False
 
 
 class RecordOptimizationContext:
@@ -1257,7 +1254,7 @@ class CppVecKernel(CppKernel):
                 assert opt_ctx.is_bf16_mem_copy
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
         elif (V.graph.get_dtype(name) in [torch.uint8]) and (
-            opt_ctx.is_store_fp32_as_uint8
+            opt_ctx.is_store_float_as_uint8
         ):
             # TODO(Leslie): Optimize the implementation of store_float_as_uint8
             # * Pattern match of quantization op in the loop body.
@@ -1281,7 +1278,7 @@ class CppVecKernel(CppKernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum"}
+        assert reduction_type in {"max", "min", "sum", "prod"}
         assert dtype == torch.float
         assert src_dtype == torch.float
         reduce_map = {"max": "maximum", "min": "minimum"}
@@ -1294,6 +1291,8 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
             if reduction_type == "sum":
                 vec_reduc_prefix += "omp_out += omp_in"
+            elif reduction_type == "prod":
+                vec_reduc_prefix += "omp_out *= omp_in"
             else:
                 vec_reduc_prefix += (
                     f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
@@ -1328,6 +1327,8 @@ class CppVecKernel(CppKernel):
             reduce_all_body = "{"
             if reduction_type == "sum":
                 reduce_all_body += "return x + y;"
+            elif reduction_type == "prod":
+                reduce_all_body += "return x * y;"
             else:
                 reduce_all_body += (
                     f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
@@ -1646,6 +1647,17 @@ class CppVecKernelChecker(CppVecKernel):
 
         return False
 
+    def is_load_integer_scalar_tensor(self, name: str, index: sympy.Expr):
+        load_dtype = V.graph.get_dtype(name)
+        buffer = V.graph.get_buffer(name)
+        return (
+            load_dtype in [torch.int32, torch.int64]
+            and isinstance(buffer, TensorBox)
+            and isinstance(buffer.data, StorageBox)
+            and (len(buffer.data.layout.size) == 0)
+            and (index == 0)
+        )
+
     def load(self, name: str, index: sympy.Expr):
         with RecordOptimizationContext(__name__) as node_ctx:
             load_dtype = V.graph.get_dtype(name)
@@ -1668,7 +1680,9 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"{load_dtype} not loaded as float")
                 return var
 
-            if load_dtype not in self.load_supported_dtypes:
+            if (
+                load_dtype not in self.load_supported_dtypes
+            ) and not self.is_load_integer_scalar_tensor(name, index):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
@@ -1709,10 +1723,10 @@ class CppVecKernelChecker(CppVecKernel):
                     return self.simd_vec
             elif store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_uint8 = self.can_store_fp32_as_uint8(
+                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
                     name, value_node
                 )
-                if not opt_ctx.is_store_fp32_as_uint8:
+                if not opt_ctx.is_store_float_as_uint8:
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -1731,7 +1745,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum"]
+            and reduction_type in ["max", "min", "sum", "prod"]
         ):
             pass
         else:
@@ -1798,7 +1812,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
-                    if not (name in self.fast_vec_list):
+                    if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
                     return self.simd_vec
 
@@ -1934,7 +1948,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var):
+            def indirect_indexing(index_var, size):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
@@ -1970,6 +1984,18 @@ class CppVecKernelChecker(CppVecKernel):
                                 opt_ctx.is_load_uint8_as_float = True
                             elif dtype == torch.float:
                                 pass
+                            elif (
+                                dtype in [torch.int32, torch.int64]
+                                and input_value.target == "load"
+                            ):
+                                buffer = V.graph.get_buffer(input_value.args[1])
+                                # Check if load of a scalar tensor of integer
+                                if not (
+                                    isinstance(buffer, TensorBox)
+                                    and isinstance(buffer.data, StorageBox)
+                                    and len(buffer.data.layout.size) == 0
+                                ):
+                                    self.disable_vec(f"to_dtype: dtype {dtype}")
                             else:
                                 self.disable_vec(f"to_dtype: dtype {dtype}")
                     elif dtype == torch.bfloat16:
@@ -2014,6 +2040,11 @@ class CppKernelProxy(CppKernel):
         self.loop_nest = None
         self.call_ranges = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+
+    def data_type_propagation(self, nodes):
+        for _node in nodes:
+            assert isinstance(_node, SchedulerNode)
+            data_type_propagation(_node)
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2161,6 +2192,7 @@ class CppKernelProxy(CppKernel):
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
+        self.data_type_propagation(nodes)
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
@@ -2423,9 +2455,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str)
+        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args)
+        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
 
 
 class CppWrapperKernelGroup(KernelGroup):
