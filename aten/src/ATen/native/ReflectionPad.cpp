@@ -638,7 +638,7 @@ void reflection_pad2d_backward_out_template(
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_frame(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           nplane,
           input_w, input_h, output_w, output_h,
           pad_l, pad_t);
@@ -648,7 +648,7 @@ void reflection_pad2d_backward_out_template(
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_loop(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           nbatch, nplane,
           input_w, input_h, output_w, output_h,
           pad_l, pad_t);
@@ -889,7 +889,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output_,
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_input.scalar_type(), "reflection_pad1d_backward_cpu", [&] {
         reflection_pad1d_backward_out_frame(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           nplane,
           input_w, output_w,
           pad_l);
@@ -899,7 +899,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output_,
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       grad_input.scalar_type(), "reflection_pad1d_backward_cpu", [&] {
         reflection_pad1d_backward_out_loop(
-          grad_input.data_ptr<scalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(),
           grad_output.data_ptr<scalar_t>(),
           nbatch, nplane,
           input_w, output_w,
@@ -1061,7 +1061,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_loop<scalar_t>(
-              grad_input.data_ptr<scalar_t>(),
+              grad_input.mutable_data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
               input.size(0),
               nplane,
@@ -1079,7 +1079,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
           reflection_pad3d_backward_out_frame<scalar_t>(
-              grad_input.data_ptr<scalar_t>(),
+              grad_input.mutable_data_ptr<scalar_t>(),
               grad_output_.data_ptr<scalar_t>(),
               nplane,
               input_w,
