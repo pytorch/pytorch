@@ -1250,6 +1250,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+        tx.output.tensor_id_to_fake_clone[id(e)] = fake_e.clone()
         return fake_e
     else:
         return e
