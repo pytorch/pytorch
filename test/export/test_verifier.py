@@ -9,7 +9,7 @@ import torch._dynamo as torchdynamo
 from functorch import make_fx
 from functorch.experimental import functionalize
 from torch import Tensor
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
 
 from torch._export.verifier import (
@@ -193,4 +193,4 @@ class VerifierTest(TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
