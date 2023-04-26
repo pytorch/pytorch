@@ -383,7 +383,7 @@ if torch._C.has_mkldnn:
                     ]
                 else:
                     computation_args += [1.0, None, [], None]
-            # Make sure the other is not a alias or mutation(fx side doesn't has such info).
+            # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
             can_be_inplace = not (
                 isinstance(other.data, ir.ReinterpretView)
