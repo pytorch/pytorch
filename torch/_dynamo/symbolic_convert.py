@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, TracingContext
+from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
     allowed_functions,
@@ -948,31 +948,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
-        state = self.copy_graphstate()
-        ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
-            unimplemented(f"SETUP_WITH {ctx}")
-
-        if isinstance(ctx, GenericContextWrappingVariable):
-            # Save the checkpoint to restore if there is
-            # graph break under the GenericContextWrappingVariable.
-            self.states_before_block.append(state)
-
-        self.output.guards.update(ctx.guards)
-
-        if isinstance(self, InstructionTranslator):
-            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
-        else:
-            # can't restore this while inlining
-            self.block_stack.append(BlockStackEntry(inst.target))
-        self.push(
-            WithExitFunctionVariable(
-                ctx,
-                inst.target,
-                **VariableTracker.propagate(ctx),
-            )
-        )
-        self.push(ctx.enter(self))
+        self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
         self.block_stack.append(BlockStackEntry(inst.target))
@@ -1276,6 +1252,25 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
         )
 
+    def BUILD_MAP_UNPACK(self, inst):
+        items = self.popn(inst.argval)
+        # ensure everything is a dict
+        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]
+        result = dict()
+        for x in items:
+            assert isinstance(x, ConstDictVariable)
+            result.update(x.items)
+        self.push(
+            ConstDictVariable(
+                result,
+                dict,
+                mutable_local=MutableLocal(),
+                **VariableTracker.propagate(items),
+            )
+        )
+
+    BUILD_MAP_UNPACK_WITH_CALL = BUILD_MAP_UNPACK
+
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
         values = self.popn(inst.argval)
@@ -1524,6 +1519,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert obj.mutable_local
         obj.call_method(self, "update", [v], {})
 
+    DICT_UPDATE = DICT_MERGE
+
     def GEN_START(self, inst):
         self.pop()
 
@@ -1680,10 +1677,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         pass
 
     def BEFORE_WITH(self, inst):
+        self.setup_or_before_with(inst)
+
+    def setup_or_before_with(self, inst):
         state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
-            unimplemented(f"BEFORE_WITH {ctx}")
+            unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             # Save the checkpoint to restore if there is
@@ -1697,10 +1697,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inst.target,
             **VariableTracker.propagate(ctx),
         )
-        # see create_call_resume_at for block stack details
-        assert self.next_instruction
-        assert self.next_instruction.exn_tab_entry
-        target = self.next_instruction.exn_tab_entry.target
+        if sys.version_info >= (3, 11):
+            # see create_call_resume_at for block stack details
+            assert self.next_instruction
+            assert self.next_instruction.exn_tab_entry
+            target = self.next_instruction.exn_tab_entry.target
+        else:
+            target = inst.target
         if isinstance(self, InstructionTranslator):
             self.block_stack.append(BlockStackEntry(target, len(self.stack), ctx))
         else:
@@ -1880,8 +1883,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         mutated_closure_cell_contents: Set[str],
         frame_state,
+        trainstep=False,
     ):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
+        _step_logger()(
+            logging.INFO,
+            f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
+        )
         super().__init__(
             output=OutputGraph(
                 f_globals,
@@ -1903,70 +1910,73 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
-        self.one_graph: bool = one_graph
-        self.export = export
-        self.mutated_closure_cell_contents = mutated_closure_cell_contents
-        if self.export:
-            assert (
-                self.one_graph
-            ), "Export without one graph - something has gone wrong."
+        self.output.tracing_context.trainstep = trainstep
 
-        vars = list(code_options["co_varnames"])
-        vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+        with tracing(self.output.tracing_context):
+            self.one_graph: bool = one_graph
+            self.export = export
+            self.mutated_closure_cell_contents = mutated_closure_cell_contents
+            if self.export:
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
-        self.symbolic_locals = collections.OrderedDict(
-            (
-                k,
-                VariableBuilder(
-                    self,
-                    LocalSource(k)
-                    if k in code_options["co_varnames"]
-                    else LocalSource((k)),
-                )(f_locals[k]),
+            vars = list(code_options["co_varnames"])
+            vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
+            self.symbolic_locals = collections.OrderedDict(
+                (
+                    k,
+                    VariableBuilder(
+                        self,
+                        LocalSource(k)
+                        if k in code_options["co_varnames"]
+                        else LocalSource((k)),
+                    )(f_locals[k]),
+                )
+                for k in vars
+                if k in f_locals
             )
-            for k in vars
-            if k in f_locals
-        )
 
-        # symbolic_locals contains the mapping from original f_locals to the
-        # Variable objects. During the Variable building phase, each object also
-        # has its associated guards. At the end, we will accumulate these
-        # guards.
-        #
-        # One way of handling these guards is to just accumulate all of them
-        # right now. However, many f_locals might not be used in the frame and
-        # thus can unnecessarily increase guard execution overhead.  Therefore,
-        # we selectively update output.guards as we run the Python Bytecode
-        # instruction by instruction.
-        #
-        # An exception here is list/dict variables. Guards related to these
-        # variables have indexed access, like Tensor_match on args[0], and if
-        # args is not used in this frame, we will miss a LIST_LENGTH check like
-        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-        # next invocation when args is not a list, and args[0] is a runtime
-        # error. Therefore, we recursively add guards for list/dict variable here.
-        for val in self.symbolic_locals.values():
-            if isinstance(
-                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-            ):
-                local_guards = VariableTracker.propagate(val)["guards"]
-                index_guards = [
-                    guard
-                    for guard in local_guards
-                    if guard.create_fn
-                    in (
-                        GuardBuilder.LIST_LENGTH,
-                        GuardBuilder.DICT_KEYS,
-                        GuardBuilder.ODICT_KEYS,
-                        GuardBuilder.TUPLE_ITERATOR_LEN,
-                    )
-                ]
-                self.output.guards.update(index_guards)
+            # symbolic_locals contains the mapping from original f_locals to the
+            # Variable objects. During the Variable building phase, each object also
+            # has its associated guards. At the end, we will accumulate these
+            # guards.
+            #
+            # One way of handling these guards is to just accumulate all of them
+            # right now. However, many f_locals might not be used in the frame and
+            # thus can unnecessarily increase guard execution overhead.  Therefore,
+            # we selectively update output.guards as we run the Python Bytecode
+            # instruction by instruction.
+            #
+            # An exception here is list/dict variables. Guards related to these
+            # variables have indexed access, like Tensor_match on args[0], and if
+            # args is not used in this frame, we will miss a LIST_LENGTH check like
+            # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+            # next invocation when args is not a list, and args[0] is a runtime
+            # error. Therefore, we recursively add guards for list/dict variable here.
+            for val in self.symbolic_locals.values():
+                if isinstance(
+                    val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+                ):
+                    local_guards = VariableTracker.propagate(val)["guards"]
+                    index_guards = [
+                        guard
+                        for guard in local_guards
+                        if guard.create_fn
+                        in (
+                            GuardBuilder.LIST_LENGTH,
+                            GuardBuilder.DICT_KEYS,
+                            GuardBuilder.ODICT_KEYS,
+                            GuardBuilder.TUPLE_ITERATOR_LEN,
+                        )
+                    ]
+                    self.output.guards.update(index_guards)
 
-        self._freevars_ids = dict()
-        for name in self.code_options["co_freevars"]:
-            if name in f_locals:
-                self._freevars_ids[name] = id(f_locals[name])
+            self._freevars_ids = dict()
+            for name in self.code_options["co_freevars"]:
+                if name in f_locals:
+                    self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
         super().run()

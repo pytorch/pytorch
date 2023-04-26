@@ -56,7 +56,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
         correct_loss = train_step(model, inputs)
 
-        opt_train_step = torch.compile(train_step, backend="train_step_eager")
+        opt_train_step = torch.compile(
+            train_step, backend="train_step_eager", trainstep=True
+        )
         opt_loss = opt_train_step(model, inputs)
 
         self.assertTrue(same(correct_loss, opt_loss))
