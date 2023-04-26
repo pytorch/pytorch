@@ -282,7 +282,7 @@ def mps_ops_modifier(ops):
         'nn.functional.tanhshrink': [torch.uint8],
         'nn.functional.triplet_margin_loss': [torch.uint8],
         'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
-        'nn.functional.pairwise_distance': [torch.uint8, torch.float16],
+        'nn.functional.pairwise_distance': [torch.uint8],
         'outer': [torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
@@ -320,7 +320,6 @@ def mps_ops_modifier(ops):
                            torch.int32, torch.int64, torch.uint8, torch.int8],
         'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
                   torch.int32, torch.int64, torch.uint8, torch.int8],
-        'dist': [torch.float16],  # cpu result off, showing inf values
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -2058,6 +2057,34 @@ class TestMPS(TestCaseMPS):
         res = torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         res_cpu = torch.norm(d_cpu[0, :, :]), torch.norm(d_cpu[1, :, :])
         self.assertEqual(res, res_cpu)
+
+    def test_linalg_vector_norm(self):
+        x_mps = torch.tensor([0, 0, 0, 2, 3], dtype=torch.float, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.linalg.vector_norm(x_mps, ord=0)
+        res_cpu = torch.linalg.vector_norm(x_cpu, ord=0)
+        self.assertEqual(res_mps, res_cpu)
+
+        a_mps = torch.arange(27, dtype=torch.float, device="mps") - 4
+        a_cpu = torch.arange(27, dtype=torch.float, device="cpu") - 4
+
+        B_mps = a_mps.reshape(3, 3, 3)
+        B_cpu = a_cpu.reshape(3, 3, 3)
+
+        res_mps = torch.linalg.vector_norm(a_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(a_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        res_mps = torch.linalg.vector_norm(B_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        for dim in range(0, B_mps.dim()):
+            res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
+            res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
+            self.assertEqual(res_mps, res_cpu)
+
 
     def test_layer_norm(self):
         # TODO: Test non-contiguous
@@ -10375,7 +10402,7 @@ class TestConsistency(TestCaseMPS):
                 elif (op.name == "native_layer_norm"):
                     atol = 1e-4
                     rtol = 1.3e-5
-                elif op.name == "norm" and dtype == torch.float16:
+                elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
                     atol = 7e-4
                     rtol = 1.5e-3
                 elif op.name == "unique" and cpu_kwargs["sorted"] is False:
