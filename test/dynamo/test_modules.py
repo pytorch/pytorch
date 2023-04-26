@@ -1274,7 +1274,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
-    
+
     def test_lazy_module_no_cls_to_become(self):
         # make sure super() works in the case where cls_to_become is None
         m = LazyChildModuleNoClsToBecome()
