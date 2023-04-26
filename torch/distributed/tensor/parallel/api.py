@@ -334,7 +334,9 @@ def _parallelize_multihead_attn(
         tp_multi_head_attention.copy(module)
         module = tp_multi_head_attention
 
-    assert isinstance(module, TensorParallelMultiheadAttention)
+    assert isinstance(module, TensorParallelMultiheadAttention), (
+        f"Expects TensorParallelMultiheadAttention but got {type(module)}"
+    )
     # shard TPMA
     for n, m in module.named_children():
         if n == "qkv":
