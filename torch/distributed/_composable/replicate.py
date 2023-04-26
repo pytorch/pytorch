@@ -111,6 +111,7 @@ class _ReplicateState:
             self.kwargs.pop("device_id")
 
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
+        # Weakref to the DDP instance is currently only used for testing.
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
     def forward_pre_hook(
