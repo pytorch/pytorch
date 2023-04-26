@@ -66,6 +66,31 @@ binary_list = {
 
 
 class TestPaternMatcher(TestCase):
+    def _clone_inputs(self, inputs):
+        def clone(x):
+            if not isinstance(x, torch.Tensor):
+                return x
+            return x.clone()
+
+        return tuple(clone(x) for x in inputs)
+
+    def _test_common(
+        self, mod, inputs, matcher_count, matcher_nodes, atol=1e-5, rtol=1.3e-6
+    ):
+        counters.clear()
+        with torch.no_grad():
+            clone_inputs = self._clone_inputs(inputs)
+            expected = mod(*inputs)
+            actual = torch.compile(mod)(*clone_inputs)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            self.assertEqual(
+                counters["inductor"]["pattern_matcher_count"], matcher_count
+            )
+            self.assertEqual(
+                counters["inductor"]["pattern_matcher_nodes"],
+                matcher_nodes,
+            )
+
     def test_conv2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -92,9 +117,7 @@ class TestPaternMatcher(TestCase):
             memory_format,
         ) in options:
             x_shape = (1, 3, 56, 56)
-            mod = M(
-                unary_fn,
-            ).eval()
+            mod = M(unary_fn).eval()
 
             # TODO: add bf16 test for cpu path?
             # TODO: this test fails when requires_grad=False
@@ -103,16 +126,7 @@ class TestPaternMatcher(TestCase):
                 .add(1)
                 .to(memory_format=memory_format)
             )
-            with torch.no_grad():
-                expected = mod(v)
-                actual = torch.compile(mod)(v)
-                torch.testing.assert_close(actual, expected)
-                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    unary_list[unary_fn],
-                )
-                counters.clear()
+            self._test_common(mod, (v,), 1, unary_list[unary_fn])
 
     def test_linear_unary(self):
         class M(torch.nn.Module):
@@ -145,16 +159,9 @@ class TestPaternMatcher(TestCase):
                 # only fuse for linear when the dtype is bf16
                 mod = mod.to(dtype)
                 v = torch.randn(2, 10).to(dtype)
-                with torch.no_grad():
-                    expected = mod(v)
-                    actual = torch.compile(mod)(v)
-                    torch.testing.assert_close(actual, expected)
-                    self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                    self.assertEqual(
-                        counters["inductor"]["pattern_matcher_nodes"],
-                        unary_list_bf16[unary_fn],
-                    )
-                    counters.clear()
+                self._test_common(
+                    mod, (v,), 1, unary_list_bf16[unary_fn], atol=1e-5, rtol=1.6e-2
+                )
 
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
@@ -186,16 +193,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            with torch.no_grad():
-                expected = mod(v)
-                actual = torch.compile(mod)(v)
-                torch.testing.assert_close(actual, expected)
-                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    unary_list[unary_fn],
-                )
-                counters.clear()
+            self._test_common(mod, (v,), 1, unary_list[unary_fn])
 
     def test_conv2d_binary(self):
         class M(torch.nn.Module):
@@ -233,23 +231,15 @@ class TestPaternMatcher(TestCase):
         ) in options:
             x_shape = (1, 3, 56, 56)
             mod = M(binary_fn, has_relu).eval()
-
             v = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
                 .add(1)
                 .to(memory_format=memory_format)
             )
-            with torch.no_grad():
-                expected = mod(v)
-                opt_model = torch.compile(mod)
-                actual = opt_model(v)
-                torch.testing.assert_close(actual, expected)
-                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    binary_list[binary_fn] + 1 if has_relu else binary_list[binary_fn],
-                )
-                counters.clear()
+            match_nodes = (
+                binary_list[binary_fn] + 1 if has_relu else binary_list[binary_fn]
+            )
+            self._test_common(mod, (v,), 1, match_nodes)
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
@@ -270,22 +260,12 @@ class TestPaternMatcher(TestCase):
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
-                with torch.no_grad():
-                    mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
-
-                    # only fuse for linear when the dtype is bf16
-                    mod = mod.to(dtype)
-                    v = torch.randn(input_shape).to(dtype)
-                    other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
-                    expected = mod(v, other)
-                    actual = torch.compile(mod)(v, other)
-                    torch.testing.assert_close(actual, expected, rtol=1e-2, atol=1e-2)
-                    self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                    self.assertEqual(
-                        counters["inductor"]["pattern_matcher_nodes"],
-                        binary_list[binary_fn],
-                    )
-                    counters.clear()
+                mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
+                v = torch.randn(input_shape).to(dtype)
+                other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
+                self._test_common(
+                    mod, (v, other), 1, binary_list[binary_fn], rtol=1e-2, atol=1e-2
+                )
 
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):
@@ -305,19 +285,10 @@ class TestPaternMatcher(TestCase):
         # check works for min_value > max_value.
         min_values = [3, torch.randn(1, 32, 28, 28)]
         max_values = [0, torch.randn(1, 32, 28, 28)]
-        with torch.no_grad():
-            mod = Model().eval()
-            v = torch.randn(1, 3, 28, 28)
-            for min_value, max_value in zip(min_values, max_values):
-                expected = mod(v, min_value, max_value)
-                actual = torch.compile(mod)(v, min_value, max_value)
-                torch.testing.assert_close(actual, expected)
-                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    3,
-                )
-                counters.clear()
+        mod = Model().eval()
+        v = torch.randn(1, 3, 28, 28)
+        for min_value, max_value in zip(min_values, max_values):
+            self._test_common(mod, (v, min_value, max_value), 1, 3)
 
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
@@ -336,15 +307,7 @@ class TestPaternMatcher(TestCase):
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
             for negative_slope in negative_slopes:
-                expected = mod(v, negative_slope)
-                actual = torch.compile(mod)(v, negative_slope)
-                torch.testing.assert_close(actual, expected)
-                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    4,
-                )
-                counters.clear()
+                self._test_common(mod, (v, negative_slope), 1, 4)
 
     # https://github.com/pytorch/pytorch/issues/99838.
     def test_conv2d_add_scalar(self):
@@ -363,15 +326,7 @@ class TestPaternMatcher(TestCase):
         with torch.no_grad():
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
-            expected = mod(v)
-            actual = torch.compile(mod)(v)
-            torch.testing.assert_close(actual, expected)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
-            self.assertEqual(
-                counters["inductor"]["pattern_matcher_nodes"],
-                0,
-            )
-            counters.clear()
+            self._test_common(mod, (v,), 0, 0)
 
 
 if __name__ == "__main__":
