@@ -115,7 +115,7 @@ Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
   return csr;
 }
 
-Tensor zeros_with_indices_like(const Tensor& t) {
+Tensor zeros_like_with_indices(const Tensor& t) {
   TORCH_INTERNAL_ASSERT(t.is_sparse());
   return at::_sparse_coo_tensor_with_dims_and_tensors(
       t.sparse_dim(),
