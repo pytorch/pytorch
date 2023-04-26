@@ -1,5 +1,5 @@
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import weakref
-from typing import Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -57,7 +57,7 @@ class _ReplicateState:
             )
         self.module = module
         replicate.state(module)._params_collected = False
-        module.register_forward_pre_hook(self.forward_pre_hook)
+        module.register_forward_pre_hook(self.forward_pre_hook, with_kwargs=True)
         # TODO(@yhcharles): fix type error
         module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
         self.kwargs = kwargs
@@ -83,30 +83,41 @@ class _ReplicateState:
 
         self.has_initialized = True
 
-        self._collect_params(self.module)
+        self._collect_params(self.module)  # type: ignore[arg-type]
         # Only saved for testing
         replicate.state(self.module)._names = self._names
-        if "device_ids" in self.kwargs:
+        if "device_id" in self.kwargs:
             # replicate() supports a small usability enhancement where
-            # device_ids=[self.device] can also be passed in for CPU so users
-            # don't have to code change for CPU / GPU runs.
-            device_ids = self.kwargs["device_ids"]
-            if device_ids is not None and not isinstance(device_ids, list):
-                raise RuntimeError(
-                    f"Expected device_ids arg to be Optional[List[Union[int, torch.device]]], got {device_ids}"
+            # user can pass in device_id as a Union[int, torch.device] even for
+            # CPU devices so users don't have to change code for CPU/GPU runs.
+            # We derive the right device_ids to feed into DDP to support this.
+            if self.kwargs["device_id"] is not None:
+                device_id = self.kwargs["device_id"]
+                assert isinstance(device_id, (int, torch.device)), (
+                    f"device_id wrong type: {type(device_id)}, please report a bug."
                 )
-            device_id = device_ids[0]
-            if isinstance(device_id, torch.device) and device_id.type == "cpu":
+                # Convert to device_ids that DDP expects.
+                if isinstance(device_id, torch.device) and device_id.type == "cpu":
+                    # CPU modules receive device_ids None
+                    self.kwargs["device_ids"] = None
+                else:
+                    # GPU modules expect device_ids=[cuda_device]
+                    self.kwargs["device_ids"] = [device_id]
+            else:
                 self.kwargs["device_ids"] = None
+            self.kwargs.pop("device_id")
 
+        dev_ids = self.kwargs['device_ids']
+        print(f"RV: creating DDP with device_ids {dev_ids}")
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
     def forward_pre_hook(
-        self, module: nn.Module, input: Tuple[torch.Tensor, ...]
-    ) -> None:
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         self.init_helper()
-        self._ddp._pre_forward()
+        args, kwargs = self._ddp._pre_forward(*args, **kwargs)
+        return args, kwargs
 
     def forward_post_hook(
         self,

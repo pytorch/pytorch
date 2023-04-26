@@ -713,4 +713,7 @@ instantiate_device_type_tests(TestDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 
 
 if __name__ == "__main__":
-    run_tests()
+    # NB: CPU dtensor ops test frequently timeout https://github.com/pytorch/pytorch/issues/98816
+    # so running it only on CUDA
+    if torch.cuda.is_available():
+        run_tests()

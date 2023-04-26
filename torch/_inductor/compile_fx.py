@@ -8,7 +8,6 @@ import warnings
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
-import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
@@ -25,12 +24,13 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides, pattern_matcher
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
+from .fx_passes.post_grad import post_grad_passes
+from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .mkldnn import convert_outplace_to_inplace
 from .utils import (
     developer_warning,
     get_dtype_size,
@@ -199,7 +199,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        pattern_matcher.post_grad_passes(gm)
+        post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -516,6 +516,7 @@ def compile_fx_with_cpp_wrapper(
     example_inputs: List[torch.Tensor],
     inner_compile,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """
     Compile into cpp wrapper:
@@ -536,7 +537,9 @@ def compile_fx_with_cpp_wrapper(
             return compile_fx(
                 module,
                 example_inputs,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                inner_compile=functools.partial(
+                    inner_compile, cpp_wrapper=True, aot_mode=aot_mode
+                ),
                 decompositions=decompositions,
             )
     else:
@@ -557,7 +560,9 @@ def compile_fx_with_cpp_wrapper(
             compiled = compile_fx(
                 module_copy,
                 inputs_copy,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=False),
+                inner_compile=functools.partial(
+                    inner_compile, cpp_wrapper=False, aot_mode=False
+                ),
                 decompositions=decompositions,
             )
             if fake_mode:
@@ -580,7 +585,9 @@ def compile_fx_with_cpp_wrapper(
             return compile_fx(
                 module,
                 example_inputs,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                inner_compile=functools.partial(
+                    inner_compile, cpp_wrapper=True, aot_mode=aot_mode
+                ),
                 decompositions=decompositions,
             )
 
@@ -592,12 +599,17 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
-    return compile_fx(
-        model_,
-        example_inputs_,
-        inner_compile=functools.partial(inner_compile, aot_mode=True),
-        config_patches=config_patches,
-        decompositions=decompositions,
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx_aot(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
+            )
+    return compile_fx_with_cpp_wrapper(
+        model_, example_inputs_, inner_compile, decompositions, aot_mode=True
     )
 
 
@@ -654,9 +666,7 @@ def compile_fx(
 
         # Since handle_dynamo_export_graph will trigger compile_fx again,
         # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_, example_inputs_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -666,8 +676,6 @@ def compile_fx(
         )
 
     assert not config._raise_error_for_testing
-    functorch.compile.config.use_functionalize = True
-    functorch.compile.config.use_fake_tensor = True
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
@@ -683,10 +691,6 @@ def compile_fx(
             joint_graph_passes(model)
 
         fixed = len(example_inputs) - num_example_inputs
-        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
-        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
-        # implementation is used if available.
-        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,

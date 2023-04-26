@@ -491,9 +491,12 @@ class MultiprocessContext(PContext):
             error_filepath = self.error_files[failed_local_rank]
 
             log.error(
-                f"failed (exitcode: {failed_proc.exitcode})"
-                f" local_rank: {failed_local_rank} (pid: {e.pid})"
-                f" of fn: {fn_name} (start_method: {self.start_method})",
+                "failed (exitcode: %s)"
+                " local_rank: %s (pid: %s)"
+                " of fn: %s (start_method: %s)",
+                failed_proc.exitcode,
+                failed_local_rank, e.pid,
+                fn_name, self.start_method,
                 exc_info=True,
             )
 
@@ -671,9 +674,10 @@ class SubprocessContext(PContext):
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
                 log.error(
-                    f"failed (exitcode: {first_failure.exitcode})"
-                    f" local_rank: {first_failure.local_rank} (pid: {first_failure.pid})"
-                    f" of binary: {self.entrypoint}"
+                    "failed (exitcode: %s)"
+                    " local_rank: %s (pid: %s)"
+                    " of binary: %s",
+                    first_failure.exitcode, first_failure.local_rank, first_failure.pid, self.entrypoint
                 )
             else:
                 # Populate return with dummy values. This provides consistency with MultiprocessingHandler

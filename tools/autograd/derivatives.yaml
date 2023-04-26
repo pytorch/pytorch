@@ -1619,8 +1619,8 @@
   self: grad.flip(dims)
   result: auto_linear
 
-- name: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
-  self: grad.roll(fmap(reverse_list(shifts), [](int64_t i){return -i;}), reverse_list(dims))
+- name: roll(Tensor self, SymInt[1] shifts, int[1] dims=[]) -> Tensor
+  self: grad.roll_symint(fmap(reverse_list_symint(shifts), [](c10::SymInt i){return -i;}), reverse_list(dims))
   result: auto_linear
 
 - name: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
@@ -1998,6 +1998,7 @@
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
   output: log_sigmoid_backward(self_t.conj(), self_p, buffer).conj()
+  output_differentiability: [True, False]
 
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
@@ -2326,6 +2327,7 @@
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
+  result: log_sigmoid_backward(grad_output_t, self_p, buffer) + log_sigmoid_double_backward(self_t * grad_output_p, self_p)
 
 - name: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor
   grad_output: grad.to(output.dtype()) - (grad.to(output.dtype()) * output.exp()).sum(dim, true)
@@ -2353,6 +2355,12 @@
   # also checks the assumption that negative_slope is positive when self_is_result
   # is True:
   result: leaky_relu_backward(grad_output_t, self_p, negative_slope, self_is_result)
+
+# This derivative is mps-only, and `error_for_max_pool2d_double_backward` just raises an error.
+- name: max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  grad_output: error_for_max_pool2d_double_backward()
+  self: zeros_like(self)
+  result: auto_linear
 
 - name: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 2)
@@ -2697,7 +2705,7 @@
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.sym_size(dim.back()))
   result: auto_linear
 
-- name: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
+- name: _fft_c2r(Tensor self, int[] dim, int normalization, SymInt last_dim_size) -> Tensor
   self: fft_c2r_backward(grad, dim, normalization)
   result: auto_linear
 

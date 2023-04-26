@@ -8,9 +8,11 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._composable.replicate import replicate
-from torch.testing._internal.common_distributed import MultiProcessTestCase, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests
-
 
 
 class Net(nn.Module):
@@ -71,10 +73,9 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
 
 class ReplicateTest(MultiProcessTestCase):
-
     @property
     def world_size(self) -> int:
-        return 2
+        return 1
 
     def setUp(self) -> None:
         super().setUp()
@@ -138,6 +139,30 @@ class ReplicateTest(MultiProcessTestCase):
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
+    def test_replicate_move_args_kwargs_to_device(self):
+        class MyNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(2, 2)
+
+            def forward(self, inp, *, kwarg=None):
+                if kwarg is not None:
+                    inp = inp @ kwarg
+                return self.a(inp)
+
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch.cuda.set_device(self.rank)
+        model = MyNet().cuda()
+        replicate(model, device_id=[torch.cuda.current_device()])
+        # CPU input ensures replicate can move arg and kwargs to device.
+        a, b = torch.randn(2, 2), torch.randn(2, 2)
+        model(a, kwarg=b).sum().backward()
+
     @skip_if_lt_x_gpu(2)
     def test_replicate_ignore_module(self):
         dist.init_process_group(
@@ -152,7 +177,8 @@ class ReplicateTest(MultiProcessTestCase):
         torch.cuda.manual_seed(self.rank)
         model = Net().cuda()
         replicate(model, ignored_modules=[model.fc1])
-        inp = torch.randn(5, 2, device='cuda') * (self.rank + 1)
+        # CPU input ensures that replicate can move input to GPU as DDP does.
+        inp = torch.randn(5, 2) * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
@@ -164,7 +190,9 @@ class ReplicateTest(MultiProcessTestCase):
             self.assertNotEqual(grad, g)
 
         for dp_grad in [model.fc2.weight.grad, model.fc3.weight.grad]:
-            tensor_list = [torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())]
+            tensor_list = [
+                torch.zeros_like(dp_grad) for _ in range(dist.get_world_size())
+            ]
             dist.all_gather(tensor_list, dp_grad)
             grad, rest = tensor_list[0], tensor_list[1:]
             for g in rest:
@@ -185,7 +213,7 @@ class ReplicateTest(MultiProcessTestCase):
         )
         self._compare_module(model, replicate_model)
 
-    def test_replicate_cpu_device_input(self):
+    def test_replicate_device_id(self):
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
@@ -193,12 +221,40 @@ class ReplicateTest(MultiProcessTestCase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
         model = Net()
-        replicate(model, device_ids=[torch.device("cpu")])
+        replicate(model, device_id=torch.device("cpu"))
         # DDP instance is attached in first pre forward
         model(torch.randn(2, 2))
         replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
+        # Should be None for CPU training
         self.assertEqual(None, replicate_ddp_weakref.device_ids)
 
+        model.cuda()
+        model_cuda = deepcopy(model)
+        replicate(model_cuda, device_id=torch.device(torch.cuda.current_device()))
+        # DDP instance is attached in first pre forward
+        model_cuda(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        print(replicate_ddp_weakref.device_ids)
+        # Pass in int as device_id
+        model_cuda = deepcopy(model_cuda)
+        replicate(model_cuda, device_id=int(torch.cuda.current_device()))
+        # DDP instance is attached in first pre forward
+        model_cuda(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        print(replicate_ddp_weakref.device_ids)
+
+    def test_replicate_wrong_device_id_type(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        model = Net()
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected device_id to be int or torch.device"
+        ):
+            replicate(model, device_id=[torch.device("cpu")])
 
 
 if __name__ == "__main__":

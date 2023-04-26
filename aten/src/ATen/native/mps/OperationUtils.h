@@ -2,14 +2,25 @@
 
 #pragma once
 
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
+#include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 #include <unordered_map>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -99,6 +110,7 @@ class Placeholder {
 };
 
 void resize_tensor(Tensor* output);
+Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
@@ -268,6 +280,25 @@ struct MPSGraphCache
   dispatch_queue_t serialQueue_ = nullptr;
 
 };
+
+// Common template for creating graph with a specified cache if missing
+template<typename T>
+inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(MPSGraph*, T*)> instantiate) {
+  auto cache_ = MPSGraphCache::getInstance();
+  if (auto rc  = cache_->LookUpAs<T>(key)) {
+    return rc;
+  }
+  return cache_->CreateCachedGraphAs<T>(key, ^mps::MPSCachedGraph*() {
+    T* newCachedGraph = nil;
+    @autoreleasepool {
+      // Initialize graph
+      auto mpsGraph = mps::make_mps_graph();
+      newCachedGraph = new T(mpsGraph);
+      instantiate(mpsGraph, newCachedGraph);
+    }
+    return newCachedGraph;
+  });
+}
 
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);

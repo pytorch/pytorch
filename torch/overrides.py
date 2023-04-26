@@ -20,7 +20,7 @@ please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
 instructions in the ``README.md`` in that directory.
 """
 
-import __future__
+import __future__  # noqa: F404
 
 import collections
 import functools
@@ -886,6 +886,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.init.constant_: lambda tensor, val: -1,
         torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode='fan_in', nonlinearity='leaky_relu': -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
+        torch.nonzero_static: lambda input, *, size, fill_value=-1: -1,
         torch.argwhere: lambda input: -1,
         torch.norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.linalg.norm: lambda input, ord=None, dim=None, keepdim=False, out=None, dtype=None: -1,
