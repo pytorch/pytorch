@@ -12,6 +12,7 @@ from torch.fx.node import Node
 log = logging.getLogger(__name__)
 ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
+
 def args_str(args):
     # a debug helper
     if torch.is_tensor(args):
@@ -323,7 +324,9 @@ class DDPOptimizer:
                         else:
                             curr_submod = real_mod
 
-                        ddp_graph_log.debug("\n---%s graph---\n%s", n.target, curr_submod.graph)
+                        ddp_graph_log.debug(
+                            "\n---%s graph---\n%s", n.target, curr_submod.graph
+                        )
 
                         # When calling the compiler on the submod, inputs (new_args) are expected to
                         # be FakeTensors already since Dynamo would have made them FakeTensors in the
@@ -351,5 +354,7 @@ class DDPOptimizer:
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        ddp_graph_log.debug("\n---final graph---\n%s\n---------------\n", split_gm.graph)
+        ddp_graph_log.debug(
+            "\n---final graph---\n%s\n---------------\n", split_gm.graph
+        )
         return split_gm
