@@ -49,6 +49,10 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
     MPSGraphResizeNearestRoundingModeRoundToOdd        =  5L,
 };
 
+
+
+#endif
+
 - (MPSGraphTensor * _Nonnull) convolution3DWithSourceTensor:(MPSGraphTensor * _Nonnull) source
                                     weightsTensor:(MPSGraphTensor * _Nonnull) weights
                                        descriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) descriptor
@@ -66,9 +70,6 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                            forwardConvolutionDescriptor:(MPSGraphConvolution3DOpDescriptor * _Nonnull) forwardConvolutionDescriptor
                                                                    name:(NSString * _Nullable) name;
 
-
-
-#endif
 
 - (MPSGraphTensor * _Nonnull)cumulativeSumWithTensor:(MPSGraphTensor * _Nonnull)tensor
                                                 axis:(NSInteger)axis
