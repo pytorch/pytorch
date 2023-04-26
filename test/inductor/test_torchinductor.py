@@ -3613,6 +3613,15 @@ class CommonTemplate:
         x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
         self.common(fn, (x,))
 
+    def test_constant_pad_nd_inplace(self):
+        def fn(a):
+            return aten.constant_pad_nd(a, [0, 0])
+
+        x = torch.randn([2], device=self.device)
+        fn_compiled = torch.compile(fn)
+        y = fn_compiled(x)
+        self.assertTrue(y is not x)
+
     def test_l1_loss(self):
         def fn(a, b):
             return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
