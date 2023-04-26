@@ -113,15 +113,15 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* Tensor_dtype(PyTensorType* self, void* unused) {
+static PyObject* Tensor_dtype(PyTensorType* self, void* unused) {
   return torch::autograd::utils::wrap(self->dtype);
 }
 
-PyObject* Tensor_layout(PyTensorType* self, void* unused) {
+static PyObject* Tensor_layout(PyTensorType* self, void* unused) {
   return torch::autograd::utils::wrap(self->layout);
 }
 
-PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
@@ -129,7 +129,7 @@ PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   }
 }
 
-PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
   } else {
@@ -137,7 +137,7 @@ PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   }
 }
 
-PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
   if (self->layout->layout == at::Layout::SparseCsr) {
     Py_RETURN_TRUE;
   } else {
@@ -302,7 +302,7 @@ static THPObjectPtr get_tensor_dict() {
 // importing torch.
 static std::vector<PyTensorType*> tensor_types;
 
-void set_default_storage_type(Backend backend, ScalarType dtype) {
+static void set_default_storage_type(Backend backend, ScalarType dtype) {
   THPObjectPtr storage = get_storage_obj(backend, dtype);
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -314,7 +314,7 @@ void set_default_storage_type(Backend backend, ScalarType dtype) {
   }
 }
 
-void set_default_tensor_type(
+static void set_default_tensor_type(
     c10::optional<Backend> backend,
     c10::optional<ScalarType> dtype) {
   if (backend.has_value()) {
