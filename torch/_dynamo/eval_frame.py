@@ -676,6 +676,7 @@ def export(
     f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
+    pre_autograd: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
@@ -694,6 +695,12 @@ def export(
 
         aten_graph (bool): If True, exports a graph with ATen operators.
         If False, exports a graph with Python operators. Default is False.
+
+        pre_autograd (bool): If True, exports a graph with ATen operators,
+        but before autograd has run. This can be useful if you want to apply further tranformations
+        on a graph before running it through autograd.
+        This flag is only valid if aten_graph=True is set.
+        Default is False.
 
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
         Required if aten_graph or tracing_mode is specified. Default is None.
@@ -722,6 +729,8 @@ def export(
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+    if pre_autograd:
+        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
 
     graph = None
@@ -878,6 +887,7 @@ def export(
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
+                    pre_autograd=pre_autograd,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
