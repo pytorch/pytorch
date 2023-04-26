@@ -136,7 +136,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+        return self._forward(*args, **kwargs)
 
 
 def remove_from_cache(f):
