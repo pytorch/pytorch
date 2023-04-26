@@ -15,7 +15,11 @@ def _read_config(**kwargs):
 def _filegroup(**kwargs):
     filegroup(**kwargs)
 
+def _cxx_library(**kwargs):
+    cxx_library(**kwargs)
+
 fb_native = struct(
+    cxx_library = _cxx_library,
     genrule = _genrule,
     read_config = _read_config,
     filegroup = _filegroup,
