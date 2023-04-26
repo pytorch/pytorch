@@ -339,7 +339,7 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all([x is None for x in flat_grads])
+        all_none_grads = all(x is None for x in flat_grads)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -1880,6 +1880,14 @@ class CommonTemplate:
         self.common(fn, (torch.randn(2, 2, 10), [3, 3, 4]))
         self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
         self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
+
+    def test_split_with_sizes_failed(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(a):
+            return torch.split(a, [2, 1, 1], dim=1)
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            fn(torch.randn(1, 5))
 
     def test_split(self):
         def fn(a):
@@ -4592,6 +4600,41 @@ class CommonTemplate:
         self.assertTrue((c < 1).all())
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
+
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_philox_rand(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "functionalization of rng ops supported only on CUDA"
+            )
+
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            a = torch.rand_like(x) * x
+            a = torch.rand_like(x) * a
+            return a
+
+        def check(x):
+            torch.manual_seed(123)
+            a = fn(x)
+
+            torch.manual_seed(1234)
+            b = fn(x)
+
+            torch.manual_seed(123)
+            c = fn(x)
+
+            # same seed, same values
+            self.assertTrue(torch.allclose(a, c))
+
+            # different calls, different values
+            self.assertFalse(torch.allclose(a, b))
+
+        check(torch.ones(1024, device=self.device, dtype=torch.float32))
+        self.assertEqual(torch.cuda._get_rng_state_offset(), 2048)
+        # Check non-multiple of 4 numel
+        check(torch.ones(3, device=self.device, dtype=torch.float32))
+        self.assertEqual(torch.cuda._get_rng_state_offset(), 8)
 
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
