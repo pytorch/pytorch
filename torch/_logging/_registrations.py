@@ -6,7 +6,7 @@ register_log("inductor", "torch._inductor")
 register_log("dynamic", "torch.fx.experimental.symbolic_shapes")
 
 register_artifact("guards")
-register_artifact("bytecode")
+register_artifact("bytecode", off_by_default=True)
 register_artifact("graph")
 register_artifact("graph_code")
 register_artifact("aot_graphs")

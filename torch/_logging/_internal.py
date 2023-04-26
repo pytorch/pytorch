@@ -123,16 +123,16 @@ def set_logs(
     dynamo=DEFAULT_LOG_LEVEL,
     aot=DEFAULT_LOG_LEVEL,
     inductor=DEFAULT_LOG_LEVEL,
-    bytecode=None,
-    aot_graphs=None,
-    aot_joint_graph=None,
-    ddp_graphs=None,
-    graph=None,
-    graph_code=None,
-    guards=None,
-    recompiles=None,
-    output_code=None,
-    schedule=None,
+    bytecode=False,
+    aot_graphs=False,
+    aot_joint_graph=False,
+    ddp_graphs=False,
+    graph=False,
+    graph_code=False,
+    guards=False,
+    recompiles=False,
+    output_code=False,
+    schedule=False,
     modules=None,
 ):
     """
@@ -152,15 +152,10 @@ def set_logs(
     if modules is None:
         modules = {}
 
-    def _should_enable_artifact(alias, val):
-        if val is None:
-            return not log_registry.is_off_by_default(alias)
-        return val
-
     def _set_logs(**kwargs):
         for alias, val in itertools.chain(kwargs.items(), modules.items()):
             if log_registry.is_artifact(alias):
-                if _should_enable_artifact(alias, val):
+                if val:
                     log_state.enable_artifact(alias)
             elif log_registry.is_log(alias):
                 if val not in logging._levelToName:
@@ -241,12 +236,16 @@ VERBOSITY_REGEX = (
 
 
 def configure_artifact_log(log):
+    # If the artifact is off by default, then it should only be logged when explicitly
+    # enabled; set propagate to False so that this artifact is not propagated
+    # to its ancestor logger
+    if log_registry.is_off_by_default(log.artifact_name):
+        log.propagate = False
+
     # enable artifact logging when explicitly enabled
     if log_state.is_artifact_enabled(log.artifact_name):
         log.setLevel(logging.DEBUG)
         log.propagate = True
-    else:
-        log.propagate = False
 
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
