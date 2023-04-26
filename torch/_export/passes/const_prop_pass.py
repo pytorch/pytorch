@@ -1,5 +1,5 @@
 import torch
-from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._export.pass_base import ExportPassBase, ProxyValue
 
@@ -54,7 +54,7 @@ class ConstPropPass(ExportPassBase):
             (not op_is_q_dq and not self.propogate_quant)
             or (op_is_q_dq and self.propogate_quant)
         ) and is_const([args, kwargs]):
-            guard = torch._C._DisableTorchDispatch()
+            guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
             try:
                 result = op(*args, **kwargs)
             finally:
