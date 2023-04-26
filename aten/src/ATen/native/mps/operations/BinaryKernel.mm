@@ -180,7 +180,8 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -197,8 +198,10 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
         }
       }
 
+      id<MTLFunction> kernelDataOffsetsFunction =
+          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          [[device newComputePipelineStateWithFunction:kernelDataOffsetsFunction error:&error] autorelease];
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
       TORCH_CHECK(
@@ -232,6 +235,9 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
 
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      [computeEncoder endEncoding];
+      mpsStream->commit(true);
     }
   });
 }

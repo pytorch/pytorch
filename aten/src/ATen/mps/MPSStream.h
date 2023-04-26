@@ -17,7 +17,6 @@
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 typedef id<MTLCommandQueue> MTLCommandQueue_t;
 typedef id<MTLCommandBuffer> MTLCommandBuffer_t;
-typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
 typedef id<MTLSharedEvent> MTLSharedEvent_t;
 typedef id<MTLDevice> MTLDevice_t;
 #else
@@ -25,7 +24,6 @@ typedef void* MTLCommandQueue_t;
 typedef void* MTLCommandQueue;
 typedef void* MTLCommandBuffer_t;
 typedef void* MTLCommandBuffer;
-typedef void* MTLComputeCommandEncoder_t;
 typedef void* MTLSharedEvent_t;
 typedef void* dispatch_queue_t;
 typedef void* MTLDevice_t;
@@ -62,9 +60,7 @@ public:
   dispatch_queue_t queue() const { return _serialQueue; }
 
   MPSCommandBuffer* commandBuffer();
-  MTLComputeCommandEncoder_t commandEncoder();
   void commit(bool flush);
-  void endKernelCoalescing();
   void commitAndWait();
   void commitAndContinue();
   void synchronize(SyncType syncType);
@@ -91,8 +87,6 @@ private:
   Stream _stream;
   MTLCommandQueue_t   _commandQueue = nil;
   MPSCommandBuffer*  _commandBuffer = nil;
-  MTLComputeCommandEncoder_t _commandEncoder = nil;
-
   MPSGraphExecutionDescriptor *_executionDescriptor = nil;
   void _flush(bool commitAndWait) const;
 
