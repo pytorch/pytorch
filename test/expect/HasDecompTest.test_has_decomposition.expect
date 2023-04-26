@@ -35,6 +35,7 @@ aten::_amp_update_scale
 aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
+aten::_assert_async.msg
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
