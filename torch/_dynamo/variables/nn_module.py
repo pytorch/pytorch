@@ -82,6 +82,20 @@ class NNModuleVariable(VariableTracker):
         # implement list/iter/tuple/etc calls
         base = tx.output.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
+        if isinstance(base, torch.nn.ModuleDict):
+            result = []
+            for name, submod in base.items():
+                name_var = variables.ConstantVariable(name)
+                tx.output.register_attr_or_module(
+                    submod,
+                    self.module_key,
+                    name,
+                    source=NNModuleSource(GetItemSource(self.source, name)),
+                    **options,
+                )
+                result.append(name_var)
+            return result
+
         assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
         ), typestr(base)
@@ -265,7 +279,8 @@ class NNModuleVariable(VariableTracker):
 
             if is_lazy:
                 # The module type will change after it is called
-                self.module_type = mod.cls_to_become
+                if mod.cls_to_become is not None:
+                    self.module_type = mod.cls_to_become
 
                 # The pre-hook runs to initialize the module shapes, then deletes itself.  After this,
                 # the module is more or less not lazy and can be treated as a normal module regardless of
@@ -671,7 +686,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
-            self.value_type = mod.cls_to_become
+            if mod.cls_to_become is not None:
+                self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
         name = "__call__"
@@ -704,6 +720,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if method is torch.nn.Module.parameters:
                 assert not args or kwargs
+                if tx.output.side_effects.has_pending_mutation(self):
+                    unimplemented("Module.parameters() with pending mutation")
                 options["guards"].add(
                     self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
