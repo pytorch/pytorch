@@ -15,6 +15,7 @@ __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
     "ColwiseParallel",
+    "ColwiseParallelNoReshard",
     "PairwiseParallel",
     "PairwiseSequenceParallel",
     "make_input_replicate_1d",
@@ -98,6 +99,17 @@ class ColwiseParallel(ParallelStyle):
 
     def __init__(self) -> None:
         super().__init__(make_input_replicate_1d, make_output_replicate_1d)
+
+
+class ColwiseParallelNoReshard(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    We don't perform reshard for output.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, None)
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]

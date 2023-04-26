@@ -6,6 +6,7 @@ import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
+    ColwiseParallelNoReshard,
     make_input_replicate_1d,
     make_input_reshard_replicate,
     make_input_shard_1d,
@@ -219,6 +220,13 @@ class TensorParallelStyleTest(DTensorTestBase):
         cs = ColwiseParallel()
         self._1d_input_func_check(tensor, tensor, cs._prepare_input)
         self.assertEqual(make_output_replicate_1d, cs._prepare_output)
+
+    @with_comms
+    def test_colwise_parallel_no_reshard_style(self):
+        tensor = torch.rand(8, 16, device=self.device_type)
+        cs_ns = ColwiseParallelNoReshard()
+        self._1d_input_func_check(tensor, tensor, cs_ns._prepare_input)
+        self.assertEqual(None, cs_ns._prepare_output)
 
 
 if __name__ == "__main__":
