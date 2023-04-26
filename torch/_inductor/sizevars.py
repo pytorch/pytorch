@@ -106,6 +106,7 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
+            base_pos = True
             if isinstance(base, ModularIndexing):
                 # for modular indexing, biggest values from the ranges don't necessarily result in
                 # the biggest result, the biggest result is modulus - 1
@@ -114,14 +115,16 @@ class SizeVarAllocator:
                 # actual iteration range is to size-1
                 iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
                 base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.statically_known_lt(base_lowest, 0):
+                if self.statically_known_leq(0, base_lowest):
                     # can't replace with indexing div if base can be negative
-                    return ModularIndexing(base, divisor, modulus)
+                    base_pos = True
+                else:
+                    base_pos = False
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
                 base_s = base
-            if self.statically_known_lt(base_s, modulus * divisor):
+            if self.statically_known_lt(base_s, modulus * divisor) and base_pos:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
