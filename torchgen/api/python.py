@@ -951,6 +951,9 @@ def argument_type_str_pyi(t: Type) -> str:
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
+        elif str(t.elem) == "SymInt" and t.size == 1:
+            elem = argument_type_str_pyi(t.elem)
+            ret = f"Union[{elem}, Sequence[{elem}]]"
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
