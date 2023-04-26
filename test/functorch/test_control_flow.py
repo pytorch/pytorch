@@ -4,7 +4,7 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
-from torch._functorch.aot_autograd import from_fun
+from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
@@ -371,13 +371,15 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return func(*args, **kwargs)
+                    func_args = pytree.tree_map(to_fun, args)
+                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    return func(*func_args, **func_kwargs)
                 finally:
                     torch._disable_functionalization()
             return wrapper
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
-            make_fx(f_wrapper(f))(example_input_func)
+            make_fx(f_wrapper(f))(example_input)
 
     def test_cond_functionalized_aot_func_check_functional(self):
         def true_fn(x):
@@ -400,12 +402,14 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
+                    func_args = pytree.tree_map(to_fun, args)
+                    func_kwargs = pytree.tree_map(to_fun, kwargs)
                     return pytree.tree_map(from_fun, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
 
-        result_gm = make_fx(f_wrapper(f))(example_input_func)
+        result_gm = make_fx(f_wrapper(f))(example_input)
         for node in result_gm.true_graph_0.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(not node.target._schema.is_mutable)
