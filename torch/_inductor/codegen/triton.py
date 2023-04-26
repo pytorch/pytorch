@@ -75,7 +75,9 @@ def config_of(args):
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
             if isinstance(x.expr, (int, sympy.Integer)):
-                return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+                # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
+                # _maybe_evaluate_static...
+                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
             else:
                 return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
@@ -317,6 +319,14 @@ class TritonOverrides(OpOverrides):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
+    # TODO: work out how to use randint4x
+    @staticmethod
+    def randint(
+        seed, offset, _
+    ):  # _ here to keep the contract identical to CPU randint op
+        offset = f"({offset}).to(tl.uint32)"
+        return f"tl.randint({seed}, {offset}).to(tl.int32)"
+
     @staticmethod
     def rsqrt(x):
         return f"tl.math.rsqrt({x})"
@@ -479,7 +489,7 @@ class IterationRangesRoot(IterationRanges):
         """
         Lookup a given RangeTreeEntry, creating it if needed
         """
-        if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
+        if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
             expr = ir.FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
@@ -527,12 +537,12 @@ class IterationRangesRoot(IterationRanges):
             divisor = divisor * node.length
 
         for node in nodes:
-            if not V.graph.sizevars.maybe_guard_equals(node.divisor, divisor):
+            if not V.graph.sizevars.statically_known_equals(node.divisor, divisor):
                 # fill in unused index var
                 add(self.lookup(divisor, ir.FloorDiv(node.divisor, divisor)))
                 divisor = node.divisor
             add(node)
-        if not V.graph.sizevars.maybe_guard_equals(self.numel, divisor):
+        if not V.graph.sizevars.statically_known_equals(self.numel, divisor):
             # fill in unused index var
             add(self.lookup(divisor, ir.FloorDiv(self.numel, divisor)))
 
@@ -771,10 +781,9 @@ class TritonKernel(Kernel):
 
         def add_range(i, expr):
             expr = sv.simplify(expr)
-            if not sv.maybe_guard_multiple_of(remaining[i], expr):
+            if not sv.statically_known_multiple_of(remaining[i], expr):
                 raise CantSplit()
             # guard on the last item out
-            sv.maybe_guard_equals(remaining[i], expr)
             remaining[i] = ir.FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
             return next(var_count)
@@ -790,7 +799,7 @@ class TritonKernel(Kernel):
         for length_group in lengths:
             return_getters = []
             for size in length_group:
-                if sv.maybe_guard_equals(size, 1):
+                if sv.statically_known_equals(size, 1):
                     return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
@@ -803,7 +812,9 @@ class TritonKernel(Kernel):
 
                 if sv.size_hint(size) > sv.size_hint(remaining[current_group]):
                     # need to break size in two
-                    if not sv.maybe_guard_multiple_of(size, remaining[current_group]):
+                    if not sv.statically_known_multiple_of(
+                        size, remaining[current_group]
+                    ):
                         raise CantSplit()
                     size1 = remaining[current_group]
                     size2 = ir.FloorDiv(size, remaining[current_group])
@@ -985,7 +996,7 @@ class TritonKernel(Kernel):
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
             # Masks are superfluous if we only have one element
-            if V.graph.sizevars.maybe_guard_equals(tree.numel, 1):
+            if V.graph.sizevars.statically_known_equals(tree.numel, 1):
                 mask_vars.discard(f"{tree.prefix}mask")
                 continue
             # Masks are superfluous if numel is a multiple of BLOCK
@@ -997,7 +1008,7 @@ class TritonKernel(Kernel):
             # never need to do a masked load to handle stragglers at the end.
             # It's faster to avoid masking at all.  But it is sound to always
             # mask.
-            if V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
+            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):
                 mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
@@ -1227,6 +1238,8 @@ class TritonKernel(Kernel):
                 updated = f"{accumulator} + {value}"
             elif reduction_type == "prod":
                 updated = f"{accumulator} * {value}"
+            elif reduction_type == "xor_sum":
+                updated = f"{accumulator} ^ {value}"
             else:
                 raise NotImplementedError(f"reduction_type {reduction_type}")
 
@@ -2056,7 +2069,7 @@ class TritonScheduling:
                     a0, a1 = ranked_tilings[i]
                     b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
-                if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
+                if V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     tiling = (a0, ir.FloorDiv(a1, b1), b1)
                     ranked_tilings = [tiling] + ranked_tilings
                     break  # only 1 choice for now

@@ -902,6 +902,8 @@ include_patterns = [
     'test/test_value_ranges.py',
     'torch/utils/_sympy/interp.py',
     'torch/utils/_sympy/reference.py',
+    'torch/utils/_content_store.py',
+    'test/test_content_store.py',
     'torch/_logging/**/*.py',
     'torch/nn/parallel/distributed.py',
 ]
