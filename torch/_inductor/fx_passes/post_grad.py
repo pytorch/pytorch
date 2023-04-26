@@ -300,6 +300,15 @@ def is_valid_splitwithsizes_cat(match):
     # All parts of split should be included in the cat
     if get_item_args != set(range(len(split_sizes))):
         return False
+    # The order of get_item_args should same with cat_node used.
+    # For example, if the split_node like split_with_sizes(input, [2, 2, 3], 1),
+    # the cat node should be like cat([get_item(0), get_item(1), get_item(2)], 1).
+    cat_items_args_order = [
+        get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
+    ]
+    if cat_items_args_order != list(range(len(split_sizes))):
+        return False
+
     return True
 
 
