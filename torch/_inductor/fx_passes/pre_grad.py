@@ -33,6 +33,11 @@ def lazy_init():
     if config.split_cat_fx_passes:
         _split_cat_init()
 
+    if config.is_fbcode():
+        from .fb.split_cat import _split_cat_init as _fb_split_cat_init
+
+        _fb_split_cat_init()
+
 
 def pre_grad_passes(gm, example_inputs):
     """
