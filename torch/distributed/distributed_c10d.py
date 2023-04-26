@@ -124,6 +124,11 @@ logger = logging.getLogger(__name__)
 global _c10d_error_logger
 _c10d_error_logger = _get_or_create_logger()
 
+# There is no clear definition of torch.distributed ops. This helper set allows
+# TorchDynamo to selectively disallow all the distributed ops from the Fx
+# graphs.
+distributed_c10d_ops = set()
+
 def exception_handler(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -148,6 +153,8 @@ def exception_handler(func):
                 }
             _c10d_error_logger.debug(error_msg_dict)
             raise
+    global distributed_c10d_ops
+    distributed_c10d_ops.add(wrapper)
     return wrapper
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
