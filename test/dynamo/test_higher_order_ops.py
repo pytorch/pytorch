@@ -1,11 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import re
+import unittest
 
 import torch
 
 import torch._dynamo.test_case
-from torch._ops import wrap
 from torch._dynamo.utils import counters
+from torch._ops import wrap
 
 
 class MockBackend:
@@ -51,7 +52,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(mock.graphs), 1)
         # wrap(fn, x, global_var)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_capture_untracked_global_nested(self):
         mock = MockBackend()
@@ -69,7 +70,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         gm = mock.graphs[0]
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.code))
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.cond_body_1.code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_capture_untracked_nonlocal(self):
         counters.clear()
@@ -92,7 +93,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(mock.graphs), 1)
         # wrap(fn, x, y)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_capture_tracked(self):
         counters.clear()
@@ -110,7 +111,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + y)
         self.assertEqual(len(mock.graphs), 1)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_inlined_functions(self):
         counters.clear()
@@ -131,7 +132,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + y)
         self.assertEqual(len(mock.graphs), 1)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_capture_value_created_in_subgraph(self):
         counters.clear()
@@ -157,7 +158,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.code))
         # z should have been lifted to input
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.cond_body_2.code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_capture_global_num(self):
         counters.clear()
@@ -180,7 +181,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         global_num = torch.randn([]).item()
         result = f(x)
         self.assertEqual(result, x + global_num)
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_capture_input_num(self):
         counters.clear()
@@ -198,7 +199,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         gm = mock.graphs[0]
         # Numbers don't get lifted
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+\);", gm.code))
-        self.assertEqual(len(counters['graph_break']), 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     # TODO: Ideally we would error out if there are any new live side
     # effects (for example, if the body function mutates a global variable).
@@ -332,6 +333,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         def f(x, y):
             def g(x):
                 return x + y
+
             return g(x)
 
         @torch.compile(backend=mock)
