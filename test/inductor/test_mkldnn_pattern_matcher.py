@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import itertools
 
 import torch
@@ -64,20 +63,6 @@ binary_list = {
     lambda x, y: x.sub(y): 2,  # call_method
     lambda x, y: x.sub_(y): 2,  # call_method
 }
-
-
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-# avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
-@functools.lru_cache(maxsize=None)
-def has_bf16_support():
-    import sys
-
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
 
 
 class TestPaternMatcher(TestCase):
@@ -154,7 +139,7 @@ class TestPaternMatcher(TestCase):
 
         options = itertools.product(unary_list_bf16, [True, False])
         dtype = torch.bfloat16
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for unary_fn, bias in options:
                 mod = M(unary_fn, 10, 30, bias=bias).eval()
                 # only fuse for linear when the dtype is bf16
@@ -283,7 +268,7 @@ class TestPaternMatcher(TestCase):
         options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
         out_feature = 30
-        if has_bf16_support():
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
                 with torch.no_grad():
                     mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
@@ -301,6 +286,92 @@ class TestPaternMatcher(TestCase):
                         binary_list[binary_fn],
                     )
                     counters.clear()
+
+    # https://github.com/pytorch/pytorch/issues/99841.
+    def test_hardtanh_pattern_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, min_value, max_value):
+                conv_transpose_output = self.conv_transpose(x)
+                clamp_min_output = torch.clamp_min(conv_transpose_output, min_value)
+                clamp_max_output = torch.clamp_max(clamp_min_output, max_value)
+                return clamp_max_output
+
+        # check works for min_value > max_value.
+        min_values = [3, torch.randn(1, 32, 28, 28)]
+        max_values = [0, torch.randn(1, 32, 28, 28)]
+        with torch.no_grad():
+            mod = Model().eval()
+            v = torch.randn(1, 3, 28, 28)
+            for min_value, max_value in zip(min_values, max_values):
+                expected = mod(v, min_value, max_value)
+                actual = torch.compile(mod)(v, min_value, max_value)
+                torch.testing.assert_close(actual, expected)
+                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    3,
+                )
+                counters.clear()
+
+    def test_leaky_relu_pattern_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x, negative_slope):
+                conv_out = self.conv(x)
+                return torch.where(conv_out > 0, conv_out, conv_out * negative_slope)
+
+        negative_slopes = [0.1, torch.randn(1, 32, 28, 28)]
+        with torch.no_grad():
+            mod = Model().eval()
+            v = torch.randn(1, 3, 28, 28)
+            for negative_slope in negative_slopes:
+                expected = mod(v, negative_slope)
+                actual = torch.compile(mod)(v, negative_slope)
+                torch.testing.assert_close(actual, expected)
+                self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    4,
+                )
+                counters.clear()
+
+    # https://github.com/pytorch/pytorch/issues/99838.
+    def test_conv2d_add_scalar(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                out_conv = self.conv(x)
+                out = torch.add(out_conv, 1.0)
+                return out
+
+        with torch.no_grad():
+            mod = Model().eval()
+            v = torch.randn(1, 3, 28, 28)
+            expected = mod(v)
+            actual = torch.compile(mod)(v)
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+            self.assertEqual(
+                counters["inductor"]["pattern_matcher_nodes"],
+                0,
+            )
+            counters.clear()
 
 
 if __name__ == "__main__":

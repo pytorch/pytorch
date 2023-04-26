@@ -103,7 +103,7 @@ def gen_data(special_op_lists, analysis_name):
     with open(f"{analysis_name}", 'w') as f:
         for op in ops:
             info = [
-                op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)
+                op['full_name'], op['meta'], op['full_name'] not in noncomposite_ops
             ] + [check(op) for check in special_op_lists]
             f.write(','.join([str(i) for i in info]) + '\n')
 
