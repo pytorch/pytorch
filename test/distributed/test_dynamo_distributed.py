@@ -670,7 +670,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # the frame count would be equal to the number of forward calls)
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_staticmethod(self):
+    def test_fsdp_staticmethod(self):
         """
         Tests that Dynamo compiles staticmethods for FSDP-managed modules
         correctly both when the staticmethod is invoked from the class and from
