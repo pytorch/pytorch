@@ -110,6 +110,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
+            self._forward = self.forward
             self.forward = self._call_lazy_check
 
     def __getstate__(self):
