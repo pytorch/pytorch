@@ -366,7 +366,7 @@ class TestPaternMatcher(TestCase):
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
     def test_conv2d_binary_inplace_fusion_failed(self):
-        # Write buffer is graph input, we can't fuse inplace.
+        # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -378,7 +378,7 @@ class TestPaternMatcher(TestCase):
                 conv_out = self.conv(x)
                 return torch.add(conv_out, other)
 
-        # Write buffer is a alias tensor, we can't fuse inplace.
+        # Written buffer is an alias tensor, we can't fuse inplace.
         class Model_v2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -403,7 +403,7 @@ class TestPaternMatcher(TestCase):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
     def test_conv2d_binary_fusion_failed(self):
-        # we dones't support alpha !=1 or othe has different size with conv's output.
+        # we don't support alpha !=1 case or other has different size with conv's output.
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
