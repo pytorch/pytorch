@@ -672,6 +672,15 @@ class Constraint:
             "you can specify them separately instead."
         )
 
+    @property
+    def serializable_spec(self):
+        return {
+            "t_id": self.t_id,
+            "dim": self.dim,
+            "min": self.constraint_range.vr.lower,
+            "max": self.constraint_range.vr.upper,
+        }
+
 
 def export(
     f: Callable[..., Any],
@@ -888,8 +897,13 @@ def export(
         graph,
     ).transform()
 
+    # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
     new_graph.meta["example_inputs"] = example_inputs
-    new_graph.meta["input_shape_constraints"] = constraints
+    new_graph.meta["input_shape_constraints"] = (
+        [constraint.serializable_spec for constraint in constraints]
+        if constraints
+        else None
+    )
     new_graph.meta["inline_constraints"] = {
         node.meta["val"].node.expr: var_to_range_map[node.meta["val"].node.expr]
         for node in new_graph.graph.nodes
@@ -991,7 +1005,7 @@ def export(
     new_graph.recompile()
 
     # TODO remove this once Executorch uses proper functionalization
-    new_graph._example_fake_inputs = example_fake_inputs
+    # new_graph._example_fake_inputs = example_fake_inputs
     new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)

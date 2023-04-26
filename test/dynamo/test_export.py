@@ -2291,7 +2291,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             aten_graph=True,
             tracing_mode="symbolic",
         )
-        self.assertEqual(gm.meta["input_shape_constraints"], constraints)
+
+        self.assertEqual(
+            gm.meta["input_shape_constraints"],
+            [c.serializable_spec for c in constraints],
+        )
         self.assertEqual(gm.meta["example_inputs"], example_inputs)
         preserved = False
         for _, vr in gm.meta["inline_constraints"].items():
