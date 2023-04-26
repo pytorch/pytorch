@@ -2048,17 +2048,17 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_scheduler_node(_node)
 
     # Check if all the nodes of a given fx graph can support BF16
-    def is_bf16_sch(self, sch_node: SchedulerNode):
-        if not isinstance(sch_node._body, ir.LoopBody):
+    def is_bf16_scheduler(self, scheduler_node: SchedulerNode):
+        if not isinstance(scheduler_node._body, ir.LoopBody):
             return True
 
-        sch_node.is_bf16 = False
+        scheduler_node.is_bf16 = False
 
         # Propagate the dtype to check if all the fx node is bf16
-        DataTypePropagation.propagate_scheduler_node(sch_node)
+        DataTypePropagation.propagate_scheduler_node(scheduler_node)
 
-        sub_blocks = [sch_node._body.root_block] + list(
-            sch_node._body.subblocks.values()
+        sub_blocks = [scheduler_node._body.root_block] + list(
+            scheduler_node._body.subblocks.values()
         )
         for sub_block in sub_blocks:
             for _node in sub_block.graph.nodes:
@@ -2088,7 +2088,7 @@ class CppKernelProxy(CppKernel):
                 else:
                     return False
 
-        sch_node.is_bf16 = True
+        scheduler_node.is_bf16 = True
         return True
 
     def legalize_bf16(self, nodes):
@@ -2228,7 +2228,7 @@ class CppKernelProxy(CppKernel):
                 add_to_dtype(sub_block.graph)
 
         if all(
-            isinstance(_node, SchedulerNode) and self.is_bf16_sch(_node)
+            isinstance(_node, SchedulerNode) and self.is_bf16_scheduler(_node)
             for _node in nodes
         ):
             # Mark the load node to load bf16
