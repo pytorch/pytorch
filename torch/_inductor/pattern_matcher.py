@@ -16,6 +16,7 @@ from torch._dynamo.utils import counters
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
 from ..fx import Transformer
@@ -555,25 +556,27 @@ def register_replacement(
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
-    argnames = [*inspect.signature(search_fn).parameters.keys()]
-    requires_grad = [
-        isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
-    ]
-    search_gm = trace_fn(search_fn, example_inputs)
-    pattern = fx_to_pattern(
-        search_gm,
-        ignore_types=(int, float, torch.device, torch.dtype),
-        argnames=argnames,
-        scalar_workaround=scalar_workaround,
-    )
-    assert repr(pattern) not in _seen_patterns
-    _seen_patterns.add(repr(pattern))
-    pattern = ReplacementPatternEntry(
-        pattern=pattern,
-        extra_check=check_fn,
-        normalize_args=normalize_args,
-    )
-    pattern.register(pass_dict)
+    # TODO: Revisit the functionalize_rng_ops for lowmem dropout
+    with functorch_config.patch(functionalize_rng_ops=False):
+        argnames = [*inspect.signature(search_fn).parameters.keys()]
+        requires_grad = [
+            isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
+        ]
+        search_gm = trace_fn(search_fn, example_inputs)
+        pattern = fx_to_pattern(
+            search_gm,
+            ignore_types=(int, float, torch.device, torch.dtype),
+            argnames=argnames,
+            scalar_workaround=scalar_workaround,
+        )
+        assert repr(pattern) not in _seen_patterns
+        _seen_patterns.add(repr(pattern))
+        pattern = ReplacementPatternEntry(
+            pattern=pattern,
+            extra_check=check_fn,
+            normalize_args=normalize_args,
+        )
+        pattern.register(pass_dict)
 
 
 def register_lowering_pattern(pattern, extra_check=_return_true, *, pass_dict):

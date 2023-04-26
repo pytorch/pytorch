@@ -261,14 +261,15 @@ void THP_decodeComplexDoubleBuffer(
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t x;
+      uint64_t x;
       double re;
     };
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t y;
+      uint64_t y;
       double im;
     };
+    static_assert(sizeof(uint64_t) == sizeof(double));
 
     x = (do_byte_swap ? decodeUInt64BE(src) : decodeUInt64LE(src));
     src += sizeof(double);
@@ -462,7 +463,7 @@ void THP_encodeComplexFloatBuffer(
   }
 }
 
-void THP_encodeCompelxDoubleBuffer(
+void THP_encodeComplexDoubleBuffer(
     uint8_t* dst,
     const c10::complex<double>* src,
     THPByteOrder order,

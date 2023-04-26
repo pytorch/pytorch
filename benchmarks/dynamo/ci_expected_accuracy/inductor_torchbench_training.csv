@@ -25,6 +25,7 @@ mobilenet_v2,pass,9
 nvidia_deeprecommender,pass,9
 phlippe_densenet,pass,9
 phlippe_resnet,pass,9
+pyhpc_isoneutral_mixing,pass,0
 pytorch_CycleGAN_and_pix2pix,pass,9
 pytorch_stargan,pass,9
 pytorch_unet,pass,9
