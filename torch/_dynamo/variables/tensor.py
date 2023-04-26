@@ -112,7 +112,7 @@ class TensorVariable(VariableTracker):
             return self.dtype in dtypes
 
         if type(tensor_type) is tuple:
-            return any([check_type(ty) for ty in tensor_type])
+            return any(check_type(ty) for ty in tensor_type)
         else:
             return check_type(tensor_type)
 
