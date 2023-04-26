@@ -714,38 +714,24 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
     return;
 
   auto approximate_type = get_gelutype_enum(approximate);
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
     string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + std::to_string(approximate_type);
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
-
-          MPSGraphTensor* outputTensor = nil;
-          if (approximate_type == GeluType::Tanh) {
-            outputTensor = tanh(mpsGraph, inputTensor);
-          } else {
-            outputTensor = normcdf(mpsGraph, inputTensor);
-          }
-          outputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor secondaryTensor:inputTensor name:nil];
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      MPSGraphTensor* outputTensor = nil;
+      if (approximate_type == GeluType::Tanh) {
+        outputTensor = tanh(mpsGraph, inputTensor);
+      } else {
+        outputTensor = normcdf(mpsGraph, inputTensor);
+      }
+      outputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor secondaryTensor:inputTensor name:nil];
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
@@ -769,17 +755,18 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   if (grad_input.numel() == 0)
     return;
 
+  auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + c10::str(approximate);
+    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + std::to_string(approximate_type);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto dataType = getMPSDataType(self);
 
       MPSGraphTensor* gradTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), getMPSShape(grad));
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(self));
       MPSGraphTensor* outputTensor = nil;
-      if (approximate == "tanh") {
+      if (approximate_type == GeluType::Tanh) {
         constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * (0.5f);
         constexpr float kKappa = 0.044715f;
         MPSGraphTensor* betaf = [mpsGraph constantWithScalar:kBeta shape:@[ @1 ] dataType:dataType];
