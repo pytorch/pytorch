@@ -186,11 +186,7 @@ class CustomOp:
         # easier, we want to be able to destroy CustomOp objects.
         # CustomOp._destroy does the job, though it leaves the CustomOp
         # in a garbage state.
-        lib = self._lib
-        self._lib = None
-        del lib
-
-        self._ophandle = None
+        del self._lib
 
         opnamespace = getattr(torch.ops, self._cpp_ns)
         if hasattr(opnamespace, self._opname):

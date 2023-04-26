@@ -679,7 +679,7 @@ class TestCustomOp(TestCase):
 
     def test_abstract_registration_location(self):
         loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
-        matches = re.match(r'.*/custom_op_db.py:\d+', loc)
+        matches = re.match(r'.*custom_op_db.py:\d+', loc)
         self.assertIsNotNone(matches)
 
     def test_data_dependent_basic(self):
