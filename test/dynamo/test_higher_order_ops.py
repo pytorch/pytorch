@@ -5,6 +5,7 @@ import torch
 
 import torch._dynamo.test_case
 from torch._ops import wrap
+from torch._dynamo.utils import counters
 
 
 class MockBackend:
@@ -36,6 +37,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+\);", mock.graphs[0].code))
 
     def test_capture_untracked_global(self):
+        counters.clear()
         mock = MockBackend()
 
         def f(x):
@@ -49,9 +51,11 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(mock.graphs), 1)
         # wrap(fn, x, global_var)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_capture_untracked_global_nested(self):
         mock = MockBackend()
+        counters.clear()
 
         @torch.compile(backend=mock)
         def f(x):
@@ -65,8 +69,10 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         gm = mock.graphs[0]
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.code))
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.cond_body_1.code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_capture_untracked_nonlocal(self):
+        counters.clear()
         mock = MockBackend()
 
         x = torch.randn(3, 3)
@@ -86,8 +92,10 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(mock.graphs), 1)
         # wrap(fn, x, y)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_capture_tracked(self):
+        counters.clear()
         mock = MockBackend()
 
         x = torch.randn(3, 3)
@@ -102,8 +110,10 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + y)
         self.assertEqual(len(mock.graphs), 1)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_inlined_functions(self):
+        counters.clear()
         mock = MockBackend()
 
         x = torch.randn(3, 3)
@@ -121,8 +131,10 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, x + y)
         self.assertEqual(len(mock.graphs), 1)
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", mock.graphs[0].code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_capture_value_created_in_subgraph(self):
+        counters.clear()
         mock = MockBackend()
 
         x = torch.randn(3, 3)
@@ -144,9 +156,11 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         # Two inputs: no lifting
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.code))
         # z should have been lifted to input
-        self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.cond_body_1.code))
+        self.assertIsNotNone(re.search(r"wrap\(\w+, \w+, \w+\);", gm.cond_body_2.code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_capture_global_num(self):
+        counters.clear()
         mock = MockBackend()
         x = torch.zeros([])
 
@@ -166,8 +180,10 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         global_num = torch.randn([]).item()
         result = f(x)
         self.assertEqual(result, x + global_num)
+        self.assertEqual(len(counters['graph_break']), 0)
 
     def test_capture_input_num(self):
+        counters.clear()
         mock = MockBackend()
         x = torch.zeros([])
         y = 3.14
@@ -182,7 +198,14 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
         gm = mock.graphs[0]
         # Numbers don't get lifted
         self.assertIsNotNone(re.search(r"wrap\(\w+, \w+\);", gm.code))
+        self.assertEqual(len(counters['graph_break']), 0)
 
+    # TODO: Ideally we would error out if there are any new live side
+    # effects (for example, if the body function mutates a global variable).
+    # I don't know how to detect this in a robust way, because it conflicts with
+    # benign side effects like storing and loading cells that is necessary for
+    # capturing variables.
+    @unittest.expectedFailure
     def test_side_effect_in_body(self):
         from torch._dynamo.utils import counters
 
@@ -282,10 +305,7 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
     def test_access_module_attr(self):
         # We can likely support this in the future, I just don't want to deal
         # with it right now
-        from torch._dynamo.utils import counters
-
         counters.clear()
-
         mock = MockBackend()
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
@@ -302,6 +322,25 @@ class TestHigherOrderOps(torch._dynamo.test_case.TestCase):
             dict(counters["graph_break"]),
             {"accessing attribute of nn.Module inside HigherOrderOperator": 1},
         )
+
+    def test_make_closure(self):
+        counters.clear()
+        mock = MockBackend()
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            def g(x):
+                return x + y
+            return g(x)
+
+        @torch.compile(backend=mock)
+        def h(x, y):
+            return wrap(f, x, y)
+
+        result = h(x, y)
+        self.assertEqual(result, x + y)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
 
 if __name__ == "__main__":
