@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import unittest
 from copy import deepcopy
 
 import torch
@@ -124,6 +125,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             self.assertTrue(correct_params[name].grad is None)
             self.assertTrue(opt_params[name].grad is None)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_adam_optimizer(self):
         model = Seq().cuda()
         model.apply(init_weights)
