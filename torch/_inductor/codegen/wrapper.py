@@ -486,6 +486,9 @@ class WrapperCodeGen(CodeGen):
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
 
+    def codegen_tuple_access(self, basename: str, index: str) -> str:
+        return f"{basename}[{index}]"
+
     def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_python_sizevar, shape))
         if len(parts) == 0:
@@ -722,7 +725,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
-        self.call_func_name = "inductor_cpp_entry"
+        self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
 
     def seed(self):
@@ -737,7 +740,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_header(self):
         if V.graph.aot_mode:
-            self.header.splice("\n#include <ATen/ATen.h>")
+            self.header.splice(
+                """
+                /* AOTInductor generated code */
+
+                #include <ATen/ScalarOps.h>
+                """
+            )
         else:
             self.header.splice(
                 """
@@ -881,10 +890,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, f"{codegen_reference}")
         self.writeline(self.wrap_kernel_call(kernel, args))
 
+    def add_benchmark_harness(self, output):
+        if V.graph.aot_mode:
+            return
+        super().add_benchmark_harness(output)
+
     def codegen_sizevar(self, x: Expr) -> str:
         from .cpp import cexpr
 
         return cexpr(V.graph.sizevars.simplify(x))
+
+    def codegen_tuple_access(self, basename: str, index: str) -> str:
+        return f"std::get<{index}>({basename})"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -895,7 +912,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def make_buffer_free(self, buffer):
-        return f"{buffer.get_name()}.reset();"
+        return (
+            ""
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            else f"{buffer.get_name()}.reset();"
+        )
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
@@ -972,7 +993,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
     def write_prefix(self):
         self.prefix.splice(
             """
-            #include <ATen/ATen.h>
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 

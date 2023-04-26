@@ -1,12 +1,12 @@
 #pragma once
 
-#include <stdint.h>
 #include <mutex>
 #include <deque>
 #include <atomic>
 #include <typeinfo>
 #include <utility>
 #include <cstddef>
+#include <cstdint>
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
