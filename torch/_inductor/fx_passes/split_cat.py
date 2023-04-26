@@ -7,6 +7,7 @@ from ..pattern_matcher import (
     Arg,
     CallFunction,
     CallMethod,
+    config_flag,
     get_arg_value,
     MULTIPLE,
     PatternEntry,
@@ -78,5 +79,7 @@ def _split_cat_init():
         CallMethod("split", Arg(), Arg(), dim=Arg(), _users=MULTIPLE),
         CallMethod("split", Arg(), split_size=Arg(), dim=Arg(), _users=MULTIPLE),
     ]:
-        pattern = NormalizeSplit(pattern=pattern, extra_check=lambda arg: True)
+        pattern = NormalizeSplit(
+            pattern=pattern, extra_check=config_flag("split_cat_fx_passes")
+        )
         pattern.register(patterns)
