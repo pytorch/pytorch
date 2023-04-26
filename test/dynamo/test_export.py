@@ -2263,19 +2263,42 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * c, b
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), 2 <= dynamic_dim(z, 0)]
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata(self):
+        from torch._export.constraints import constrain_as_size
+
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
         gm, _ = torch._dynamo.export(
-            my_dyn_fn,
-            x,
-            y,
-            z,
+            f,
+            *example_inputs,
             constraints=constraints,
             aten_graph=True,
             tracing_mode="symbolic",
         )
         self.assertEqual(gm.meta["input_shape_constraints"], constraints)
-        self.assertTrue("example_inputs" in gm.meta)
-        self.assertTrue("node_range_constraints" in gm.meta)
+        self.assertEqual(gm.meta["example_inputs"], example_inputs)
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):

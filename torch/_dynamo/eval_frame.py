@@ -7,6 +7,7 @@ import functools
 import inspect
 import logging
 import os
+import re
 import sys
 import textwrap
 import threading
@@ -764,7 +765,7 @@ def export(
 
     fake_mode = None
     example_inputs = []
-    node_range_constraints = {}
+    var_to_range_map = {}
 
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, inner_example_inputs
@@ -775,11 +776,11 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal fake_mode, example_inputs, node_range_constraints
+        nonlocal fake_mode, example_inputs, var_to_range_map
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
         if fake_mode and fake_mode.shape_env:
-            node_range_constraints = fake_mode.shape_env.var_to_range
+            var_to_range_map = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -889,7 +890,13 @@ def export(
 
     new_graph.meta["example_inputs"] = example_inputs
     new_graph.meta["input_shape_constraints"] = constraints
-    new_graph.meta["node_range_constraints"] = node_range_constraints
+    new_graph.meta["inline_constraints"] = {
+        node.meta["val"].node.expr: var_to_range_map[node.meta["val"].node.expr]
+        for node in new_graph.graph.nodes
+        if node.op != "placeholder"
+        and "val" in node.meta
+        and re.match(r"^i\d+$", str(node.meta["val"]))
+    }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
