@@ -46,7 +46,7 @@ class TestCudaWrapper(TorchTestCase):
     device = "cuda"
 
 
-def make_test_case(name, device, tests, condition):
+def make_test_case(name, device, tests, condition=True):
     test_name = f"{name}_{device}" if device else name
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
@@ -64,14 +64,10 @@ def make_test_case(name, device, tests, condition):
 
     fn.__name__ = test_name
     if device == "cuda":
-        setattr(
-            CudaWrapperTemplate, test_name, fn
-        )
+        setattr(CudaWrapperTemplate, test_name, fn)
     else:
-        if condition:       
-            setattr(
-                CppWrapperTemplate, test_name, fn
-            )
+        if condition:
+            setattr(CppWrapperTemplate, test_name, fn)
 
 
 if RUN_CPU:
