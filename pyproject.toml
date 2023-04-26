@@ -36,7 +36,6 @@ ignore = [
     "B027", "B904", "B905",
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
-    "C419", # generators may not be supported by jit
     "E501", # E501 is not flexible enough, we're using B950 instead
     "E721",
     "E731", # Assign lambda expression
