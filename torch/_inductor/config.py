@@ -69,6 +69,7 @@ coordinate_descent_tuning = (
 
 layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
 force_contiguous_inputs = os.environ.get("TORCHINDUCTOR_FORCE_CONTIGUOUS_INPUTS", "0") == "1"
+fallback_batchnorm = os.environ.get("TORCHINDUCTOR_FALLBACK_BATCH_NROM", "1") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have

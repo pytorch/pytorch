@@ -619,6 +619,13 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+
+    # InstanceNorm is too slow with channels last. Disable layout-optimization for
+    # convolution which needs channels last inputs.
+    if any(isinstance(x, torch.nn.modules.instancenorm.InstanceNorm2d) for x in model_.modules()):
+        print("DIABLE LAYOUT_OPT BECAUSE INSTANCE_NORM")
+        config.layout_opt = False
+
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(
@@ -736,6 +743,7 @@ def compile_fx(
     with overrides.patch_functions():
         if decompositions is None:
             decompositions = select_decomp_table()
+
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch

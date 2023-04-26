@@ -134,6 +134,7 @@ def fuse_reindexing(reindex1, reindex2):
     return reindex
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
+NHWC_FILL_ORDER = [1, 3, 2, 0]
 
 def stride_order2fill_order(order):
     """
@@ -2160,6 +2161,8 @@ class ComputedBuffer(Buffer):
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
+            # if order is not None and len(order) == 4:
+            #     order = NHWC_FILL_ORDER
             if order:
                 self.freeze_layout_with_fill_order(order)
             else:
