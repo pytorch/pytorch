@@ -101,9 +101,9 @@ def diff_arg(arg, requires_grad=True):
         else:
             return arg.is_floating_point() or arg.is_complex()
     if is_iterable_of_tensors(arg):
-        if all([is_differentiable_arg(a) for a in arg]):
+        if all(is_differentiable_arg(a) for a in arg):
             return True
-        if all([not is_differentiable_arg(a) for a in arg]):
+        if all(not is_differentiable_arg(a) for a in arg):
             return False
         raise RuntimeError("NYI: The test runner can't handle this")
     return isinstance(arg, Tensor) and is_differentiable_arg(arg)
@@ -983,7 +983,6 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
 
@@ -1074,7 +1073,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('put'),
         xfail('take'),
-        xfail('nn.functional.max_pool3d'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1172,7 +1170,6 @@ class TestOperators(TestCase):
         xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
-        xfail('nn.functional.max_pool3d'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),

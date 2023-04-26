@@ -15,6 +15,7 @@ import types
 import warnings
 import weakref
 from enum import Enum
+from os.path import dirname, join
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
@@ -25,6 +26,7 @@ from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
@@ -44,8 +46,8 @@ else:
             continue
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
-from . import config, convert_frame, skipfiles, utils
-from .exc import ResetRequired
+from . import config, convert_frame, external_utils, skipfiles, utils
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -74,6 +76,11 @@ unset = Unset.token
 
 compile_lock = threading.RLock()
 most_recent_backend: Optional[CompilerFn] = None
+DONT_WRAP_FILES = {
+    # For tracing into fx modules
+    inspect.getsourcefile(GraphModule),
+    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_exporter.py"),
+}
 
 
 class OptimizedModule(torch.nn.Module):
@@ -82,30 +89,45 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    def __init__(self, mod, dynamo_ctx):
+    def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
         # Installs the params/buffer
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
+        self._initialize()
+
+    def _initialize(self):
+        # Do this stuff in constructor to lower overhead slightly
+        if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
+            inspect.getsourcefile(self._orig_mod.forward)
+        ):
+            # This may be a torch.nn.* instance in skipfiles.py which
+            # won't trigger a frame evaluation workaround to add an extra
+            # frame we can capture
+            self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
+        else:
+            # Invoke hooks outside of dynamo then pickup the inner frame
+            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+
+        if hasattr(self._orig_mod, "_initialize_hook"):
+            self.__call__ = self._call_lazy_check
+
+    def __getstate__(self):
+        state = dict(self.__dict__)
+        state.pop("forward", None)
+        state.pop("__call__", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__ = state
+        self._initialize()
 
     def __getattr__(self, name):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name, value):
-        if name == "forward":
-            log.warning(
-                "Modifying OptimizedModule.forward may not do what you expect. "
-                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
-                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
-                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
-                "forward method without __call__ (and thus bypassing module hooks). "
-                "To alter the behavior of the wrapped module, modify its forward before compilation. "
-            )
-        super().__setattr__(name, value)
-
-    def __call__(self, *args, **kwargs):
+    def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
@@ -113,14 +135,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
-
-    def forward(self, *args, **kwargs):
-        log.warning(
-            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
-            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
-        )
-        return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
 
 
 def remove_from_cache(f):
@@ -221,8 +236,19 @@ class _TorchDynamoContext:
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
-
         assert callable(fn)
+
+        try:
+            filename = inspect.getsourcefile(fn)
+        except TypeError:
+            filename = None
+        if (
+            (filename is None or skipfiles.check(filename))
+            and (getattr(fn, "__name__", "") != "_call_impl")
+            and filename not in DONT_WRAP_FILES
+        ):
+            # call to a builtin without a frame for us to capture
+            fn = external_utils.wrap_inline(fn)
 
         callback = self.callback
         on_enter = self.on_enter
@@ -348,7 +374,11 @@ class OptimizeContext(_TorchDynamoContext):
 
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self):
-        super().__init__(callback=False)
+        # cudagraph trees relies on generation increment
+        def on_enter():
+            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+
+        super().__init__(callback=False, on_enter=on_enter)
 
 
 class DisableContext(_TorchDynamoContext):
@@ -417,7 +447,7 @@ def _optimize_catch_errors(
 
 
 def get_compiler_fn(compiler_fn):
-    from .debug_utils import wrap_backend_debug
+    from .repro.after_dynamo import wrap_backend_debug
 
     if hasattr(compiler_fn, "compiler_name"):
         compiler_str = compiler_fn.compiler_name
@@ -463,6 +493,7 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=False,
+    trainstep=False,
     fake_mode=None
 ):
     """
@@ -489,6 +520,9 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    if trainstep:
+        nopython = True
+
     check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
@@ -505,12 +539,9 @@ def optimize(
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
-    if nopython:
+    if nopython or trainstep:
         return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-            fake_mode=fake_mode
+            backend, dynamic=dynamic, hooks=hooks, trainstep=trainstep, fake_mode=fake_mode,
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
@@ -651,8 +682,9 @@ def export(
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
-    tracing_mode: str = "real",
+    tracing_mode: str = "symbolic",
     constraints: List[Constraint] = None,
+    assume_static_by_default: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -689,7 +721,7 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None or tracing_mode != "real":
+    if decomposition_table is not None:
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
@@ -765,7 +797,9 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        specialize_int=True
+        summarize_dim_constraints=True,
+        specialize_int=True,
+        assume_static_by_default=assume_static_by_default,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -841,12 +875,16 @@ def export(
                 return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-                tracing_mode="real",
-                _allow_non_fake_inputs=True,
-            )(*example_fake_inputs)
+            try:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="real",
+                    _allow_non_fake_inputs=True,
+                )(*example_fake_inputs)
+            except CondOpArgsMismatchError as e:
+                # Wrap the internal error to the user-facing error
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -963,6 +1001,7 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=False,
+    trainstep=False,
     fake_mode=None
 ):
     """
@@ -975,7 +1014,11 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints, fake_mode=fake_mode
+            backend,
+            export=export,
+            export_constraints=export_constraints,
+            trainstep=trainstep,
+            fake_mode=fake_mode,
         ),
         hooks,
         backend_ctx_ctor,

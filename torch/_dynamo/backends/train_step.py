@@ -11,11 +11,12 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
+from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 from torch.func import functionalize
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, PythonKeyTracer, make_fx
-from torch.fx.interpreter import Interpreter
 from torch._guards import detect_fake_mode
 from torch.nn.utils import stateless
 
@@ -91,9 +92,8 @@ def train_step_compiler(backend_compile_fn):
             assert_no_fake_params_or_buffers(mod)
         assert len(real_inputs) > 0, "Expected at least one input"
         fake_mode = detect_fake_mode()
-        assert isinstance(
-            fake_mode, FakeTensorMode
-        ), "Expected a valid FakeTensorMode"
+
+        assert isinstance(fake_mode, FakeTensorMode), "Expected a valid FakeTensorMode"
 
         def fakeify_tensors(flat_args):
             already_fake = {}
@@ -170,7 +170,6 @@ def train_step_compiler(backend_compile_fn):
 
             optimizer_proxy_mode, optimizer_fx_tracer = get_deferred_modes()
             with fake_mode, optimizer_proxy_mode:
-                breakpoint()
                 for group in opt.param_groups:
                     params_with_grad = []
                     grads = []
