@@ -751,8 +751,6 @@ def mps_ops_error_inputs_modifier(ops):
         'bernoulli',
         'clamp_max',
         'clamp_min',
-        'index_add',
-        'trace',
         'masked_scatter',
 
         # unsupported float64 dtype
