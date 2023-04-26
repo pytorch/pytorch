@@ -3357,6 +3357,7 @@ def nansum(self, dim=None, keepdim=False, *, dtype=None):
 
 
 @register_decomposition([aten.arange.default, aten.arange.out])
+@out_wrapper()
 def arange_default(
     end: NumberType,
     *,
@@ -3370,7 +3371,7 @@ def arange_default(
     )
 
 
-@register_decomposition([aten.arange.start, aten.arange.start_out])
+@register_decomposition([aten.arange.start])
 def arange_start(
     start: NumberType,
     end: NumberType,
