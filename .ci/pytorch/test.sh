@@ -269,9 +269,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
 fi
 
 if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-batch-only)
-else
-  DYNAMO_BENCHMARK_FLAGS+=(--static-shapes)
+  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
 
 if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
@@ -311,9 +309,9 @@ test_perf_for_dashboard() {
           --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
       python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --static-shapes \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
           --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_static_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
     fi
 
     # Run performance test
@@ -330,9 +328,9 @@ test_perf_for_dashboard() {
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
       python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --static-shapes \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
           --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_static_${suite}_${dtype}_${mode}_cuda_performance.csv"
+          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
     fi
   done
 }
