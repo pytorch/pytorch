@@ -6414,43 +6414,44 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(y, y_ref)
 
 
-    def test_channel_shuffle_return_alias_of_self(self):
-        # gh-76616: nn.ChannelShuffle will return alias of self with an empty input tensor
+    def test_channel_shuffle_return_self(self):
+        # gh-76616: nn.ChannelShuffle will return self with an empty input tensor
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
         torch.testing.assert_close(output, input_tensor)
 
-    def test_upsamplingLinear1d(self):
-        for align_corners in [True, False]:
-            for recompute_scale_factor in [True, False]:
-                kwargs = dict(
-                    mode='linear', align_corners=align_corners, recompute_scale_factor=recompute_scale_factor
-                )
-                # test float scale factor up & downsampling
-                for scale_factor in [0.5, 1.5, 2]:
-                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                    in_t = torch.ones(1, 1, 2)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    with warnings.catch_warnings(record=True) as w:
-                        out_t = m(in_t)
-                    self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("recompute_scale_factor", [True, False])
+    @parametrize_test("round_with_scale_factor", [True, False])
+    def test_upsamplingLinear1d(self, align_corners, recompute_scale_factor, round_with_scale_factor):
+        kwargs = dict(
+            mode='linear', align_corners=align_corners, recompute_scale_factor=recompute_scale_factor
+        )
+        # test float scale factor up & downsampling
+        for scale_factor in [0.5, 1.5, 2]:
+            m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+            in_t = torch.ones(1, 1, 2)
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
-                    input = torch.randn(1, 1, 2, requires_grad=True)
-                    if not recompute_scale_factor:
-                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
-                    else:
-                        gradcheck(lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs), (input,))
+            input = torch.randn(1, 1, 2, requires_grad=True)
+            if not recompute_scale_factor:
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
+            else:
+                gradcheck(lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs), (input,))
 
         # Check https://github.com/pytorch/pytorch/issues/62396
-        test_scales = [0.1234, 0.9999, 1.8]
-        isize = 32
-        expected_out_sizes = [int(0.5 + s * isize) for s in test_scales]
-        t_in = torch.randint(0, 256, size=(1, 1, isize), dtype=torch.float)
-        for r in [True, False]:
+        if round_with_scale_factor:
+            test_scales = [0.1234, 0.9999, 1.8]
+            isize = 32
+            expected_out_sizes = [int(0.5 + s * isize) for s in test_scales]
+            t_in = torch.randint(0, 256, size=(1, 1, isize), dtype=torch.float)
             for s, expected_osize in zip(test_scales, expected_out_sizes):
                 t_out = F.interpolate(
-                    t_in, scale_factor=s, recompute_scale_factor=r, mode="nearest"
+                    t_in, scale_factor=s, round_with_scale_factor=round_with_scale_factor, **kwargs
                 )
                 self.assertEqual(t_out.shape[-1], expected_osize)
 
@@ -6463,7 +6464,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
-    def test_upsampling_not_recompute_scale_factor(self):
+    @parametrize_test("device", ["cpu"] + (["cuda"] if TEST_CUDA else []))
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("round_with_scale_factor", [True, False])
+    def test_upsampling_not_recompute_scale_factor(self, device, align_corners, round_with_scale_factor):
         # test output against known input: result must match opencv
         # opencv gives output of shape (5, 5, 2)
         in_t = torch.arange(8.).view(1, 2, 2, 2)
@@ -6479,6 +6483,12 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
               [5.08591, 5.32473, 5.79249, 6.21060, 6.29613],
               [5.92213, 6.16095, 6.62871, 7.04682, 7.13234],
               [6.09318, 6.33200, 6.79976, 7.21787, 7.30340]]]])
+
+        if not round_with_scale_factor:
+            # Expected output produced by opencv is larger than output by pytorch interpolate
+            # when round_with_scale_factor=False, https://github.com/pytorch/pytorch/issues/62396
+            expected_out_t = expected_out_t[..., :4, :4]
+
         if IS_PPC:
             # Both OpenCV and PyTorch give a slightly different result on PPC
             expected_out_t = torch.tensor(
@@ -6491,29 +6501,31 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                   [4.15039, 4.38921, 4.85697, 5.27508],
                   [5.08591, 5.32473, 5.79249, 6.21059],
                   [5.92212, 6.16094, 6.62870, 7.04680]]]])
-        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
+        out_t = F.interpolate(
+            in_t,
+            scale_factor=2.3,
+            mode='bicubic',
+            align_corners=False,
+            recompute_scale_factor=False,
+            round_with_scale_factor=round_with_scale_factor
+        )
         torch.set_printoptions(precision=5)
         if IS_PPC:
-            self.assertEqual(out_t[..., :3, :3], expected_out_t[..., :3, :3], atol=1e-4, rtol=0)
+            self.assertEqual(out_t[..., :4, :4], expected_out_t[..., :4, :4], atol=1e-4, rtol=0)
         else:
             self.assertEqual(out_t, expected_out_t, atol=1e-4, rtol=0)
 
-        device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
+        kwargs = dict(mode='bicubic', align_corners=align_corners, round_with_scale_factor=round_with_scale_factor)
+        # test float scale factor up & downsampling
+        d = 0.5 if round_with_scale_factor else 0.0
+        for scale_factor in [0.6, 1.6, 2.3]:
+            in_t = torch.ones(2, 2, 2, 2).to(device)
+            out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+            out_size = int(math.floor(d + in_t.shape[-1] * scale_factor))
+            self.assertEqual(torch.ones(2, 2, out_size, out_size, device=device), out_t, atol=1e-5, rtol=0)
 
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bicubic', align_corners=align_corners)
-            # test float scale factor up & downsampling
-            for device in device_list:
-                for scale_factor in [0.6, 1.6, 2.3]:
-                    in_t = torch.ones(2, 2, 2, 2).to(device)
-                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(0.5 + in_t.shape[-1] * scale_factor))
-                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data, atol=1e-5, rtol=0)
-
-                    input = torch.randn(2, 2, 2, 2, requires_grad=True)
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+            input = torch.randn(2, 2, 2, 2, requires_grad=True, device=device)
+            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
@@ -9292,7 +9304,7 @@ class TestNNDeviceType(NNTestCase):
         if "tri" in mode:
             input_shape += (isize, isize)
 
-        d = 0.5 if round_with_scale_factor in (True, None) else 0.0
+        d = 0.5 if round_with_scale_factor else 0.0
         expected_out_size = int(d + s * isize)
 
         t_in = torch.randint(0, 256, size=input_shape, dtype=torch.float, device=device)

@@ -13415,6 +13415,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_vector_norm_out
+    MPS: linalg_vector_norm_out_mps
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
