@@ -670,8 +670,8 @@ class AdagradOptimizer(Optimizer):
 
     def _process_ema_options(self, ema_options):
         logger.info(f"ema_options: {str(ema_options)}")
-        self.ema_enabled = True if ema_options and "ema_alpha" in ema_options else False
-        self.ema_teacher_enabled = True if ema_options and "ema_teacher_alpha" in ema_options else False
+        self.ema_enabled = ema_options and ema_options.get("ema_alpha", None) is not None
+        self.ema_teacher_enabled = ema_options and ema_options.get("ema_teacher_alpha", None) is not None
         self.param2ema_teacher_param = {}
         if self.ema_enabled or self.ema_teacher_enabled:
             self.ema_start = ema_options.get("ema_start", None)

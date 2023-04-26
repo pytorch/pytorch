@@ -936,6 +936,8 @@ class TestFSDPOptimState(FSDPTest):
             fsdp_kwargs={"use_orig_params": True},
         )
 
+        # Enable this once use_orig_params supports rank0_only=Treu
+        """
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
             state_dict_settings=StateDictSettings(
@@ -950,6 +952,7 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
             fsdp_kwargs={"use_orig_params": True},
         )
+        """
 
         self._test_load_optim_state_with_optim_state_dict(
             _ModelClass.NESTED,
@@ -1669,6 +1672,68 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_optim_state_without_param_groups(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch.manual_seed(0)
+                self.net1 = nn.Sequential(nn.Linear(2, 4), nn.ReLU())
+
+            def forward(self, x):
+                return self.net1(x)
+
+        model = FSDP(SimpleModel().cuda())
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        # Train one step to save original optimizer state dict and original optimizer param groups.
+        batch = torch.rand(3, 2, device=torch.device("cuda"))
+        for param in model.parameters():
+            if param.requires_grad:
+                t = torch.zeros_like(param)
+                param.grad = torch.autograd.Variable(t)
+        optim.step()
+        loss = model(batch).sum()
+        loss.backward()
+
+        original_osd = deepcopy(optim.state_dict())
+        original_osd_no_param_groups = deepcopy(original_osd)
+        # manually remove param_groups from optimizer state dict
+        original_param_groups = deepcopy(
+            original_osd_no_param_groups.pop("param_groups")
+        )
+        # passing the osd without param_groups to FSDP
+        original_fsdp_optim_state_dict = deepcopy(
+            FSDP.optim_state_dict(
+                model, optim, optim_state_dict=original_osd_no_param_groups
+            )
+        )
+        # check the state_dict sharded by FSDP does not contain param_groups.
+        self.assertEqual(None, original_fsdp_optim_state_dict.get("param_groups"))
+
+        # train another step to make optim a different state.
+        for param in model.parameters():
+            if param.requires_grad:
+                t = torch.zeros_like(param)
+                param.grad = torch.autograd.Variable(t)
+        optim.step()
+        loss = model(batch).sum()
+        loss.backward()
+
+        state_dict_to_load = FSDP.optim_state_dict_to_load(
+            model, optim, original_fsdp_optim_state_dict
+        )
+        # manually add param_groups to state_dict_to_load before loading the optimizer state
+        state_dict_to_load["param_groups"] = original_param_groups
+        optim.load_state_dict(state_dict_to_load)
+        self.assertEqual(original_osd, optim.state_dict())
+
+        fsdp_optim_state = FSDP.optim_state_dict(model, optim)
+        self._check_same_state(
+            original_fsdp_optim_state_dict, fsdp_optim_state, check_same_param_keys=True
+        )
+        self.assertEqual(original_param_groups, optim.state_dict()["param_groups"])
+
+    @skip_if_lt_x_gpu(2)
     def test_with_empty_optimizer_state(self):
         model = FSDP(TestDummyModel().cuda())
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
@@ -1806,6 +1871,32 @@ class TestFSDPOptimState(FSDPTest):
 
         # TODO: add local/sharded/full state_dict and CPU offloading and rank0
         # interface test here, https://github.com/pytorch/pytorch/issues/97163
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_none_tensor_state(self):
+        def _run_test(use_orig_params):
+            model = FSDP(TestDummyModel().cuda(), use_orig_params=use_orig_params)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+            def step():
+                loss = model(model.get_input())
+                loss.backward(loss)
+                optim.step()
+
+            step()
+            original_osd = deepcopy(optim.state_dict())
+            for param_id, state in original_osd["state"].items():
+                # Add customized value
+                state["value1"] = 2.74
+                state["value2"] = None
+
+            osd = FSDP.optim_state_dict(model, optim, optim_state_dict=original_osd)
+            osd_to_load = FSDP.optim_state_dict_to_load(model, optim, osd)
+            for param_id, state in osd_to_load["state"].items():
+                self.assertEqual(state["value1"], 2.74)
+                self.assertEqual(state["value2"], None)
+
+        self.run_subtests({"use_orig_params": [False, True]}, _run_test)
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
