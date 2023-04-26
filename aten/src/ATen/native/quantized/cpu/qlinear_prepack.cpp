@@ -308,18 +308,18 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   if (bias.has_value()) {
     auto& b = bias.value();
     ///////////////////////
-    auto bias_size = b.sizes().vec();
-    bias_size.insert(bias_size.begin(), 1);
-    TORCH_CHECK(
-        bias_size[1] == weight_ptr->get_dim(1),
-        "bias should have N elements: ",
-        std::to_string(weight_ptr->get_dim(1)),
-        ", but got ", bias_size[1]);
-    auto bias_desc = ideep::tensor::desc(bias_size, dnnl::memory::data_type::f32);
-    ideep::tensor packed_bias;
-    packed_bias.init(bias_desc, b.data_ptr());
+    // auto bias_size = b.sizes().vec();
+    // bias_size.insert(bias_size.begin(), 1);
+    // TORCH_CHECK(
+    //     bias_size[1] == weight_ptr->get_dim(1),
+    //     "bias should have N elements: ",
+    //     std::to_string(weight_ptr->get_dim(1)),
+    //     ", but got ", bias_size[1]);
+    // auto bias_desc = ideep::tensor::desc(bias_size, dnnl::memory::data_type::f32);
+    // ideep::tensor packed_bias;
+    // packed_bias.init(bias_desc, b.data_ptr());
     ///////////////////////
-    // auto packed_bias = pack_bias(b, weight_ptr->get_dim(1));
+    auto packed_bias = pack_bias(b, weight_ptr->get_dim(1));
     onednn_bias = c10::optional<ideep::tensor>(packed_bias);
   }
   auto ret_ptr = c10::make_intrusive<PackedLinearWeightsOnednn>(
