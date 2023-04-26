@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, TracingContext
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 from torch.func import functionalize
@@ -75,6 +75,12 @@ def train_step_compiler(backend_compile_fn):
         assert len(real_inputs) > 0, "Expected at least one input"
         fake_mode = detect_fake_mode()
 
+        tc = TracingContext.train_step_context(assert_if_missing=True)
+        assert tc.optimizers_stepped == tc.optimizers_zeroed_grad, (
+            "Not all calls to optimizer.step() were paired with a call to .zero_grad()."
+            " Calling .zero_grad() is required for train_step compilation, since it enforces parity in behavior"
+            " between compiled and eager mode.  Compiled mode never mutates the .grad fields of the outside module."
+        )
         assert isinstance(fake_mode, FakeTensorMode), "Expected a valid FakeTensorMode"
 
         def fakeify_inputs(flat_args):
