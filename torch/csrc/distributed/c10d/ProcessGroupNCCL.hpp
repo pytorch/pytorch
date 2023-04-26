@@ -324,8 +324,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void startCoalescing() override;
 
-  void endCoalescing(
-      std::vector<c10::intrusive_ptr<Work>>& reqs) override;
+  c10::intrusive_ptr<Work> endCoalescing() override;
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -649,10 +648,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::set<int> usedDeviceIdxs_;
 
   // Flag to denote if a coalescing groupStart/groupEnd block is active
-  bool coalescing_active_ = false;
+  int coalescing_state_ = 0;
 
   // Stores device indexes for all collectives run inside a coalescing block
   std::vector<std::vector<at::Device>> coalescedDevices_;
+
+  // Stores communicators for all collectives run inside a coalescing block
+  std::vector<std::vector<std::shared_ptr<NCCLComm>>> coalescedComms_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
