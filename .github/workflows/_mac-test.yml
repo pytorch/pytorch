@@ -73,13 +73,33 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
           use-gha: true
+
+      - name: Disable XProtect and MDS
+        continue-on-error: true
+        run: |
+          # Like Windows Defender, XProtect could interfere with the test
+          set +e
+          set -x
+
+          SERVICES=(
+            "com.apple.XProtect.daemon.scan"
+            "com.apple.XprotectFramework.PluginService"
+            "com.apple.XprotectFramework.scan"
+            "com.apple.metadata.mds"
+            "com.apple.metadata.mds.index"
+          )
+          # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
+          for SERVICE in "${SERVICES[@]}"; do
+            sudo launchctl stop "${SERVICE}"
+            sudo launchctl disable "system/${SERVICE}"
+          done
 
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
@@ -130,11 +150,12 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
         run: |
           # shellcheck disable=SC1090
           set -ex
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
 
           # sanitize the input commit message and PR body here:
           #
@@ -162,7 +183,21 @@ jobs:
           ${CONDA_RUN} which python
           ${CONDA_RUN} python --version
 
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          pushd "${RUNNER_TEMP}"
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          RC=$?
+          popd
+
+          if [ "${RC}" -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
+
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
@@ -192,6 +227,21 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Archive conda environments
+        if: failure()
+        shell: bash
+        run: |
+          zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
+
+      - name: Store conda environments on GHA for debugging
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}-${{ steps.get-job-id.outputs.job-id }}-temp
+          retention-days: 14
+          if-no-files-found: warn
+          path: runner_temp.zip
 
       - name: Clean up disk space
         if: always()
