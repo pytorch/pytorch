@@ -122,6 +122,7 @@ def _disallowed_function_ids():
                 _functional_collectives._are_we_tracing,
             ]
         )
+        config.skipfiles_inline_module_allowlist.append(_functional_collectives)
     except ImportError:
         pass
 

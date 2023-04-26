@@ -751,10 +751,6 @@ def mps_ops_error_inputs_modifier(ops):
         'bernoulli',
         'clamp_max',
         'clamp_min',
-        'index_add',
-        'trace',
-        'nn.functional.max_pool2d',
-        'nn.functional.gelu',
         'masked_scatter',
 
         # unsupported float64 dtype
@@ -1491,6 +1487,22 @@ class TestMPS(TestCaseMPS):
         linear_mps = F.linear(x_mps, projected_mps)
 
         self.assertEqual(linear, linear_mps)
+
+    def test_linear_bias(self):
+        def helper(bias_shape):
+            device = "cpu"
+            x = torch.randn(2, 2, 2, 64, device=device)
+            linear = torch.nn.Linear(64, 4, device=device)
+            linear.bias = torch.nn.Parameter(torch.randn(bias_shape, dtype=torch.float32, device=device))
+            y = linear(x)
+            device = "mps"
+            x_mps = x.to(device)
+            linear.to(device)
+            y_mps = linear(x_mps)
+            self.assertEqual(y, y_mps)
+
+        helper(())
+        helper((2, 4))
 
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
