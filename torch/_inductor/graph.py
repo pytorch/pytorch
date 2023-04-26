@@ -581,7 +581,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # Not really multi-output, can straightforwardly recurse in
                 elif (
                     isinstance(result.data.data, ir.MultiOutput)
-                    and result.data.data.index == ""
+                    and not result.data.data.indices
                 ):
                     if isinstance(result.data.data.inputs[0], ir.Buffer):
                         result.data.data.inputs[0].origin_node = n
