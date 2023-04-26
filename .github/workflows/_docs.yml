@@ -156,7 +156,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/master/
+          path: pytorch.github.io/docs/main/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview
@@ -190,7 +190,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/master/
+          path: pytorch.github.io/docs/main/
           s3-prefix: pytorch/pytorch/pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview (forward compatibility)
