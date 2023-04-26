@@ -210,7 +210,7 @@ class RNNBase(Module):
 
     def check_input(self, input: Tensor, batch_sizes: Optional[Tensor]) -> None:
         if input.dtype != self._flat_weights[0].dtype:
-            raise RuntimeError('input must have the type {}, got type {}'.format(
+            raise ValueError('input must have the type {}, got type {}'.format(
                 self._flat_weights[0].dtype, input.dtype))
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
