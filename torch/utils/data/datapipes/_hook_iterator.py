@@ -27,6 +27,10 @@ def _simplify_obj_name(obj) -> str:
         return repr(obj)
 
 
+def _strip_datapipe_from_name(name: str) -> str:
+    return name.replace("IterDataPipe", "").replace("MapDataPipe", "")
+
+
 def _generate_input_args_string(obj):
     """
     Generate a string for the input arguments of an object.
@@ -42,8 +46,11 @@ def _generate_input_args_string(obj):
     return ', '.join([f'{name}={value}' for name, value in result])
 
 
-def _generate_iterdatapipe_msg(datapipe):
-    return f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+def _generate_iterdatapipe_msg(datapipe, simplify_dp_name: bool = False):
+    output_string = f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+    if simplify_dp_name:
+        output_string = _strip_datapipe_from_name(output_string)
+    return output_string
 
 
 def _gen_invalid_iterdatapipe_msg(datapipe):
@@ -104,13 +111,11 @@ def hook_iterator(namespace):
     Hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`. This is done for the purpose of
     profiling and checking if an iterator is still valid.
     """
-    profile_name = None
 
     def profiler_record_fn_context(datapipe):
-        nonlocal profile_name
-        if profile_name is None:
-            profile_name = _generate_iterdatapipe_msg(datapipe)
-        return torch.autograd.profiler.record_function(profile_name)
+        if not hasattr(datapipe, "_profile_name"):
+            datapipe._profile_name = _generate_iterdatapipe_msg(datapipe, simplify_dp_name=True)
+        return torch.autograd.profiler.record_function(datapipe._profile_name)
 
     class IteratorDecorator:
         r"""
@@ -118,13 +123,13 @@ def hook_iterator(namespace):
         DataPipes of which `__iter__` method is NOT a generator function. Those `__iter__`
         method commonly returns `self` but not necessarily.
         """
-        def __init__(self, iterator, source_dp, iterator_id, has_next_method):
+        def __init__(self, iterator, datapipe, iterator_id, has_next_method):
             self.iterator = iterator
-            self.source_dp = source_dp
+            self.datapipe = datapipe
             self.iterator_id = iterator_id
             self._profiler_enabled = torch.autograd._profiler_enabled()
             # Check if `__iter__` returns `self` and `DataPipe` has `__next__`
-            self.self_and_has_next_method = self.iterator is self.source_dp and has_next_method
+            self.self_and_has_next_method = self.iterator is self.datapipe and has_next_method
 
         def __iter__(self):
             return self
@@ -133,17 +138,17 @@ def hook_iterator(namespace):
             r"""
             Return next with logic related to iterator validity, profiler, and incrementation of samples yielded.
             """
-            _check_iterator_valid(self.source_dp, self.iterator_id)
+            _check_iterator_valid(self.datapipe, self.iterator_id)
             result = next(self.iterator)
             if not self.self_and_has_next_method:
-                self.source_dp._number_of_samples_yielded += 1
+                self.datapipe._number_of_samples_yielded += 1
             return result
 
         def __next__(self):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
             if self._profiler_enabled:
-                with profiler_record_fn_context(self.source_dp):
+                with profiler_record_fn_context(self.datapipe):
                     return self._get_next()
             else:  # Decided against using `contextlib.nullcontext` for performance reasons
                 return self._get_next()
