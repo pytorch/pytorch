@@ -206,7 +206,7 @@ void ProfilingRecord::insertShapeProfile(
   n->replaceInput(offset, pn->output());
 }
 
-bool needsProfiledInputs(Node* n) {
+static bool needsProfiledInputs(Node* n) {
   if (tensorexpr::isSupported(n) ||
 #ifndef C10_MOBILE
       (fuser::cuda::isEnabled() && fuser::cuda::profileNode(n))
@@ -243,7 +243,7 @@ bool needsProfiledInputs(Node* n) {
   }
 }
 
-bool needsProfiledOutput(Node* n) {
+static bool needsProfiledOutput(Node* n) {
   if (tensorexpr::isSupported(n) ||
 #ifndef C10_MOBILE
       (fuser::cuda::isEnabled() && fuser::cuda::profileNode(n))
