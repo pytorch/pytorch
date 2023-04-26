@@ -3,6 +3,8 @@ import functools
 import unittest
 
 import torch
+import torch.utils._pytree as pytree
+from torch._functorch.aot_autograd import from_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
@@ -398,7 +400,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return func(*args, **kwargs)
+                    return pytree.tree_map(from_fun, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -411,6 +413,8 @@ class TestControlFlowTraced(TestCase):
         for node in result_gm.false_graph_0.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(not node.target._schema.is_mutable)
+
+        self.assertEqual(result_gm(torch.ones(5, 5)), f(torch.ones(5, 5)))
 
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):
@@ -754,6 +758,35 @@ class TestControlFlowTraced(TestCase):
         for node in gm.body_graph_0.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(not node.target._schema.is_mutable)
+
+    def test_map_functionalized_aot_func(self):
+        def map_fn(x, y):
+            z = x + y
+            z.add_(4)
+            return z
+
+        def f(xs, y):
+            return control_flow.map(map_fn, xs, y)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
+
+        gm = make_fx(f_wrapper(f))(*example_inputs)
+
+        for node in gm.body_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+        self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):

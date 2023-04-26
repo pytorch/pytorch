@@ -237,10 +237,10 @@ def cond_func(pred, true_fn, false_fn, inputs):
     unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
     unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
     mode = 'mutations_and_views' if reapply_views else 'mutations'
-    functional_true = functionalize(true_fn, remove=mode)
-    functional_false = functionalize(false_fn, remove=mode)
     guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
     try:
+        functional_true = functionalize(true_fn, remove=mode)
+        functional_false = functionalize(false_fn, remove=mode)
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException("One of torch.cond branch "
