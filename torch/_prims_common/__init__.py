@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
@@ -1775,22 +1776,14 @@ def clone_preserve_strides(x):
 
 class CUDARngStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple(fake_mode=None):
+    def get_torch_state_as_tuple(fake_mode=nullcontext()):
         if not torch.cuda.is_available():
-            seed = torch.tensor(0)
-            offset = torch.tensor(0)
-            if fake_mode:
-                seed = fake_mode.from_tensor(seed)
-                offset = fake_mode.from_tensor(offset)
-            return seed, offset
+            raise RuntimeError("CUDA not available")
 
-        rng_state = torch.cuda.get_rng_state()
-        if fake_mode:
-            rng_state = fake_mode.from_tensor(rng_state)
-        # Rng state is [64-bit seed, 64-bit offset]
-        seed = rng_state[0:8].view(dtype=torch.int64)[0]
-        offset = rng_state[8:].view(dtype=torch.int64)[0]
-        return seed, offset
+        with fake_mode:
+            seed = torch.tensor(torch.cuda.initial_seed())
+            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            return seed, offset
 
     @staticmethod
     def set_torch_state_tensor(seed, offset):
@@ -1801,10 +1794,5 @@ class CUDARngStateHelper:
         torch.cuda.set_rng_state(new_state)
 
     @staticmethod
-    def advance_torch_state(relative_offset):
-        rng_state = torch.cuda.get_rng_state()
-        # Rng state is [64-bit seed, 64-bit offset]
-        seed = rng_state[0:8].view(dtype=torch.int64)[0]
-        offset = rng_state[8:].view(dtype=torch.int64)[0]
-        new_offset = offset + relative_offset
-        CUDARngStateHelper.set_torch_state_tensor(seed, new_offset)
+    def set_new_offset(relative_offset):
+        torch.cuda._set_rng_state_offset(relative_offset.item())
