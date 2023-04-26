@@ -95,7 +95,7 @@ def graph_optimization_pass(
             return f"{func.__module__}.{func.__name__}"
 
         func_key = make_key(func)
-        _prerequisite_sets[func_key] = set(make_key(f) for f in prerequisites)
+        _prerequisite_sets[func_key] = {make_key(f) for f in prerequisites}
         for apply_after_pass in apply_after:
             _apply_before_sets[make_key(apply_after_pass)].add(func_key)
 
