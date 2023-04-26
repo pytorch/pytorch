@@ -221,7 +221,7 @@ struct ATenDLMTensor {
   DLManagedTensor tensor;
 };
 
-void deleter(DLManagedTensor* arg) {
+static void deleter(DLManagedTensor* arg) {
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
 }
 
