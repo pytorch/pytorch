@@ -31,6 +31,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    ops_wrapper,
     PermuteView,
     Pointwise,
     Reduction,
@@ -393,15 +394,6 @@ def to_device(x: TensorBox, device: torch.device):
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-def ops_wrapper(name):
-    assert isinstance(name, str)
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
-
-    return fn
 
 
 def register_pointwise(
@@ -3444,19 +3436,7 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-REDUCTION_COMBINE_FN = {
-    "sum": ops_wrapper("add"),
-    "prod": ops_wrapper("mul"),
-    "min": ops_wrapper("minimum"),
-    "max": ops_wrapper("maximum"),
-    "any": ops_wrapper("logical_or"),
-}
-
-
-def make_reduction(reduction_type: str, override_return_dtype=None, combine_fn=None):
-    if combine_fn is None:
-        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
-
+def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
         if dtype is not None:
             x = to_dtype(x, dtype)
@@ -3502,7 +3482,6 @@ def make_reduction(reduction_type: str, override_return_dtype=None, combine_fn=N
             dst_dtype=override_return_dtype or x.get_dtype(),
             src_dtype=x.get_dtype(),
             inner_fn=loader,
-            combine_fn=combine_fn,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
             reduction_type=reduction_type,
@@ -3819,69 +3798,14 @@ def reduce_min(x, dim=None, keepdim=False):
     return reduce_amin(x, axis=None, keepdims=keepdim)
 
 
-@register_lowering(aten.amax)
-def reduce_amax(x, dim=None, keepdim=False):
-    x_dtype = x.get_dtype()
-    combine_fn = ops_wrapper("maximum")
-
-    reduce_fn = make_reduction("max", combine_fn=combine_fn)
-    return reduce_fn(x, axis=dim, keepdims=keepdim)
-
-
-@register_lowering(aten.amin)
-def reduce_amin(x, dim=None, keepdim=False):
-    x_dtype = x.get_dtype()
-    combine_fn = ops_wrapper("minimum")
-
-    reduce_fn = make_reduction("min", combine_fn=combine_fn)
-    return reduce_fn(x, axis=dim, keepdims=keepdim)
-
-
-@register_lowering(aten.argmax)
-def reduce_argmax(x, dim=None, keepdim=False):
-    x_dtype = x.get_dtype()
-
-    def combine_fn(a, b):
-        a_value, a_index = a
-        b_value, b_index = b
-
-        b_is_max = ops.gt(b_value, a_value)
-        if is_float_dtype(x_dtype):
-            b_is_max = ops.logical_or(b_is_max, ops.isnan(b_value))
-
-        return (
-            ops.where(b_is_max, b_value, a_value),
-            ops.where(b_is_max, b_index, a_index),
-        )
-
-    reduce_fn = make_reduction(
-        "argmax", combine_fn=combine_fn, override_return_dtype=torch.int64
-    )
-    return reduce_fn(x, axis=dim, keepdims=keepdim)
-
-
-@register_lowering(aten.argmin)
-def reduce_argmin(x, dim=None, keepdim=False):
-    x_dtype = x.get_dtype()
-
-    def combine_fn(a, b):
-        a_value, a_index = a
-        b_value, b_index = b
-
-        b_is_min = ops.lt(b_value, a_value)
-        if is_float_dtype(x_dtype):
-            b_is_min = ops.logical_or(b_is_min, ops.isnan(b_value))
-
-        return (
-            ops.where(b_is_min, b_value, a_value),
-            ops.where(b_is_min, b_index, a_index),
-        )
-
-    reduce_fn = make_reduction(
-        "argmin", combine_fn=combine_fn, override_return_dtype=torch.int64
-    )
-    return reduce_fn(x, axis=dim, keepdims=keepdim)
-
+reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
+reduce_argmax = register_lowering(aten.argmax)(
+    make_reduction("argmax", override_return_dtype=torch.int64)
+)
+reduce_argmin = register_lowering(aten.argmin)(
+    make_reduction("argmin", override_return_dtype=torch.int64)
+)
 
 add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"

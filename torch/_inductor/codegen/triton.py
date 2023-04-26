@@ -1132,9 +1132,7 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction(
-        self, name, dtype, src_dtype, reduction_type, combine_fn, index, value
-    ):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
@@ -1219,9 +1217,10 @@ class TritonKernel(Kernel):
                 idx_dtype = self.index_dtype
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
+                combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
                 self.compute.writeline(
-                    f"{accumulator} = tl.where({cond}, {updated}, {accumulator}"
+                    f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
                 self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:

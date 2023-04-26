@@ -200,8 +200,6 @@ class OptimizeIndexing:
                 submodules[key] = functools.partial(
                     self.masked_subblock, subblock, self.interp_env
                 )
-            elif "reduce_subblock" in key:
-                pass
             else:
                 assert "set_indirect" in key
                 idx = int(key[len("set_indirect") :])

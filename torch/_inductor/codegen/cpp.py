@@ -952,20 +952,20 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(
-        self, name, dtype, src_dtype, reduction_type, combine_fn, index, value
-    ):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
         tmpvar = self.reduction_cse.generate(
             self.loads, f"reduction {name} {cexpr_index(index)}", write=False
         )
         index = self.rename_indexing(index)
         self.reduction_var_map[tmpvar] = reduction_type
+        combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
 
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
                 argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
             )
+            compare_op = "<" if reduction_type == "argmax" else ">"
             with V.kernel.swap_buffers(self.stores):
                 result_value, result_index = combine_fn(
                     (f"{tmpvar}.value", f"{tmpvar}.index"),
@@ -974,8 +974,9 @@ class CppKernel(Kernel):
 
             self.stores.writelines(
                 [
-                    f"{tmpvar}.value = {result_value};",
-                    f"{tmpvar}.index = {result_index};",
+                    f"if ({tmpvar}.value {compare_op} {value}) {{",
+                    f"    {tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};",
+                    "}",
                 ],
             )
         else:
@@ -988,7 +989,7 @@ class CppKernel(Kernel):
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
 
-            with V.kernel.swap_buffers(self.stores, self.stores):
+            with V.kernel.swap_buffers(self.stores):
                 result = combine_fn(tmpvar, value)
             self.stores.writeline(f"{tmpvar} = {result};")
 
@@ -1258,9 +1259,7 @@ class CppVecKernel(CppKernel):
             )
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(
-        self, name, dtype, src_dtype, reduction_type, combine_fn, index, value
-    ):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert reduction_type in {"max", "min", "sum", "prod"}
         assert dtype == torch.float
         assert src_dtype == torch.float
@@ -1301,6 +1300,7 @@ class CppVecKernel(CppKernel):
         self.reduction_prefix.writeline(
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
+        combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
         self.stores.writeline(f"{tmpvar_vec} = {combine_fn(tmpvar_vec, value)};")
 
         if self.tiling_idx >= self.reduction_depth:
@@ -1722,9 +1722,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
 
-    def reduction(
-        self, name, dtype, src_dtype, reduction_type, combine_fn, index, value
-    ):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         if (
             dtype == torch.float
             and src_dtype == torch.float
@@ -1810,8 +1808,10 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(*args, **kwargs):
-                return self.reduction(*args, **kwargs)
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                return self.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
             @staticmethod
             def constant(val, dtype):
