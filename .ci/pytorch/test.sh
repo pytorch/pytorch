@@ -255,7 +255,7 @@ test_inductor() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
   BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  LD_LIBRARY_PATH="$TORCH_LIB_DIR $TORCH_BIN_DIR"/test_aot_inductor
+  python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -510,22 +510,16 @@ fi
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
-    ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
-
-    # Make test_reports directory
-    # NB: the ending test_libtorch must match the current function name for the current
-    # test reporting process to function as expected.
-    TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
-    mkdir -p $TEST_REPORTS_DIR
 
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
@@ -533,8 +527,8 @@ test_libtorch() {
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       python test/run_test.py --cpp --verbose -i cpp/test_jit -i cpp/nvfuser_tests
     else
+      # CUDA tests have already been skipped when CUDA is not available
       python test/run_test.py --cpp --verbose -i cpp/test_jit
-      #"$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
 
     # Run Lazy Tensor cpp tests
@@ -550,12 +544,9 @@ test_libtorch() {
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" python test/run_test.py --cpp --verbose -i cpp/test_api -i cpp/test_tensorexpr
-    #"$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
 
     if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
       python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
-      # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
-      # "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
 
     assert_git_not_dirty
@@ -564,29 +555,23 @@ test_libtorch() {
 
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
 
-  # Make test_reports directory
-  # NB: the ending test_libtorch must match the current function name for the current
-  # test reporting process to function as expected.
-  TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
-  mkdir -p $TEST_REPORTS_DIR
-  if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
-  # shellcheck source=test/mobile/nnc/test_aot_compile.sh
-  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
+  if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then
+    python test/run_test.py --cpp --verbose -i cpp/test_mobile_nnc
+  fi
+  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then
+    source test/mobile/nnc/test_aot_compile.sh
+  fi
 }
 
 test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
-    # NB: the ending test_vulkan must match the current function name for the current
-    # test reporting process to function as expected.
-    TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
-    mkdir -p $TEST_REPORTS_DIR
-    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
   fi
 }
 
@@ -601,24 +586,24 @@ test_distributed() {
 
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    # NB: the ending test_distributed must match the current function name for the current
-    # test reporting process to function as expected.
-    TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
-    mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_BIN_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
-    "$TORCH_BIN_DIR"/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
-    "$TORCH_BIN_DIR"/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
+    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+
+    # These are distributed tests, so let's continue running them sequentially here to avoid
+    # any surprise
+    python test/run_test.py --cpp --verbose -i cpp/FileStoreTest
+    python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
+    python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
 
     MPIEXEC=$(command -v mpiexec)
     if [[ -n "$MPIEXEC" ]]; then
-      MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
+      MPICMD="${MPIEXEC} -np 2 python test/run_test.py --cpp --verbose -i cpp/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
-    "$TORCH_BIN_DIR"/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
-    "$TORCH_BIN_DIR"/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
-    "$TORCH_BIN_DIR"/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
+
+    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
+    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
+    python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
   fi
 }
 
@@ -627,12 +612,10 @@ test_rpc() {
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
     # test reporting process to function as expected.
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
-    TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
-    mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_BIN_DIR"/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
+    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    #ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
   fi
 }
 
