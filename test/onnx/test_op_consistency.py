@@ -309,9 +309,11 @@ TESTED_OPS: frozenset[str] = frozenset(
         "flatten",
         "logical_not",
         "nn.functional.scaled_dot_product_attention",
+        "repeat",
         "sqrt",
         "stft",
         "t",
+        "tile",
         "unflatten",
     ]
 )
@@ -336,25 +338,37 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     fixme("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
+    dont_care("tile", opsets=[opsets_before(13)], reason=reason_onnx_does_not_support("Tile")),
     fixme("unflatten", opsets=[opsets_before(13)], reason="Helper function is needed to support legacy ops."),
 )
 # fmt: on
 
 SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
     dont_care(
+        "nn.functional.scaled_dot_product_attention",
+        matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
+        reason="dropout is random so the results do not match",
+    ),
+    dont_care(
+        "repeat",
+        reason="Empty repeats value leads to an invalid graph",
+        matcher=lambda sample: not sample.args[0],
+    ),
+    dont_care(
         "stft",
         reason="ONNX STFT does not support complex results",
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,
     ),
     fixme(
+        "tile",
+        matcher=lambda sample: any(dim == 0 for dim in sample.input.shape)
+        or not sample.input.shape,
+        reason="Logic not implemented for size 0 inputs in op.Reshape",
+    ),
+    fixme(
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
-    ),
-    dont_care(
-        "nn.functional.scaled_dot_product_attention",
-        matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
-        reason="dropout is random so the results do not match",
     ),
 )
 
@@ -435,7 +449,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         for i, cpu_sample in enumerate(samples):
             inputs = (cpu_sample.input, *cpu_sample.args)
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
-
             with self.subTest(
                 opset=self.opset_version,
                 sample_num=i,

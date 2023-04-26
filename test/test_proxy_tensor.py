@@ -154,7 +154,12 @@ class TestGenericProxyTensor(TestCase):
         # Also, torch.ones() doesn't show up in the trace.
         # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
         # so our mode never sees it - it goes directly to the BackendSelect key.
-        fx_g = make_fx(f, pre_autograd=True)(torch.ones(4, 4))
+        inp = torch.ones(4, 4)
+        # Test that make_fx(pre_autograd=True) clears caches properly.
+        from torch._dispatch.python import enable_python_dispatcher
+        with enable_python_dispatcher():
+            out1 = f(inp)
+        fx_g = make_fx(f, pre_autograd=True)(inp)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
