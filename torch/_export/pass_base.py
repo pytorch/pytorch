@@ -205,7 +205,7 @@ class ExportPassBase(PassBase):
             elif getattr(target, "__module__", None) == "_operator":
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
-            elif isinstance(target, torch._ops.OpOverload):
+            elif isinstance(target, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
                 return self.callback.call_operator(
                     target,
                     args,
