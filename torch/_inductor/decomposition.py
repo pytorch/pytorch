@@ -155,7 +155,12 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
 
 def should_pad_bench(mat1, mat2, op, input=None):
     assert utils.has_triton()
-    from triton.testing import do_bench
+
+    import triton.testing
+
+    do_bench = functools.partial(
+        triton.testing.do_bench, warmup=5, rep=100, fast_flush=True, percentiles=None
+    )
 
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
@@ -178,13 +183,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
-                lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
+                lambda: op(mat1, mat2),
             )
         else:
             if input is not None:
                 input = torch.randn_like(input)
             ori_time = do_bench(
-                lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
+                lambda: op(input, mat1, mat2),
             )
 
         mat1_pad = torch.randn_like(mat1)
@@ -203,9 +208,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
             )
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
@@ -216,9 +218,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
             )
         else:
             pad_time = do_bench(
@@ -229,9 +228,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
             )
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
