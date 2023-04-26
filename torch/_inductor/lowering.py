@@ -2940,10 +2940,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -2953,15 +2953,11 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            ph, ops.sub(phend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
                     ),
                 ]
@@ -3348,18 +3344,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.int_minimum(
+        hend = ops.minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.int_minimum(
+        wend = ops.minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3376,10 +3372,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3397,13 +3393,13 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
                             ),
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
