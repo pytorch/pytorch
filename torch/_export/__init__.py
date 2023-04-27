@@ -1,8 +1,18 @@
-import torch
+import dataclasses
 import weakref
+from typing import Any, Callable, List, Tuple, Optional
+
+import sympy
+import torch
+import torch._dynamo
+import torch.fx
+from torch._decomp import core_aten_decompositions
+from torch._dynamo.eval_frame import Constraint
+
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.utils._sympy.value_ranges import ValueRanges
-import sympy
+
+Value = Any
 
 
 # Note - [On Export Dynamic Dimension UX]
@@ -39,7 +49,44 @@ import sympy
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
-    from torch._dynamo.eval_frame import Constraint
     return Constraint(
         weakref.ref(t), id(t), index, StrictMinMaxConstraint(vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False)
     )
+
+
+@dataclasses.dataclass
+class ExportDynamoConfig:
+    """
+    Manage Export-specific configurations of Dynamo.
+    TODO add tests to make sure the flags are not outdated
+    """
+    capture_scalar_outputs: bool = True
+    capture_dynamic_output_shape_ops: bool = True
+    guard_nn_modules: bool = True
+    dynamic_shapes: bool = True
+    specialize_int: bool = True
+    allow_rnn: bool = True
+
+
+DECOMP_TABLE = core_aten_decompositions()
+
+
+def _export(
+    f: Callable,
+    args: Tuple[Value],
+    constraints: Optional[List[Constraint]] = None,
+) -> torch.fx.GraphModule:
+    """
+    Private API to export a single entry point or a free function. It is meant to be used
+    inside top level torch.export.
+    """
+    with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
+        gm, _ = torch._dynamo.export(
+            f,
+            *args,
+            aten_graph=True,
+            tracing_mode="symbolic",
+            decomposition_table=DECOMP_TABLE,
+            constraints=constraints,
+        )
+    return gm
