@@ -5423,7 +5423,7 @@ for shape in [(1,), ()]:
         self.assertEqual(order[-1], "MyFunction")
 
 
-    @slowTest
+    @slowTest()
     def test_checkpointing(self):
         num_inp = 2000
         nz_inp = 10
@@ -5498,7 +5498,7 @@ for shape in [(1,), ()]:
         self._test_checkpointing_non_reentrant_autocast(device_type='cuda')
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
-    @slowTest
+    @slowTest()
     def test_checkpointing_without_reentrant_memory_savings(self):
         class MyModel(nn.Module):
             def __init__(self, n, use_checkpoint, use_reentrant):
@@ -5653,7 +5653,7 @@ for shape in [(1,), ()]:
         ):
             d.grad_fn._saved_result
 
-    @slowTest
+    @slowTest()
     @parametrize("input_requires_grad", [True, False])
     def test_checkpointing_without_reentrant(self, input_requires_grad):
         """

@@ -1006,7 +1006,7 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertEqual(from_tensor, to_tensor, exact_dtype=False)
 
-    @slowTest
+    @slowTest()
     @onlyCPU
     def test_cat_big(self, device):
         SIZE1 = 6500

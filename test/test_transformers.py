@@ -102,7 +102,7 @@ class TestTransformers(NNTestCase):
             self.assertEqual(output_mask_4d, output_mask_TxT)
 
     @parametrize("device", device_list)
-    @slowTest
+    @slowTest()
     def test_train_with_pad_and_catch_error(self, device):
         iters = 100
         pad_mask = torch.tensor([[1, 1, 0, 0]], dtype=torch.bool).to(device)

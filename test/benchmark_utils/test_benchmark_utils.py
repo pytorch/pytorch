@@ -168,7 +168,7 @@ class TestBenchmarkUtils(TestCase):
         ).timeit(5).median
         self.assertIsInstance(sample, float)
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_timer_tiny_fast_snippet(self):
@@ -180,7 +180,7 @@ class TestBenchmarkUtils(TestCase):
         median = timer.blocked_autorange().median
         self.assertIsInstance(median, float)
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
     @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_cpp_timer(self):
@@ -474,7 +474,7 @@ class TestBenchmarkUtils(TestCase):
               20 measurements, 1000 runs per measurement, 16 threads"""
         )
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
     @unittest.skipIf(TEST_WITH_ASAN, "fails on asan")
@@ -547,7 +547,7 @@ class TestBenchmarkUtils(TestCase):
             "JIT'd bindings are only for back testing."
         )
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
     @unittest.skipIf(True, "Failing on clang, see 74398")

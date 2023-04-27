@@ -1377,20 +1377,19 @@ def skipIfTBB(message="This test makes TBB sad"):
     return dec_fn
 
 
-def slowTest(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not TEST_WITH_SLOW:
-            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-        else:
-            fn(*args, **kwargs)
-    wrapper.__dict__['slow_test'] = True
-    return wrapper
-
-
-def slowAwareTest(fn):
-    fn.__dict__['slow_test'] = True
-    return fn
+def slowTest(condition=True):
+    def dec(fn):
+        if condition:
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if not TEST_WITH_SLOW:
+                    raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+                else:
+                    fn(*args, **kwargs)
+            wrapper.__dict__['slow_test'] = True
+            return wrapper
+        return fn
+    return dec
 
 
 def skipCUDAMemoryLeakCheckIf(condition):

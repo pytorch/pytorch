@@ -526,7 +526,7 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(inp.grad, torch.zeros_like(inp))
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
-    @slowTest
+    @slowTest()
     @onlyNativeDeviceTypes
     @skipCUDAIfRocm
     @parametrize_test("module_name,module_size,output_size,test_index,should_error", [
@@ -1467,7 +1467,7 @@ torch.cuda.synchronize()
             F.max_pool3d(x, kernel_size=(1, 1, 1)).sum().backward()
             self.assertEqual(x.grad, torch.ones_like(x.grad))
 
-    @slowTest
+    @slowTest()
     def test_adaptive_pool_odd_size(self, device):
         # See https://github.com/pytorch/pytorch/issues/81409
         Ih, Iw, Oh, Ow = 5873, 3693, 3527, 2219

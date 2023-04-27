@@ -2255,6 +2255,7 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_pass_inline(g)
         FileCheck().check_count("prim::If", 1, exactly=True).run(g)
 
+    @slowTest(TEST_WITH_ASAN)
     def test_dynamic_shapes(self):
         from functools import partial
         n = 10
@@ -2712,7 +2713,7 @@ def f({', '.join(param_names)}):
         else:
             raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
 
-    @slowTest
+    @slowTest()
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nnc_correctness(self, device, dtype, op):

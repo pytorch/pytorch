@@ -688,7 +688,7 @@ class CPUReproTests(TestCase):
                 assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1313,7 +1313,7 @@ class CPUReproTests(TestCase):
                 if simdlen != 1:
                     assert metrics.generated_cpp_vec_kernel_count == 2
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )

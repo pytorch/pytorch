@@ -569,7 +569,7 @@ class TestLinalg(TestCase):
                 torch.linalg.cholesky(A, out=out)
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
-    @slowTest
+    @slowTest()
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -1878,7 +1878,7 @@ class TestLinalg(TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-    @slowTest
+    @slowTest()
     @onlyCUDA
     @skipCUDAIfNoMagma
     @dtypes(torch.float32)
@@ -2536,7 +2536,7 @@ class TestLinalg(TestCase):
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
             cholesky_solve_batch_helper((5, batchsize), (batchsize, 5, 10), upper)
 
-    @slowTest
+    @slowTest()
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -2715,7 +2715,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The diagonal element 2 is zero'):
             torch.linalg.inv_ex(A, check_errors=True)
 
-    @slowTest
+    @slowTest()
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @skipCUDAIfRocm
@@ -4174,7 +4174,7 @@ class TestLinalg(TestCase):
                                                upper, unitriangular, transpose)
 
 
-    @slowTest
+    @slowTest()
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -5704,7 +5704,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
-    @slowTest
+    @slowTest()
     @onlyNativeDeviceTypes
     # bfloat16 doesn't have sufficient precision to pass this test
     @dtypes(torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
@@ -6248,7 +6248,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.randn(3, 3, 1, 1)
         self.assertEqual(expm(x), x.exp())
 
-    @slowTest
+    @slowTest()
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -7100,7 +7100,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             sub_test(False)
 
     @skipCUDAIfRocm  # ROCm: test was exceptionally slow, even for slow tests. Skip until triage.
-    @slowTest
+    @slowTest()
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(*floating_and_complex_types())

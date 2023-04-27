@@ -821,7 +821,7 @@ class TestReductions(TestCase):
         do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
                                   use_integral=use_integral, use_complex=use_complex), (0, 2, 1))
 
-    @slowTest
+    @slowTest()
     @onlyCPU
     def test_sum_dim(self, device):
         self._test_dim_ops(

@@ -921,7 +921,7 @@ class TestUnaryUfuncs(TestCase):
         test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
 
     @onlyCPU
-    @slowTest
+    @slowTest()
     @dtypes(torch.float)
     @unittest.skipIf(True, "Insufficient memory on linux.(2|4)xlarge")
     def test_exp_slow(self, device, dtype):

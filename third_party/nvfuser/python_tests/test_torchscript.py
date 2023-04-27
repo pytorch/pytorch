@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest, \
-    is_iterable_of_tensors, freeze_rng_state, skipIfRocm
+    is_iterable_of_tensors, freeze_rng_state, skipIfRocm, IS_WINDOWS
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -3383,6 +3383,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @slowTest(IS_WINDOWS)
     def test_batch_norm_impl_index_correctness(self):
         with torch.backends.cudnn.flags(enabled=True):
             batch = [2, 7, 16]
@@ -5206,7 +5207,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
 
         super(TestCudaFuserOpInfoParent, self).tearDown()
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
@@ -5233,7 +5234,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         torch.jit._state._python_cu.drop_all_functions()
 
     @skipIfRocm
-    @slowTest
+    @slowTest()
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")

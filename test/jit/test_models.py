@@ -222,7 +222,7 @@ class TestModels(JitTestCase):
 
         self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
 
-    @slowTest
+    @slowTest()
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
 
@@ -396,7 +396,7 @@ class TestModels(JitTestCase):
             self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
                             inputs_require_grads=False, export_import=check_export_import)
 
-    @slowTest
+    @slowTest()
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
@@ -436,7 +436,7 @@ class TestModels(JitTestCase):
         self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
-    @slowTest
+    @slowTest()
     def test_super_resolution(self):
         self._test_super_resolution(self, device='cpu')
 
@@ -557,7 +557,7 @@ class TestModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_vae(self, device='cuda', check_export_import=False)
 
-    @slowTest
+    @slowTest()
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
@@ -577,7 +577,7 @@ class TestModels(JitTestCase):
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
 
-    @slowTest
+    @slowTest()
     @skipIfNoTorchVision
     def test_script_module_script_resnet(self):
         def conv1x1(in_planes, out_planes, stride=1):

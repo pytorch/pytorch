@@ -282,7 +282,7 @@ class TestTesting(TestCase):
     # See: https://github.com/pytorch/pytorch/issues/49019
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
-    @slowTest
+    @slowTest()
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
@@ -293,13 +293,13 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 
 class TestThatContainsCUDAAssertFailure(TestCase):
 
-    @slowTest
+    @slowTest()
     def test_throw_unrecoverable_cuda_exception(self):
         x = torch.rand(10, device='cuda')
         # cause unrecoverable CUDA exception, recoverable on CPU
         y = x[torch.tensor([25])].cpu()
 
-    @slowTest
+    @slowTest()
     def test_trivial_passing_test_case_on_cpu_cuda(self):
         x1 = torch.tensor([0., 1.], device='cuda')
         x2 = torch.tensor([0., 1.], device='cpu')
@@ -316,7 +316,7 @@ if __name__ == '__main__':
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
-    @slowTest
+    @slowTest()
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
@@ -328,13 +328,13 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 class TestThatContainsCUDAAssertFailure(TestCase):
 
-    @slowTest
+    @slowTest()
     def test_throw_unrecoverable_cuda_exception(self, device):
         x = torch.rand(10, device=device)
         # cause unrecoverable CUDA exception, recoverable on CPU
         y = x[torch.tensor([25])].cpu()
 
-    @slowTest
+    @slowTest()
     def test_trivial_passing_test_case_on_cpu_cuda(self, device):
         x1 = torch.tensor([0., 1.], device=device)
         x2 = torch.tensor([0., 1.], device='cpu')
@@ -357,7 +357,7 @@ if __name__ == '__main__':
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
-    @slowTest
+    @slowTest()
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
@@ -370,13 +370,13 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase
 
 class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
 
-    @slowTest
+    @slowTest()
     def test_throw_unrecoverable_cuda_exception(self, device):
         x = torch.rand(10, device=device)
         # cause unrecoverable CUDA exception, recoverable on CPU
         y = x[torch.tensor([25])].cpu()
 
-    @slowTest
+    @slowTest()
     def test_trivial_passing_test_case_on_cpu_cuda(self, device):
         x1 = torch.tensor([0., 1.], device=device)
         x2 = torch.tensor([0., 1.], device='cpu')

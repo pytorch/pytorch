@@ -12646,7 +12646,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool,
            decorators=(
-               DecorateInfo(slowTest, 'TestJit', 'test_variant_consistency_jit', active_if=TEST_WITH_ASAN),
+               DecorateInfo(slowTest(), 'TestJit', 'test_variant_consistency_jit', active_if=TEST_WITH_ASAN),
            )),
     OpInfo('max_pool2d_with_indices_backward',
            op=max_pool2d_backward,

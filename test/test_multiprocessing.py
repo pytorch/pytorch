@@ -488,7 +488,7 @@ class TestMultiprocessing(TestCase):
             self.assertFalse(p.is_alive())
 
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')

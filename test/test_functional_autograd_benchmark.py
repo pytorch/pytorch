@@ -47,7 +47,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
         for task in fast_tasks:
             self._test_runner(task)
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows does not have all the features we need.")
     def test_slow_tasks(self):
         slow_tasks = ['fcn_resnet', 'detr']

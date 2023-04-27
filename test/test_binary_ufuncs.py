@@ -4308,7 +4308,7 @@ class TestBinaryUfuncs(TestCase):
 
     @dtypes(*product(all_types_and(torch.bool), all_types_and(torch.bool)))
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    @slowTest
+    @slowTest()
     def test_zeta(self, device, dtypes):
         x_dtype, q_dtype = dtypes
 

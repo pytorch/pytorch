@@ -1627,7 +1627,7 @@ except RuntimeError as e:
         ]
         self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -1658,7 +1658,7 @@ except RuntimeError as e:
         except RuntimeError as err:
             return err
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @skipIfRocm
@@ -1669,7 +1669,7 @@ except RuntimeError as e:
         # Test that indexing out of bounds causes assert
         self._spawn_method(test_method, 11)
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_huge_index(self):
         src = torch.empty(15000000, 45, device='cuda', dtype=torch.long).random_(0, 2**22)
@@ -3412,7 +3412,7 @@ torch.cuda.synchronize()
         self.assertTrue(output.dtype is torch.float16)
         output.sum().backward()
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):
         x = torch.zeros(2**32, device='cuda', dtype=torch.int8)

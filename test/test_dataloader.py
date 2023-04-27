@@ -1862,7 +1862,7 @@ except RuntimeError as e:
     # Takes 2.5min to finish, see https://github.com/pytorch/pytorch/issues/46065
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
-    @slowTest
+    @slowTest()
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')

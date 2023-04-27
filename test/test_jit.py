@@ -1872,7 +1872,7 @@ graph(%Ra, %Rb):
                         assert(o.equal(o_ref))
                         assert(x.grad.equal(x_ref.grad))
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
         with enable_profiling_mode_for_profiling_tests():
@@ -2531,7 +2531,7 @@ graph(%Ra, %Rb):
         input = torch.rand(3, 4).cuda()
         self.assertEqual(m(input), m2(input))
 
-    @slowTest
+    @slowTest()
     def test_export_batchnorm(self):
         for mode in ['eval', 'train']:
             for clazz in [
@@ -5780,7 +5780,7 @@ a")
         code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
         FileCheck().check('sqrtf').run(code)
 
-    @slowTest
+    @slowTest()
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
@@ -10446,7 +10446,7 @@ dedent """
             self.assertEqual(m_orig.doit3(input), m_import.doit3(input))
             self.assertEqual(m_orig.forward(input), m_import.forward(input))
 
-    @slowTest
+    @slowTest()
     def test_compile_module_with_constant(self):
         class Double(nn.Module):
             def __init__(self, downsample=None):

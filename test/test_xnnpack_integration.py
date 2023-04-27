@@ -1044,7 +1044,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
                                                                                data_shape)
 
     # See https://github.com/pytorch/pytorch/issues/46066
-    @slowTest
+    @slowTest()
     def test_conv1d_with_relu_fc(self):
         batch_size_list = range(1, 3)
         input_channels_per_group_list = range(10, 12)

@@ -1605,7 +1605,7 @@ class CommonTemplate:
                 (torch.randn(8, 12, 512, 512),),
             )
 
-    @slowTest
+    @slowTest()
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
