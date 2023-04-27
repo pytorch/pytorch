@@ -69,21 +69,28 @@ def custom_op(
     This API is used as a decorator (see examples).
 
     Arguments:
-        TODO(rzou)
-        schema (str): The schema of the CustomOp.
-        ns (str): The namespace of the CustomOp. PyTorch operators need a
-            namespace; a given operator may only be created once. If you
-            are writing a Python library, we recommend the namespace to be
-            the name of your top-level module.
+        qualname (str): Should be a string that looks like
+            "namespace::operator_name". Operators in PyTorch need a namespace to
+            avoid name collisions; a given operator may only be created once.
+            If you are writing a Python library, we recommend the namespace to
+            be the name of your top-level module. The operator_name must be
+            the same as the name of the function you pass to custom_op
+            (see examples).
+        manual_schema (Optional[str]): Each PyTorch operator needs a schema that
+            tells PyTorch the types of the inputs/outputs. If None (default),
+            we will infer the schema from the type annotations on the function
+            (see examples). Otherwise, if you don't want to use type annotations,
+            you may provide us the schema string.
 
     Example::
         >>> import numpy as np
+        >>> from torch import Tensor
         >>>
         >>> # Step 1: define the CustomOp.
         >>> # We need to provide the decorator a "prototype function"
         >>> # (a function with Python ellipses as the body).
-        >>> @custom_op('(Tensor x) -> Tensor')
-        >>> def numpy_sin(x):
+        >>> @custom_op("mylibrary::numpy_sin")
+        >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     ...
         >>>
         >>> # numpy_sin is now an instance of class CustomOp
@@ -160,7 +167,8 @@ def custom_op(
 # Used to query the CustomOp associated with a specific C++ dispatcher operator.
 # An example usage is FakeTensor: FakeTensor checks if a specific operator
 # has an implementation registered via the CustomOp API.
-global_registry: typing.Dict["qualname", "CustomOp"] = {}
+# Indexed by qualname (e.g. aten::foo)
+global_registry: typing.Dict[str, "CustomOp"] = {}
 
 
 class CustomOp:
@@ -235,9 +243,10 @@ class CustomOp:
 
         Examples::
             >>> import numpy as np
+            >>> from torch import Tensor
             >>>
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def numpy_sin(x):
+            >>> @custom_op("mylibrary::numpy_sin")
+            >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> # Register an implementation for CPU Tensors
@@ -291,10 +300,11 @@ class CustomOp:
 
         Examples::
             >>> import numpy as np
+            >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @custom_op('(Tensor x, Tensor weight, Tensor bias) -> Tensor', ns='custom')
-            >>> def custom_linear(x, weight, bias):
+            >>> @custom_op('mylibrary::custom_linear')
+            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor):
             >>>     ...
             >>>
             >>> @custom_linear.impl_abstract():
@@ -309,8 +319,8 @@ class CustomOp:
             >>>     return (x @ weight.t()) + bias
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def custom_nonzero(x):
+            >>> @custom_op('mylibrary::custom_nonzero')
+            >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> @custom_nonzero.impl_abstract():
@@ -321,10 +331,6 @@ class CustomOp:
             >>>     # represents the data-dependent size.
             >>>     ctx = torch._custom_op.get_ctx()
             >>>     nnz = ctx.create_unbacked_symint()
-            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
-            >>>     # range to at least 2. Note that the operator implementation
-            >>>     # must also do this.
-            >>>     ctx.constrain_range(nnz, min=2)
             >>>     shape = [x.dim(), nnz]
             >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
@@ -333,8 +339,8 @@ class CustomOp:
             >>> def custom_nonzero_impl(x):
             >>>     x_np = to_numpy(x)
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
-            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
-            >>>     # range to at least 2.
+            >>>     # unbacked symbolic ints in PyTorch must be >= 2, so we
+            >>>     # constrain the range to at least 2
             >>>     if res.shape[0] <= 1:
             >>>         raise RuntimeError("not supported")
             >>>     return torch.tensor(res, device=x.device)
@@ -616,8 +622,8 @@ class AbstractImplCtx:
         Example::
 
             >>> # an operator with data-dependent output shape
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def custom_nonzero(x):
+            >>> @custom_op("mylibrary::custom_nonzero")
+            >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> @custom_nonzero.impl_abstract():
