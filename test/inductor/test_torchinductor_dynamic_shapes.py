@@ -141,6 +141,16 @@ class TestInductorDynamic(TestCase):
         ref = fn(a)
         self.assertEqual(res, ref)
 
+    def test_shape_as_constant_reciprocal_float_exp(self, device):
+        def fn(x, a):
+            return x, -1 / a**1.0
+
+        x = torch.rand(10, 20, device=device)
+        opt = self.compile_fn(fn)
+        res = opt(x, x.size(0))
+        ref = fn(x, x.size(0))
+        self.assertEqual(res, ref)
+
     @onlyCUDA
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
