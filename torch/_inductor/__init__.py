@@ -45,12 +45,12 @@ def aot_compile(
     """
     from .compile_fx import compile_fx_aot
 
-    compiled = compile_fx_aot(
+    result = compile_fx_aot(
         gm,
         example_inputs,
         config_patches=options,
-    )
-    lib_path = compiled()
+    )()
+    lib_path = result[0] if isinstance(result, tuple) else result
     return lib_path
 
 

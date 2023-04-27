@@ -111,6 +111,12 @@ class UnknownVariable(VariableTracker):
     """
 
 
+class DelayGraphBreakVariable(UnknownVariable):
+    """
+    Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
+    """
+
+
 class ComptimeVariable(VariableTracker):
     """
     This variable is special, it lets you execute arbitrary code at
