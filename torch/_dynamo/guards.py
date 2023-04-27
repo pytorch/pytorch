@@ -755,11 +755,19 @@ class CheckFunctionManager:
                     return converted
 
                 dynamic_dims_sizes = [
-                    convert(self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)]["size"])
+                    convert(
+                        self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                            "size"
+                        ]
+                    )
                     for t in tensor_check_examples
                 ]
                 dynamic_dims_strides = [
-                    convert(self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)]["stride"])
+                    convert(
+                        self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                            "stride"
+                        ]
+                    )
                     for t in tensor_check_examples
                 ]
 
