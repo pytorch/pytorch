@@ -25,7 +25,7 @@ class ForeachTests(TestCase):
     check_model = check_model_cuda
 
     @requires_cuda()
-    def test_single_foreach(self):
+    def test_single(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
 
@@ -40,7 +40,7 @@ class ForeachTests(TestCase):
         )
 
     @requires_cuda()
-    def test_foreach_ir_fusion(self):
+    def test_lowering_fusion(self):
         def fn(a0, a1, b0, b1):
             c = torch._foreach_add([a0, a1], [b0, b1])
             return torch._foreach_add([a0, a1], c)
@@ -56,7 +56,7 @@ class ForeachTests(TestCase):
         )
 
     @requires_cuda()
-    def test_foreach_scheduler_fusion(self):
+    def test_scheduler_fusion(self):
         def fn(a0, a1, b0, b1):
             c = torch._foreach_add([a0, a1], [b0, b1])
             return c, torch._foreach_add(
@@ -74,11 +74,11 @@ class ForeachTests(TestCase):
         )
 
     @requires_cuda()
-    def test_foreach_broadcasting(self):
+    def test_broadcasting(self):
         pass
 
     @requires_cuda()
-    def test_foreach_type_promotion(self):
+    def test_type_promotion(self):
         pass
 
     @requires_cuda()
@@ -86,11 +86,15 @@ class ForeachTests(TestCase):
         pass
 
     @requires_cuda()
-    def test_foreach_non_foreach_consumer(self):
+    def test_non_foreach_consumer(self):
         pass
 
     @requires_cuda()
-    def test_foreach_non_foreach_producer(self):
+    def test_non_foreach_producer(self):
+        pass
+
+    @requires_cuda()
+    def test_non_foreach_consumer_producer(self):
         pass
 
 
