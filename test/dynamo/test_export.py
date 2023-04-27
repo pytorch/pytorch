@@ -2274,6 +2274,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     )
     def test_export_preserve_constraints_as_metadata(self):
         import io
+
         from torch._export.constraints import constrain_as_size
 
         def f(x, y):
