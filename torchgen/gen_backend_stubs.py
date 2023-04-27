@@ -23,7 +23,7 @@ from torchgen.model import (
 )
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
-from torchgen.yaml import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.

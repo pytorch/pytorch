@@ -95,7 +95,7 @@ from torchgen.utils import (
     NamespaceHelper,
     Target,
 )
-from torchgen.yaml import YamlDumper, YamlLoader
+from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 T = TypeVar("T")
 
