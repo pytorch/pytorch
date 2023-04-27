@@ -1542,9 +1542,7 @@ def compile(model: Optional[Callable] = None, *,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
-            disable: builtins.bool = False,
-            trainstep: builtins.bool = False,
-            fake_mode=None) -> Callable:
+            disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
@@ -1572,8 +1570,6 @@ def compile(model: Optional[Callable] = None, *,
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
-       trainstep (bool): Supercedes (and implies) fullgraph=True, but supports .backward() and optimizer compilation.
-       fake_mode (Optional[FakeMode]): If using deferred initialization, provide the FakeMode.
 
     Example::
 
@@ -1594,8 +1590,7 @@ def compile(model: Optional[Callable] = None, *,
                            backend=backend,
                            mode=mode,
                            options=options,
-                           disable=disable,
-                           trainstep=trainstep)
+                           disable=disable)
         return fn
 
     import torch._dynamo
@@ -1606,9 +1601,7 @@ def compile(model: Optional[Callable] = None, *,
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
 
-    return torch._dynamo.optimize(
-        backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable, trainstep=trainstep, fake_mode=fake_mode
-    )(model)
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
 def _register_device_module(device_type, module):

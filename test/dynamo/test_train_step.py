@@ -7,7 +7,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
-from torch._dynamo.backends.train_step import get_deferred_modes
+from torch._dynamo.backends.train_step import _compile_train_step, get_deferred_modes
 from torch._dynamo.testing import same
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
@@ -67,9 +67,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
         correct_loss = train_step(model, inputs)
 
-        opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", trainstep=True
-        )
+        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
         opt_loss = opt_train_step(model, inputs)
 
         self.assertTrue(same(correct_loss, opt_loss))
@@ -106,9 +104,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             name: param.clone().detach() for name, param in model.named_parameters()
         }
 
-        opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", trainstep=True
-        )
+        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
         opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
         opt_params = {
             name: param.clone().detach() for name, param in opt_model.named_parameters()
@@ -153,9 +149,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_optimizer = deepcopy(optimizer)
         inputs = [torch.randn((128, 10)).cuda()]
 
-        opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", trainstep=True
-        )
+        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
         for step in range(10):
             correct_loss = train_step(model, optimizer, inputs)
             opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
@@ -228,10 +222,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         """
         opt_optimizer = torch.optim.Adam(deferred_model.parameters(), capturable=True)
 
-        opt_train_step = torch.compile(
+        opt_train_step = _compile_train_step(
             train_step,
             backend="train_step_eager",
-            trainstep=True,
             fake_mode=fake_tensor_mode,
         )
 
@@ -257,9 +250,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_model.apply(init_weights)
         opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
         inputs = [torch.randn((128, 10))]
-        opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", trainstep=True
-        )
+        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
 
         loss = []
         for step in range(10):
@@ -292,9 +283,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [
             pre_input_layer(pre_inputs),
         ]
-        opt_train_step = torch.compile(
-            train_step, backend="train_step_eager", trainstep=True
-        )
+        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
 
         with self.assertRaisesRegex(AssertionError, r"an input tensor has a grad_fn"):
             opt_train_step(opt_model, opt_optimizer, inputs)
@@ -310,8 +299,8 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [
             torch.randn((128, 10)),
         ]
-        opt_train_step = torch.compile(
-            train_step_multi_backward, backend="train_step_eager", trainstep=True
+        opt_train_step = _compile_train_step(
+            train_step_multi_backward, backend="train_step_eager"
         )
         with self.assertRaisesRegex(AssertionError, r"multiple \.backward\(\) calls"):
             opt_train_step(opt_model, opt_optimizer, inputs)
@@ -321,8 +310,8 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss = out.sum()
             loss.backward(loss)
 
-        opt_train_step = torch.compile(
-            train_step_backward_args, backend="train_step_eager", trainstep=True
+        opt_train_step = _compile_train_step(
+            train_step_backward_args, backend="train_step_eager"
         )
 
         with self.assertRaisesRegex(
