@@ -183,7 +183,7 @@ fi
 # This tests that the debug asserts are working correctly.
 if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
     echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
-    # TODO: Enable the check after we setup the build to run debug asserts without having 
+    # TODO: Enable the check after we setup the build to run debug asserts without having
     #       to do a full (and slow) debug build
     # (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
 elif [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
