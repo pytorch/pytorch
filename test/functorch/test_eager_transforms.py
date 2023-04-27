@@ -4735,6 +4735,9 @@ def traceable(f):
 
 class TestCompileTransforms(TestCase):
     def test_compile_hessian(self, device):
+        # The model and inputs are a smaller version
+        # of code at benchmark repo:
+        # https://github.com/pytorch/benchmark/blob/main/userbenchmark/functorch/vmap_hessian_fc.py
         D = 2
         B = 4
 
