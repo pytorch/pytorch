@@ -1280,8 +1280,10 @@ def make_rand(fn_name):
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
+fallback_randint = fallback_handler(aten.randint)
 fast_rand = make_rand("rand")
 fast_randn = make_rand("randn")
+fast_randint = make_rand("randint")
 
 
 @register_lowering([aten.rand, torch.rand])
@@ -1300,6 +1302,22 @@ def randn(*args, **kwargs):
     else:
         kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
+
+
+@register_lowering([aten.randint])
+def randint(*args, **kwargs):
+    if (
+        config.fallback_random
+        or kwargs.get("generator", None) is not None
+        or kwargs.get("dtype", None) is not torch.int32
+        or len(args) != 3
+        or args[0] != -(2**31)
+        or args[1] != 2**31
+    ):
+        return fallback_randint(*args, **kwargs)
+    else:
+        kwargs.pop("generator", None)
+        return fast_randint(args[2], **kwargs)
 
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
@@ -2703,7 +2721,7 @@ def rev(x, dims):
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
-        return x
+        return clone(x)
 
     sizes = x.get_size()
 
@@ -2997,10 +3015,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3010,15 +3028,11 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            ph, ops.sub(phend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
                     ),
                 ]
@@ -3405,18 +3419,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.int_minimum(
+        hend = ops.minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.int_minimum(
+        wend = ops.minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3433,10 +3447,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3454,13 +3468,13 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
                             ),
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
@@ -3853,6 +3867,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
