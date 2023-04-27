@@ -124,7 +124,8 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
  */
 void CUDAGeneratorImpl::set_offset(uint64_t offset) {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_offset");
-  philox_offset_per_thread_ = offset;
+  // the set function checks if the offset is a multiple of 4.
+  set_philox_offset_per_thread(offset);
   no_reset_rnn_state_.clear();
 }
 
