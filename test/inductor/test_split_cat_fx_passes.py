@@ -13,6 +13,9 @@ class TestSplitCatFxPasses(TestCase):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
 
+        def arg_only_dim0(x):
+            return [torch.relu(s) for s in torch.split(x, 2, 0)]
+
         def kwarg1(x):
             return [torch.relu(s) for s in torch.split(x, 2, dim=1)]
 
@@ -56,6 +59,7 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, expected_split_norm_count in [
             (arg_only, 1),
+            (arg_only_dim0, 1),
             (kwarg1, 1),
             (kwarg2, 1),
             (kwarg3, 1),
