@@ -62,16 +62,15 @@ TESTED_OPS: frozenset[str] = frozenset(
 # Expected failures for onnx export.
 # The list should be sorted alphabetically by op name.
 # Q: When should I use fixme vs vs skip vs xfail?
-# A: Use fixme when we want to fix the test eventually but it doesn't fail consistently,
-#        e.g. the test is flaky or some tests pass. Otherwise, use xfail.
-#    Use skip if we don't care about the test passing, e.g. ONNX doesn't support the usage.
-#    Use xfail if a test fails now and we want to eventually fix the test.
+# A: Prefer xfail over skip when possible.
+#     2a. If a test is now failing because of xpass, because some previous errors
+#     are now fixed, removed the corresponding xfail.
+#     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
-    skip("ceil", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3 (https://github.com/pytorch/pytorch/issues/99534)"),
 )
 # fmt: on
