@@ -52,7 +52,9 @@ RESERVED_NS = {
 }
 
 
-def custom_op(schema: str, *, ns: str) -> typing.Callable:
+def custom_op(
+    qualname: str, manual_schema: typing.Optional[str] = None
+) -> typing.Callable:
     r"""Creates a new CustomOp object.
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
@@ -67,20 +69,28 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
     This API is used as a decorator (see examples).
 
     Arguments:
-        schema (str): The schema of the CustomOp.
-        ns (str): The namespace of the CustomOp. PyTorch operators need a
-            namespace; a given operator may only be created once. If you
-            are writing a Python library, we recommend the namespace to be
-            the name of your top-level module.
+        qualname (str): Should be a string that looks like
+            "namespace::operator_name". Operators in PyTorch need a namespace to
+            avoid name collisions; a given operator may only be created once.
+            If you are writing a Python library, we recommend the namespace to
+            be the name of your top-level module. The operator_name must be
+            the same as the name of the function you pass to custom_op
+            (see examples).
+        manual_schema (Optional[str]): Each PyTorch operator needs a schema that
+            tells PyTorch the types of the inputs/outputs. If None (default),
+            we will infer the schema from the type annotations on the function
+            (see examples). Otherwise, if you don't want to use type annotations,
+            you may provide us the schema string.
 
     Example::
         >>> import numpy as np
+        >>> from torch import Tensor
         >>>
         >>> # Step 1: define the CustomOp.
         >>> # We need to provide the decorator a "prototype function"
         >>> # (a function with Python ellipses as the body).
-        >>> @custom_op('(Tensor x) -> Tensor')
-        >>> def numpy_sin(x):
+        >>> @custom_op("mylibrary::numpy_sin")
+        >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     ...
         >>>
         >>> # numpy_sin is now an instance of class CustomOp
@@ -113,11 +123,22 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
                 f"function, got: {type(func)}"
             )
 
+        ns, name = parse_namespace(qualname)
         validate_namespace(ns)
-        schema_str = f"{func.__name__}{schema}"
+        if func.__name__ != name:
+            raise ValueError(
+                f"custom_op(qualname='{qualname}', ...)(func): expected `func` "
+                f"to have name '{name}' but got '{func.__name__}'. "
+                f"Please either change the name of `func` or the qualname that "
+                f"is passed to `custom_op`"
+            )
+
+        schema = infer_schema(func) if manual_schema is None else manual_schema
+        schema_str = f"{name}{schema}"
         function_schema = FunctionSchema.parse(schema_str)
         validate_schema(function_schema)
-        validate_function_matches_schema(function_schema, func)
+        if manual_schema is not None:
+            validate_function_matches_schema(function_schema, func)
 
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
@@ -222,9 +243,10 @@ class CustomOp:
 
         Examples::
             >>> import numpy as np
+            >>> from torch import Tensor
             >>>
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def numpy_sin(x):
+            >>> @custom_op("mylibrary::numpy_sin")
+            >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> # Register an implementation for CPU Tensors
@@ -278,10 +300,11 @@ class CustomOp:
 
         Examples::
             >>> import numpy as np
+            >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @custom_op('(Tensor x, Tensor weight, Tensor bias) -> Tensor', ns='custom')
-            >>> def custom_linear(x, weight, bias):
+            >>> @custom_op('mylibrary::custom_linear')
+            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor):
             >>>     ...
             >>>
             >>> @custom_linear.impl_abstract():
@@ -296,8 +319,8 @@ class CustomOp:
             >>>     return (x @ weight.t()) + bias
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def custom_nonzero(x):
+            >>> @custom_op('mylibrary::custom_nonzero')
+            >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> @custom_nonzero.impl_abstract():
@@ -308,10 +331,6 @@ class CustomOp:
             >>>     # represents the data-dependent size.
             >>>     ctx = torch._custom_op.get_ctx()
             >>>     nnz = ctx.create_unbacked_symint()
-            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
-            >>>     # range to at least 2. Note that the operator implementation
-            >>>     # must also do this.
-            >>>     ctx.constrain_range(nnz, min=2)
             >>>     shape = [x.dim(), nnz]
             >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
@@ -320,8 +339,8 @@ class CustomOp:
             >>> def custom_nonzero_impl(x):
             >>>     x_np = to_numpy(x)
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
-            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
-            >>>     # range to at least 2.
+            >>>     # unbacked symbolic ints in PyTorch must be >= 2, so we
+            >>>     # constrain the range to at least 2
             >>>     if res.shape[0] <= 1:
             >>>         raise RuntimeError("not supported")
             >>>     return torch.tensor(res, device=x.device)
@@ -459,27 +478,76 @@ def get_autograd_not_implemented_kernel(custom_op) -> typing.Callable:
     return autograd_not_implemented
 
 
+def supported_param(param: inspect.Parameter) -> bool:
+    return param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+
+
 def validate_function_matches_schema(
     schema: FunctionSchema, func: typing.Callable
 ) -> None:
-    arg_spec = inspect.getfullargspec(func)
+    sig = inspect.signature(func)
 
-    arg_names = tuple(arg.name for arg in schema.arguments.post_self_positional)
-    if arg_names != tuple(arg_spec.args):
+    if not all(supported_param(p) for _, p in sig.parameters.items()):
         raise ValueError(
-            f"custom_op: Expected the schema to match the signature of `func`. "
-            f"Schema has arg names {arg_names} but function has {arg_spec.args}."
+            f"custom_op(..., manual_schema)(func): positional-only args, "
+            f"varargs, and kwargs are not supported. Please rewrite `func` "
+            f"to not have them. Got `func` with signature: {sig}"
         )
 
-    kwonlyarg_names = tuple(
-        arg.name for arg in schema.arguments.pre_tensor_options_kwarg_only
-    )
-    if kwonlyarg_names != tuple(arg_spec.kwonlyargs):
-        raise ValueError(
-            f"custom_op: Expected the schema to match the signature of `func`. "
-            f"Schema has kwonlyarg names {kwonlyarg_names} but function has "
-            f"{arg_spec.kwonlyargs}."
+    if (
+        any(
+            p.annotation is not inspect.Parameter.empty
+            for _, p in sig.parameters.items()
         )
+        or sig.return_annotation is not inspect.Signature.empty
+    ):
+        raise ValueError(
+            f"custom_op(..., manual_schema)(func): When passing in a manual "
+            f"schema, we expect `func` to have no type annotations to avoid "
+            f"ambiguity. Got `func` with signature: {sig}"
+        )
+
+    positional = [
+        (name, param)
+        for name, param in sig.parameters.items()
+        if param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ]
+    kwargonly = [
+        (name, param)
+        for name, param in sig.parameters.items()
+        if param.kind == inspect.Parameter.KEYWORD_ONLY
+    ]
+
+    def error():
+        raise ValueError(
+            f"custom_op(..., manual_schema)(func): When passing in a manual "
+            f"schema, we expect `func`'s signature to match `manual_schema` "
+            f"(aside from type annotations). "
+            f"func's signature: {sig}, manual_schema: {schema}"
+        )
+
+    def error_default_args():
+        raise ValueError(
+            f"custom_op(..., manual_schema)(func): "
+            f"neither func nor manual_schema should have default "
+            f"arguments. Got "
+            f"func's signature: {sig}, manual_schema: {schema}"
+        )
+
+    def compare(sig_args, schema_args):
+        if len(sig_args) != len(schema_args):
+            error()
+        for (name, param), arg in zip(sig_args, schema_args):
+            if name != arg.name:
+                error()
+            if param.default is not inspect.Parameter.empty or arg.default is not None:
+                error_default_args()
+
+    compare(positional, schema.arguments.flat_positional)
+    compare(kwargonly, schema.arguments.flat_kwarg_only)
 
 
 def get_none():
@@ -554,8 +622,8 @@ class AbstractImplCtx:
         Example::
 
             >>> # an operator with data-dependent output shape
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def custom_nonzero(x):
+            >>> @custom_op("mylibrary::custom_nonzero")
+            >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     ...
             >>>
             >>> @custom_nonzero.impl_abstract():
@@ -601,3 +669,91 @@ class AbstractImplCtx:
         result = self._shape_env.create_unbacked_symint()
         torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max)
         return result
+
+
+def infer_schema(prototype_function: typing.Callable) -> str:
+    sig = inspect.signature(prototype_function)
+
+    def error_fn(what):
+        raise ValueError(
+            f"custom_op(...)(func): {what} " f"Got func with signature {sig})"
+        )
+
+    params = [
+        parse_param(name, param, error_fn) for name, param in sig.parameters.items()
+    ]
+    ret = parse_return(sig.return_annotation, error_fn)
+    return f"({', '.join(params)}) -> {ret}"
+
+
+def parse_param(name, param, error_fn):
+    if not supported_param(param):
+        error_fn("We do not support positional-only args, varargs, or varkwargs.")
+
+    if param.annotation is inspect.Parameter.empty:
+        error_fn(f"Parameter {name} must have a type annotation.")
+
+    if param.annotation not in SUPPORTED_PARAM_TYPES.keys():
+        error_fn(
+            f"Parameter {name} has unsupported type {param.annotation}. "
+            f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
+        )
+
+    if param.default is not inspect.Parameter.empty:
+        error_fn(
+            f"Parameter {name} has a default value; this is not supported. "
+            f"If you want to use default values then create a function with "
+            f"default values that calls the CustomOp"
+        )
+
+    return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
+
+
+def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
+    result = [
+        (base_type, cpp_type),
+        (typing.Optional[base_type], f"{cpp_type}?"),
+        (typing.Tuple[base_type, ...], f"{cpp_type}[]"),
+    ]
+    if optional_base_list:
+        result.append((typing.Tuple[typing.Optional[base_type], ...], f"{cpp_type}?[]"))
+    if optional_list_base:
+        result.append((typing.Optional[typing.Tuple[base_type, ...]], f"{cpp_type}[]?"))
+    return result
+
+
+def get_supported_param_types():
+    data = [
+        # (python type, schema type, type?[] variant, type[]? variant
+        (torch.Tensor, "Tensor", True, False),
+        (int, "SymInt", False, True),
+        (float, "float", False, True),
+        (bool, "bool", False, True),
+        (torch.types.Number, "Scalar", False, False),
+    ]
+    result = []
+    for line in data:
+        result.extend(derived_types(*line))
+    return dict(result)
+
+
+def parse_return(annotation, error_fn):
+    if annotation is torch.Tensor:
+        return "Tensor"
+    origin = typing.get_origin(annotation)
+    if origin is not tuple:
+        error_fn(
+            "Expected output of func to be type annotated as either Tensor "
+            "or a Tuple of known size of one or more tensors"
+        )
+    args = typing.get_args(annotation)
+    for arg in args:
+        if arg is not torch.Tensor:
+            error_fn(
+                "Expected output of func to be type annotated as either Tensor "
+                "or a Tuple of known size of one or more tensors"
+            )
+    return "(" + ", ".join(["Tensor"] * len(args)) + ")"
+
+
+SUPPORTED_PARAM_TYPES = get_supported_param_types()
