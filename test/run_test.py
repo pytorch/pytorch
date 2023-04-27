@@ -139,9 +139,9 @@ def discover_tests(
     return sorted(rc)
 
 
-CPP_TESTS_DIR = os.getenv("CPP_TESTS_DIR", default=None)
+CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
 TESTS = discover_tests(
-    cpp_tests_dir=os.path.abspath(CPP_TESTS_DIR) if CPP_TESTS_DIR else None,
+    cpp_tests_dir=CPP_TESTS_DIR,
     blocklisted_patterns=[
         "ao",
         "bottleneck_test",
@@ -334,7 +334,6 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
-    "cpp/test_tensorexpr",  # TEFuserPass.DynamicShapeFusion fails flakily
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -932,7 +931,7 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.append("--use-pytest")
-    else:
+    elif IS_CI:
         # NB: Use --junit-xml to generate the C++ test report for now in
         # pytest format. Note that this format is different than the one
         # used by unittest via --junit-xml-reruns. But this is ok as we

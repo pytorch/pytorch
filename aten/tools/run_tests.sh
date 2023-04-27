@@ -6,26 +6,26 @@ VALGRIND_SUP="${PWD}/`dirname $0`/valgrind.sup"
 export CPP_TESTS_DIR=$1
 
 VALGRIND=${VALGRIND:=ON}
-python test/run_test.py --cpp --verbose \
-  -i cpp/basic \
-  -i cpp/atest \
-  -i cpp/scalar_test \
-  -i cpp/broadcast_test \
-  -i cpp/wrapdim_test \
-  -i cpp/apply_utils_test \
-  -i cpp/dlconvertor_test \
-  -i cpp/native_test \
-  -i cpp/scalar_tensor_test \
-  -i cpp/undefined_tensor_test \
-  -i cpp/extension_backend_test \
-  -i cpp/lazy_tensor_test \
-  -i cpp/tensor_iterator_test \
-  -i cpp/Dimname_test \
-  -i cpp/Dict_test \
-  -i cpp/NamedTensor_test \
-  -i cpp/cpu_generator_test \
-  -i cpp/legacy_vmap_test \
-  -i cpp/operators_test
+python test/run_test.py --cpp --verbose -i \
+  cpp/basic \
+  cpp/atest \
+  cpp/scalar_test \
+  cpp/broadcast_test \
+  cpp/wrapdim_test \
+  cpp/apply_utils_test \
+  cpp/dlconvertor_test \
+  cpp/native_test \
+  cpp/scalar_tensor_test \
+  cpp/undefined_tensor_test \
+  cpp/extension_backend_test \
+  cpp/lazy_tensor_test \
+  cpp/tensor_iterator_test \
+  cpp/Dimname_test \
+  cpp/Dict_test \
+  cpp/NamedTensor_test \
+  cpp/cpu_generator_test \
+  cpp/legacy_vmap_test \
+  cpp/operators_test
 
 if [[ -x ./tensor_interop_test ]]; then
   python test/run_test.py --cpp --verbose -i cpp/tensor_interop_test

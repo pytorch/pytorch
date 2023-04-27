@@ -525,7 +525,7 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py setup
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      python test/run_test.py --cpp --verbose -i cpp/test_jit -i cpp/nvfuser_tests
+      python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
     else
       # CUDA tests have already been skipped when CUDA is not available
       python test/run_test.py --cpp --verbose -i cpp/test_jit
@@ -543,7 +543,7 @@ test_libtorch() {
     # Wait for background download to finish
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" python test/run_test.py --cpp --verbose -i cpp/test_api -i cpp/test_tensorexpr
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" python test/run_test.py --cpp --verbose -i cpp/test_api cpp/test_tensorexpr
 
     if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
       python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
