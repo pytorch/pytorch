@@ -208,7 +208,7 @@ void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameType);
 }
 
-void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2) {
+void checkSameDim(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   TORCH_CHECK(
     t1->dim() == t2->dim(),
     "Expected tensor for ", t1, " to have the same dimension as tensor for ",
@@ -230,7 +230,7 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
   }
 }
 
-void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
+static void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   TORCH_CHECK(
     !t.defined() || t.options().backend() == backend,
     "Expected tensor to have ", toString(backend),
@@ -244,7 +244,7 @@ void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backe
   }
 }
 
-void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
+static void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
   TORCH_CHECK(
       !t.defined() || t.device().type() == device_type,
       "Expected tensor to have ", device_type,
