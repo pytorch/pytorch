@@ -435,12 +435,13 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
-bool ProcessGroupNCCL::WorkNCCL::checkTimeout() {
+bool ProcessGroupNCCL::WorkNCCL::checkTimeout(c10::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
+  auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < opTimeout_)
+  if (timeElapsed < workTimeout)
     return false;
 
   // Timed out
