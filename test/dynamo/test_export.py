@@ -2273,6 +2273,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         capture_scalar_outputs=True,
     )
     def test_export_preserve_constraints_as_metadata(self):
+        import io
         from torch._export.constraints import constrain_as_size
 
         def f(x, y):
@@ -2303,6 +2304,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if vr.lower == 2 and vr.upper == 5:
                 preserved = True
         self.assertTrue(preserved)
+
+        # Ensure the exported graph module with metadata is serializable,
+        # metadata won't be preserved during serialization
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+        buffer.seek(0)
+        loaded_gm = torch.load(buffer)
+        self.assertTrue(len(loaded_gm.meta) == 0)
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):
