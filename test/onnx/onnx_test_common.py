@@ -7,8 +7,21 @@ import copy
 import dataclasses
 import io
 import os
+import unittest
 import warnings
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 import numpy as np
 
@@ -17,6 +30,7 @@ import pytorch_test_common
 import torch
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
+from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
@@ -350,3 +364,260 @@ def _compare_pytorch_onnx_with_ort(
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
         )
+
+
+# The min onnx opset version to test for
+MIN_ONNX_OPSET_VERSION = 9
+# The max onnx opset version to test for
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
+
+# TODO(titaiwang): Change this when more versions are supported
+# The min onnx opset version to test for
+FX_MIN_ONNX_OPSET_VERSION = 18
+# The max onnx opset version to test for
+FX_MAX_ONNX_OPSET_VERSION = 18
+FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 1)
+
+BOOL_TYPES = (torch.bool,)
+
+INT_TYPES = (
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint8,
+)
+
+QINT_TYPES = (
+    torch.qint8,
+    torch.quint8,
+)
+
+FLOAT_TYPES = (
+    torch.float16,
+    torch.float32,
+    torch.float64,
+)
+
+COMPLEX_TYPES = (
+    torch.complex32,
+    torch.complex64,
+    torch.complex128,
+)
+
+TESTED_DTYPES = (
+    # Boolean
+    torch.bool,
+    # Integers
+    *INT_TYPES,
+    # Floating types
+    *FLOAT_TYPES,
+)
+
+
+@dataclasses.dataclass
+class DecorateMeta:
+    """Information about a test case to skip or xfail.
+
+    Adapted from functorch: functorch/test/common_utils.py
+
+    Attributes:
+        op_name: The name of the operator.
+        variant_name: The name of the OpInfo variant.
+        decorator: The decorator to apply to the test case.
+        opsets: The opsets to apply the decorator to.
+        dtypes: The dtypes to apply the decorator to.
+        reason: The reason for skipping.
+    """
+
+    op_name: str
+    variant_name: str
+    decorator: Callable
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
+    dtypes: Optional[Collection[torch.dtype]]
+    reason: str
+    matcher: Optional[Callable[[Any], Any]] = None
+
+    def contains_opset(self, opset: int) -> bool:
+        if self.opsets is None:
+            return True
+        return any(
+            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
+            for opset_spec in self.opsets
+        )
+
+
+def xfail(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+):
+    """Expects a OpInfo test to fail.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.expectedFailure,
+        opsets=opsets,
+        dtypes=dtypes,
+        reason=reason,
+    )
+
+
+def skip(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
+):
+    """Skips a test case in OpInfo that we don't care about.
+
+    Likely because ONNX does not support the use case or it is by design.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            skip is in the SKIP_SUBTESTS list.
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.skip(f"Skip: {reason}"),
+        opsets=opsets,
+        dtypes=dtypes,
+        reason=reason,
+        matcher=matcher,
+    )
+
+
+def fixme(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
+):
+    """Skips a test case in OpInfo. It should be eventually fixed.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            fixme is in the SKIP_SUBTESTS list.
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.skip(f"To fix: {reason}"),
+        opsets=opsets,
+        dtypes=dtypes,
+        reason=reason,
+        matcher=matcher,
+    )
+
+
+def add_decorate_info(
+    all_opinfos: Sequence[opinfo_core.OpInfo],
+    test_class_name: str,
+    base_test_name: str,
+    opset: int,
+    skip_or_xfails: Iterable[DecorateMeta],
+):
+    """Decorates OpInfo tests with decorators based on the skip_or_xfails list.
+
+    Args:
+        all_opinfos: All OpInfos.
+        test_class_name: The name of the test class.
+        base_test_name: The name of the test method.
+        opset: The opset to decorate for.
+        skip_or_xfails: DecorateMeta's.
+    """
+    ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
+    for decorate_meta in skip_or_xfails:
+        if not decorate_meta.contains_opset(opset):
+            # Skip does not apply to this opset
+            continue
+        opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
+        assert (
+            opinfo is not None
+        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        decorators = list(opinfo.decorators)
+        new_decorator = opinfo_core.DecorateInfo(
+            decorate_meta.decorator,
+            test_class_name,
+            base_test_name,
+            dtypes=decorate_meta.dtypes,
+        )
+        decorators.append(new_decorator)
+        opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+
+    return wrapped
+
+
+def opsets_before(opset: int) -> Callable[[int], bool]:
+    """Returns a comparison function that decides if the given opset is before the specified."""
+
+    def compare(other_opset: int):
+        return other_opset < opset
+
+    return compare
+
+
+def opsets_after(opset: int) -> Callable[[int], bool]:
+    """Returns a comparison function that decides if the given opset is after the specified."""
+
+    def compare(other_opset: int):
+        return other_opset > opset
+
+    return compare
+
+
+def reason_onnx_runtime_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
+
+
+def reason_onnx_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
+
+
+def reason_jit_tracer_error(info: str) -> str:
+    """Formats the reason: JIT tracer errors."""
+    return f"JIT tracer error on {info}"
+
+
+def reason_flaky() -> str:
+    """Formats the reason: test is flaky."""
+    return "flaky test"
