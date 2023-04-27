@@ -159,7 +159,8 @@ class ReplicateTest(MultiProcessTestCase):
         )
         torch.cuda.set_device(self.rank)
         model = MyNet().cuda()
-        replicate(model, device_ids=[torch.cuda.current_device()])
+        replicate(model, device_id=torch.cuda.current_device())
+        # CPU input ensures replicate can move arg and kwargs to device.
         a, b = torch.randn(2, 2), torch.randn(2, 2)
         model(a, kwarg=b).sum().backward()
 
@@ -212,6 +213,49 @@ class ReplicateTest(MultiProcessTestCase):
             deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
         )
         self._compare_module(model, replicate_model)
+
+    def test_replicate_device_id(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        model = Net()
+        replicate(model, device_id=torch.device("cpu"))
+        # DDP instance is attached in first pre forward
+        model(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model)._ddp_weakref()
+        # Should be None for CPU training
+        self.assertEqual(None, replicate_ddp_weakref.device_ids)
+
+        model.cuda()
+        model_cuda = deepcopy(model)
+        replicate(model_cuda, device_id=torch.device(torch.cuda.current_device()))
+        # DDP instance is attached in first pre forward
+        model_cuda(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
+        # Pass in int as device_id
+        model_cuda = deepcopy(model_cuda)
+        replicate(model_cuda, device_id=int(torch.cuda.current_device()))
+        # DDP instance is attached in first pre forward
+        model_cuda(torch.randn(2, 2))
+        replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
+        self.assertEqual([0], replicate_ddp_weakref.device_ids)
+
+    def test_replicate_wrong_device_id_type(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        model = Net()
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected device_id to be int or torch.device"
+        ):
+            replicate(model, device_id=[torch.device("cpu")])
 
 
 if __name__ == "__main__":
