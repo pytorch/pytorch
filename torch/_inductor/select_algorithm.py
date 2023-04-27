@@ -151,6 +151,7 @@ class TritonTemplateKernel(TritonKernel):
                 "import triton",
                 "from torch._inductor.triton_heuristics import template",
                 "from torch._inductor.utils import instance_descriptor",
+                "from torch._inductor import triton_helpers",
                 "",
                 self.jit_line(),
                 f"def {self.kernel_name}({', '.join(arg_defs)}):",
