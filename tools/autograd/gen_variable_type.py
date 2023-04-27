@@ -1059,6 +1059,9 @@ def emit_body(
         if is_inplace_foreach and info is not None:
             for i, arg in enumerate(f.func.arguments.flat_non_out):
                 if arg in inplace_foreacharg2refarg:
+                    # note(crcrpar): From what I understand, what matters is only the name.
+                    # Thus originally I only replace argument only when the names are different.
+                    # TODO(crcrpar): Make it simpler.
                     mapped_arg = inplace_foreacharg2refarg[arg]
                     arguments[i] = Argument(
                         mapped_arg.name,
