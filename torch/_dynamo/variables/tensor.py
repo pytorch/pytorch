@@ -112,7 +112,7 @@ class TensorVariable(VariableTracker):
             return self.dtype in dtypes
 
         if type(tensor_type) is tuple:
-            return any([check_type(ty) for ty in tensor_type])
+            return any(check_type(ty) for ty in tensor_type)
         else:
             return check_type(tensor_type)
 
@@ -182,7 +182,8 @@ class TensorVariable(VariableTracker):
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
         if name in ("resize_", "unsqueeze_") and self.source is not None:
-            unimplemented(f"calling {name}() on graph input")
+            # Delay the graph break to the actual call of unsqueeze_/resize_
+            return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
