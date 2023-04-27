@@ -1,6 +1,4 @@
 # Owner(s): ["module: onnx"]
-import unittest
-
 import pytorch_test_common
 import torch
 from torch import nn
@@ -69,7 +67,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
     def test_empty(self):
-        # Since `torch.empty` returns tensor with unintialized data, we cannot
+        # Since `torch.empty` returns tensor with uninitialized data, we cannot
         # test this under `test_fx_to_onnx_with_onnxruntime.py` with result comparison.
         def func(x):
             return torch.empty(x.size(), dtype=torch.int64)
@@ -77,9 +75,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         tensor_x = torch.randn(1, 1, 2)
         _ = dynamo_export(func, tensor_x, export_options=self.export_options)
 
-    @unittest.skip(
-        "max_pool2d is not supported in ATen Lib: https://github.com/microsoft/onnx-script/issues/585"
-    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
