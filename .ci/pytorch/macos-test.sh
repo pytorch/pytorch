@@ -77,8 +77,7 @@ test_libtorch() {
     # without these paths being set
     export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
-
+    TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" CPP_TESTS_DIR="${CPP_BUILD}/caffe2/bin" python test/run_test.py --cpp --verbose -i cpp/test_api
     assert_git_not_dirty
   fi
 }
