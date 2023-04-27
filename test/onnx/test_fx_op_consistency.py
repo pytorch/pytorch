@@ -29,13 +29,11 @@ import unittest
 import warnings
 from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
+import onnx_test_common
+
 import parameterized
 
 import torch
-from test_fx_to_onnx_with_onnxruntime import (
-    _run_test_with_fx_to_onnx_exporter_and_onnx_runtime,
-    TestFxToOnnxWithOnnxRuntime,
-)
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
@@ -391,7 +389,7 @@ def _get_test_class_name(cls, num, params_dict) -> str:
     ],
     class_name_func=_get_test_class_name,
 )
-class TestOnnxModelOutputConsistency(TestFxToOnnxWithOnnxRuntime):
+class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """Test output consistency between exported ONNX models and PyTorch eager mode.
 
     This is a parameterized test suite.
@@ -448,8 +446,8 @@ class TestOnnxModelOutputConsistency(TestFxToOnnxWithOnnxRuntime):
                     rtol = None
                     atol = None
                 # Run the test
-                _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                    self, model, inputs, rtol=rtol, atol=atol
+                self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                    model, inputs, rtol=rtol, atol=atol
                 )
 
 

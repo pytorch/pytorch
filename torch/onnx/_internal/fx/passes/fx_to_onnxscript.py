@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -45,7 +45,7 @@ def _onnx_function_diagnose_call_append_symbolic_source_location(
     # TODO(bowbao): Record source location of symbolic.
     # Need this separate step because normally only the source location of
     # class `onnxscript.OnnxFunction.__call__` is recorded.
-    pass
+    ...
 
 
 # TODO(bowbao): Delete this once diagnostics is introduced in onnxscript.
@@ -200,7 +200,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             continue
         if key == "dtype":
             if value is None:
-                filtered["dtype"] = -1
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
             else:
                 filtered["dtype"] = int(
                     _type_utils.JitScalarType.from_dtype(value).onnx_type()
@@ -221,6 +223,7 @@ def _fill_tensor_meta(
         torch.SymInt,
         torch.SymFloat,
         List[fake_tensor.FakeTensor],
+        Tuple[fake_tensor.FakeTensor, ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
