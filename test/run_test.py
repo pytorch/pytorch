@@ -548,8 +548,6 @@ def run_test(
     should_file_rerun = (
         "--subprocess" not in command
         and not RERUN_DISABLED_TESTS
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
     )
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
