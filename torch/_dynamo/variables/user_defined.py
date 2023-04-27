@@ -407,9 +407,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 type(self.value).__dict__[name], staticmethod
             )
             if is_staticmethod:
-                # Use `GetAttrVariable` to avoid doubly passing in `self` as an
-                # argument, which happens if using `UserMethodVariable`
-                return variables.GetAttrVariable(self, name, source=source, **options)
+                # Use `UserFunctionVariable` to avoid doubly passing in `self`
+                # as an argument, which happens if using `UserMethodVariable`
+                return variables.UserFunctionVariable(subobj, name, source=source, **options)
             return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
