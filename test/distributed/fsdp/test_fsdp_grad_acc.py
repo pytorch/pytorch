@@ -243,7 +243,7 @@ class TestGradAcc(FSDPTest):
                 ShardingStrategy.FULL_SHARD,
                 ShardingStrategy.SHARD_GRAD_OP,
                 ShardingStrategy.NO_SHARD,
-            ]
+            ],
         }
 
     @skip_if_lt_x_gpu(2)
