@@ -65,7 +65,7 @@ def make_test_case(name, device, tests, condition=True):
     fn.__name__ = test_name
     if condition:
         setattr(
-            CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
+            CppWrapperTemplate if device != "cuda" else CudaWrapperTemplate,
             test_name,
             fn,
         )
