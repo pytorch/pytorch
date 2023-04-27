@@ -509,7 +509,7 @@ class GraphLowering(torch.fx.Interpreter):
 
                 return True
 
-            if isinstance(result, ir.TensorListItem) and all_users_are_foreach(n):
+            if isinstance(result, ir.TensorListItem) and not all_users_are_foreach(n):
                 # if the result is a TensorListItem, but it is not used by a foreach op, we need to realize it
                 result = result.get_value()
 
