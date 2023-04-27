@@ -3477,10 +3477,15 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
-        (inputs, constant_args, _, _) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            _,
+            req_stride_order,
+        ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        other = cls.realize_input(other)
+        other = cls.require_stride_order(other, req_stride_order)
         V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
         constant_args = constant_args + [
