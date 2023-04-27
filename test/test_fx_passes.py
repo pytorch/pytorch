@@ -227,6 +227,13 @@ class TestPartitionFunctions:
         a7 = torch.ops.aten.permute(a6, [1, 0])
         return a7 - 1.0
 
+    @staticmethod
+    def forward17(a, b, c, d):
+        a0 = a + b
+        a1 = c + d
+        out = torch.stack([a0, a1])
+        return out
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
@@ -298,6 +305,32 @@ class TestFXGraphPasses(JitTestCase):
 
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
+        torch.testing.assert_close(expected, result)
+
+    @parametrize("fn, expected_partition, aggressive_merge", [
+        (TestPartitionFunctions.forward17, [['add_1'], ['add']], False),
+        (TestPartitionFunctions.forward17, [['add', 'add_1']], True),
+    ])
+    def test_partitioner_aggressive_merge(self, fn, expected_partition, aggressive_merge):
+        traced = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True,
+                                                 aggressive_merge=aggressive_merge)
+        partitions = partitioner.propose_partitions()
+        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
+        assert len(partitions_name) == len(expected_partition)
+        for i in range(len(partitions_name)):
+            assert set(partitions_name[i]) == set(expected_partition[i])
+
+        fused_graph = partitioner.fuse_partitions(partitions)
+
+        a, b, c, d = torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4)
+
+        expected = fn(a, b, c, d)
+        result = fused_graph(a, b, c, d)
         torch.testing.assert_close(expected, result)
 
     @parametrize("partition", [
