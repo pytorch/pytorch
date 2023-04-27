@@ -857,6 +857,10 @@ def export(
                 arg.node.meta["val"] = self.current_node.meta["val"]
             if "tensor_dict" in self.current_node.meta:
                 arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+            if "nn_module_boundary" in self.current_node.meta:
+                arg.node.meta["nn_module_boundary"] = self.current_node.meta[
+                    "nn_module_boundary"
+                ]
             return arg
 
         def output(self, target, args, kwargs):

@@ -3,7 +3,7 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager
-from typing import Dict, List
+from typing import Dict, List, Literal, Union
 
 import torch.nn
 
@@ -61,6 +61,49 @@ def initialize_lazy_module(tx, mod, args, kwargs):
             for arg in proxy_args_kwargs(args, {})[0]
         ]
         mod._infer_parameters(mod, input)
+
+
+def _assign_meta_for_boundary_proxy(
+    module_key: str,
+    proxy: "torch.fx.Proxy",
+    pos: "Union[int, str]",
+    boundary_type: "Union[Literal['nn_module_input'], Literal['nn_module_output']]",
+) -> None:
+    if isinstance(proxy, (tuple, list)):
+        for i, sub_proxy in enumerate(proxy):
+            _assign_meta_for_boundary_proxy(
+                module_key, sub_proxy, f"{pos}_{i}", boundary_type
+            )
+
+    elif hasattr(proxy, "node"):
+        node = proxy.node
+        # TODO: module_key today does not differentiate between multiple calls to the
+        # same module.
+        node.meta.setdefault("nn_module_boundary", {})
+        node.meta["nn_module_boundary"].setdefault(boundary_type, {})
+        node.meta["nn_module_boundary"][boundary_type].setdefault(module_key, [])
+        node.meta["nn_module_boundary"][boundary_type][module_key].append(pos)
+
+
+def _assign_meta_for_module_boundaries(
+    module_key: str,
+    args,
+    kwargs,
+    ret_vals,
+) -> None:
+    for i, arg in enumerate(args):
+        if arg.is_proxy():
+            _assign_meta_for_boundary_proxy(
+                module_key, arg.as_proxy(), i, "nn_module_input"
+            )
+    for k, arg in kwargs.items():
+        if arg.is_proxy():
+            _assign_meta_for_boundary_proxy(
+                module_key, arg.as_proxy(), k, "nn_module_input"
+            )
+    _assign_meta_for_boundary_proxy(
+        module_key, ret_vals.as_proxy(), "output", "nn_module_output"
+    )
 
 
 class NNModuleVariable(VariableTracker):
@@ -298,7 +341,7 @@ class NNModuleVariable(VariableTracker):
 
                 from .builder import wrap_fx_proxy
 
-                return wrap_fx_proxy(
+                ret_vals = wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_module",
@@ -307,6 +350,12 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
+
+                _assign_meta_for_module_boundaries(
+                    self.module_key, args, kwargs, ret_vals
+                )
+
+                return ret_vals
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
@@ -328,11 +377,15 @@ class NNModuleVariable(VariableTracker):
                     assert istype(fn, types.FunctionType)
 
                 options["source"] = fn_source
-                return tx.inline_user_function_return(
+                ret_vals = tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
                     args,
                     kwargs,
                 )
+                _assign_meta_for_module_boundaries(
+                    self.module_key, args, kwargs, ret_vals
+                )
+                return ret_vals
 
     def call_method(
         self,
