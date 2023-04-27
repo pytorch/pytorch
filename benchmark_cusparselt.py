@@ -36,6 +36,34 @@ class Model(nn.Module):
         return self.linear(x)
 
 
+def gen_two_four_sparse_mask(m, k, dtype):
+    # generate mask
+    mask_id_sequence = []
+
+    def random_mask_choice(i=None):
+        import random
+
+        choices = [
+            [1, 1, 0, 0],
+            [1, 0, 1, 0],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 1],
+        ]
+        if i is None:
+            i = random.randint(0, len(choices) - 1)
+        mask_id_sequence.append(i)
+        return choices[i]
+
+    mask_entries = []
+    for i in range(m * (k // 4)):
+        choice = 5 if i == 33 else 0
+        mask_entries += random_mask_choice()
+
+    weight = torch.tensor(mask_entries, dtype=dtype, device=DEVICE).view(m, k).cuda()
+    return weight
+
 # function to compare dense vs cusparselt linear for given m, k, n, batch_size
 def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=False):
 
@@ -44,9 +72,16 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
     # print(m, k, n, batch_size, init_batch_size, dtype, temp)
     # create dense fp16 model
     model = Model(m, k).half().cuda().eval()
+
+    # need to set model weight since int8 and also clear out bias
+    # this is because you can't have a int8 linear layer currently, dispatch wont work on int8 matmul
+    if dtype is torch.int8:
+        model.linear.bias.data.zero_()
+        model.linear.weight.data = gen_two_four_sparse_mask(m, k, torch.float16)
+
     # create input tensor
     input_tensor = torch.randint(
-        5, 
+        2, 
         (init_batch_size, n, k),
         device=DEVICE,
         dtype=dtype,
@@ -62,17 +97,28 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
     sparse_model = pruner.convert(model, mapping={nn.Linear: temp})
     pruner.squash_mask()
 
-    # suppress stdout
-    devnull = open("/dev/null", "w")
-    oldstdout_fno = os.dup(sys.stdout.fileno())
-    os.dup2(devnull.fileno(), 1)
+    # print(input_tensor)
+
+
+    sparse_output = sparse_model(input_tensor)
+    dense_output = model(input_tensor.half()).to(dtype)
+    # print(sparse_output)
+    # print(dense_output)
+
+    # print(sparse_model.linear.weight)
+    # print(model.linear.weight)
 
     correct = torch.allclose(
-        model(input_tensor.half()).to(dtype), sparse_model(input_tensor), rtol=1e-3, atol=1e-3
+        dense_output,
+        sparse_output,
+        rtol=1e-3,
+        atol=1e-3
     )
 
+    assert correct
+
     input_tensor = torch.randint(
-        5, 
+        2, 
         (batch_size, n, k),
         device=DEVICE, 
         dtype=dtype,
@@ -87,8 +133,6 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
         globals={"input_tensor": input_tensor.half(), "model": model},
     ).blocked_autorange()
 
-    os.dup2(oldstdout_fno, 1)
-
     return {
         "m": m,
         "k": k,
@@ -99,7 +143,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
         "sparse_latency (ms)": sparse_measurement.median * 1000,
         "dense_latency (ms)": dense_measurement.median * 1000,
         "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
-        # "correct": correct,
+        "correct": correct,
     }
 
 
@@ -112,9 +156,8 @@ if __name__ == "__main__":
             "nvidia-bert",
             "nvidia-fixed-k",
             "nvidia-fixed-mn",
-            "distilbert-shapes",
-            "alg-id-sweep",
-            "int8-fp16-linear",
+            "llama-shapes",
+            "int8",
         ],
     )
     args = parser.parse_args()
@@ -173,50 +216,8 @@ if __name__ == "__main__":
         ]
         results = (compare_linear(10240, k, 10240, 1, 1, torch.float16) for k in tqdm(k_vals))
 
-    elif args.mode == "distilbert-shapes":
-        shapes = [
-            # distilbert shapes
-            (768, 3072, 768),
-            (3072, 768, 3072),
-            # jiecao shapes
-            # (1024, 1536, 2048),
-            # (1024, 9408, 2048),
-            # (1024, 3200, 2048),
-            # (1024, 256, 9472),
-            # (1024, 10240, 256),
-            # (1024, 256, 12608),
-            # (1024, 2560, 1024),
-            # (1024, 512, 10240),
-            # (1024, 10240, 512),
-            # (1024, 2048, 1024),
-            # (1024, 512, 512),
-            # (1024, 1024, 1024),
-            # (1024, 2048, 2048),
-            # (2048, 1536, 2048),
-            # (2048, 9408, 2048),
-            # (2048, 3200, 2048),
-            # (2048, 256, 9472),
-            # (2048, 10240, 256),
-            # (2048, 256, 12608),
-            # (2048, 2560, 1024),
-            # (2048, 512, 10240),
-            # (2048, 10240, 512),
-            # (2048, 2048, 1024),
-            # (2048, 512, 512),
-            # (2048, 1024, 1024),
-            # (2048, 2048, 2048),
-        ]
-        batch_sizes = [4, 16, 64, 256]
-        results = (
-            compare_linear(m, k, n, batch_size, batch_size, torch.float16)
-            for (m, k, n), batch_size in tqdm(
-                product(shapes, batch_sizes), total=len(shapes) * len(batch_sizes)
-            )
-        )
-
-
-    elif args.mode == "int8-fp16-linear":
-        MP = 2
+    elif args.mode == "llama-shapes":
+        MP = 8
         BS = 512
         print(f"Working on MP: {MP}, BS: {BS}")
         shapes = [
@@ -226,7 +227,18 @@ if __name__ == "__main__":
             (8192, 22016 // MP, BS),
         ]
         dtypes = [torch.int8, torch.float16]
-        batch_sizes = [1, 16]
+        batch_sizes = [1, 16, 64, 256]
+        results = (
+            compare_linear(m, k, n, batch_size, batch_size, dtype)
+            for dtype, batch_size, (m, k, n) in tqdm(
+                product(dtypes, batch_sizes, shapes), total=len(dtypes) * len(batch_sizes) * len(shapes)
+            )
+        )
+
+    elif args.mode == "int8":
+        shapes = [(128, 128, 128)]
+        dtypes = [torch.int8, torch.float16]
+        batch_sizes = [1, 16, 64, 256]
         results = (
             compare_linear(m, k, n, batch_size, batch_size, dtype)
             for dtype, batch_size, (m, k, n) in tqdm(

@@ -214,31 +214,4 @@ def sizeof_fmt(num, suffix="B"):
             )
         ]
 
-def gen_two_four_sparse_mask(m, k, dtype):
-    # generate mask
-    mask_id_sequence = []
-
-    def random_mask_choice(i=None):
-        import random
-
-        choices = [
-            [1, 1, 0, 0],
-            [1, 0, 1, 0],
-            [1, 0, 0, 1],
-            [0, 1, 1, 0],
-            [0, 1, 0, 1],
-            [0, 0, 1, 1],
-        ]
-        if i is None:
-            i = random.randint(0, len(choices) - 1)
-        mask_id_sequence.append(i)
-        return choices[i]
-
-    mask_entries = []
-    for i in range(m * (k // 4)):
-        choice = 5 if i == 33 else 0
-        mask_entries += random_mask_choice(i=choice)
-
-    weight = torch.tensor(mask_entries, dtype=dtype, device=device).view(m, k).cuda()
-    return weight, mask_id_sequence
 
