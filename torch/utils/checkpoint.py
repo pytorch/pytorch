@@ -39,24 +39,26 @@ def _get_device_module(device='cuda'):
     device_module = getattr(torch, device)
     return device_module
 
-class _DefaultDevice(object):
+class DefaultDevice(object):
     _default_device_type = "cuda"
 
     @staticmethod
     def set_device_type(device: str = "cuda"):
-        _DefaultDevice._default_device_type = device
+        DefaultDevice._default_device_type = device
 
     @staticmethod
     def get_device_type():
-        return _DefaultDevice._default_device_type
+        return DefaultDevice._default_device_type
 
 def infer_device_type(*args):
     device_types = list({arg.device.type for arg in args
                         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
-    if len(device_types) > 1:
-        raise ValueError("Expected all tensor args except CPU tensor to be on the same device,"
-                         " but found at least two devices, ", device_types)
-    return _DefaultDevice.get_device_type() if len(device_types) == 0 else device_types[0]
+    if len(device_types) == 0:
+        return DefaultDevice.get_device_type()
+    elif "cuda" in device_types:
+        return "cuda"
+    else:
+        return device_types[0]
 
 # We can't know if the run_fn will internally move some args to different devices,
 # which would require logic to preserve rng states for those devices as well.
