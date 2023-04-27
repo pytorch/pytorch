@@ -36,7 +36,7 @@ What is an FX transform? Essentially, it's a function that looks like this.
         # Step 3: Construct a Module to return
         return torch.fx.GraphModule(m, graph)
 
-Your transform will take in an :class:`torch.nn.Module`, acquire a :class:`Graph`
+Your transform will take in a :class:`torch.nn.Module`, acquire a :class:`Graph`
 from it, do some modifications, and return a new
 :class:`torch.nn.Module`. You should think of the :class:`torch.nn.Module` that your FX
 transform returns as identical to a regular :class:`torch.nn.Module` -- you can pass it to another
@@ -226,7 +226,7 @@ Graph Manipulation Examples
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Replace one
-   op <https://github.com/pytorch/examples/blob/main/fx/replace_op.py>`__
+   op <https://github.com/pytorch/examples/blob/master/fx/replace_op.py>`__
 -  `Conv/Batch Norm
    fusion <https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50>`__
 -  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
@@ -404,7 +404,7 @@ Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
-   Propagation <https://github.com/pytorch/pytorch/blob/main/torch/fx/passes/shape_prop.py>`__
+   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
 -  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
@@ -854,7 +854,7 @@ Non-\ ``torch`` Functions
 
 FX uses ``__torch_function__`` as the mechanism by which it intercepts
 calls (see the `technical
-overview <https://github.com/pytorch/pytorch/blob/main/torch/fx/OVERVIEW.md#technical-details>`__
+overview <https://github.com/pytorch/pytorch/blob/master/torch/fx/OVERVIEW.md#technical-details>`__
 for more information about this). Some functions, such as builtin Python
 functions or those in the ``math`` module, are not covered by
 ``__torch_function__``, but we would still like to capture them in
@@ -1071,7 +1071,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
 
   - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
 
