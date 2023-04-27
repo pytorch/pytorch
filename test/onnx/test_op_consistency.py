@@ -145,7 +145,7 @@ def xfail(
     )
 
 
-def dont_care(
+def skip(
     op_name: str,
     variant_name: str = "",
     *,
@@ -165,12 +165,12 @@ def dont_care(
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
         matcher: A function that matches the test sample input. It is used only when
-            dont_care is in the SKIP_SUBTESTS list.
+            skip is in the SKIP_SUBTESTS list.
     """
     return DecorateMeta(
         op_name=op_name,
         variant_name=variant_name,
-        decorator=unittest.skip(f"Don't care: {reason}"),
+        decorator=unittest.skip(f"Skip: {reason}"),
         opsets=opsets,
         dtypes=dtypes,
         reason=reason,
@@ -305,6 +305,8 @@ def reason_flaky() -> str:
 # Ops to be tested for numerical consistency between onnx and pytorch
 TESTED_OPS: frozenset[str] = frozenset(
     [
+        "atan",
+        "atan2",
         "ceil",
         "flatten",
         "logical_not",
@@ -323,38 +325,48 @@ TESTED_OPS: frozenset[str] = frozenset(
 
 # Expected failures for onnx export.
 # The list should be sorted alphabetically by op name.
-# Q: When should I use fixme vs vs dont_care vs xfail?
+# Q: When should I use fixme vs vs skip vs xfail?
 # A: Use fixme when we want to fix the test eventually but it doesn't fail consistently,
 #        e.g. the test is flaky or some tests pass. Otherwise, use xfail.
-#    Use dont_care if we don't care about the test passing, e.g. ONNX doesn't support the usage.
+#    Use skip if we don't care about the test passing, e.g. ONNX doesn't support the usage.
 #    Use xfail if a test fails now and we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    dont_care(
+    skip(
+        "atan", dtypes=BOOL_TYPES + INT_TYPES,
+        reason=reason_onnx_does_not_support("Atan")
+    ),
+    fixme("atan", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    skip(
+        "atan2", dtypes=BOOL_TYPES + INT_TYPES,
+        reason=reason_onnx_does_not_support("Atan")
+    ),
+    fixme("atan2", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    skip(
         "ceil", dtypes=BOOL_TYPES + INT_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    dont_care("nn.functional.scaled_dot_product_attention", opsets=[opsets_before(14)], reason="Need Trilu."),
+    skip("nn.functional.scaled_dot_product_attention", opsets=[opsets_before(14)], reason="Need Trilu."),
     fixme("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
-    dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
-    dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
-    dont_care("tile", opsets=[opsets_before(13)], reason=reason_onnx_does_not_support("Tile")),
+    skip("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    skip("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
+    skip("tile", opsets=[opsets_before(13)], reason=reason_onnx_does_not_support("Tile")),
     fixme("unflatten", opsets=[opsets_before(13)], reason="Helper function is needed to support legacy ops."),
 )
 # fmt: on
 
 SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
-    dont_care(
+    skip(
         "nn.functional.scaled_dot_product_attention",
         matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
         reason="dropout is random so the results do not match",
     ),
-    dont_care(
+    skip(
         "repeat",
         reason="Empty repeats value leads to an invalid graph",
         matcher=lambda sample: not sample.args[0],
     ),
-    dont_care(
+    skip(
         "stft",
         reason="ONNX STFT does not support complex results",
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,

@@ -79,7 +79,7 @@ most_recent_backend: Optional[CompilerFn] = None
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
-    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_exporter.py"),
+    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
 
@@ -110,7 +110,8 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
-            self.__call__ = self._call_lazy_check
+            self._forward = self.forward
+            self.forward = self._call_lazy_check
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -135,7 +136,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return super().__call__(*args, **kwargs)
+        return self._forward(*args, **kwargs)
 
 
 def remove_from_cache(f):

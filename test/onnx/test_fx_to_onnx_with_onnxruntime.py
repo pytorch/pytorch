@@ -18,8 +18,12 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
-from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
+from torch.onnx._internal import _beartype, diagnostics
+from torch.onnx._internal.fx import (
+    context as fx_context,
+    fx_symbolic_graph_extractor,
+    serialization as fx_serialization,
+)
 from torch.testing._internal import common_utils
 
 try:
@@ -681,7 +685,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ftm = fake_tensor.FakeTensorMode(
                 allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
-            ctx = fx_onnx.FxToOnnxContext()
+            ctx = fx_context.FxToOnnxContext()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
@@ -696,16 +700,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
 
-                export_output = FXSymbolicTraceExporter(
-                    options=torch.onnx.ExportOptions(
-                        opset_version=self.opset_version,
-                        dynamic_shapes=self.dynamic_shapes,
-                        op_level_debug=self.op_level_debug,
-                    ),
-                    model=fake_model,
-                    model_args=fake_args,
-                    model_kwargs={},
-                ).export()
+                options = torch.onnx.ExportOptions(
+                    opset_version=self.opset_version,
+                    dynamic_shapes=self.dynamic_shapes,
+                    op_level_debug=self.op_level_debug,
+                )
+                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
+                    options
+                )
+                export_options.fx_tracer = (
+                    fx_symbolic_graph_extractor.FXSymbolicTracer()
+                )
+                export_output = torch.onnx.dynamo_export(
+                    fake_model,
+                    *fake_args,
+                    export_options=export_options,
+                )
 
                 onnx_model = export_output.model_proto
 
@@ -720,7 +730,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
             onnx_model_location = model_name + "_external_data.onnx"
             onnx_initializer_location = model_name + "_initializers"
-            fx_onnx.save_model_with_external_data(
+            fx_serialization.save_model_with_external_data(
                 tmp_folder,
                 onnx_model_location,
                 onnx_initializer_location,
