@@ -228,9 +228,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
     TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
 
-    TORCH_CHECK(q.is_cuda());
-    TORCH_CHECK(k.is_cuda());
-    TORCH_CHECK(v.is_cuda());
     TORCH_CHECK(out.is_cuda());
     TORCH_CHECK(cu_seqlens_q.is_cuda());
     TORCH_CHECK(cu_seqlens_k.is_cuda());
@@ -238,7 +235,7 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     TORCH_CHECK(q.stride(-1) == 1);
     TORCH_CHECK(k.stride(-1) == 1);
     TORCH_CHECK(v.stride(-1) == 1);
-    TORCH_CHECK(cu_seqlens_k.is_contiguous());
+    TORCH_CHECK(cu_seqlens_q.is_contiguous());
     TORCH_CHECK(cu_seqlens_k.is_contiguous());
 
     const auto sizes = q.sizes();
@@ -248,8 +245,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     const int num_heads = sizes[H_DIM];
     const int head_size = sizes[D_DIM];
     const int total_k = k.size(TOTAL_DIM);
-    TORCH_CHECK(batch_size > 0);
-    TORCH_CHECK((head_size % 8 == 0) && (head_size <= 128));
 
     CHECK_SHAPE(q, total_q, num_heads, head_size);
     CHECK_SHAPE(k, total_k, num_heads, head_size);

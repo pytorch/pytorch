@@ -1293,6 +1293,21 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        if SM80OrLater
+        else [SDPBackend.EFFICIENT_ATTENTION],
+    )
+    def test_invalid_batch_size_0(self, kernel: SDPBackend):
+        with sdp_kernel(**backend_map[kernel]):
+            shape = (0, 4, 8, 16)
+            make_tensor = partial(rand_sdpa_tensor, shape=shape, type="dense", device="cuda", dtype=torch.float16)
+            query, key, value = make_tensor(), make_tensor(), make_tensor()
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
 
 class TestSDPA(NNTestCase):
     """ Used to test the functionality of scaled_dot_product_attention

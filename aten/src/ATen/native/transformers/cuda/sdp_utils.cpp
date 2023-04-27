@@ -362,6 +362,13 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
     }
     return false;
   }
+  if (q_batch_size == 0){
+    if (debug) {
+      TORCH_WARN("Both fused kernels require batch_size to be greater than 0.");
+    }
+    return false;
+  }
+
   return true;
 }
 
@@ -555,7 +562,60 @@ bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
   // Determinism is not set so we can use the kernel.
   return true;
 }
+// bool flash_forward_checks(sdp_params params, bool debug){
+//     auto dprops = at::cuda::getCurrentDeviceProperties();
+//     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
+//     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+//     bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+//     TORCH_CHECK(is_sm90 || is_sm8x || is_sm75);
+//     auto q_dtype = params.query.dtype();
+//     TORCH_CHECK(q_dtype == at::kHalf || (is_sm8x && q_dtype == at::kBFloat16));
+//     TORCH_CHECK(params.key.dtype() == q_dtype);
+//     TORCH_CHECK(params.value.dtype() == q_dtype);
+//     TORCH_CHECK(out.dtype() == q_dtype);
+//     TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
+//     TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
+//     // This is taken care of validate_sdpa_input attention.cpp
+//     // TORCH_CHECK(q.is_cuda());
+//     // TORCH_CHECK(k.is_cuda());
+//     // TORCH_CHECK(v.is_cuda());
 
+
+
+//     // This is taken care of in check_head_dim_size
+//     // TORCH_CHECK(q.stride(-1) == 1);
+//     // TORCH_CHECK(k.stride(-1) == 1);
+//     // TORCH_CHECK(v.stride(-1) == 1);
+
+//     // These would be sanity checks
+//     TORCH_CHECK(cu_seqlens_k.is_contiguous());
+//     TORCH_CHECK(cu_seqlens_k.is_contiguous());
+//     TORCH_CHECK(out.is_cuda());
+//     TORCH_CHECK(cu_seqlens_q.is_cuda());
+//     TORCH_CHECK(cu_seqlens_k.is_cuda());
+//     CHECK_SHAPE(q, total_q, num_heads, head_size);
+//     CHECK_SHAPE(k, total_k, num_heads, head_size);
+//     CHECK_SHAPE(v, total_k, num_heads, head_size);
+//     CHECK_SHAPE(out, total_q, num_heads, head_size);
+//     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
+//     CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+
+//     const auto sizes = q.sizes();
+
+//     // We should en
+//     const int batch_size = cu_seqlens_q.numel() - 1;
+//     const int total_q = sizes[TOTAL_DIM];
+//     const int num_heads = sizes[H_DIM];
+//     const int head_size = sizes[D_DIM];
+//     const int total_k = k.size(TOTAL_DIM);
+//     // We should add this to check_shape
+//     TORCH_CHECK(batch_size > 0);
+//     // check_head_dim_size
+//     // TORCH_CHECK((head_size % 8 == 0) && (head_size <= 128));
+
+
+//     return true;
+// }
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
