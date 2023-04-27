@@ -55,7 +55,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
   return nullptr;
 }
 
-std::string getSchemaInputTypesString(const FunctionSchema& schema) {
+static std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
   for (const auto i : c10::irange(1, forward_args.size())) {
