@@ -34,6 +34,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/ops/scalar_tensor.h>
+#include <iostream>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -196,7 +198,7 @@ void run_fmha_fwd(Launch_params<FMHA_fprop_params> &launch_params) {
 // The tensor `out` will get populated the output attention
 // First return value is softmax_logsumexp
 // Second return value is the random generator state
-std::tuple<at::Tensor, uint64_t, uint64_t, at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
         const at::Tensor &v,         // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -318,7 +320,8 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     // be used in the backward function
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
     uint64_t seed{0}, offset{0};
-    if( is_dropout ) {
+    at::Tensor seed_t, offset_t;
+    if (is_dropout) {
         TORCH_CHECK(at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
         "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
         // See Note [Acquire lock when using random generators]
@@ -326,12 +329,13 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         // generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         std::tie(seed, offset) = at::cuda::philox::unpack(philox_state);
+        seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)));
+        offset_t = at::tensor({static_cast<int64_t>(offset)});//at::scalar_tensor(at::Scalar(offset));
         launch_params.params.philox_args = philox_state;
     }
 
     run_fmha_fwd(launch_params);
-
-    return {softmax_lse, seed, offset, flash_softmax};
+    return {softmax_lse, seed_t, offset_t, flash_softmax};
 }
 
 void run_fmha_bwd(FMHA_dgrad_params &params, cudaStream_t stream, const bool configure) {
@@ -497,7 +501,18 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(
         !is_dropout || at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
         "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
-    at::PhiloxCudaState philox_args{philox_seed, philox_offset};
+    at::PhiloxCudaState philox_args;
+    if (at::cuda::currentStreamCaptureStatus() ==
+            at::cuda::CaptureStatus::None ||
+        !is_dropout) {
+          philox_args = at::PhiloxCudaState(philox_seed, philox_offset);
+    } else { // dropout + capture
+       // in reality will be tensors right away
+        at::Tensor seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_seed)));
+        at::Tensor offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_offset)));
+        philox_args = at::PhiloxCudaState(
+            seed_t.data_ptr<int64_t>(), offset_t.data_ptr<int64_t>(), 0);
+    }
     params.philox_args = philox_args;
 
     launch(params, stream, /*configure=*/false);
