@@ -1252,7 +1252,7 @@ class TritonKernel(Kernel):
                     updated = f"{accumulator} + {value}"
                 elif reduction_type == "prod":
                     updated = f"{accumulator} * {value}"
-                    elif reduction_type == "xor_sum":
+                elif reduction_type == "xor_sum":
                     updated = f"{accumulator} ^ {value}"
                 else:
                     raise NotImplementedError(f"reduction_type {reduction_type}")
