@@ -55,7 +55,7 @@ static int64_t get_max_index_logical_dim(
   return max_logical_dim;
 }
 
-std::vector<optional<Tensor>> batchIndices(
+static std::vector<optional<Tensor>> batchIndices(
   ArrayRef<optional<Tensor>> indices,
   ArrayRef<optional<int64_t>> indices_bdims,
   int64_t batch_size,

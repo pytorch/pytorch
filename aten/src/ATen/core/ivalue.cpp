@@ -535,7 +535,7 @@ std::ostream& printDict(
 }
 
 // Properly disambiguate the type of an empty dict
-std::ostream& printMaybeAnnotatedDict(
+static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
     IValueFormatter formatter) {
