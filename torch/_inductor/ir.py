@@ -682,6 +682,11 @@ class Reduction(Loops):
             def combine_fn(a, b):
                 return ops.mul(a, b)
 
+        elif reduction_type == "xor_sum":
+
+            def combine_fn(a, b):
+                return ops.bitwise_xor(a, b)
+
         elif reduction_type == "min":
 
             def combine_fn(a, b):
@@ -700,15 +705,31 @@ class Reduction(Loops):
         elif reduction_type == "argmin":
 
             def combine_fn(a, b):
-                return ops.minimum(a[0], b[0]), ops.where(
-                    ops.lt(b[0], a[0]), b[1], a[1]
+                a_value, a_index = a
+                b_value, b_index = b
+                mask = ops.lt(b_value, a_value)
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
+
+                return (
+                    ops.where(mask, b_value, a_value),
+                    ops.where(mask, b_index, a_index),
                 )
 
         elif reduction_type == "argmax":
 
             def combine_fn(a, b):
-                return ops.maximum(a[0], b[0]), ops.where(
-                    ops.gt(b[0], a[0]), b[1], a[1]
+                a_value, a_index = a
+                b_value, b_index = b
+                mask = ops.gt(b_value, a_value)
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
+
+                return (
+                    ops.where(mask, b_value, a_value),
+                    ops.where(mask, b_index, a_index),
                 )
 
         else:
@@ -774,6 +795,7 @@ class Reduction(Loops):
 
             rtypes_to_inits = {
                 "sum": py_cnst(0),
+                "xor_sum": py_cnst(0),
                 "prod": py_cnst(1),
                 "any": py_cnst(0),
                 # "all" is desugared to `!any(!val)`
@@ -911,6 +933,7 @@ class Reduction(Loops):
         return {
             "sum": 0,
             "prod": 1,
+            "xor_sum": 0,
             "any": 0,
         }[reduction_type]
 
@@ -3470,10 +3493,15 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
-        (inputs, constant_args, _, _) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            _,
+            req_stride_order,
+        ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        other = cls.realize_input(other)
+        other = cls.require_stride_order(other, req_stride_order)
         V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
         constant_args = constant_args + [
