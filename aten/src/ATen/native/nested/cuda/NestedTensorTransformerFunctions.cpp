@@ -711,7 +711,6 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
       output_shape) = sdpa_nested_preprocessing(query, key, value);
 
   Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
-  //int64_t philox_seed{0}, philox_offset{0};
   std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_buffer_reshaped,

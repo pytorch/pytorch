@@ -737,7 +737,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Ten
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
   Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
-  //int64_t philox_seed{0}, philox_offset{0};
   std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_reshaped,
@@ -826,7 +825,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   at::Tensor output = at::empty_like(query);
 
   Tensor logsumexp, debug_attn_mask;
-  //uint64_t philox_seed{0}, philox_offset{0};
   Tensor philox_seed, philox_offset;
   std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
       query,
@@ -845,12 +843,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
       num_splits);
 
   debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
-
-  // int64_t signed_philox_seed{0}, signed_philox_offset{0};
-  // if (dropout_p > 0.) {
-  //   signed_philox_seed = c10::bit_cast<int64_t>(philox_seed.item().to<int64_t>());
-  //   signed_philox_offset= c10::bit_cast<int64_t>(philox_offset.item().to<int64_t>());
-  // }
 
   return std::make_tuple(output, logsumexp, philox_seed, philox_offset, debug_attn_mask);
 #endif
