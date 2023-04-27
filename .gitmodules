@@ -74,6 +74,7 @@
     ignore = dirty
     path = third_party/onnx
     url = https://github.com/onnx/onnx.git
+    branch = rel-1.14.0
 [submodule "third_party/onnx-tensorrt"]
     ignore = dirty
     path = third_party/onnx-tensorrt
