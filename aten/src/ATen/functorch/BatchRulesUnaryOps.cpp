@@ -9,6 +9,7 @@
 
 namespace at { namespace functorch {
 
+namespace{
 std::tuple<Tensor,optional<int64_t>>
 clone_batch_rule(
     const Tensor& self,
@@ -77,6 +78,7 @@ to_other_batch_rule(const Tensor& self, optional<int64_t> self_bdim,
                     bool non_blocking,
                     bool copy, c10::optional<at::MemoryFormat> memory_format) {
   return std::make_tuple(self.to(other, non_blocking, copy, memory_format), self_bdim);
+}
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {

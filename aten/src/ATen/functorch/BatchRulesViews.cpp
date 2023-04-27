@@ -89,6 +89,8 @@ namespace at { namespace functorch {
 // Note [Writing batch rule for in-place operators]
 // TODO: This is kinda complicated. Saving this for a future date.
 
+namespace{
+
 std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -581,6 +583,8 @@ std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto result = at::triu(self_, diagonal);
   return std::make_tuple(std::move(result), 0);
+}
+
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {

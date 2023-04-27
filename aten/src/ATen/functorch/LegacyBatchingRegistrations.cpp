@@ -66,6 +66,7 @@ namespace functorch {
 // to do steps (1), (2), and (4).
 // (see NOTE: [What is an VmapTransform?] in VmapTransforms.h)
 
+namespace{
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -811,6 +812,7 @@ Tensor& BatchedTensor_requires_grad_(Tensor& self, bool requires_grad) {
   return self;
 }
 
+}
 
 TORCH_LIBRARY_IMPL(_, FuncTorchBatched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
