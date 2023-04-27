@@ -37,6 +37,10 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
+uint32_t randint_cpu(uint32_t seed, uint32_t offset) {
+  return at::Philox4_32(seed, 0, offset)();
+}
+
 template <typename T> struct AsIntegerType { typedef T type; };
 template <> struct AsIntegerType<float> { typedef uint32_t type; };
 template <> struct AsIntegerType<double> { typedef uint64_t type; };
