@@ -1091,6 +1091,10 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
+    if sum(split_sizes) != self.shape[dim]:
+        raise ValueError(
+            "Split sizes don't add up to the tensor's size in the given dimension"
+        )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
@@ -3350,6 +3354,36 @@ def aminmax(self, *, dim=None, keepdim=False):
 @out_wrapper()
 def nansum(self, dim=None, keepdim=False, *, dtype=None):
     return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
+
+
+@register_decomposition([aten.arange.default, aten.arange.out])
+@out_wrapper()
+def arange_default(
+    end: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+):
+    return aten.arange.start_step(
+        0, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_decomposition([aten.arange.start])
+def arange_start(
+    start: NumberType,
+    end: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+):
+    return aten.arange.start_step(
+        start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
 
 
 def register_inplace(aten_op, outplace_op):

@@ -108,6 +108,11 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
+    if torch.distributed.is_available():
+        from torch.distributed import _functional_collectives
+
+        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
+
     # extract all dtypes from torch
     dtypes = [
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
@@ -122,7 +127,7 @@ def _disallowed_function_ids():
 
     # Distributed APIs don't work well with torch.compile.
     if torch.distributed.is_available():
-        remove.extend(torch.distributed.distributed_c10d.distributed_c10d_ops)
+        remove.extend(torch.distributed.distributed_c10d.dynamo_unsupported_distributed_c10d_ops)
 
     return {id(x) for x in remove}
 
@@ -260,6 +265,7 @@ def is_allowed(obj):
     # in those cases
     if id(obj) in _disallowed_function_ids:
         return False
+
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
