@@ -1060,13 +1060,12 @@ def emit_body(
             for i, arg in enumerate(f.func.arguments.flat_non_out):
                 if arg in inplace_foreacharg2refarg:
                     mapped_arg = inplace_foreacharg2refarg[arg]
-                    if arg.name != mapped_arg.name:
-                        arguments[i] = Argument(
-                            mapped_arg.name,
-                            mapped_arg.type,
-                            mapped_arg.default,
-                            mapped_arg.annotation,
-                        )
+                    arguments[i] = Argument(
+                        mapped_arg.name,
+                        mapped_arg.type,
+                        mapped_arg.default,
+                        mapped_arg.annotation,
+                    )
         return list(mapMaybe(gen_differentiable_input, arguments))
 
     def find_args_with_derivatives(
