@@ -141,7 +141,7 @@ def discover_tests(
 
 CPP_TESTS_DIR = os.getenv("CPP_TESTS_DIR", default=None)
 TESTS = discover_tests(
-    cpp_tests_dir=pathlib.Path(CPP_TESTS_DIR) if CPP_TEST_DIR else None,
+    cpp_tests_dir=pathlib.Path(CPP_TESTS_DIR) if CPP_TESTS_DIR else None,
     blocklisted_patterns=[
         "ao",
         "bottleneck_test",
