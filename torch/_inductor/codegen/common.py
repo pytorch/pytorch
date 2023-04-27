@@ -188,7 +188,7 @@ class ExprPrinter(Printer):
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
             return f"math.sqrt({base})"
-        assert exp.is_integer
+        assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
@@ -809,3 +809,8 @@ class OptimizationContext:
     dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
+
+    # Load uint8 value as float32
+    is_load_uint8_as_float: bool = False
+    # Store float32 value as uint8
+    is_store_float_as_uint8: bool = False
