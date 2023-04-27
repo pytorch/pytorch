@@ -1,8 +1,5 @@
 from triton.runtime.jit import JITFunction
 
-from ..._dynamo import config as dynamo_config
-from .. import config
-
 from ..utils import instance_descriptor
 
 from ..virtualized import V
