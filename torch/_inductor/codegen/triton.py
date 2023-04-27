@@ -1905,12 +1905,18 @@ class TritonScheduling:
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        if config.serialize_intermediates_with_origin_node:
+        if config.generate_intermediate_hooks:
             for node in node_schedule:
+                if not isinstance(node, scheduler.BaseSchedulerNode):
+                    continue
+                # TODO: not sure if this is the right thing to do
+                name = node.get_name()
+                if kernel.args.is_removed(name):
+                    continue
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
                     V.graph.wrapper_code.writeline(
-                        f"log.warning('%s %s', {origin_node.name!r}, {node.get_name()})"
+                        f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )
 
         self.scheduler.free_buffers()

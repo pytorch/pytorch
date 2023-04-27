@@ -245,7 +245,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
-                import logging
+                from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
                 from torch import empty_strided, as_strided, device
@@ -342,8 +342,8 @@ class WrapperCodeGen(CodeGen):
         self.writeline(
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
-        if config.serialize_intermediates_with_origin_node and origin_node is not None:
-            self.writeline(f"log.warning('%s %s', {origin_node.name!r}, {output_name})")
+        if config.generate_intermediate_hooks and origin_node is not None:
+            self.writeline(f"run_intermediate_hooks({origin_node.name!r}, {output_name})")
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
