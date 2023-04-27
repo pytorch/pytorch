@@ -1193,7 +1193,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4)
         y = torch.ones(4)
         self.assertTrue(same(f1(x).shape, f2(y).shape))
-        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)  # mul_
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -4703,12 +4704,13 @@ def fn():
         # exception raised in dynamo optimized code
         code = """\
 import torch
+import torch._dynamo
 def f(a):
     a += 1
     raise RuntimeError("smoge")
     return a
 
-opt_fn = torch.compile(backend="eager")(f)
+opt_fn = torch._dynamo.optimize("eager")(f)
 opt_fn(torch.ones(2))
 """
         proc = subprocess.run(
@@ -4718,6 +4720,18 @@ opt_fn(torch.ones(2))
         # process did not segfault, C assert fail (abort), etc.
         self.assertGreater(proc.returncode, 0)
         self.assertIn("smoge", proc.stderr.decode("utf-8"))
+
+    def test_variable_access_in_exception(self):
+        def fn():
+            x = torch.ones(3, 3)
+            try:
+                raise RuntimeError("bad")
+            except RuntimeError:
+                x += 1
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        torch.allclose(opt_fn(), torch.tensor([3.0]))
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
@@ -5089,6 +5103,16 @@ opt_fn(torch.ones(2))
 
         self.assertTrue(s == s2)
         self.assertTrue(s != s3)
+
+    def test_add_sizes(self):
+        def func(x):
+            y = x.size()
+            return y + y
+
+        eager_out = func(torch.ones(10, 10, 3))
+        compile_out = torch._dynamo.optimize("eager")(func)(torch.ones(10, 10, 3))
+        self.assertTrue(isinstance(compile_out, torch.Size))
+        self.assertEqual(eager_out, compile_out)
 
 
 class CustomFunc1(torch.autograd.Function):
