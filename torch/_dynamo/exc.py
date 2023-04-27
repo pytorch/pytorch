@@ -5,8 +5,16 @@ from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
 from . import config
+from .config import is_fbcode
 
 from .utils import counters, format_bytecode
+
+if is_fbcode():
+    from torch.fb.exportdb.logging import exportdb_error_message
+else:
+
+    def exportdb_error_message(ref_case_id):
+        return ""
 
 
 class TorchDynamoException(RuntimeError):
@@ -100,7 +108,7 @@ class UserErrorType(Enum):
 
 
 class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg):
+    def __init__(self, error_type: UserErrorType, msg, ref_case_id=None):
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
         The error message should tell user about next actions.
@@ -108,6 +116,9 @@ class UserError(Unsupported):
         error_type: Type of user error
         msg: Actionable error message
         """
+        if ref_case_id is not None:
+            assert isinstance(ref_case_id, int)
+            msg += exportdb_error_message(ref_case_id)
         super().__init__(msg)
         self.error_type = error_type
         self.message = msg
