@@ -188,6 +188,7 @@ __all__ = [
     "amin",
     "prod",
     "sum",
+    "xor_sum",
     "var",
     #
     # Tensor Creation Prims
@@ -2305,6 +2306,10 @@ _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
+_xor_sum_doc = """
+    Computes the xor sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
 _prod_doc = """
     Computes the product of elements in the input tensor over the list of dimensions
     specified in the dim argument
@@ -2348,6 +2353,22 @@ sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
     doc=_sum_doc,
+)
+
+
+def _xor_sum_aten(
+    inp: TensorLikeType,
+    dims: Optional[DimsSequenceType],
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    raise NotImplementedError("xor_sum only implemented with inductor")
+
+
+xor_sum = _make_reduction_prim(
+    name="xor_sum",
+    impl_aten=_xor_sum_aten,
+    doc=_xor_sum_doc,
 )
 
 
@@ -2789,7 +2810,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,

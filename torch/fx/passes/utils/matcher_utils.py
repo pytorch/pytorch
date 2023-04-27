@@ -221,7 +221,7 @@ class SubgraphMatcher:
                 elif isinstance(a1, (list, tuple)) and isinstance(a2, (list, tuple)):
                     matched = _match_args(a1, a2)
                 else:
-                    matched = self.ignore_literals or self._match_literals(a1, a2, match)
+                    matched = self._match_literals(a1, a2, match) or self.ignore_literals
 
                 if not matched:
                     return False

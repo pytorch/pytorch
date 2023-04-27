@@ -1015,3 +1015,51 @@ class MemoryProfileTimeline:
         import json
         with open(path, 'w') as f:
             json.dump([times, sizes], f)
+
+    def export_memory_timeline_html(self, path, device, figsize=(20, 12), title=None) -> None:
+        """Exports the memory timeline as an HTML file which contains
+        the memory timeline plot embedded as a PNG file."""
+        # Check if user has matplotlib installed, return gracefully if not.
+        import importlib.util
+        matplotlib_spec = importlib.util.find_spec("matplotlib")
+        if matplotlib_spec is None:
+            print("export_memory_timeline_html failed because matplotlib was not found.")
+            return
+
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from base64 import b64encode
+        from tempfile import NamedTemporaryFile
+        from os import remove
+
+        mt = self._coalesce_timeline(device)
+        times, sizes = np.array(mt[0]), np.array(mt[1])
+        stacked = np.cumsum(sizes, axis=1) / 1024**3
+
+        # Plot memory timeline as stacked data
+        fig = plt.figure(figsize=figsize, dpi=80)
+        axes = fig.gca()
+        for category, color in _CATEGORY_TO_COLORS.items():
+            i = _CATEGORY_TO_INDEX[category]
+            axes.fill_between(
+                times / 1e3, stacked[:, i], stacked[:, i + 1], color=color, alpha=0.7
+            )
+        fig.legend(["Unknown" if i is None else i.name for i in _CATEGORY_TO_COLORS])
+        axes.set_xlabel("Time (us)")
+        axes.set_ylabel("Memory (GB)")
+        title = "\n\n".join(
+            ([title] if title else []) + [f"Max: {stacked[:, -1].max():.2f} GB"]
+        )
+        axes.set_title(title)
+
+        # Embed the memory timeline image into the HTML file
+        tmpfile = NamedTemporaryFile('wb', suffix='.png', delete=False)
+        tmpfile.close()
+        fig.savefig(tmpfile.name, format='png')
+
+        with open(tmpfile.name, 'rb') as tmp:
+            encoded = b64encode(tmp.read()).decode('utf-8')
+            html = 'GPU Memory Timeline HTML' + '<img src=\'data:image/png;base64,{}\'>'.format(encoded)
+            with open(path, 'w') as f:
+                f.write(html)
+        remove(tmpfile.name)
