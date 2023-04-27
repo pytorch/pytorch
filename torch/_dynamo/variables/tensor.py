@@ -8,7 +8,8 @@ import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
-from .. import config, variables
+from .. import config, utils, variables
+from ..bytecode_transformation import create_call_function, Instruction
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -721,6 +722,32 @@ class NumpyNdarrayVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         unimplemented(f"numpy_ndarray.{name}()")
+
+    @staticmethod
+    def reconstruct_ndarray_before_return(codegen, output_graph) -> List[Instruction]:
+        """
+        Check if return value is torch_np.ndarray if so convert it to numpy.ndarray.
+        The equivalent Python code looks like this:
+        def f(x):
+            ___tmp_0 = __compiled_fn_0(x)
+            if isinstance(___tmp_0, torch_np.ndarray):
+                return ___tmp_0.tensor.numpy()
+            else:
+                return ___tmp_0
+        """
+        if not config.numpy_ndarray_as_tensor:
+            return []
+
+        var = output_graph.new_var()
+
+        return [
+            codegen.create_store(var),
+            *AttrSource(
+                codegen.tx.import_source(utils.__name__), "to_numpy_helper"
+            ).reconstruct(codegen),
+            codegen.create_load(var),
+            *create_call_function(1, False),
+        ]
 
 
 class UnspecializedPythonVariable(TensorVariable):
