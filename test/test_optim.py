@@ -33,7 +33,7 @@ from torch.optim.lr_scheduler import (
     PolynomialLR,
     EPOCH_DEPRECATION_WARNING,
 )
-from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
+from torch.optim.swa_utils import AveragedModel, SWALR, update_bn, get_swa_multi_avg_fn, get_ema_multi_avg_fn
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -3997,7 +3997,7 @@ class SWATestCNN(torch.nn.Module):
 
 
 class TestSWAUtils(TestCase):
-    def _test_averaged_model(self, net_device, swa_device):
+    def _test_averaged_model(self, net_device, swa_device, ema):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.ReLU(),
@@ -4010,32 +4010,48 @@ class TestSWAUtils(TestCase):
             torch.nn.Linear(5, 10),
         ).to(net_device)
 
-        averaged_dnn = AveragedModel(dnn, device=swa_device)
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                p_avg += p.detach() / n_updates
-            averaged_dnn.update_parameters(dnn)
+        averaged_params, averaged_dnn = self._run_averaged_steps(dnn, swa_device, ema)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_swa.device == swa_device)
-            self.assertTrue(p.device == net_device)
+            self.assertTrue(p_avg.device == net_device)
         self.assertTrue(averaged_dnn.n_averaged.device == swa_device)
 
-    def test_averaged_model_all_devices(self):
+    def _run_averaged_steps(self, dnn, swa_device, ema):
+        ema_decay = 0.999
+        if ema:
+            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
+        else:
+            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_swa_multi_avg_fn())
+
+        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
+
+        n_updates = 10
+        for i in range(n_updates):
+            for p, p_avg in zip(dnn.parameters(), averaged_params):
+                p.detach().add_(torch.randn_like(p))
+                if ema:
+                    p_avg += p.detach() * ema_decay ** (n_updates - i - 1) * ((1 - ema_decay) if i > 0 else 1.0)
+                else:
+                    p_avg += p.detach() / n_updates
+            averaged_dnn.update_parameters(dnn)
+
+        return averaged_params, averaged_dnn
+
+    @parametrize("ema", [True, False])
+    def test_averaged_model_all_devices(self, ema):
         cpu = torch.device("cpu")
-        self._test_averaged_model(cpu, cpu)
+        self._test_averaged_model(cpu, cpu, ema)
         if torch.cuda.is_available():
             cuda = torch.device(0)
-            self._test_averaged_model(cuda, cpu)
-            self._test_averaged_model(cpu, cuda)
-            self._test_averaged_model(cuda, cuda)
+            self._test_averaged_model(cuda, cpu, ema)
+            self._test_averaged_model(cpu, cuda, ema)
+            self._test_averaged_model(cuda, cuda, ema)
 
-    def test_averaged_model_mixed_device(self):
+    @parametrize("ema", [True, False])
+    def test_averaged_model_mixed_device(self, ema):
         if not torch.cuda.is_available():
             return
         dnn = torch.nn.Sequential(
@@ -4043,14 +4059,8 @@ class TestSWAUtils(TestCase):
         )
         dnn[0].cuda()
         dnn[1].cpu()
-        averaged_dnn = AveragedModel(dnn)
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                p_avg += p.detach() / n_updates
-            averaged_dnn.update_parameters(dnn)
+
+        averaged_params, averaged_dnn = self._run_averaged_steps(dnn, None, ema)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
@@ -4082,62 +4092,36 @@ class TestSWAUtils(TestCase):
         averaged_dnn = AveragedModel(dnn)
         pickle.dumps(averaged_dnn)
 
-    def test_averaged_model_exponential(self):
-        # Test AveragedModel with EMA as avg_fn
-        dnn = torch.nn.Sequential(
-            torch.nn.Conv2d(1, 5, kernel_size=3),
-            torch.nn.BatchNorm2d(5, momentum=0.3),
-            torch.nn.Linear(5, 10),
-        )
-        alpha = 0.9
-
-        def avg_fn(p_avg, p, n_avg):
-            return alpha * p_avg + (1 - alpha) * p
-
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn)
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            updated_averaged_params = []
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                if i == 0:
-                    updated_averaged_params.append(p.clone())
-                else:
-                    updated_averaged_params.append(
-                        (p_avg * alpha + p * (1 - alpha)).clone()
-                    )
-            for b in dnn.buffers():
-                if b.size() != torch.Size([]):
-                    b.detach_().add_(torch.randn_like(b))
-
-            averaged_dnn.update_parameters(dnn)
-            averaged_params = updated_averaged_params
-
-        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
-            self.assertEqual(p_avg, p_swa)
-        for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
-            self.assertEqual(b_avg, b_swa)
-
-    def test_averaged_model_exponential_buffers(self):
+    @parametrize("use_multi_avg_fn", [True, False])
+    @parametrize("use_buffers", [True, False])
+    def test_averaged_model_exponential(self, use_multi_avg_fn, use_buffers):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10),
         )
-        alpha = 0.9
+        decay = 0.9
 
-        def avg_fn(p_avg, p, n_avg):
-            return alpha * p_avg + (1 - alpha) * p
+        if use_multi_avg_fn:
+            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(decay), use_buffers=use_buffers)
+        else:
+            def avg_fn(p_avg, p, n_avg):
+                return decay * p_avg + (1 - decay) * p
 
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
-        dnn_params = itertools.chain(dnn.parameters(), dnn.buffers())
+            averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=use_buffers)
+
+        if use_buffers:
+            dnn_params = list(itertools.chain(dnn.parameters(), dnn.buffers()))
+        else:
+            dnn_params = list(dnn.parameters())
+
         averaged_params = [
             torch.zeros_like(param)
             for param in dnn_params
             if param.size() != torch.Size([])
         ]
+
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
@@ -4149,18 +4133,24 @@ class TestSWAUtils(TestCase):
                     updated_averaged_params.append(p.clone())
                 else:
                     updated_averaged_params.append(
-                        (p_avg * alpha + p * (1 - alpha)).clone()
+                        (p_avg * decay + p * (1 - decay)).clone()
                     )
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
-        for p_avg, p_swa in zip(
-            averaged_params,
-            itertools.chain(
-                averaged_dnn.module.parameters(), averaged_dnn.module.buffers()
-            ),
-        ):
-            self.assertEqual(p_avg, p_swa)
+        if use_buffers:
+            for p_avg, p_swa in zip(
+                averaged_params,
+                itertools.chain(
+                    averaged_dnn.module.parameters(), averaged_dnn.module.buffers()
+                ),
+            ):
+                self.assertEqual(p_avg, p_swa)
+        else:
+            for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+                self.assertEqual(p_avg, p_swa)
+            for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
+                self.assertEqual(b_avg, b_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
 
@@ -4265,6 +4255,7 @@ class TestSWAUtils(TestCase):
 
 
 instantiate_parametrized_tests(TestLRScheduler)
+instantiate_parametrized_tests(TestSWAUtils)
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
