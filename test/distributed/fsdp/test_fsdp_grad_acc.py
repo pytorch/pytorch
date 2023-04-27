@@ -183,9 +183,7 @@ class TestGradAcc(FSDPTest):
         batch_idx = 0
         for config in configs:
             sync_context = (
-                fsdp_model.no_sync()
-                if config.use_no_sync
-                else contextlib.suppress()
+                fsdp_model.no_sync() if config.use_no_sync else contextlib.suppress()
             )
             with sync_context:
                 for _ in range(config.num_iters):
@@ -236,7 +234,7 @@ class TestGradAcc(FSDPTest):
                 ShardingStrategy.FULL_SHARD,
                 ShardingStrategy.SHARD_GRAD_OP,
                 ShardingStrategy.NO_SHARD,
-            ]
+            ],
         }
 
     @skip_if_lt_x_gpu(2)
