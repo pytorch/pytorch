@@ -303,7 +303,7 @@ class NNModuleVariable(VariableTracker):
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
                 else:
-                    fn = mod.__call__
+                    fn = mod._call_impl
                 fn_source = AttrSource(self.source, "__call__")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
