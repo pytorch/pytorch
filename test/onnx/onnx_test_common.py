@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import copy
+import contextlib
 
+import copy
 import dataclasses
 import io
 import os
@@ -26,6 +27,7 @@ from typing import (
 import numpy as np
 
 import onnxruntime
+import pytest
 import pytorch_test_common
 import torch
 from torch.onnx import _constants, verification
@@ -429,6 +431,9 @@ class DecorateMeta:
         opsets: The opsets to apply the decorator to.
         dtypes: The dtypes to apply the decorator to.
         reason: The reason for skipping.
+        test_behavior: The behavior of the test case. [skip or xfail]
+        matcher: The matcher to apply to the test case.
+        enabled_if: Whether to enable test behavior. Usually used on onnx/ort version control
     """
 
     op_name: str
@@ -437,7 +442,9 @@ class DecorateMeta:
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
     dtypes: Optional[Collection[torch.dtype]]
     reason: str
-    matcher: Optional[Callable[[Any], Any]] = None
+    test_behavior: str
+    matcher: Optional[Callable[[Any], bool]] = None
+    enabled_if: bool = True
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -455,6 +462,8 @@ def xfail(
     reason: str,
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], bool]] = None,
+    enabled_if: bool = True,
 ):
     """Expects a OpInfo test to fail.
 
@@ -464,6 +473,9 @@ def xfail(
         opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            xfail is in the SKIP_XFAIL_SUBTESTS list.
+        enabled_if: Whether to enable xfail. Usually used on onnx/ort version control
     """
     return DecorateMeta(
         op_name=op_name,
@@ -471,7 +483,10 @@ def xfail(
         decorator=unittest.expectedFailure,
         opsets=opsets,
         dtypes=dtypes,
+        enabled_if=enabled_if,
+        matcher=matcher,
         reason=reason,
+        test_behavior="xfail",
     )
 
 
@@ -483,6 +498,7 @@ def skip(
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
+    enabled_if: bool = True,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -495,7 +511,8 @@ def skip(
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
         matcher: A function that matches the test sample input. It is used only when
-            skip is in the SKIP_SUBTESTS list.
+            skip is in the SKIP_XFAIL_SUBTESTS list.
+        enabled_if: Whether to enable skip. Usually used on onnx/ort version control
     """
     return DecorateMeta(
         op_name=op_name,
@@ -505,37 +522,8 @@ def skip(
         dtypes=dtypes,
         reason=reason,
         matcher=matcher,
-    )
-
-
-def fixme(
-    op_name: str,
-    variant_name: str = "",
-    *,
-    reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
-):
-    """Skips a test case in OpInfo. It should be eventually fixed.
-
-    Args:
-        op_name: The name of the operator.
-        variant_name: The name of the variant.
-        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
-        dtypes: The dtypes to expect the failure.
-        reason: The reason for the failure.
-        matcher: A function that matches the test sample input. It is used only when
-            fixme is in the SKIP_SUBTESTS list.
-    """
-    return DecorateMeta(
-        op_name=op_name,
-        variant_name=variant_name,
-        decorator=unittest.skip(f"To fix: {reason}"),
-        opsets=opsets,
-        dtypes=dtypes,
-        reason=reason,
-        matcher=matcher,
+        enabled_if=enabled_if,
+        test_behavior="skip",
     )
 
 
@@ -570,6 +558,7 @@ def add_decorate_info(
             test_class_name,
             base_test_name,
             dtypes=decorate_meta.dtypes,
+            active_if=decorate_meta.enabled_if,
         )
         decorators.append(new_decorator)
         opinfo.decorators = tuple(decorators)
@@ -621,3 +610,35 @@ def reason_jit_tracer_error(info: str) -> str:
 def reason_flaky() -> str:
     """Formats the reason: test is flaky."""
     return "flaky test"
+
+
+@contextlib.contextmanager
+def normal_xfail_skip_test_behaviors(
+    test_behavior: Optional[str] = None, reason: Optional[str] = None
+):
+    """This context manager is used to handle the different behaviors of xfail and skip.
+
+    Args:
+        test_behavior (optional[str]): From DecorateMeta name, can be 'skip', 'xfail', or None.
+        reason (optional[str]): The reason for the failure or skip.
+
+    Raises:
+        e: Any exception raised by the test case if it's not an expected failure.
+    """
+
+    # We need to skip as soon as possible, as SegFault might also be a case.
+    if test_behavior == "skip":
+        pytest.skip(reason=reason)
+
+    try:
+        yield
+    # We could use `except (AssertionError, RuntimeError, ...) as e:`, but it needs
+    # to go over all test cases to find the right exception type.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        if test_behavior is None:
+            raise e
+        if test_behavior == "xfail":
+            pytest.xfail(reason=reason)
+    else:
+        if test_behavior == "xfail":
+            pytest.fail("Test unexpectedly passed")
