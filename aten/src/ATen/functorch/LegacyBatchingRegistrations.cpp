@@ -99,19 +99,6 @@ static bool participatesInCurrentLevel(ITensorListRef self) {
   return false;
 }
 
-std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return self.chunk(chunks, dim);
-  }
-
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dim_physical = self_physical.getPhysicalDim(dim);
-  auto result = at::chunk(self_physical.tensor(), chunks, dim_physical);
-  self_physical.getPhysicalToLogicalMap().applyInplace(result);
-  return result;
-}
-
 std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
