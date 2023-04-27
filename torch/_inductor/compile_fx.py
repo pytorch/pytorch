@@ -194,7 +194,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        post_grad_passes(gm)
+        gm = post_grad_passes(gm, example_inputs)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
