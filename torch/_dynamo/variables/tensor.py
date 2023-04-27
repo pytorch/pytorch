@@ -140,6 +140,10 @@ class TensorVariable(VariableTracker):
             )
         return props
 
+    def call_hasattr(self, tx, name: str) -> VariableTracker:
+        options = VariableTracker.propagate(self)
+        return variables.ConstantVariable(hasattr(self, name), **options)
+
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
 

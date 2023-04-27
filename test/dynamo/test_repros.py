@@ -3111,6 +3111,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(inp1, inp2, inp3, inp4, c)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_hasattr_tensor(self):
+        def fn(x):
+            if hasattr(x, "dtype"):
+                a = 2.0
+            return x * a
+
+        x = torch.ones(4)
+        ref = fn(x)
+
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
