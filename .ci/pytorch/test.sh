@@ -521,9 +521,13 @@ test_libtorch() {
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
 
-    # Run JIT cpp tests
-    python test/cpp/jit/tests_setup.py setup
+    # Prepare the model used by test_jit, the model needs to be in the test directory
+    # to get picked up by run_test
+    pushd test
+    python cpp/jit/tests_setup.py setup
+    popd
 
+    # Run JIT cpp tests
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
     else
