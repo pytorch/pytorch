@@ -432,6 +432,7 @@ CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
+ROCKSET_REVERTS_COLLECTION = "reverts"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
 
@@ -1393,6 +1394,48 @@ def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
         return []
 
 
+def save_rockset_record(
+    collection: str,
+    data: Any,
+    dry_run: bool,
+    workspace: str = "commons",
+    num_retries: int = 3,
+) -> None:
+    """Helper function to save things into rockset"""
+    if dry_run:
+        # Decide not to save the record to Rockset if dry-run is set to not pollute
+        # the collection
+        return
+
+    try:
+        import rockset  # type: ignore[import]
+
+        # Prepare the record to be written into Rockset
+        client = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+        client.Documents.add_documents(
+            collection=collection,
+            data=data,
+            workspace=workspace,
+        )
+    except ModuleNotFoundError:
+        print("Rockset is missing, no record will be saved")
+        return
+
+    except Exception as e:
+        if num_retries > 0:
+            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
+            return save_rockset_record(
+                collection=collection,
+                data=data,
+                dry_run=dry_run,
+                workspace=workspace,
+                num_retries=num_retries - 1,
+            )
+        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
+
+
 def save_merge_record(
     collection: str,
     comment_id: int,
@@ -1411,76 +1454,66 @@ def save_merge_record(
     ignore_current: bool = False,
     error: str = "",
     workspace: str = "commons",
-    num_retries: int = 3,
 ) -> None:
     """
     This saves the merge records into Rockset, so we can query them (for fun and profit)
     """
-    if dry_run:
-        # Decide not to save the record to Rockset if dry-run is set to not pollute
-        # the collection
-        return
+    data = [
+        {
+            "comment_id": comment_id,
+            "pr_num": pr_num,
+            "owner": owner,
+            "project": project,
+            "author": author,
+            "pending_checks": pending_checks,
+            "failed_checks": failed_checks,
+            "last_commit_sha": last_commit_sha,
+            "merge_base_sha": merge_base_sha,
+            "merge_commit_sha": merge_commit_sha,
+            "is_failed": is_failed,
+            "skip_mandatory_checks": skip_mandatory_checks,
+            "ignore_current": ignore_current,
+            "error": error,
+        }
+    ]
 
-    try:
-        import rockset  # type: ignore[import]
+    save_rockset_record(
+        collection=collection,
+        data=data,
+        dry_run=dry_run,
+        workspace=workspace,
+        num_retries=3,
+    )
 
-        # Prepare the record to be written into Rockset
-        data = [
-            {
-                "comment_id": comment_id,
-                "pr_num": pr_num,
-                "owner": owner,
-                "project": project,
-                "author": author,
-                "pending_checks": pending_checks,
-                "failed_checks": failed_checks,
-                "last_commit_sha": last_commit_sha,
-                "merge_base_sha": merge_base_sha,
-                "merge_commit_sha": merge_commit_sha,
-                "is_failed": is_failed,
-                "skip_mandatory_checks": skip_mandatory_checks,
-                "ignore_current": ignore_current,
-                "error": error,
-            }
-        ]
 
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-        client.Documents.add_documents(
-            collection=collection,
-            data=data,
-            workspace=workspace,
-        )
+def save_revert_record(
+    comment_id: int,
+    pr: GitHubPR,
+    commit_sha: str,
+    revert_sha: str,
+    dry_run: bool = False,
+) -> None:
+    """
+    This saves successful revert records into Rockset
+    """
+    data = [
+        {
+            "comment_id": comment_id,
+            "pr_num": pr.pr_num,
+            "owner": pr.org,
+            "project": pr.project,
+            "commit_sha": commit_sha,
+            "revert_sha": revert_sha,
+        }
+    ]
 
-    except ModuleNotFoundError:
-        print("Rockset is missing, no record will be saved")
-        return
-
-    except Exception as e:
-        if num_retries > 0:
-            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
-            return save_merge_record(
-                collection=collection,
-                comment_id=comment_id,
-                pr_num=pr_num,
-                owner=owner,
-                project=project,
-                author=author,
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                last_commit_sha=last_commit_sha,
-                merge_base_sha=merge_base_sha,
-                merge_commit_sha=merge_commit_sha,
-                is_failed=is_failed,
-                dry_run=dry_run,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=ignore_current,
-                error=error,
-                workspace=workspace,
-                num_retries=num_retries - 1,
-            )
-        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
+    save_rockset_record(
+        collection=ROCKSET_REVERTS_COLLECTION,
+        data=data,
+        dry_run=dry_run,
+        num_retries=3,
+        workspace="commons",
+    )
 
 
 def get_rockset_results(
@@ -1660,6 +1693,11 @@ def try_revert(
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
+
+    if comment_id:
+        # Upload information about successful reverts to rockset
+        revert_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+        save_revert_record(comment_id, pr, commit_sha, revert_sha, dry_run)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
