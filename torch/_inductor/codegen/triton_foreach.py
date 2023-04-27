@@ -25,7 +25,7 @@ class ForeachKernel(Kernel):
 
         MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
         kernels = []
-        max_list_length = int(MAX_NUM_ARGS / num_lists)
+        max_list_length = MAX_NUM_ARGS // num_lists
         for i in range(0, list_length, max_list_length):
             kernels.append(
                 ForeachKernel(
