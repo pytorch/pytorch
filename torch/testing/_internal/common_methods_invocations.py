@@ -2789,10 +2789,18 @@ reference_inputs_bucketize = partial(sample_inputs_bucketize, reference_inputs_m
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
-    for size, noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
+    # (unsorted tensor size, (input sizes,))
+    sizes = (
+        ((0,), (0,)),
+        ((M,), ((), (M,), (M, M))),
+        ((0, 0), (0, 0)),
+        ((M, M), (M, M)),
+        ((0, 0, 0), (0, 0, 0)),
+        ((M, M, M), (M, M, M)),
+    )
+
+    for (size, input_sizes), noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
-        input_sizes = ((), (M, M), size) if size == (M,) else (size,)
         for input_size in input_sizes:
             input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
             if np.product(size) == 0:
