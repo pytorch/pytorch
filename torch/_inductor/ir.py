@@ -2050,48 +2050,6 @@ class BufferList(IRNode):
     def get_name(self):
         return self.name
 
-    # TODO mlazos: Ensure each Bufferlist has uniform dtype and device
-    def get_device(self, ind=0):
-        return self.data.layouts[ind].device
-
-    # TODO mlazos: Ensure each Bufferlist has uniform dtype and device
-    def get_dtype(self, ind=0):
-        return getattr(self.data.layouts[ind], "dtype", None)
-
-    def get_size(self, ind):
-        return list(self.data.layouts[ind].size)
-
-    def get_stride(self, ind):
-        return list(self.data.layouts[ind].stride)
-
-    def get_layout(self, ind):
-        return self.data.layouts[ind]
-
-    def get_layouts(self):
-        return self.data.layouts
-
-    def get_storage_numel(self):
-        return self.get_numel()
-
-    def is_extern(self):
-        return False
-
-    def freeze_layout(self):
-        if not isinstance(self.layout, (MultiOutputLayout, AliasedLayout)):
-            self.layout = self.layout.as_fixed()
-
-    def freeze_layout_with_stride_order(self, order):
-        assert isinstance(self.layout, FlexibleLayout)
-        self.layout = self.layout.as_stride_order(order)
-
-    def freeze_layout_with_fill_order(self, order):
-        assert isinstance(self.layout, FlexibleLayout)
-        self.layout = self.layout.as_fill_order(order)
-
-    def freeze_layout_with_same_order(self, stride):
-        assert isinstance(self.layout, FlexibleLayout)
-        self.layout = self.layout.as_same_order(stride)
-
     def make_loader(self):
         def fn():
             load = self.data.make_loader()
@@ -2105,14 +2063,17 @@ class BufferList(IRNode):
 
         return fn
 
-    def is_no_op(self):
-        return False
-
-    def codegen_reference(self):
-        return self.get_name()
-
     def decide_layout(self):
         pass
+
+    def get_device(self):
+        return self.data.layouts[0].device
+
+    def get_layouts(self):
+        return self.data.layouts
+
+    def is_no_op(self):
+        return False
 
     def get_alias_names(self):
         return ()
@@ -2144,15 +2105,6 @@ class BufferList(IRNode):
 
     def get_read_writes(self):
         return self.normalized_read_writes()
-
-    def realize(self):
-        pass
-
-    def _index(self, ind):
-        return self.data._index(ind)
-
-    def body(self, indices):
-        self.data.body(indices)
 
 
 class ListElemBuffer(Buffer):
