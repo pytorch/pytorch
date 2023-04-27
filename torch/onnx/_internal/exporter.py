@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import abc
-import inspect
 import io
 import logging
 from typing import (
     Any,
     Callable,
+    Dict,
     Final,
     List,
     Mapping,
@@ -16,6 +16,7 @@ from typing import (
     runtime_checkable,
     Sequence,
     Tuple,
+    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -78,32 +79,68 @@ class ExportOptions:
         self.logger = logger
 
 
-class ResolvedExportOptions:
+class ResolvedExportOptions(ExportOptions):
+    """Consolidates `ExportOptions` with default values.
+    All unspecified options from `ExportOptions` are assigned a default value.
+    This is an internal class and its API may be changed at any time without notice.
+    """
+
+    # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
+    opset_version: int
+    dynamic_shapes: bool
+    op_level_debug: bool
+    logger: logging.Logger
+
+    # Private only attributes
+    decomposition_table: Dict[torch._ops.OpOverload, Callable]
+    """A dictionary that maps operators to their decomposition functions."""
+
+    fx_tracer: FXGraphExtractor
+    """The FXGraphExtractor instance used to extract the FX graph from the model."""
+
     @_beartype.beartype
-    def __init__(self, options: Optional[ExportOptions]):
+    def __init__(
+        self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
+    ):
         if options is None:
             options = ExportOptions()
+        if isinstance(options, ResolvedExportOptions):
+            self.opset_version = options.opset_version
+            self.dynamic_shapes = options.dynamic_shapes
+            self.op_level_debug = options.op_level_debug
+            self.logger = options.logger
+            self.fx_tracer = options.fx_tracer
+            self.decomposition_table = options.decomposition_table
+        else:
+            T = TypeVar("T")
 
-        T = TypeVar("T")
+            @_beartype.beartype
+            def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
+                if value is not None:
+                    return value
+                if callable(fallback):
+                    return fallback()
+                return fallback
 
-        @_beartype.beartype
-        def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
-            if value is not None:
-                return value
-            if callable(fallback):
-                return fallback()
-            return fallback
+            self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
+            self.dynamic_shapes = resolve(options.dynamic_shapes, False)
+            import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
+            from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
+                function_dispatcher,
+            )
 
-        self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
-        self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-        self.op_level_debug = resolve(options.op_level_debug, False)
-        self.logger = resolve(
-            options.logger, lambda: logging.getLogger().getChild("torch.onnx")
-        )
+            self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+            self.decomposition_table = (
+                function_dispatcher.DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE
+            )
+            self.op_level_debug = resolve(options.op_level_debug, False)
+            self.logger = resolve(
+                options.logger, lambda: logging.getLogger().getChild("torch.onnx")
+            )
 
-        for key in dir(options):
-            if not key.startswith("_"):  # skip private attributes
-                assert hasattr(self, key), f"Unresolved option '{key}'"
+            for key in dir(options):
+                if not key.startswith("_"):  # skip private attributes
+                    assert hasattr(self, key), f"Unresolved option '{key}'"
 
 
 @runtime_checkable
@@ -410,7 +447,138 @@ class ExportOutput:
             serializer.serialize(self, destination)
 
 
-class Exporter(abc.ABC):
+class FXGraphExtractor(abc.ABC):
+    """Abstract interface for FX graph extractor engines.
+    This class isolates FX extraction logic from the rest of the export logic.
+    That allows a single ONNX exporter that can leverage different FX graphs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_adapter: InputAdapter = InputAdapter()
+        self.output_adapter: OutputAdapter = OutputAdapter()
+
+    @_beartype.beartype
+    def _export_fx_to_onnx(
+        self,
+        options: ResolvedExportOptions,
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ) -> ExportOutput:
+        # TODO: Import here to prevent circular dependency
+        import torch.onnx._internal.fx.fx_exporter as fx_exporter
+        import torch.onnx._internal.fx.passes as passes
+
+        # Apply decomposition table to the input graph.
+        module = passes.Decompose(
+            fx_module,
+            options.decomposition_table,
+            enable_dynamic_axes=options.dynamic_shapes,
+        ).run(*fx_module_args)
+
+        # ONNX does not support views and mutations.
+        # Functionalize to get a semantically equivalent graph without mutations.
+        module = passes.Functionalize(
+            module, enable_dynamic_axes=options.dynamic_shapes
+        ).run(*fx_module_args)
+        # Input mutations are detected and distilled after `Functionalize` pass.
+        # Remove them since ONNX inference does not need them.
+        module = passes.RemoveInputMutation(module).run(*fx_module_args)
+
+        # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
+        # The pass added nodes with static shape into original node metadata:
+        # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
+        if options.op_level_debug:
+            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
+
+        # We want to pass list of ints and floats to TorchScript graph correctly
+        # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
+        # receive FakeTensor and results runtime error. In addition, TorchScript-based
+        # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
+        # with FakeTensorMode.
+        with torch.utils._mode_utils.no_dispatch():
+            onnxscript_graph = passes.export_fx_to_onnxscript(module, options)
+            # ONNX does not support None inputs. During graph building, all None inputs
+            # are removed. Here we register this step to input adapter.
+            self.adapt_input(fx_exporter.RemoveNoneInputStep, fx_module_args, {})
+            # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
+            # tensor, etc), we flatten the collection and register each element as output.
+            self.output_adapter.append_step(fx_exporter.FlattenOutputStep())
+
+        # Export TorchScript graph to ONNX ModelProto.
+        onnx_model = onnxscript_graph.to_model_proto(options.opset_version)
+        return torch.onnx.ExportOutput(
+            onnx_model, self.input_adapter, self.output_adapter
+        )
+
+    def adapt_input(
+        self,
+        adapt_step_cls: Type[InputAdaptStep],
+        model_args: Sequence[Any],
+        model_kwargs: Mapping[str, Any],
+        step_init_args: Optional[Sequence[Any]] = None,
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        """Apply an input adapt step to the model args and kwargs.
+        An input adapt step object is initialized, applied and recorded as part of
+        ``self.input_adapter`.
+        Args:
+            adapt_step_cls: The input adapt step class.
+            model_args: The model args.
+            model_kwargs: The model kwargs.
+            step_init_args: The input adapt step initialization arguments.
+        Returns:
+            The adapted model args and kwargs.
+        """
+        step_init_args = step_init_args or ()
+        adapt_step = adapt_step_cls(*step_init_args)
+        self.input_adapter.append_step(adapt_step)
+        return adapt_step.apply(model_args, model_kwargs)
+
+    def adapt_output(
+        self,
+        adapt_step_cls: Type[OutputAdaptStep],
+        model_outputs: Any,
+        step_init_args: Optional[Sequence[Any]] = None,
+    ) -> Any:
+        """Apply an output adapt step to the model outputs.
+        An output adapt step object is initialized, applied and recorded as part of
+        ``self._output_adapter`.
+        Args:
+            adapt_step_cls: The output adapt step class.
+            model_outputs: The model outputs.
+            step_init_args: The input adapt step initialization arguments.
+        Returns:
+            The adapted model outputs.
+        """
+        step_init_args = step_init_args or ()
+        adapt_step = adapt_step_cls(*step_init_args)
+        self.output_adapter.append_step(adapt_step)
+        return adapt_step.apply(model_outputs)
+
+    @abc.abstractmethod
+    def generate_fx(
+        self,
+        options: ResolvedExportOptions,
+        model: Union[torch.nn.Module, Callable],
+        model_args: Sequence[Any],
+        model_kwargs: Mapping[str, Any],
+    ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
+        """Analyzes user ``model`` and generates a FX graph.
+        Args:
+            options: The export options.
+            model: The user model.
+            model_args: The model's positional input arguments.
+            model_kwargs: The model's keyword input arguments.
+        Returns:
+            The generated FX Graph, and the model's adapted input arguments.
+        """
+        # By design, only torch.fx.GraphModule is needed
+        # But FXSymbolicTracer modifies model data, which will be needed
+        # to produce the ONNX proto in the next layer.
+        # TODO: Refactor after https://github.com/pytorch/pytorch/pull/98421
+        ...
+
+
+class Exporter:
     @_beartype.beartype
     def __init__(
         self,
@@ -419,33 +587,31 @@ class Exporter(abc.ABC):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
-        if isinstance(options, ExportOptions):
-            self.options = ResolvedExportOptions(options)
-        elif isinstance(options, ResolvedExportOptions):
-            self.options = options
+        self.options = ResolvedExportOptions(options)
         assert self.options is not None
 
         self.model = model
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-    @abc.abstractmethod
     def export(self) -> ExportOutput:
-        pass
+        graph_module, updated_model_args = self.options.fx_tracer.generate_fx(
+            self.options, self.model, self.model_args, self.model_kwargs
+        )
+
+        # Export FX graph to ONNX ModelProto.
+        #
+        # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
+        # to _export.
+        return self.options.fx_tracer._export_fx_to_onnx(
+            self.options, graph_module, updated_model_args
+        )
 
     @property
     def logger(self) -> logging.Logger:
         # options.logger will always be resolved to an instance when constructing
         assert isinstance(self.options.logger, logging.Logger)
         return self.options.logger
-
-    @property
-    def model_signature(self) -> inspect.Signature:
-        return inspect.signature(
-            self.model.forward
-            if isinstance(self.model, torch.nn.Module)
-            else self.model
-        )
 
 
 class UnsatisfiedDependencyError(RuntimeError):
@@ -533,15 +699,15 @@ def dynamo_export(
         ).save("my_model.onnx")
     """
 
-    resolved_export_options = ResolvedExportOptions(export_options)
+    resolved_export_options = (
+        export_options
+        if isinstance(export_options, ResolvedExportOptions)
+        else ResolvedExportOptions(export_options)
+    )
 
     _assert_dependencies(resolved_export_options)
 
-    # Import inside to avoid introducing the dependencies on `onnx` and `onnxscript` for
-    # this file (exporter.py).
-    from torch.onnx._internal.fx.dynamo_exporter import DynamoExporter
-
-    return DynamoExporter(
+    return Exporter(
         options=resolved_export_options,
         model=model,
         model_args=model_args,

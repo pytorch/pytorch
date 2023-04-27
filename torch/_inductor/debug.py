@@ -127,8 +127,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
-                return any([in_output(x) for x in snode.snodes])
-            return any([isinstance(user.node, OutputNode) for user in snode.users])
+                return any(in_output(x) for x in snode.snodes)
+            return any(isinstance(user.node, OutputNode) for user in snode.users)
 
         if in_output(snode):
             outputs.append(fx_node)

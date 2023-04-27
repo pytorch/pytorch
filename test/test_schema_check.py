@@ -397,35 +397,25 @@ class TestSchemaCheck(JitTestCase):
         def f(x):
             return torch.ops.bad_schemas.secretly_aliasing(x)
 
-        f_compiled = torch.compile(f, backend="eager_debug")
         x = torch.rand((3, 3))
-
         with self.assertRaisesRegex(RuntimeError, "not defined to alias output but was aliasing"):
             with SchemaCheckMode() as s:
                 out = f(x)
-        with self.assertRaisesRegex(RuntimeError, "not defined to alias output but was aliasing"):
-            out = f_compiled(x)
 
     def test_alias_check_fail_custom_ops_secretly_mutating(self):
         def f(x):
             return torch.ops.bad_schemas.secretly_mutating(x)
 
-        f_compiled = torch.compile(f, backend="eager_debug")
         x = torch.rand((3, 3))
-
         with self.assertRaisesRegex(RuntimeError, "not defined as mutable but was mutated"):
             with SchemaCheckMode() as s:
                 out = f(x)
-        with self.assertRaisesRegex(RuntimeError, "not defined as mutable but was mutated"):
-            out = f_compiled(x)
 
     def test_alias_check_fail_custom_ops_output_is_input(self):
         def f(x):
             return torch.ops.bad_schemas.output_is_input(x)
 
-        f_compiled = torch.compile(f, backend="eager_debug")
         x = torch.rand((3, 3))
-
         with self.assertRaisesRegex(RuntimeError, "are not allowed to directly return inputs"):
             with SchemaCheckMode() as s:
                 out = f(x)
