@@ -1039,7 +1039,7 @@ Miscellanea
         traced.eval()
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(traced(x), x)
+        torch.testing.assert_close(traced(x), x)
         """
         AssertionError: Tensor-likes are not close!
 
