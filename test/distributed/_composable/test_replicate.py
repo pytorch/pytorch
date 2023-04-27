@@ -160,7 +160,6 @@ class ReplicateTest(MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         model = MyNet().cuda()
         replicate(model, device_ids=[torch.cuda.current_device()])
-        # CPU input ensures replicate can move arg and kwargs to device.
         a, b = torch.randn(2, 2), torch.randn(2, 2)
         model(a, kwarg=b).sum().backward()
 
