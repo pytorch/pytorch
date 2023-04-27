@@ -54,8 +54,7 @@ class ForeachKernel(Kernel):
             1,
             1,
         )
-        self.num_warps = 32
-        self.num_stages = 4
+        self.num_warps = 8
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -107,7 +106,7 @@ class ForeachKernel(Kernel):
         }
         triton_meta["configs"] = [config_of(signature)]
         return (
-            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            f"@template(num_stages=1, num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
         )
 
