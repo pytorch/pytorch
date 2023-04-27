@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo,
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS
 )
 import torch
 import torch.nn as nn
@@ -23,7 +23,7 @@ import math
 from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -46,6 +46,7 @@ from torch._ops import HigherOrderOperator
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.autograd.forward_ad as fwAD
 from torch.func import functional_call, stack_module_state, linearize
+from common_utils import expectedFailureIf
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -4734,6 +4735,9 @@ def traceable(f):
 
 
 class TestCompileTransforms(TestCase):
+    # torch.compile is not supported on Windows
+    # Triton only supports GPU with SM70 or later.
+    @expectedFailureIf(IS_WINDOWS or not (SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
