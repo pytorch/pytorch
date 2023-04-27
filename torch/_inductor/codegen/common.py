@@ -188,7 +188,7 @@ class ExprPrinter(Printer):
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
             return f"math.sqrt({base})"
-        assert exp.is_integer
+        assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
