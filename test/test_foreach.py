@@ -207,6 +207,7 @@ class TestForeach(TestCase):
                     inplace_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False, zero_size=zero_size)
                     assert_multiple_grad_fns(tensors, self)
 
+                    # note(crcrpar): the following ops' reference torch functions don't have the overload with Scalar/ScalarList.
                     is_foreach_max_min_imum_with_scalar_or_scalarlist = (
                         inplace_op.func in (torch._foreach_minimum_, torch._foreach_maximum_)
                         and (
