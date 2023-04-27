@@ -4,6 +4,7 @@
 __all__ = ["svd_lowrank", "pca_lowrank"]
 
 from typing import Optional, Tuple
+from contextlib import nullcontext
 
 import torch
 from torch import Tensor
@@ -152,8 +153,14 @@ def _svd_lowrank(
         M_t = _utils.transpose(M)
     A_t = _utils.transpose(A)
 
-    with torch.amp.autocast(A.device.type, enabled=False): # issue #99710
+    if not torch._jit_internal.is_scripting():
+        # avoid downcasting to float16 during matmul, which 
+        # would break ops like torch.linalg.qr (#99710)
+        ctx = torch.amp.autocast(A.device.type, enabled=False)
+    else:
+        ctx = nullcontext()
 
+    with ctx:
         # Algorithm 5.1 in Halko et al 2009, slightly modified to reduce
         # the number conjugate and transpose operations
         if m < n or n > q:
