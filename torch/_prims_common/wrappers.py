@@ -277,8 +277,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         _fn.__annotations__ = fn.__annotations__
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
-        if "arange" in str(_fn):
-            breakpoint()
         return _fn
 
     return _out_wrapper
