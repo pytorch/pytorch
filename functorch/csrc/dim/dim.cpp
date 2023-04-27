@@ -13,6 +13,7 @@
 #include <vector>
 //#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <torch/csrc/utils/reprfunc.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -305,7 +306,7 @@ PyTypeObject Dim::Type = {
     0,                              /* tp_getattr */
     0,                              /* tp_setattr */
     0,                              /* tp_as_async */
-    (reprfunc)Dim_repr,           /* tp_repr */
+    TORCH_AS_REPRFUNC(Dim_repr),    /* tp_repr */
     0,                 /* tp_as_number */
     0,                              /* tp_as_sequence */
     0,                              /* tp_as_mapping */
@@ -520,15 +521,15 @@ PyMappingMethods DimList_mapping = {
 
 PyTypeObject DimList::Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "_C.DimList",               /* tp_name */
-    sizeof(DimList),               /* tp_basicsize */
-    0,                              /* tp_itemsize */
-    DimList::dealloc_stub,      /* tp_dealloc */
-    0,                              /* tp_vectorcall_offset */
-    0,                              /* tp_getattr */
-    0,                              /* tp_setattr */
-    0,                              /* tp_as_async */
-    (reprfunc)DimList_repr,           /* tp_repr */
+    "_C.DimList",                    /* tp_name */
+    sizeof(DimList),                 /* tp_basicsize */
+    0,                               /* tp_itemsize */
+    DimList::dealloc_stub,           /* tp_dealloc */
+    0,                               /* tp_vectorcall_offset */
+    0,                               /* tp_getattr */
+    0,                               /* tp_setattr */
+    0,                               /* tp_as_async */
+    TORCH_AS_REPRFUNC(DimList_repr), /* tp_repr */
     0,                 /* tp_as_number */
     &DimList_seq,                 /* tp_as_sequence */
     &DimList_mapping,             /* tp_as_mapping */

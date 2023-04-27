@@ -1567,7 +1567,7 @@ cc_library(
         exclude = [
             "torch/csrc/*/generated/*.h",
         ] + torch_cuda_headers,
-    ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
+    ) + GENERATED_AUTOGRAD_CPP + [":version_h"] + ["//torch/csrc/utils:hdrs"],
     includes = [
         "third_party/kineto/libkineto/include",
         "torch/csrc",
@@ -1581,6 +1581,7 @@ cc_library(
         ":aten_headers",
         ":caffe2_headers",
         "//c10",
+        "//torch/csrc/utils:reprfunc",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
         "@onnx",
@@ -1620,7 +1621,8 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + torch_sources,
+    )) + torch_sources + ["//torch/csrc/utils:srcs"],
+    hdrs = ["//torch/csrc/utils:hdrs"],
     copts = TORCH_COPTS,
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",

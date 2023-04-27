@@ -5,6 +5,7 @@
 #include <string>
 
 #include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/utils/reprfunc.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/Exceptions.h"
 

@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/reprfunc.h>
 
 #include <ATen/Device.h>
 #include <c10/util/Exception.h>
@@ -226,7 +227,7 @@ PyTypeObject THPDeviceType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPDevice_repr, /* tp_repr */
+    TORCH_AS_REPRFUNC(THPDevice_repr), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -237,7 +238,7 @@ PyTypeObject THPDeviceType = {
     // this later, so for now, don't actually implement this
     // THPDevice_call, /* tp_call */
     nullptr, /* tp_call */
-    (reprfunc)THPDevice_str, /* tp_str */
+    TORCH_AS_REPRFUNC(THPDevice_str), /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */

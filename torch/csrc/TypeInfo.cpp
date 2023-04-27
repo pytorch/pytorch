@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/reprfunc.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <c10/util/Exception.h>
@@ -259,13 +260,13 @@ PyTypeObject THPFInfoType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPFInfo_str, /* tp_repr */
+    TORCH_AS_REPRFUNC(THPFInfo_str), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     nullptr, /* tp_hash  */
     nullptr, /* tp_call */
-    (reprfunc)THPFInfo_str, /* tp_str */
+    TORCH_AS_REPRFUNC(THPFInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
@@ -312,13 +313,13 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPIInfo_str, /* tp_repr */
+    TORCH_AS_REPRFUNC(THPIInfo_str), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
     nullptr, /* tp_hash  */
     nullptr, /* tp_call */
-    (reprfunc)THPIInfo_str, /* tp_str */
+    TORCH_AS_REPRFUNC(THPIInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
