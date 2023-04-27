@@ -146,7 +146,8 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
 # Used to query the CustomOp associated with a specific C++ dispatcher operator.
 # An example usage is FakeTensor: FakeTensor checks if a specific operator
 # has an implementation registered via the CustomOp API.
-global_registry: typing.Dict["qualname", "CustomOp"] = {}
+# Indexed by qualname (e.g. aten::foo)
+global_registry: typing.Dict[str, "CustomOp"] = {}
 
 
 class CustomOp:
