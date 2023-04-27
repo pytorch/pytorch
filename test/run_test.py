@@ -560,7 +560,7 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1 if should_file_rerun else 0,
+            retries=2 if should_file_rerun else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
