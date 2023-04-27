@@ -34,10 +34,15 @@ def config_of(args):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
         if isinstance(x, SizeArg):
-            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+            if isinstance(x.expr, (int, sympy.Integer)):
+                # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
+                # _maybe_evaluate_static...
+                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
+            else:
+                return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
-    if config.triton.divisible_by_16 and not dynamo_config.dynamic_shapes:
+    if config.triton.divisible_by_16:
         divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     else:
         divisible_by_16 = []

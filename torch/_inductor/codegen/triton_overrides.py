@@ -209,6 +209,14 @@ class TritonOverrides(OpOverrides):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
+    # TODO: work out how to use randint4x
+    @staticmethod
+    def randint(
+        seed, offset, _
+    ):  # _ here to keep the contract identical to CPU randint op
+        offset = f"({offset}).to(tl.uint32)"
+        return f"tl.randint({seed}, {offset}).to(tl.int32)"
+
     @staticmethod
     def rsqrt(x):
         return f"tl.math.rsqrt({x})"
