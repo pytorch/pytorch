@@ -6,6 +6,7 @@ import traceback
 import warnings
 from enum import auto, Enum
 from typing import (
+    Any,
     Callable,
     Dict,
     Generator,
@@ -14,6 +15,7 @@ from typing import (
     no_type_check,
     Optional,
     Set,
+    Tuple,
 )
 
 import torch
@@ -58,7 +60,7 @@ class _FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._fully_sharded_module_to_handles: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
+            nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
         # All following attributes should only be used for root states:
@@ -184,6 +186,25 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
+def _named_parameters_with_duplicates(
+    module: nn.Module, **kwargs: Any
+) -> List[Tuple[str, nn.Parameter]]:
+    """
+    This API is required as some modules overwrite `named_parameters()` but do not support
+    `remove_duplicate`.
+    """
+    assert (
+        "remove_duplicate" not in kwargs
+    ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+    kwargs["remove_duplicate"] = False
+    try:
+        ret = list(module.named_parameters(**kwargs))
+    except AssertionError as e:
+        kwargs.pop("remove_duplicate")
+        ret = list(module.named_parameters(**kwargs))
+    return ret
+
+
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
@@ -204,8 +225,10 @@ def _get_param_to_fqns(
             includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, param_to_fqns):
-        for param_name, param in module.named_parameters(recurse=False):
+    def module_fn(module, prefix, tree_level, param_to_fqns):
+        for param_name, param in _named_parameters_with_duplicates(
+            module, recurse=False
+        ):
             local_fqns = (
                 param._fqns
                 if type(param) is flat_param_file.FlatParameter
@@ -247,7 +270,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
-        [key for key, _ in model.named_parameters()],
+        [key for key, _ in _named_parameters_with_duplicates(model)],
         param_to_unflat_param_names,
     )
 
@@ -272,13 +295,14 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
+    def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
+        module_fn(module, prefix, tree_level, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
             if submodule is None:
                 continue
             new_prefix = prefix + submodule_name + "."
+            new_tree_level = tree_level + 1
             if filter_fqns is not None:
                 for fqn in filter_fqns:
                     if fqn.startswith(new_prefix):
@@ -308,9 +332,9 @@ def _apply_to_modules(
                             f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
-            f(submodule, new_prefix, *args, **kwargs)
+            f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
-    f(root_module, "", *args, **kwargs)
+    f(root_module, "", 0, *args, **kwargs)
     return return_fn(*args, **kwargs)
 
 
