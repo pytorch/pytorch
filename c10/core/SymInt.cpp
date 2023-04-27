@@ -230,10 +230,12 @@ DEFINE_SYMINT_OP_INTONLY(int64_t, SymInt)
 DEFINE_SYMINT_OP_INTONLY(int32_t, SymInt)
 DEFINE_SYMINT_OP_INTONLY(uint64_t, SymInt)
 DEFINE_SYMINT_OP_INTONLY(uint32_t, SymInt)
+DEFINE_SYMINT_OP_INTONLY(size_t, SymInt) // needed for osx
 DEFINE_SYMINT_OP(int64_t, SymInt)
 DEFINE_SYMINT_OP(int32_t, SymInt) // make sure constants work
 DEFINE_SYMINT_OP(uint64_t, SymInt)
 DEFINE_SYMINT_OP(uint32_t, SymInt)
+DEFINE_SYMINT_OP(size_t, SymInt) // needed for osx
 DEFINE_SYMINT_OP(double, SymFloat)
 DEFINE_SYMINT_OP(float, SymFloat) // just for completeness
 
