@@ -53,6 +53,8 @@ def _unsafe_view(self, size):
     return self.view(size)
 
 
+# TODO: for now, inductor doesn't handle asserts
+# because the condition is symbool -> tensor in the graph.
 @register_decomposition([aten._assert_async.msg])
 def assert_async_msg_decomp(tensor, msg):
     return

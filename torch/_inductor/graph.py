@@ -360,9 +360,6 @@ class GraphLowering(torch.fx.Interpreter):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
-        if target == torch.ops.aten._assert_async.msg:
-            return
-
         if target not in lowerings:
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
