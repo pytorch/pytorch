@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
+import sympy
 from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
 from .. import config, variables
@@ -466,6 +467,10 @@ class SymNodeVariable(VariableTracker):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = sym_num
+
+        if isinstance(sym_num, (sympy.Integer, int)):
+            return ConstantVariable(sym_num)
+
         return SymNodeVariable(proxy, sym_num, **options)
 
     def __init__(self, proxy, sym_num, **kwargs):
