@@ -415,6 +415,7 @@ AutoNcclGroup::AutoNcclGroup() {
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
+  comm_nonblocking_ = false;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
