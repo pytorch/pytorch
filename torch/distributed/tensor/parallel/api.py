@@ -167,7 +167,7 @@ def _rowwise_parallelize_linear_fn(
 ) -> None:
     """
     This function parallelizes the input :class:`nn.Linear` module in
-    :class:`RowwiseParallel` style.
+    :class:`RowwiseParallel` or `RowwiseParallelForPairwise` style.
 
     Args:
         name (str):
@@ -198,7 +198,7 @@ def _colwise_parallelize_linear_fn(
 ) -> None:
     """
     This function parallelizes the input :class:`nn.Linear` module in
-    :class:`ColwiseParallel` or `ColwiseParallelNoReshard` style.
+    :class:`ColwiseParallel` or `ColwiseParallelForPairwise` style.
 
     Args:
         name (str):
