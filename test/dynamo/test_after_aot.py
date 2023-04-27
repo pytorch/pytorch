@@ -1,10 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
 import io
+import os
+import shutil
+import sys
+import tempfile
+import unittest
 
 import torch._dynamo.test_case
 
-from torch._dynamo.repro.after_aot import save_graph_repro
+from torch._dynamo.repro.after_aot import InputWriter, save_graph_repro
 
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._traceback import report_compile_source_on_error
@@ -16,7 +21,8 @@ def strip_trailing_whitespace(r):
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
     def test_save_graph_repro(self):
-        return
+        # TODO: This triggers CUDA context initialization, even though
+        # it is CPU only
         buf = io.StringIO()
         args = [torch.randn(4)]
 
@@ -24,53 +30,51 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             return (x * x,)
 
         gm = make_fx(f)(*args)
-        save_graph_repro(buf, gm, args, "inductor_accuracy", stable_output=True)
-        r = strip_trailing_whitespace(buf.getvalue())
-        self.assertExpectedInline(
-            r,
+        with tempfile.TemporaryDirectory() as d:
+            save_graph_repro(buf, gm, args, "inductor_accuracy", save_dir=d)
+            r = buf.getvalue()
+            with report_compile_source_on_error():
+                exec(r, {"__compile_source__": r})
+
+            shutil.rmtree(os.path.join(d, "storages"))
+
+            # Should still work even without the save dir
+            with report_compile_source_on_error():
+                exec(r, {"__compile_source__": r})
+
+    @unittest.skipIf(sys.byteorder != "little", "checksum depends on endianness")
+    def test_dump_tensor(self):
+        def test(tensor, expected):
+            with tempfile.TemporaryDirectory() as d:
+                writer = InputWriter(d, stable_hash=True)
+                prefix = len(writer.lines)
+                x = writer.tensor(tensor)
+                self.assertExpectedInline(
+                    "\n".join(writer.lines[prefix:]), expected, skip=1
+                )
+                env = {}
+                # TODO: assert no logs
+                exec("\n".join(writer.lines), env)
+                self.assertEqual(env[x], tensor)
+
+        test(
+            torch.zeros(3, 4),
             """\
-import torch._inductor.overrides
-
-import torch
-from torch import tensor, device
-import torch.fx as fx
-from torch._dynamo.testing import rand_strided
-from math import inf
-from torch.fx.experimental.proxy_tensor import make_fx
-
-# config omitted due to stable_output=True
-
-# REPLACEABLE COMMENT FOR TESTING PURPOSES
-
-
-
-from torch.nn import *
-class Repro(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-
-
-    def forward(self, x_1):
-        mul = torch.ops.aten.mul.Tensor(x_1, x_1);  x_1 = None
-        return (mul,)
-
-args = []
-args.append(rand_strided((4,), (1,), torch.float32, 'cpu'))  # shape (4,), stride (1,)
-mod = make_fx(Repro(), tracing_mode='real')(*args)
-
-from torch._inductor.compile_fx import compile_fx_inner
-from torch._dynamo.debug_utils import same_two_models
-
-compiled = compile_fx_inner(mod, args)
-class AccuracyError(Exception):
-    pass
-if not same_two_models(mod, compiled, args, only_fwd=True):
-    raise AccuracyError("Bad accuracy detected")
-""",
+buf0 = reader.storage('c17fd92682ca5b304ac71074b558dda9e8eb4d66', 48)
+t0 = reader.tensor(buf0, (3, 4))""",
         )
-        with report_compile_source_on_error():
-            exec(r, {"__compile_source__": r})
+        test(
+            torch.ones(3, 4, dtype=torch.int32),
+            """\
+buf0 = reader.storage('7c221e2da0c58c700cc2996644dd13d042bd552e', 48, dtype_hint=torch.int32)
+t0 = reader.tensor(buf0, (3, 4), dtype=torch.int32)""",
+        )
+        test(
+            torch.empty((3, 4, 5, 6), memory_format=torch.channels_last).fill_(2),
+            """\
+buf0 = reader.storage('49ebab3961d6221e64c4c72b0aefd976bdd2afc4', 1440)
+t0 = reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4))""",
+        )
 
 
 if __name__ == "__main__":

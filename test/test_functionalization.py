@@ -1446,6 +1446,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return view_5
     """)  # noqa: B950
 
+    def test_mutation_overlapping_mem(self):
+        def fn(x):
+            # x: (1, 5)
+            t1 = torch.add(x, x)
+            t2 = t1.unfold(1, 3, 2)
+            t3 = t2.abs_()
+            return t3
+
+        with self.assertRaisesRegex(RuntimeError, r'encountered a tensor being mutated that has internal overlap'):
+            x = torch.ones(1, 5)
+            out = _functionalize(fn, reapply_views=True, crossref=False)(x)
+
 
     def test_batch_norm(self):
         def f(x, running_mean, running_var):
