@@ -961,16 +961,18 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  test_python_shard 1
+  # TODO: REVERT ME
   test_aten
+  test_python_shard 1
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  test_python_shard 2
+  # TODO: REVERT ME
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+  test_python_shard 2
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
