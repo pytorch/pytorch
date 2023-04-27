@@ -619,7 +619,7 @@ def create_differentiability_info(
     output_differentiability = defn_dict.pop("output_differentiability", None)
     output_differentiability_conditions = None
     if output_differentiability and any(
-        [isinstance(diff, str) for diff in output_differentiability]
+        isinstance(diff, str) for diff in output_differentiability
     ):
         if len(output_differentiability) != 1:
             raise RuntimeError(
