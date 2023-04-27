@@ -545,10 +545,7 @@ def run_test(
     os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
-    )
+    should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
