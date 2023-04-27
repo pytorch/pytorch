@@ -78,5 +78,3 @@ if [ "$VALGRIND" == "ON" ]; then
     valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
   fi
 fi
-
-popd
