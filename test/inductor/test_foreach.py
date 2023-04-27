@@ -75,7 +75,20 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     def test_broadcasting(self):
-        pass
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        fn_opt = torch._dynamo.optimize()(fn)
+
+        inputs = (
+            torch.rand(10, 1, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+        actual = fn_opt(*inputs)
+        expected = fn(*inputs)
+        self.assertEqual(actual, expected)
 
     @requires_cuda()
     def test_type_promotion(self):
@@ -95,6 +108,10 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     def test_non_foreach_consumer_producer(self):
+        pass
+
+    @requires_cuda()
+    def test_scalar_overloads(self):
         pass
 
 

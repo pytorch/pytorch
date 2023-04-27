@@ -2,12 +2,15 @@ import sympy
 from triton.runtime.jit import JITFunction
 
 from .. import config
-
 from ..utils import instance_descriptor
-
 from ..virtualized import V
-
 from .common import SizeArg, TensorArg
+
+
+def triton_compute_type(dtype):
+    triton_type_name = str(dtype).split(".")[-1]
+    if triton_type_name == "bool":
+        triton_type_name = "int1"
 
 
 def signature_of(arg):

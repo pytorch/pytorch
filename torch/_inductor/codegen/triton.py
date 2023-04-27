@@ -39,10 +39,10 @@ from .common import (
     PythonPrinter,
     SizeArg,
 )
-
 from .triton_foreach import ForeachKernel
-
 from .triton_overrides import TritonOverrides
+from .triton_utils import config_of, signature_of, triton_compute_type
+
 
 log = logging.getLogger(__name__)
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
