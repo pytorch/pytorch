@@ -85,6 +85,7 @@ if RUN_CPU:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
+        BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
@@ -126,11 +127,13 @@ if RUN_CUDA:
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
+        BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
+        BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
