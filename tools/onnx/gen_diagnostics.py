@@ -22,7 +22,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from torchgen import utils as torchgen_utils
-from torchgen.yaml import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 
 _RULES_GENERATED_COMMENT = """\
 GENERATED CODE - DO NOT EDIT DIRECTLY
