@@ -2792,7 +2792,7 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
 
     # (unsorted tensor size, (input sizes,))
     sizes = (
-        ((0,), ((0,))),
+        ((0,), ((0,),)),
         ((M,), ((), (M,), (M, M))),
         ((0, 0), ((0, 0),)),
         ((M, M), ((M, M),)),
