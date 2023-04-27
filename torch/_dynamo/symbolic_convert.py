@@ -1927,12 +1927,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
-                VariableBuilder(
-                    self,
-                    LocalSource(k)
-                    if k in code_options["co_varnames"]
-                    else LocalSource((k)),
-                )(f_locals[k]),
+                VariableBuilder(self, LocalSource(k))(f_locals[k]),
             )
             for k in vars
             if k in f_locals

@@ -1,16 +1,8 @@
 from __future__ import annotations
 
-import abc
 import inspect
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
-import torch._ops
-import torch.fx
-
-import torch.onnx
-import torch.onnx._internal.fx.function_dispatcher as function_dispatcher
-import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype, exporter
 from torch.utils import _pytree as pytree
 
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
@@ -232,110 +224,3 @@ class FlattenOutputWithTreeSpecValidationStep:
                 error_message="Model outputs incompatible with the format that was exported. ",
             )
         return flattened_outputs
-
-
-class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
-    _input_adapter: exporter.InputAdapter
-    _output_adapter: exporter.OutputAdapter
-
-    @property
-    def decomposition_table(self) -> Mapping[torch._ops.OpOverload, Callable]:
-        return function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE
-
-    def _apply_input_adapt_step(
-        self,
-        adapt_step_cls: Type[exporter.InputAdaptStep],
-        model_args: Sequence[Any],
-        model_kwargs: Mapping[str, Any],
-        step_init_args: Optional[Sequence[Any]] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        """Apply an input adapt step to the model args and kwargs.
-
-        An input adapt step object is initialized, applied and recorded as part of
-        ``self._input_adapter`.
-
-        Args:
-            adapt_step_cls: The input adapt step class.
-            model_args: The model args.
-            model_kwargs: The model kwargs.
-            step_init_args: The input adapt step initialization arguments.
-
-        Returns:
-            The adapted model args and kwargs.
-        """
-        step_init_args = step_init_args or ()
-        adapt_step = adapt_step_cls(*step_init_args)
-        self._input_adapter.append_step(adapt_step)
-        return adapt_step.apply(model_args, model_kwargs)
-
-    def _apply_output_adapt_step(
-        self,
-        adapt_step_cls: Type[exporter.OutputAdaptStep],
-        model_outputs: Any,
-        step_init_args: Optional[Sequence[Any]] = None,
-    ) -> Any:
-        """Apply an output adapt step to the model outputs.
-
-        An output adapt step object is initialized, applied and recorded as part of
-        ``self._output_adapter`.
-
-        Args:
-            adapt_step_cls: The output adapt step class.
-            model_outputs: The model outputs.
-            step_init_args: The input adapt step initialization arguments.
-
-        Returns:
-            The adapted model outputs.
-        """
-        step_init_args = step_init_args or ()
-        adapt_step = adapt_step_cls(*step_init_args)
-        self._output_adapter.append_step(adapt_step)
-        return adapt_step.apply(model_outputs)
-
-    @_beartype.beartype
-    def export_fx_to_onnx(
-        self,
-        fx_module: torch.fx.GraphModule,
-        fx_module_args: Sequence[Any],
-    ) -> torch.onnx.ExportOutput:
-        # Apply decomposition table to the input graph.
-        module = passes.Decompose(
-            fx_module,
-            self.decomposition_table,
-            enable_dynamic_axes=self.options.dynamic_shapes,
-        ).run(*fx_module_args)
-
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        module = passes.Functionalize(
-            module, enable_dynamic_axes=self.options.dynamic_shapes
-        ).run(*fx_module_args)
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(module).run(*fx_module_args)
-
-        # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
-        # The pass added nodes with static shape into original node metadata:
-        # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
-        if self.options.op_level_debug:
-            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
-
-        # We want to pass list of ints and floats to TorchScript graph correctly
-        # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
-        # receive FakeTensor and results runtime error. In addition, TorchScript-based
-        # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
-        # with FakeTensorMode.
-        with torch.utils._mode_utils.no_dispatch():
-            onnxscript_graph = passes.export_fx_to_onnxscript(module, self.options)
-            # ONNX does not support None inputs. During graph building, all None inputs
-            # are removed. Here we register this step to input adapter.
-            self._apply_input_adapt_step(RemoveNoneInputStep, fx_module_args, {})
-            # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
-            # tensor, etc), we flatten the collection and register each element as output.
-            self._output_adapter.append_step(FlattenOutputStep())
-
-        # Export TorchScript graph to ONNX ModelProto.
-        onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
-        return torch.onnx.ExportOutput(
-            onnx_model, self._input_adapter, self._output_adapter
-        )
