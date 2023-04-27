@@ -966,12 +966,6 @@ class CppKernel(Kernel):
                 argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
-            with V.kernel.swap_buffers(self.stores):
-                result_value, result_index = combine_fn(
-                    (f"{tmpvar}.value", f"{tmpvar}.index"),
-                    (value, self.itervars[-1]),
-                )
-
             self.stores.writelines(
                 [
                     f"if ({tmpvar}.value {compare_op} {value}) {{",
