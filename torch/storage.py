@@ -29,6 +29,7 @@ class _StorageBase:
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
+    def __setitem__(self, *args, **kwargs): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
     def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
@@ -39,7 +40,10 @@ class _StorageBase:
     def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
-    def get_device(self) -> int: ...  # noqa: E704
+
+    def get_device(self) -> int:
+        return self.device.index
+
     def data_ptr(self) -> int: ...  # noqa: E704
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
@@ -247,6 +251,17 @@ class _StorageBase:
 
     def untyped(self):
         return self
+
+    def byteswap(self, dtype):
+        """Swaps bytes in underlying data"""
+        elem_size = torch._utils._element_size(dtype)
+        # for complex types, don't swap first and second numbers
+        if dtype.is_complex:
+            elem_size = max(int(elem_size / 2), 1)
+        for i in range(int(len(self) / elem_size)):
+            for k in range(int(elem_size / 2)):
+                self[i * elem_size + k], self[i * elem_size + elem_size - k - 1] = \
+                    self[i * elem_size + elem_size - k - 1], self[i * elem_size + k]
 
 
 def _share_memory_lock_protected(fn):
