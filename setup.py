@@ -1007,6 +1007,7 @@ def main():
         'networkx',
         'jinja2',
         'fsspec',
+        'yaml',
     ]
 
     extras_require = {
