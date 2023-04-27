@@ -14,7 +14,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_static_shapes
+from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
@@ -903,6 +903,49 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_meshgrid(x, y):
+        import numpy as np
+
+        r1, r2 = np.meshgrid(x.numpy(), y.numpy())
+        return torch.from_numpy(r1), torch.from_numpy(r2)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_torch_from_numpy(x):
+        a = x.numpy()
+        b = torch.from_numpy(a)
+        if b.size(0) == 1:
+            return torch.tensor(True)
+        else:
+            return torch.tensor(False)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_attributes(x):
+        a = x.numpy()
+        return (
+            a.itemsize,
+            a.strides,
+            a.shape,
+            a.ndim,
+            a.size,
+            torch.from_numpy(a.T),
+            torch.from_numpy(a.real),
+            torch.from_numpy(a.imag),
+        )
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_mean_sum_np(x: torch.Tensor):
+        import numpy as np
+
+        x_mean = np.mean(x.numpy(), 1)
+        x_sum = np.sum(x_mean)
+        x_sum_array = np.asarray(x_sum)
+        return torch.from_numpy(x_sum_array)
 
 
 def global_func_with_default_tensor_args(
