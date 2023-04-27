@@ -129,6 +129,10 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     # Huggingface
     "BartForConditionalGeneration",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
+    # Torchbench
+    "speech_transformer",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_isoneutral_mixing",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_turbulent_kinetic_energy",  # https://github.com/pytorch/pytorch/issues/99893
 ]
 
 CI_SKIP[CI("aot_eager", training=True)] = [
@@ -1289,7 +1293,7 @@ class BenchmarkRunner:
                 fields.append(v)
 
             output_csv(output_filename, headers, fields)
-            return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
+            return accuracy_status
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)

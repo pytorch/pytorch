@@ -59,7 +59,7 @@ Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
   return unreduced;
 }
 
-bool isDefined(const c10::optional<Tensor>& t) {
+static bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
 }
 
@@ -145,7 +145,7 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
+static c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
   c10::SymInt size = 1;
   if (sizes.empty()) {
     return 1;
@@ -165,7 +165,7 @@ Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   return gradient_result;
 }
 
-Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
+static Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
   if (!self.is_complex() && gradient_result.is_complex()) {
     // R -> C
     return at::real(gradient_result);
@@ -4365,7 +4365,7 @@ Tensor fft_r2c_backward(
 }
 
 // Helper for batchnorm_double_backward
-Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
+static Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
   auto r = to_sum.sum(0, keepdim);
   int64_t start_point_exclusive = keepdim ? 1 : 0;
   for (int64_t dim = r.dim() - 1; dim > start_point_exclusive; dim--) {
@@ -4377,7 +4377,7 @@ Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
 // Helper for batchnorm_double_backward
 // similar to expand_as below, but doesn't do the expand_as; operates as if
 // reductions were done with keepdim=True
-Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
+static Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
   while (src_expanded.sizes().size() < target.sizes().size() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
@@ -4391,7 +4391,7 @@ Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
 // Helper for batchnorm_double_backward
 // because gamma/ggG/ggB are 1-dimensional and represent dim==1, we can't
 // do a straight expansion because it won't follow the broadcasting rules.
-Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
+static Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
   while (src_expanded.sizes().size() < target.sizes().size() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
@@ -4947,7 +4947,7 @@ bool any_variable_defined(const variable_list& variables) {
 // from the right.
 // Additionally, when the computation is done in-place, we exploit that the
 // first `k` coordinates of `u_full/v_full` are zeros.
-Tensor apply_simple_transformation(
+static Tensor apply_simple_transformation(
     int64_t m,
     int64_t k,
     const Tensor& u_full,
