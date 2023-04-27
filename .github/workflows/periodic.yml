@@ -141,7 +141,7 @@ jobs:
 
   ios-12-5-1-x86-64-coreml:
     name: ios-12-5-1-x86-64-coreml
-    if: !(github.event_name == 'schedule' && (github.event.schedule == '45 0,8,16 * * *' || github.event.schedule == '29 8 * * *'))
+    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * *'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-x86-64-coreml
@@ -154,7 +154,7 @@ jobs:
 
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
-    if: !(github.event_name == 'schedule' && (github.event.schedule == '45 0,8,16 * * *' || github.event.schedule == '29 8 * * *'))
+    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * *'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-custom-ops
@@ -176,7 +176,7 @@ jobs:
 
   macos-12-py3-x86-64-build:
     name: macos-12-py3-x86-64
-    if: !(github.event_name == 'schedule' && (github.event.schedule == '45 4,12,20 * * *' || github.event.schedule == '29 8 * * *'))
+    if: github.event_name != 'schedule' || github.event.schedule == '45 4,12,20 * * *'
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-12-py3-x86-64
