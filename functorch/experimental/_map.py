@@ -82,9 +82,10 @@ def map_proxy_torch_dispatch_mode(f, xs, *args):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
-        res = trace_map(mode, map, f, xs, *args)
-    return res
-
+        if mode.enable_tracing:
+            return trace_map(mode, map, f, xs, *args)
+        else:
+            return map(f, xs, *args)
 
 @map.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(f, xs, *args):

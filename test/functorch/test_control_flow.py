@@ -5,7 +5,7 @@ import torch
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, disable_proxy_modes_tracing
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 
@@ -772,6 +772,56 @@ class TestControlFlowTraced(TestCase):
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
         x = torch.ones(4, 3, 2)
         self.assertEqual(foo(x), gm(x))
+
+    def test_cond_disable_proxy_modes_tracing(self):
+        def true_fn(x):
+            return x + x
+
+        def false_fn(x):
+            return x * x
+
+        def foo_disable_tracing(x):
+            with disable_proxy_modes_tracing():
+                res = cond(torch.tensor(True), true_fn, false_fn, [x])
+            return x
+
+        def foo(x):
+            res = cond(torch.tensor(True), true_fn, false_fn, [x])
+            return x
+
+        gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
+        gm_disable_proxy = make_fx(foo_disable_tracing, tracing_mode="symbolic")(torch.ones(3, 2, 1))
+
+        def count_target(gm, target):
+            return len([node for node in gm.graph.nodes if node.target is target])
+
+        self.assertEqual(count_target(gm, cond), 1)
+        self.assertEqual(count_target(gm_disable_proxy, cond), 0)
+
+    def test_map_disable_proxy_modes_tracing(self):
+
+        def f(x, y):
+            return x + y
+
+        xs = torch.ones(3, 2, 2)
+        y = torch.ones(2)
+
+        def foo(x, y):
+            control_flow.map(f, x, y)
+            return x, y
+
+        def foo_disable_tracing(x, y):
+            with disable_proxy_modes_tracing():
+                control_flow.map(f, x, y)
+            return x
+
+        gm = make_fx(foo, tracing_mode="symbolic")(xs, y)
+        gm_disable_tracing = make_fx(foo_disable_tracing, tracing_mode="symbolic")(xs, y)
+
+        def count_target(gm, target):
+            return len([node for node in gm.graph.nodes if node.target is target])
+        self.assertEqual(count_target(gm, control_flow.map), 1)
+        self.assertEqual(count_target(gm_disable_tracing, control_flow.map), 0)
 
 if __name__ == '__main__':
     run_tests()

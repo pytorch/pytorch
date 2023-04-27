@@ -138,8 +138,10 @@ def inner(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
-        res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
-    return res
+        if mode.enable_tracing:
+            return trace_cond(mode, cond, pred, true_fn, false_fn, operands)
+        else:
+            return cond(pred, true_fn, false_fn, operands)
 
 
 @cond.py_impl(FakeTensorMode)
