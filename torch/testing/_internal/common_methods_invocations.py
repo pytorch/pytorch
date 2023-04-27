@@ -17351,9 +17351,15 @@ op_db: List[OpInfo] = [
         skips=(
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
-            DecorateInfo(unittest.skip('Allowed exemption'), 'TestCommon', 'test_dtypes'),),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=0)}),
+                         'TestDecomp', 'test_comprehensive'),
+            # lambda impl
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),),
         supports_out=False,
         supports_gradgrad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
         "nn.functional.softplus",
