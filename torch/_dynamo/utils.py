@@ -37,6 +37,14 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
+try:
+    import torch_np
+
+    HAS_NUMPY_TORCH_INTEROP = True
+except ModuleNotFoundError:
+    torch_np = None
+    HAS_NUMPY_TORCH_INTEROP = False
+
 import importlib
 
 import torch
