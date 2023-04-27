@@ -3078,10 +3078,11 @@ class IndexPutFallback(ExternKernel):
             if self.indices[i] is not None:
                 indices.append(next(iter_valid_indices))
             else:
-                indices.append("None")
-        wrapper.writeline(
-            f"{self.kernel}({x}, [{','.join(indices)}], {values}, {repr(self.constant_args[0])})"
-        )
+                indices.append(V.graph.wrapper_code.none_str)
+
+        indices = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
+        args = [x, indices, values, *self.codegen_const_args()]
+        wrapper.writeline(wrapper.wrap_kernel_call(self.kernel, args))
 
     def should_allocate(self):
         return False
@@ -3097,6 +3098,7 @@ class IndexPutFallback(ExternKernel):
             [accumulate],
         )
         self.name = V.graph.register_buffer(self)
+        self.kernel = "at::index_put_" if V.graph.cpp_wrapper else "aten.index_put_"
 
 
 class DeviceCopy(ExternKernelOut):
