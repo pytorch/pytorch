@@ -5070,17 +5070,58 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
-        self.common(
-            fn,
-            [
-                torch.randn([144, 144]),
-            ],
-            # Mismatched elements: 1 / 144 (0.7%)
-            # Greatest absolute difference: 26 at index (71,)
-            # Greatest relative difference: 0.4126984179019928 at index (71,)
-            atol=1e-5,
-            rtol=0.5,
-        )
+        self.common(fn, (torch.randn([144, 144]),))
+
+    def test_argmax_argmin_with_duplicates(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        # Unrolled reduction
+        t1 = torch.randint(2, size=(6, 6))
+        self.common(fn, (t1,))
+
+        # Persistent reduction
+        t1 = torch.randint(8, size=(32, 32))
+        self.common(fn, (t1,))
+
+        # Non-persistent reduction
+        t1 = torch.randint(8, size=(1028, 1028))
+        self.common(fn, (t1,))
+
+    def test_argmax_argmin_with_nan(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        if self.device == "cpu":
+            raise unittest.SkipTest("broken on CPU")
+
+        # Unrolled reduction
+        t1 = torch.randn((6, 6))
+        t1[:, 1] = float("nan")
+        t1[:, 3] = float("nan")
+        self.common(fn, (t1,))
+
+        # Persistent reduction
+        t1 = torch.randn((32, 32))
+        t1[:, 4] = float("nan")
+        t1[:, 8] = float("nan")
+        self.common(fn, (t1,))
+
+        # Non-persistent reduction
+        t1 = torch.randn((1028, 1028))
+        t1[:, 40] = float("nan")
+        t1[:, 100] = float("nan")
+        self.common(fn, (t1,))
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
