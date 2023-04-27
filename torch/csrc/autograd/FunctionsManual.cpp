@@ -5740,7 +5740,7 @@ Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
 
   auto materialized = tensors.materialize();
   auto any_defined = false;
-  for (const auto& t : tensors) {
+  for (const Tensor& t : materialized) {
     any_defined |= isFwGradDefined(t);
   }
 
