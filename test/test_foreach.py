@@ -257,13 +257,9 @@ class TestForeach(TestCase):
             self._pointwise_test(
                 wrapped_op, ref, inputs, is_fastpath and not disable_fastpath, False, values=values, zero_size=zero_size
             )
-            with InplaceForeachVersionBumpCheck(self, sample.input):
-                self._pointwise_test(
-                    inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath,
-                    True, values=values, zero_size=zero_size)
             self._pointwise_test(
-                inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath, True,
-                values=values, zero_size=zero_size)
+                inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath,
+                True, values=values, zero_size=zero_size)
 
             if op.supports_autograd and dtype in floating_types() and not zero_size:
                 transformed_sample = sample.transform(get_transform_func(len(sample.input), dtype, device, is_fastpath))
@@ -360,7 +356,8 @@ class TestForeach(TestCase):
             return
         ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1], inputs[2]] if is_inplace else inputs
         try:
-            actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
+            with (InplaceForeachVersionBumpCheck(self, inputs[0]) if is_inplace else nullcontext()):
+                actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 ref(ref_inputs)
