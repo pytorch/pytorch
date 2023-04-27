@@ -183,9 +183,11 @@ class ExprPrinter(Printer):
         base = self._print(base)
         # NB: Remember this is sizevar computation!  You don't typically
         # expect to have to do floating point computation including exponents
-        # in sizevar compute.  Instead of adding support for sqrt/floating
+        # in sizevar compute.  Instead of adding support for floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
+        if exp == 0.5:
+            return f"math.sqrt({base})"
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -807,3 +809,8 @@ class OptimizationContext:
     dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
+
+    # Load uint8 value as float32
+    is_load_uint8_as_float: bool = False
+    # Store float32 value as uint8
+    is_store_float_as_uint8: bool = False

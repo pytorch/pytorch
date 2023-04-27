@@ -1,6 +1,8 @@
 import functools
 import itertools
 import logging
+import os
+import warnings
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -25,7 +27,6 @@ from torch.utils._pytree import tree_flatten
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
-from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -40,7 +41,13 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    developer_warning,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -136,16 +143,6 @@ def is_boolean_type(x):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
-
-
-def decode_device(device):
-    if device is None:
-        return torch.tensor(0.0).device  # default device
-    if isinstance(device, str):
-        device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
-    return device
 
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
@@ -558,11 +555,11 @@ def squeeze(x, dim=None):
     dim = canonicalize_dims(len(x.get_size()), dim)
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
-    new_shape = [
-        s
-        for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
-    ]
+    new_shape = []
+    for d, s in enumerate(x.get_size()):
+        if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
+            new_shape.append(s)
+
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
 
@@ -731,9 +728,9 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
-    if start < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(start + dim_size, 0)):
         start = 0
-    if end < -dim_size:
+    if V.graph.sizevars.shape_env.evaluate_expr(sympy.Lt(end + dim_size, 0)):
         end = 0
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
@@ -1097,8 +1094,26 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
+@functools.lru_cache(None)
+def _warn_complex_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    )
+
+
+# There are some types (CPU) which we accept as input but not as
+# output.
+def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
+    "Do not support reading or writing to this tensor"
+    if t.is_complex():
+        _warn_complex_not_supported()
+        return True
+    return False
+
+
 def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
-    if t.dtype in (torch.complex32, torch.complex64, torch.complex128):
+    "Do not support writing tensor but can read from it"
+    if unsupported_input_tensor(t):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1118,12 +1133,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             if is_output:
                 if unsupported_output_tensor(meta):
                     return True
+            else:
+                if unsupported_input_tensor(meta):
+                    return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, is_output=(False or not allow_cpu_inputs)):
+        if check_skip_condition(arg, is_output=False):
             return True
 
     return check_skip_condition(node, is_output=True)
@@ -1133,15 +1151,79 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn:
-        developer_warning(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it"
+    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
+        # Note: 'warn' is holdover from when this was a warning, but for ops that previously
+        # set warn=False we do not want a CI error.
+        # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
+        # likely to be triggered preferentially on one CI config over another.
+        if torch._dynamo.config.suppress_errors:
+            torch._dynamo.config.suppress_errors = False
+            log.warning(
+                "A make_fallback error occured in suppress_errors config,"
+                " and suppress_errors is being disabled to surface it."
+            )
+        raise AssertionError(
+            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
+            " or inductor_decompositions, and delete the corresponding `make_fallback` line."
+            " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
         )
 
     add_needs_realized_inputs(kernel)
     if layout_constraint is not None:
         add_layout_constraint(kernel, layout_constraint)
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+
+
+def philox_rand_offset(shape):
+    """
+    TorchInductor offset calculation differs from PyTorch eager offset
+    calculation for random ops (tl.rand vs torch.rand). In future, we should
+    strive for same impl for tl.rand and torch.rand.
+    """
+    numel = 1
+    for s in shape:
+        numel = numel * s
+    return tensor(numel, dtype=torch.int64)
+
+
+@register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
+def philox_rand(size, seed, offset, stride, device, dtype):
+    # stride arg is optional and will be used in future for distributed random
+    # ops. Currently, its ununsed.
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+    offset_loader = offset.make_loader()
+
+    def inner_fn(index):
+        # Both seed and offset in the philox_rand op are tensors.
+        # torch seed and offsets are of type int64, but tl.rand accepts int32
+        seed_index_expr = ops.to_dtype(seed_loader([]), torch.int32)
+        offset_index_expr = ops.to_dtype(offset_loader([]), torch.int32)
+        # Get the offset'd position
+        rand_index_expr = ops.add(
+            ops.index_expr(random_pos(index), torch.int32), offset_index_expr
+        )
+        return ops.rand(
+            seed_index_expr,
+            rand_index_expr,
+            dtype,
+        )
+
+    random_values_node = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
+
+    offset_node = philox_rand_offset(size)
+    return random_values_node, offset_node
 
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
@@ -1246,8 +1328,10 @@ def make_rand(fn_name):
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
+fallback_randint = fallback_handler(aten.randint)
 fast_rand = make_rand("rand")
 fast_randn = make_rand("randn")
+fast_randint = make_rand("randint")
 
 
 @register_lowering([aten.rand, torch.rand])
@@ -1266,6 +1350,22 @@ def randn(*args, **kwargs):
     else:
         kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
+
+
+@register_lowering([aten.randint])
+def randint(*args, **kwargs):
+    if (
+        config.fallback_random
+        or kwargs.get("generator", None) is not None
+        or kwargs.get("dtype", None) is not torch.int32
+        or len(args) != 3
+        or args[0] != -(2**31)
+        or args[1] != 2**31
+    ):
+        return fallback_randint(*args, **kwargs)
+    else:
+        kwargs.pop("generator", None)
+        return fast_randint(args[2], **kwargs)
 
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
@@ -1429,7 +1529,6 @@ make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
 make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
-make_fallback(aten.prod, warn=False)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
@@ -1506,6 +1605,9 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+# fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
+make_fallback(aten.exponential.default, warn=False)
 
 
 @register_lowering(aten.clone)
@@ -1586,7 +1688,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = end + dim_size
     if start is None:
         start = 0
-    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
         end = dim_size
 
     src_size = list(x.get_size())
@@ -1663,7 +1765,13 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, (float, int)):
+    if isinstance(data, sympy.Symbol):
+        ranges = []
+
+        def inner_fn(index):
+            return ops.index_expr(data, dtype)
+
+    elif isinstance(data, (float, int)):
         ranges = []
 
         def inner_fn(index):
@@ -2661,7 +2769,7 @@ def rev(x, dims):
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
-        return x
+        return clone(x)
 
     sizes = x.get_size()
 
@@ -3800,6 +3908,18 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+@register_lowering(aten.prod)
+def prod(x, axis=None, keepdims=False, *, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    fn = make_reduction("prod", override_return_dtype=dtype)
+    return fn(x, axis, keepdims, dtype=dtype)
+
+
+register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
@@ -3993,6 +4113,11 @@ try:
         return TensorBox.create(
             ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
         )
+
+    @register_lowering(c10d_functional.all_reduce_coalesced)
+    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
+        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
 
 except ImportError:
     log.info(
