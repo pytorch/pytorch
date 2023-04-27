@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -45,7 +45,7 @@ def _onnx_function_diagnose_call_append_symbolic_source_location(
     # TODO(bowbao): Record source location of symbolic.
     # Need this separate step because normally only the source location of
     # class `onnxscript.OnnxFunction.__call__` is recorded.
-    pass
+    ...
 
 
 # TODO(bowbao): Delete this once diagnostics is introduced in onnxscript.

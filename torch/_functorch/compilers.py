@@ -367,7 +367,10 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         if len(gm_to_save.graph.nodes) == 0:
             log.log(
                 logging.WARNING,
-                f"No nodes in graph {current_name}_{type_name}_{graph_index}.",
+                "No nodes in graph {%s}_{%s}_{%s}.",
+                current_name,
+                type_name,
+                graph_index,
             )
             return
 
