@@ -2459,7 +2459,6 @@ aot_autograd_failures = {
 
     xfail('linalg.svdvals', ''),
     xfail('linalg.cond', ''),
-    xfail('linalg.matrix_norm', ''),
     xfail('linalg.norm', ''),
     xfail('linalg.norm', 'subgradients_at_zero'),
     xfail('linalg.svd', ''),
@@ -2519,7 +2518,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function...
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
-    xfail('linalg.matrix_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.matrix_power', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides

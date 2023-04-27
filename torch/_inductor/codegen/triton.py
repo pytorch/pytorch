@@ -193,19 +193,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"tl.where({a} != {a}, {a}, tl.where({a} < {b}, {a}, {b}))"
+        return f"triton_helpers.minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"tl.where({a} < {b}, {a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"tl.where({a} > {b}, {a}, {b})"
+        return f"triton_helpers.maximum({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -645,20 +637,6 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-class ProdHelper:
-    name = "_prod_accumulate"
-
-    @staticmethod
-    def codegen(buffer):
-        buffer.splice(
-            f"""
-            @triton.jit
-            def {ProdHelper.name}(a, b):
-                return a * b
-            """
-        )
-
-
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = pexpr
@@ -681,7 +659,6 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
-        self.helper_functions = set()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1198,76 +1175,90 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            if reduction_type == "prod":
-                self.helper_functions.add(ProdHelper)
-                return (
-                    f"tl.reduce({value}, {dim}, {ProdHelper.name})[{', '.join(sizes)}]"
-                )
-            else:
-                return f"tl.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+            use_helper = reduction_type in {"argmax", "argmin", "max", "min", "prod"}
+            module = "triton_helpers" if use_helper else "tl"
+            return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+
+        def final_argreduce(buffer, result_var, value, index):
+            buffer.splice(
+                f"""\
+                _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                {result_var} = {result_var}_tmp[{', '.join(sizes)}]
+                """
+            )
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
+        cond = " & ".join(masks)
+
         if self.persistent_reduction:
-            cond = " & ".join(masks)
             masked_value = self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default})"
             )
-            result_var = self.cse.generate(self.compute, final_reduction(masked_value))
+            if reduction_type in {"argmax", "argmin"}:
+                accumulator_index = self.cse.generate(
+                    self.compute,
+                    f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                )
+                result_var = self.cse.newvar()
+                root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
+                final_argreduce(
+                    self.compute, result_var, masked_value, accumulator_index
+                )
+            else:
+                result_var = self.cse.generate(
+                    self.compute, final_reduction(masked_value)
+                )
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
+            # NOTE: We should be using tl.full here, but this also does type
+            # promotion e.g. bool to int32, which is sometimes necessary if
+            # similar promotion happened elsewhere in the pre-reduction
+            # operation. We should identify any such cases and fix them.
             default_value = f" + {default}" if default != 0 else ""
             self.body.writeline(
                 f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
             )
-            accumulator_index = None
+
             if reduction_type in {"argmax", "argmin"}:
                 accumulator_index = f"_{result_var}_index"
+                long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
-                    f"{accumulator_index} = tl.zeros({self.dense_size_str()}, tl.int64)"
+                    f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
                 )
+                root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
 
-            updated = value
-            if reduction_type in {"min", "argmin"}:
-                masks.append(f"({accumulator} > {value})")
-            elif reduction_type in {"max", "argmax"}:
-                masks.append(f"({accumulator} < {value})")
-            elif reduction_type == "sum":
-                updated = f"{accumulator} + {value}"
-            elif reduction_type == "prod":
-                updated = f"{accumulator} * {value}"
-            elif reduction_type == "xor_sum":
-                updated = f"{accumulator} ^ {value}"
-            else:
-                raise NotImplementedError(f"reduction_type {reduction_type}")
-
-            cond = " & ".join(masks)
-
-            if accumulator_index:
-                # argmax or argmin
-                self.compute.writeline(
-                    f"{accumulator_index} = tl.where({cond},  {reduction_range_prefix}index, {accumulator_index})",
+                self.compute.splice(
+                    f"""\
+                {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
+                    {accumulator}, {accumulator_index}, {value}, {reduction_range_prefix}index
                 )
-            self.compute.writeline(
-                f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
-            )
-
-            if accumulator_index:
-                # argmax, argmin
+                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
+                """
+                )
                 idx_dtype = self.index_dtype
-                self.suffix.writelines(
-                    [
-                        f"{accumulator_index}_reduce = "
-                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
-                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
-                        f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
-                        f"{result_var} = tl.sum("
-                        f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
-                    ]
-                )
+                final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
+                updated = value
+                if reduction_type == "min":
+                    updated = f"triton_helpers.minimum({accumulator}, {value})"
+                elif reduction_type == "max":
+                    updated = f"triton_helpers.maximum({accumulator}, {value})"
+                elif reduction_type == "sum":
+                    updated = f"{accumulator} + {value}"
+                elif reduction_type == "prod":
+                    updated = f"{accumulator} * {value}"
+                elif reduction_type == "xor_sum":
+                    updated = f"{accumulator} ^ {value}"
+                else:
+                    raise NotImplementedError(f"reduction_type {reduction_type}")
+
+                self.compute.writeline(
+                    f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
+                )
                 self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
@@ -1441,6 +1432,7 @@ class TritonKernel(Kernel):
                     from torch._inductor.ir import TileHint
                     from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
+                    from torch._inductor import triton_helpers
                 """
             )
             if config.benchmark_kernel:
@@ -1452,9 +1444,6 @@ class TritonKernel(Kernel):
                         from torch._inductor.triton_heuristics import grid
                     """
                 )
-
-        for helper in sorted(self.helper_functions, key=lambda kls: kls.__name__):
-            helper.codegen(code)
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -1933,7 +1922,7 @@ class TritonScheduling:
             wrapper.kernel_to_hash[kernel_name] = basename
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.triton('''")
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("''')")
 

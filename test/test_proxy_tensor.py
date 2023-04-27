@@ -1420,7 +1420,6 @@ fake_tensor_failures = {
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 
-    xfail('linalg.cond', ''),
     xfail("linalg.matrix_norm"),
     xfail("linalg.norm"),
     xfail("linalg.matrix_norm"),
@@ -1459,7 +1458,6 @@ symbolic_tensor_failures = {
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigvalsh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.householder_product', ''),  # aten.linalg_householder_product.default - couldn't find symbolic meta funct...
