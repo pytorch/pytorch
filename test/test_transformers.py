@@ -1755,7 +1755,7 @@ class TestSDPA(NNTestCase):
         is_dropout = dropout_p > 0.0
 
         # Create real output
-        if isSm86or89Device and head_dim in range(65, 129):
+        if isSM86or89Device and head_dim in range(65, 129):
             self.assertRaises(RuntimeError, lambda: torch.ops.aten._scaled_dot_product_flash_attention(
                 query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True))
             return
