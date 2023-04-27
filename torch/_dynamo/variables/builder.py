@@ -21,6 +21,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     RelaxedUnspecConstraint,
 )
+from torch.utils.weak import WeakIdRef
 from torch.fx.immutable_collections import immutable_list
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -1250,7 +1251,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
-        tx.output.tensor_id_to_fake_clone[id(e)] = fake_e.clone()
+        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {"size": fake_e.size(), "stride": fake_e.stride()}
         return fake_e
     else:
         return e
