@@ -96,9 +96,6 @@ class _ReplicateState:
             # We derive the right device_ids to feed into DDP to support this.
             if self.kwargs["device_id"] is not None:
                 device_id = self.kwargs["device_id"]
-                assert isinstance(device_id, (int, torch.device)), (
-                    f"device_id wrong type: {type(device_id)}, please report a bug."
-                )
                 # Convert to device_ids that DDP expects.
                 if isinstance(device_id, torch.device) and device_id.type == "cpu":
                     # CPU modules receive device_ids None

@@ -139,6 +139,7 @@ class ReplicateTest(MultiProcessTestCase):
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
+    @skip_if_lt_x_gpu(2)
     def test_replicate_move_args_kwargs_to_device(self):
         class MyNet(nn.Module):
             def __init__(self):
@@ -178,7 +179,7 @@ class ReplicateTest(MultiProcessTestCase):
         model = Net().cuda()
         replicate(model, ignored_modules=[model.fc1])
         # CPU input ensures that replicate can move input to GPU as DDP does.
-        inp = torch.randn(5, 2) * (self.rank + 1)
+        inp = torch.randn(5, 2, device="cuda") * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
