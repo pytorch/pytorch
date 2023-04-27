@@ -526,6 +526,7 @@ def run_test(
         return 0
 
     if test_file.startswith(CPP_TEST_PREFIX):
+        # C++ tests are not the regular test directory
         if CPP_TESTS_DIR:
             cpp_test = os.path.join(
                 CPP_TESTS_DIR,
@@ -538,7 +539,6 @@ def run_test(
                 test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
             )
 
-        # C++ tests are in CPP_TEST_PATH, not the regular test directory
         argv = [cpp_test] + unittest_args
     else:
         # Can't call `python -m unittest test_*` here because it doesn't run code
