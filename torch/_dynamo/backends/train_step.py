@@ -1,11 +1,12 @@
+import builtins
 from contextlib import contextmanager
 from copy import copy
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Union
 from unittest import mock
 
 import torch
 import torch.utils._pytree as pytree
-from torch import fx
+from torch import _C, _TorchCompileInductorWrapper, fx
 from torch._dynamo import register_backend
 from torch._dynamo.backends.registry import lookup_backend
 from torch._guards import detect_fake_mode, TracingContext
@@ -14,6 +15,59 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
+
+
+def _compile_train_step(
+    train_step_fn: Callable,
+    *,
+    dynamic: builtins.bool = False,
+    backend: Union[str, Callable] = "inductor",
+    mode: Union[str, None] = None,
+    options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+    disable: builtins.bool = False,
+) -> Callable:
+    """
+    Compiles a whole train step function, without graph-breaking on .backward() or optimizer.
+
+    EXPERIMENTAL: both how the API is constructed and how it behaves are experimental and subject to change.
+
+    Limitations:
+    - (Currently) only a single optimizer may be used, plan to support multiple
+    - For each optimizer that .step() is called on, .zero_grad(set_to_none=True) must also be called
+      such that the compiled function has the same semantics as the uncompiled (eager) function.
+    - All inputs to the train_step fn (whether args/kwargs or globals) must not have .grad_fn set, meaning
+      you may not use these tensors in gradient-requiring operations outside of the compiled region
+    - Not all optimizers or forms of optimizers may be supported. Currently only tested with SGD and
+      Adam(capturable=True)
+
+    _compile_train_step args are copied from `torch.compile` so see those docs for more info.
+    - note: fullgraph=True is implied
+
+    Example:
+
+        from torch._dynamo.backends._train_step import _compile_train_step
+
+        def train_step(model, optimizer, inputs):
+            ...
+
+        opt_train_step = _compile_train_step(train_step, ...)
+    """
+    _C._log_api_usage_once("torch._dynamo.backends.train_step._compile_train_step")
+
+    import torch._dynamo
+
+    if mode is not None and options is not None:
+        raise RuntimeError(
+            "Either mode or options can be specified, but both can't be specified at the same time."
+        )
+    if mode is None and options is None:
+        mode = "default"
+    if backend == "inductor":
+        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+
+    return torch._dynamo.optimize(
+        backend=backend, nopython=True, dynamic=dynamic, disable=disable, trainstep=True
+    )(train_step_fn)
 
 
 @contextmanager
