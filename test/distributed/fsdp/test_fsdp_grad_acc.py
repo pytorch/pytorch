@@ -239,6 +239,11 @@ class TestGradAcc(FSDPTest):
                 CPUOffload(offload_params=False),
                 CPUOffload(offload_params=True),
             ],
+            "sharding_strategy": [
+                ShardingStrategy.FULL_SHARD,
+                ShardingStrategy.SHARD_GRAD_OP,
+                ShardingStrategy.NO_SHARD,
+            ],
         }
 
     @skip_if_lt_x_gpu(2)
@@ -261,19 +266,10 @@ class TestGradAcc(FSDPTest):
             ),
         ],
     )
-    @parametrize(
-        "sharding_strategy",
-        [
-            ShardingStrategy.FULL_SHARD,
-            ShardingStrategy.SHARD_GRAD_OP,
-            ShardingStrategy.NO_SHARD,
-        ],
-    )
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc(
         self,
         configs: _GradAccConfigs,
-        sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):
         """
@@ -294,7 +290,6 @@ class TestGradAcc(FSDPTest):
             self._test_grad_acc,
             batch_dim=1,
             configs=configs.configs,
-            sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
         )
 
