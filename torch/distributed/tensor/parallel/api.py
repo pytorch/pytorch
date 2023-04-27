@@ -18,6 +18,7 @@ from torch.distributed.tensor.parallel.multihead_attention_tp import (
 )
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
+    ColwiseParallelNoReshard,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
@@ -85,7 +86,7 @@ def parallelize_module(  # type: ignore[return]
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
-        if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
+        if isinstance(parallelize_plan, (ColwiseParallel, ColwiseParallelNoReshard, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
         # PairwiseParallel
         if _is_mha_for_pairwise_parallel(module):
@@ -193,7 +194,7 @@ def _colwise_parallelize_linear_fn(
 ) -> None:
     """
     This function parallelizes the input :class:`nn.Linear` module in
-    :class:`ColwiseParallel` style.
+    :class:`ColwiseParallel` or `ColwiseParallelNoReshard` style.
 
     Args:
         name (str):
@@ -271,7 +272,7 @@ def _parallelize_linear(
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
-    elif isinstance(parallel_style, ColwiseParallel):
+    elif isinstance(parallel_style, ColwiseParallel) or isinstance(parallel_style, ColwiseParallelNoReshard):
         distribute_module(
             module,
             device_mesh,
