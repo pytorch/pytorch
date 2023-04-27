@@ -553,6 +553,18 @@ class LazyModuleWithListInput(torch.nn.Module):
         return self.layer(input[:-1])
 
 
+class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self.layer = LazyLayerWithListInput()
+
+    def forward(self, x):
+        return self.layer(x)
+
+
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1249,6 +1261,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
         x = [torch.rand([5, 5])] * 3 + [None]
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module6(self):
+        # Test new lazy submodule in lazy module's initialize_parameters
+        m = LazyModuleWithLazySubmodule()
+        x = [torch.rand([5, 5])] * 3
         opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
         res = opt_m(x)
         ref = m(x)

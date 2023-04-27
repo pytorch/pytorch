@@ -507,11 +507,11 @@ def squeeze(x, dim=None):
     dim = canonicalize_dims(len(x.get_size()), dim)
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
-    new_shape = [
-        s
-        for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
-    ]
+    new_shape = []
+    for d, s in enumerate(x.get_size()):
+        if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
+            new_shape.append(s)
+
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
 
@@ -1280,8 +1280,10 @@ def make_rand(fn_name):
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
+fallback_randint = fallback_handler(aten.randint)
 fast_rand = make_rand("rand")
 fast_randn = make_rand("randn")
+fast_randint = make_rand("randint")
 
 
 @register_lowering([aten.rand, torch.rand])
@@ -1300,6 +1302,22 @@ def randn(*args, **kwargs):
     else:
         kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
+
+
+@register_lowering([aten.randint])
+def randint(*args, **kwargs):
+    if (
+        config.fallback_random
+        or kwargs.get("generator", None) is not None
+        or kwargs.get("dtype", None) is not torch.int32
+        or len(args) != 3
+        or args[0] != -(2**31)
+        or args[1] != 2**31
+    ):
+        return fallback_randint(*args, **kwargs)
+    else:
+        kwargs.pop("generator", None)
+        return fast_randint(args[2], **kwargs)
 
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
@@ -1622,7 +1640,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = end + dim_size
     if start is None:
         start = 0
-    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
         end = dim_size
 
     src_size = list(x.get_size())
@@ -2703,7 +2721,7 @@ def rev(x, dims):
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
-        return x
+        return clone(x)
 
     sizes = x.get_size()
 
@@ -3853,6 +3871,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
@@ -4044,6 +4063,11 @@ try:
         return TensorBox.create(
             ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
         )
+
+    @register_lowering(c10d_functional.all_reduce_coalesced)
+    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
+        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
 
 except ImportError:
     log.info(

@@ -752,7 +752,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
-        gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 

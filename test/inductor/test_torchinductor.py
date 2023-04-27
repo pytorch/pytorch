@@ -30,6 +30,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -816,7 +817,10 @@ class CommonTemplate:
                 torch.amin(b + 1, keepdim=True),
             )
 
-        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+        dtypes = [torch.float, torch.float16]
+        if not (self.device == "cuda" and not SM80OrLater):
+            dtypes += [torch.bfloat16]
+        for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
 
     def test_fmin_fmax(self):
@@ -3612,6 +3616,15 @@ class CommonTemplate:
 
         x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
         self.common(fn, (x,))
+
+    def test_constant_pad_nd_inplace(self):
+        def fn(a):
+            return aten.constant_pad_nd(a, [0, 0])
+
+        x = torch.randn([2], device=self.device)
+        fn_compiled = torch.compile(fn)
+        y = fn_compiled(x)
+        self.assertTrue(y is not x)
 
     def test_l1_loss(self):
         def fn(a, b):
