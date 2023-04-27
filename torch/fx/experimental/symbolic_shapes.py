@@ -2336,7 +2336,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(f"Constraints violated!\n{err}")
             elif len(warn_msgs) > 0:
-                log.warning("%s Warning only constraints violated", len(warn_msgs))
+                log.debug("%s Warning only constraints violated", len(warn_msgs))
 
         return exprs
 
@@ -2613,7 +2613,7 @@ class ShapeEnv:
         if not expr.has(sympy.Mod):
             try:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
-                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:
