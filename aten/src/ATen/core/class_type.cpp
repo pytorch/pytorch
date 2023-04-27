@@ -131,7 +131,7 @@ bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
       name) != unresolved_class_attributes_.end();
 }
 
-void checkForwardHookInputArguments(
+static void checkForwardHookInputArguments(
     const FunctionSchema& forward_schema,
     const FunctionSchema& hook_schema,
     const std::string& hook_id,
