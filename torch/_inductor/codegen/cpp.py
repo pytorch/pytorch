@@ -75,6 +75,8 @@ INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
     "sum": "+",
+    "prod": "*",
+    "xor_sum": "^",
     "min": "min",
     "max": "max",
     "argmin": "argmin",
@@ -88,8 +90,10 @@ def reduction_init(reduction_type, dtype):
         # Since load promotes all half-precision inputs to float, the initial
         # constant for reduction must be promoted as well
         dtype = torch.float32
-    if reduction_type in ("sum", "any"):
+    if reduction_type in ("xor_sum", "sum", "any"):
         return 0
+    if reduction_type == "prod":
+        return 1
     if reduction_type in {"max", "argmax"}:
         return (
             f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
@@ -108,6 +112,10 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "prod":
+        return f"{var} *= {next_value}"
+    if reduction_type == "xor_sum":
+        return f"{var} ^= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
     return f"{var} = std::{reduction_type}({var}, {next_value})"
@@ -120,6 +128,10 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} = at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
         return f"{var} += {next_value}"
+    elif reduction_type == "prod":
+        return f"{var} *= {next_value}"
+    elif reduction_type == "xor_sum":
+        return f"{var} ^= {next_value}"
     else:
         raise NotImplementedError()
 
@@ -904,6 +916,10 @@ class CppOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
     @staticmethod
+    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
+
+    @staticmethod
     def sigmoid(x):
         return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
@@ -1271,7 +1287,7 @@ class CppVecKernel(CppKernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum"}
+        assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
         assert dtype == torch.float
         assert src_dtype == torch.float
         reduce_map = {"max": "maximum", "min": "minimum"}
@@ -1284,6 +1300,10 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
             if reduction_type == "sum":
                 vec_reduc_prefix += "omp_out += omp_in"
+            elif reduction_type == "prod":
+                vec_reduc_prefix += "omp_out *= omp_in"
+            elif reduction_type == "xor_sum":
+                vec_reduc_prefix += "omp_out ^= omp_in"
             else:
                 vec_reduc_prefix += (
                     f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
@@ -1318,6 +1338,10 @@ class CppVecKernel(CppKernel):
             reduce_all_body = "{"
             if reduction_type == "sum":
                 reduce_all_body += "return x + y;"
+            elif reduction_type == "prod":
+                reduce_all_body += "return x * y;"
+            elif reduction_type == "xor_sum":
+                reduce_all_body += "return x ^ y;"
             else:
                 reduce_all_body += (
                     f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
@@ -1734,7 +1758,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum"]
+            and reduction_type in ["max", "min", "sum", "prod", "xor_sum"]
         ):
             pass
         else:
@@ -1801,7 +1825,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
-                    if not (name in self.fast_vec_list):
+                    if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
                     return self.simd_vec
 
@@ -2444,9 +2468,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str)
+        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args)
+        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
 
 
 class CppWrapperKernelGroup(KernelGroup):

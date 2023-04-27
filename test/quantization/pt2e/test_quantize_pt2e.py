@@ -245,6 +245,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
+            tracing_mode="real",
         )
 
         m = prepare_qat_pt2e_quantizer(m, quantizer)
@@ -326,8 +327,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.bn = torch.nn.BatchNorm2d(1)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -338,7 +339,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         quantizer = QNNPackQuantizer()
         quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
         m = M()
-        example_inputs = (torch.randn(1, 1, 3, 3),)
+        m_fx = copy.deepcopy(m)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # PT2 export
         m, guards = torchdynamo.export(
@@ -347,19 +349,12 @@ class TestQuantizePT2E(QuantizationTestCase):
             aten_graph=True,
         )
         m = prepare_qat_pt2e_quantizer(m, quantizer)
-        print("\n\n=== PT2 graph ===\n", m)
         result = m(*example_inputs)
 
         # FX
         qconfig_mapping = QConfigMapping().set_global(default_per_channel_symmetric_qnnpack_qat_qconfig)
-        m_fx = M()
-        m_fx = prepare_qat_fx(m_fx, qconfig_mapping, example_inputs)
-        #m_fx, guards = torchdynamo.export(
-        #    m_fx,
-        #    *copy.deepcopy(example_inputs),
-        #    aten_graph=True,
-        #)
-        print("\n\n=== FX graph ===\n", m_fx)
+        backend_config = get_qnnpack_backend_config()
+        m_fx = prepare_qat_fx(m_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
         result_fx = m_fx(*example_inputs)
 
         # Verify that numerics match
