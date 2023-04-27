@@ -112,7 +112,7 @@ class GraphLowering(torch.fx.Interpreter):
             # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
-                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
             (
                 size,
@@ -691,10 +691,9 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
+            return AotCodeCache.compile(
+                self, code, cuda=(self.get_single_device() == "cuda")
             )
-            return lambda dummy: libpath
         else:
             return self.compile_to_module().call
 
