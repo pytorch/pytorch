@@ -5902,6 +5902,17 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(x, 2), opt_fn(x, 2))
 
+    def test_inplace_resize_as(self):
+        def fn(x, y):
+            x.resize_as_(y)
+            return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(200, 300)
+        x_clone = x.clone()
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        same(fn(x, y), opt_fn(x_clone, y))
+
 
 @dataclasses.dataclass
 class TestFailure:

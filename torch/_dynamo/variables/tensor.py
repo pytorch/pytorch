@@ -181,8 +181,8 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get resize_() on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name in ("resize_", "unsqueeze_") and self.source is not None:
-            # Delay the graph break to the actual call of unsqueeze_/resize_
+        if name in ("resize_", "unsqueeze_", "resize_as_") and self.source is not None:
+            # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_
             return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
