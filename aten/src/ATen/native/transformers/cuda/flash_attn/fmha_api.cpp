@@ -367,8 +367,8 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const bool zero_tensors,
         const bool is_causal,
         const int num_splits,
-        const uint64_t philox_seed,
-        const uint64_t philox_offset
+        at::Tensor philox_seed,
+        at::Tensor philox_offset
 ) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
@@ -505,13 +505,13 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     if (at::cuda::currentStreamCaptureStatus() ==
             at::cuda::CaptureStatus::None ||
         !is_dropout) {
-          philox_args = at::PhiloxCudaState(philox_seed, philox_offset);
+          philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
     } else { // dropout + capture
        // in reality will be tensors right away
-        at::Tensor seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_seed)));
-        at::Tensor offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_offset)));
+        // at::Tensor seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_seed)));
+        // at::Tensor offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_offset)));
         philox_args = at::PhiloxCudaState(
-            seed_t.data_ptr<int64_t>(), offset_t.data_ptr<int64_t>(), 0);
+            philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
     }
     params.philox_args = philox_args;
 

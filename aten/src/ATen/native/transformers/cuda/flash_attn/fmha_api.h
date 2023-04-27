@@ -43,8 +43,8 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const bool zero_tensors,
         const bool is_causal,
         const int num_splits,
-        const uint64_t philox_seed,
-        const uint64_t philox_offset
+        at::Tensor philox_seed,
+        at::Tensor philox_offset
 );
 
 } // namespace fmha

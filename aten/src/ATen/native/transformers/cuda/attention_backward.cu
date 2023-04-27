@@ -86,8 +86,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const int64_t philox_seed,
-    const int64_t philox_offset,
+    Tensor philox_seed,
+    Tensor philox_offset,
     c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   /*
@@ -107,8 +107,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  uint64_t unsigned_philox_seed = c10::bit_cast<uint64_t>(philox_seed);
-  uint64_t unsigned_philox_offset = c10::bit_cast<uint64_t>(philox_offset);
+  //uint64_t unsigned_philox_seed = c10::bit_cast<uint64_t>(philox_seed);
+  //uint64_t unsigned_philox_offset = c10::bit_cast<uint64_t>(philox_offset);
 
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
           contiguous_grad_out,
@@ -129,8 +129,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           false, /*zero_tensors = false for all calls here*/
           is_causal,
           num_splits,
-          unsigned_philox_seed,
-          unsigned_philox_offset
+          philox_seed,
+          philox_offset
   );
   return std::make_tuple(dq, dk, dv);
 #endif
@@ -333,8 +333,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const int64_t philox_seed,
-    const int64_t philox_offset,
+    Tensor philox_seed,
+    Tensor philox_offset,
     c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
