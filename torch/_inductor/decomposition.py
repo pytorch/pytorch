@@ -39,8 +39,6 @@ inductor_decompositions = get_decompositions(
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
-stride_agnostic_decomps = {}
-
 
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
@@ -49,23 +47,9 @@ def register_decomposition(ops):
     return decomp.register_decomposition(ops, decompositions)
 
 
-def register_stride_agnostic_decomposition(op_overload):
-    assert isinstance(op_overload, torch._ops.OpOverload)
-
-    def decomposition_decorator(f):
-        stride_agnostic_decomps[op_overload] = f
-
-    return decomposition_decorator
-
-
 @register_decomposition(aten._unsafe_view.default)
 def _unsafe_view(self, size):
     # this makes pattern matching easier
-    return self.view(size)
-
-
-@register_stride_agnostic_decomposition(aten._unsafe_view.default)
-def _unsafe_view_stride_agnostic(self, size):
     return self.view(size)
 
 
@@ -370,13 +354,30 @@ def all_dim(input, dim, keepdim=False):
 
 # NB: this decomposition is not stride accurate, do not put it in the main
 # library
-@register_stride_agnostic_decomposition(aten.copy.default)
+@register_decomposition(aten.copy)
 def copy(self, src, non_blocking=False):
     intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        return aten.expand_copy.default(intermediate, self.size())
-    else:
+    # cheapest case
+    if self.size() == intermediate.size() and self.stride() == intermediate.stride() and self.storage_offset() == intermediate.storage_offset():
         return intermediate
+    # next cheapest case
+    if self.size() == intermediate.size() and self.is_contiguous() and self.storage_offset() == intermediate.storage_offset():
+        return intermediate.contiguous()
+    # next cheapest case (expand_copy is guaranteed to return a contiguous tensor)
+    if self.is_contiguous() and self.storage_offset() == 0:
+        return aten.expand_copy.default(intermediate, self.size())
+    # expensive case
+    # We need to return a tensor with the data of "src",
+    # But with the size/stride/storage_offset of "self" (... and any other metadata! neg, conj, etc).
+    # A problem for another day
+    assert not self.is_conj() and not self.is_neg()
+    out_buffer = torch.empty(self.untyped_storage().size(), dtype=self.dtype, device=self.device)
+    out_buffer_updated = aten.as_strided_scatter(
+        out_buffer, src, self.size(), self.stride(), self.storage_offset()
+    )
+    return out_buffer_updated.as_strided(
+        self.size(), self.stride(), self.storage_offset()
+    )
 
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):

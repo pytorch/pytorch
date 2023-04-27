@@ -5,12 +5,8 @@ import operator
 
 import torch
 import torch._inductor as inductor
-from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import detect_fake_mode
-from torch.fx.experimental.proxy_tensor import make_fx
 from .. import config, ir, pattern_matcher
 
-from ..decomposition import stride_agnostic_decomps
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -39,59 +35,13 @@ pass_patterns = [
 ]
 
 
-def run_stride_agnostic_decomps(
-    gm: torch.fx.GraphModule, example_inputs
-) -> torch.fx.GraphModule:
-    with detect_fake_mode(), enable_python_dispatcher():
-        try:
-            # This is quite hairy. The idea here is that now that our IR is functionalized,
-            # it is safe to run decompositions that don't respect strides **except** for two cases:
-            # (1) view() can fail if your tensors have wrong strides
-            # (2) as_strided() can be silently wrong.
-            # We will be less concerned with (2), but will focus on (1).
-            # The idea here is that as part of running stride-agnostic decompositions,
-            # we will take any view ops in the graph, and turn them into reshapes when our wrong strides
-            # will require extra clones in order to make those views valid.
-            # We do this by *temporarily* registering an decomposition from view -> reshape.
-            @aten.view.default.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)
-            def stride_agnostic_view_decomp(tensor, sizes):
-                # To avoid infinite looping, de-register our custom decomp while inside of it.
-                curr_impl = aten.view.default.py_kernels[
-                    torch._C.DispatchKey.CompositeImplicitAutograd
-                ]
-                del aten.view.default.py_kernels[
-                    torch._C.DispatchKey.CompositeImplicitAutograd
-                ]
-                aten.view.default._dispatch_cache.clear()
-                try:
-                    return aten.view(tensor, sizes)
-                except ValueError:
-                    return aten.reshape(tensor, sizes)
-                finally:
-                    aten.view.default.py_impl(
-                        torch._C.DispatchKey.CompositeImplicitAutograd
-                    )(curr_impl)
-
-            gm_stride_agnostic = make_fx(
-                torch.fx.Interpreter(gm).run,
-                decomposition_table=stride_agnostic_decomps,
-            )(*example_inputs)
-        finally:
-            # Remove our custom view() decomp when finished.
-            del aten.view.default.py_kernels[
-                torch._C.DispatchKey.CompositeImplicitAutograd
-            ]
-    return gm_stride_agnostic
-
-
-def post_grad_passes(gm: torch.fx.GraphModule, example_inputs):
+def post_grad_passes(gm: torch.fx.GraphModule):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
 
     The IR here has been normalized and functionalized.
     """
-    # gm = run_stride_agnostic_decomps(gm, example_inputs)
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -107,7 +57,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, example_inputs):
             patterns.apply(gm.graph)
 
     gm.graph.lint()
-    return gm
 
 
 @functools.lru_cache(None)
