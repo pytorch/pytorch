@@ -23,6 +23,7 @@ import platform
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -582,6 +583,15 @@ def wait_for_process(p, timeout=None):
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except subprocess.TimeoutExpired:
+        # send SIGINT to give pytest a chance to make xml
+        p.send_signal(signal.SIGINT)
         exit_status = p.wait(timeout=5)
         if exit_status is not None:
             return exit_status
@@ -1789,7 +1799,7 @@ def check_if_enable(test: unittest.TestCase):
                         # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                    if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
                         should_skip = True
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
@@ -3159,9 +3169,9 @@ class TestCase(expecttest.TestCase):
                 yield
             if len(ws) == 0:
                 self.fail('no warning caught')
-            self.assertTrue(any([type(w.message) is category for w in ws]))
+            self.assertTrue(any(type(w.message) is category for w in ws))
             self.assertTrue(
-                any([re.match(pattern, str(w.message)) for w in ws]),
+                any(re.match(pattern, str(w.message)) for w in ws),
                 f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):
