@@ -37,16 +37,11 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
-    try:
-        if not has_required_labels(pr):
-            print(LABEL_ERR_MSG)
-            add_label_err_comment(pr)
-        else:
-            delete_all_label_err_comments(pr)
-    except Exception as e:
-        pass
-
-    exit(0)
+    if not has_required_labels(pr):
+        print(LABEL_ERR_MSG)
+        add_label_err_comment(pr)
+    else:
+        delete_all_label_err_comments(pr)
 
 
 if __name__ == "__main__":
