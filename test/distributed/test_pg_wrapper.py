@@ -33,6 +33,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 
     def _validate_error(self, exception, op_type, rank, tensor):
         err = str(exception)
+        print(f"RV: err {err}")
         self.assertTrue(
             op_type in err, f"Got {err} but expected {op_type} to be in error."
         )
@@ -62,6 +63,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 
             # Ensure sequence number is logged in error
             self.assertTrue("SequenceNumber" in err)
+            # Ensure info about how collectives diff is in the error.
+            self.assertTrue("Collectives differ in the following" in err)
 
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
@@ -90,7 +93,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             tensor = tensor.to(self.rank)
         works = []
         # Run a few successful collectives
-        for _ in range(10):
+        for _ in range(500):
             work = wrapper_pg.allreduce([tensor])
             works.append(work)
 
