@@ -409,7 +409,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if is_staticmethod:
                 # Use `UserFunctionVariable` to avoid doubly passing in `self`
                 # as an argument, which happens if using `UserMethodVariable`
-                return variables.UserFunctionVariable(subobj, name, source=source, **options)
+                return variables.UserFunctionVariable(
+                    subobj, name, source=source, **options
+                )
             return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
