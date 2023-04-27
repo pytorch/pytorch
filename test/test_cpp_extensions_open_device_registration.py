@@ -270,8 +270,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_tensor = cpu_tensor.foo()
             foo_storage = foo_tensor.storage()
             self.assertTrue(foo_storage.size() == 8)
-            foo_storage.resize_(5)
-            self.assertTrue(foo_storage.size() == 5)
+            foo_storage.resize_(8)
+            self.assertTrue(foo_storage.size() == 8)
+            with self.assertRaisesRegex(RuntimeError, 'overflow'):
+                foo_storage.resize_(8**29)
 
         test_base_device_registration()
         test_before_common_registration()

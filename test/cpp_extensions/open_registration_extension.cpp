@@ -134,7 +134,7 @@ const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
   const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
   const auto offset = self.unsafeGetTensorImpl()->storage_offset();
   const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
-  const Storage &storage = self.unsafeGetTensorImpl()->unsafe_storage()
+  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
   if (storage_size > storage.nbytes()) {
     storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
   }
