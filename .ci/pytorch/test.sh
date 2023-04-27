@@ -510,13 +510,13 @@ fi
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
-    #ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
@@ -555,8 +555,8 @@ test_libtorch() {
 
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
-  #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
 
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then
     python test/run_test.py --cpp --verbose -i cpp/test_mobile_nnc
@@ -568,8 +568,8 @@ test_aot_compilation() {
 
 test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
   fi
@@ -586,8 +586,8 @@ test_distributed() {
 
   if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
-    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
 
     # These are distributed tests, so let's continue running them sequentially here to avoid
     # any surprise
@@ -597,7 +597,8 @@ test_distributed() {
 
     MPIEXEC=$(command -v mpiexec)
     if [[ -n "$MPIEXEC" ]]; then
-      MPICMD="${MPIEXEC} -np 2 python test/run_test.py --cpp --verbose -i cpp/ProcessGroupMPITest"
+      # NB: mpiexec only works directly with the C++ test binary here
+      MPICMD="${MPIEXEC} -np 2 $TORCH_BIN_DIR/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
 
@@ -612,9 +613,9 @@ test_rpc() {
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
     # test reporting process to function as expected.
-    #ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    #ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
     python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
   fi
 }

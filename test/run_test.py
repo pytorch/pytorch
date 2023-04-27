@@ -139,7 +139,9 @@ def discover_tests(
     return sorted(rc)
 
 
+CPP_TESTS_DIR = os.getenv("CPP_TESTS_DIR", default=None)
 TESTS = discover_tests(
+    cpp_tests_dir=pathlib.Path(CPP_TESTS_DIR) if CPP_TEST_DIR else None,
     blocklisted_patterns=[
         "ao",
         "bottleneck_test",
@@ -524,14 +526,20 @@ def run_test(
         return 0
 
     if test_file.startswith(CPP_TEST_PREFIX):
-        # C++ tests are in CPP_TEST_PATH, not the regular test directory
-        argv = [
-            os.path.join(
+        if CPP_TESTS_DIR:
+            cpp_test = os.path.join(
+                CPP_TESTS_DIR,
+                test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
+            )
+        else:
+            cpp_test = os.path.join(
                 pathlib.Path(test_directory).parent,
                 CPP_TEST_PATH,
                 test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
             )
-        ] + unittest_args
+
+        # C++ tests are in CPP_TEST_PATH, not the regular test directory
+        argv = [cpp_test] + unittest_args
     else:
         # Can't call `python -m unittest test_*` here because it doesn't run code
         # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -909,7 +917,11 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         # failure
         rerun_options = ["-x", "--reruns=2"]
         if IS_CI:
-            rerun_options.append(f"--sc={stepcurrent_key}")
+            if is_cpp_test:
+                # TODO: Figure out why pytest-cpp doesn't work with the local conftest
+                rerun_options.append("--sw")
+            else:
+                rerun_options.append(f"--sc={stepcurrent_key}")
 
     pytest_args = [
         "-vv",
@@ -985,14 +997,14 @@ def parse_args():
         "--verbose",
         action="count",
         default=0,
-        help="print verbose information and test-by-test results",
+        help="Print verbose information and test-by-test results",
     )
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
         "--distributed-tests",
         action="store_true",
-        help="run all distributed tests",
+        help="Run all distributed tests",
     )
     parser.add_argument(
         "--functorch",
