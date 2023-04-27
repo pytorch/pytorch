@@ -374,11 +374,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"tl.math.isinf({x})"
+        return f"tl.math.isinf({x}).to(tl.int1)"
 
     @staticmethod
     def isnan(x):
-        return f"tl.math.isnan({x})"
+        return f"tl.math.isnan({x}).to(tl.int1)"
 
     @staticmethod
     def round(x):
