@@ -417,7 +417,7 @@ def _pre_forward(
         # the `grad_fn` is mutated.
         _register_post_backward_hooks(state, handles)
 
-        should_cast_forward_inputs = all(
+        should_cast_forward_inputs = len(state._handles) > 0 and all(
             not handle._force_full_precision for handle in state._handles
         )
 
@@ -599,7 +599,7 @@ def _root_pre_forward(
 
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
 
-        should_cast_forward_inputs = all(
+        should_cast_forward_inputs = len(state._handles) > 0 and all(
             not handle._force_full_precision for handle in state._handles
         )
 
