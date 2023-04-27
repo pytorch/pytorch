@@ -137,11 +137,11 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
   } else if (device_type == at::kPrivateUse1) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
-        !c10::overflows<size_t>(size_bytes_i),
+        !c10::overflows<int64_t>(size_bytes_i),
         "Requested storage size (",
         size_bytes_i,
-        ") cannot be represented as a size_t");
-    const auto size_bytes = static_cast<size_t>(size_bytes_i);
+        ") cannot be represented as a int64_t");
+    const auto size_bytes = static_cast<int64_t>(size_bytes_i);
     void* original_data_ptr = storage.data_ptr().get();
 
     auto src_option =
