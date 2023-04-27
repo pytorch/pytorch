@@ -82,8 +82,8 @@ TORCH_API void checkDimRange(
     int64_t dim_end);
 TORCH_API void checkSameDim(
     CheckedFrom c,
-    const TensorArg& t1,
-    const TensorArg& t2);
+    const TensorGeometryArg& t1,
+    const TensorGeometryArg& t2);
 TORCH_API void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
 TORCH_API void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
 TORCH_API void checkSize(

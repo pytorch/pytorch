@@ -208,7 +208,7 @@ void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameType);
 }
 
-void checkSameDim(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
+void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2) {
   TORCH_CHECK(
     t1->dim() == t2->dim(),
     "Expected tensor for ", t1, " to have the same dimension as tensor for ",
