@@ -30,6 +30,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -75,20 +76,6 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 vec_dtypes = [torch.float, torch.bfloat16]
-
-
-# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-# avx512vl, and avx512dq at least. So we will skip the test case if one processor
-# is not meet the requirement.
-@functools.lru_cache(maxsize=None)
-def has_bf16_support():
-    import sys
-
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
 
 
 class TestCase(TorchTestCase):
@@ -353,7 +340,7 @@ def check_model(
 
         correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
         flat_grads, _ = tree_flatten(correct_grad)
-        all_none_grads = all([x is None for x in flat_grads])
+        all_none_grads = all(x is None for x in flat_grads)
         if all_none_grads:
             # See Note [Detaching inputs that never need gradients]
             # There are a handful of ops that can return None gradients, into of zero gradients.
@@ -765,6 +752,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    def test_prod(self):
+        def fn(a):
+            return a.prod(0), a.prod(1), a.prod()
+
+        self.common(fn, (torch.rand((10, 10)),))
+        self.common(fn, (torch.rand((1, 2050)),))
+
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -823,7 +817,10 @@ class CommonTemplate:
                 torch.amin(b + 1, keepdim=True),
             )
 
-        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+        dtypes = [torch.float, torch.float16]
+        if not (self.device == "cuda" and not SM80OrLater):
+            dtypes += [torch.bfloat16]
+        for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
 
     def test_fmin_fmax(self):
@@ -1039,6 +1036,17 @@ class CommonTemplate:
                 torch.randn(12, 5, 5),
                 torch.randint(0, 11, (24,)),
             ),
+        )
+
+    def test_views5(self):
+        # tensor with shape 0 in any dimension
+        def forward(x):
+            y = x[:, 4:]
+            return y.view(len(y), -1, 4)
+
+        self.common(
+            forward,
+            (torch.randn(4, 4, 4, 4),),
         )
 
     def test_relu(self):
@@ -1768,89 +1776,6 @@ class CommonTemplate:
                 (v1, v2),
             )
 
-    def test_conv2d_packed(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv2d packed test")
-
-        x_shape = (1, 3, 56, 56)
-        for mode_train in [True, False]:
-            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
-                mode=mode_train
-            )
-            v = torch.randn(x_shape, dtype=torch.float32)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-
-    def test_conv_used_from_multiple_places(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv/linear fusion test")
-
-        class M(torch.nn.Module):
-            def __init__(self, conv_in_channel, conv_out_channel) -> None:
-                super().__init__()
-                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
-
-            def forward(self, x):
-                res = self.conv(x)
-                res = F.relu(res)
-                res = self.conv(res)
-                return res
-
-        with torch.no_grad():
-            m = M(3, 3).eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(1, 3, 224, 224)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
-
-    def test_linear_used_from_multiple_places(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv/linear fusion test")
-
-        class M(torch.nn.Module):
-            def __init__(self, in_channel, out_channel) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(in_channel, out_channel)
-
-            def forward(self, x):
-                res = self.linear(x)
-                res = F.relu(res)
-                res = self.linear(res)
-                return res
-
-        if has_bf16_support():
-            with torch.no_grad():
-                m = M(224, 224).bfloat16().eval()
-                m_opt = torch.compile(m)
-                x = torch.randn(224, 224, dtype=torch.bfloat16)
-                m_opt(x)
-                self.assertEqual(m(x), m_opt(x))
-
-    def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
-        for input_shape, bias in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], 30, bias=bias)
-            ).eval()
-
-            v = torch.randn(input_shape)
-            with torch.no_grad():
-                self.common(
-                    mod,
-                    (v,),
-                )
-            if has_bf16_support() and len(input_shape) > 1:
-                mod = mod.to(torch.bfloat16)
-                v = v.to(torch.bfloat16)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
-
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1880,19 +1805,6 @@ class CommonTemplate:
             code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
-
-    def test_conv_transpose2d_packed(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("only support cpu conv_transpose2d packed test")
-
-        x_shape = (1, 3, 28, 28)
-        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
-        v = torch.randn(x_shape, dtype=torch.float32)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
 
     def test_view_detach(self):
         def fn(a):
@@ -1972,6 +1884,14 @@ class CommonTemplate:
         self.common(fn, (torch.randn(2, 2, 10), [3, 3, 4]))
         self.common(fn, (torch.randn(2, 2, 10), [4, 3, 3]))
         self.common(fn, (torch.randn(2, 2, 10), [1, 2, 3, 4]))
+
+    def test_split_with_sizes_failed(self):
+        @torch._dynamo.optimize("inductor")
+        def fn(a):
+            return torch.split(a, [2, 1, 1], dim=1)
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            fn(torch.randn(1, 5))
 
     def test_split(self):
         def fn(a):
@@ -2707,6 +2627,25 @@ class CommonTemplate:
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_complex_fallback(self):
+        def fn(x):
+            return x * x + 10
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]).to(dtype=torch.complex64),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+        class ToComplex(nn.Module):
+            def forward(self, x):
+                return (x + x + 12).to(torch.complex64)
+
+        self.common(ToComplex(), (torch.rand([1, 2, 4, 8]),), check_lowp=False)
+
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -3677,6 +3616,15 @@ class CommonTemplate:
 
         x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
         self.common(fn, (x,))
+
+    def test_constant_pad_nd_inplace(self):
+        def fn(a):
+            return aten.constant_pad_nd(a, [0, 0])
+
+        x = torch.randn([2], device=self.device)
+        fn_compiled = torch.compile(fn)
+        y = fn_compiled(x)
+        self.assertTrue(y is not x)
 
     def test_l1_loss(self):
         def fn(a, b):
@@ -4666,6 +4614,41 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_philox_rand(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "functionalization of rng ops supported only on CUDA"
+            )
+
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            a = torch.rand_like(x) * x
+            a = torch.rand_like(x) * a
+            return a
+
+        def check(x):
+            torch.manual_seed(123)
+            a = fn(x)
+
+            torch.manual_seed(1234)
+            b = fn(x)
+
+            torch.manual_seed(123)
+            c = fn(x)
+
+            # same seed, same values
+            self.assertTrue(torch.allclose(a, c))
+
+            # different calls, different values
+            self.assertFalse(torch.allclose(a, b))
+
+        check(torch.ones(1024, device=self.device, dtype=torch.float32))
+        self.assertEqual(torch.cuda._get_rng_state_offset(), 2048)
+        # Check non-multiple of 4 numel
+        check(torch.ones(3, device=self.device, dtype=torch.float32))
+        self.assertEqual(torch.cuda._get_rng_state_offset(), 8)
+
     def test_randn_like_empty(self):
         class Model(torch.nn.Module):
             def __init__(
@@ -4689,6 +4672,36 @@ class CommonTemplate:
             return torch.rand_like(x), torch.randn_like(x)
 
         self.common(fn, [torch.zeros([20, 20])])
+
+    def test_like_rands2(self):
+        # rand_like with kwargs `device` of str type
+        d = self.device
+        assert isinstance(d, str)
+
+        @torch.compile
+        def fn(x):
+            return torch.rand_like(x, device=d)
+
+        x = torch.ones(10, device=self.device, dtype=torch.float32)
+        a0 = fn(x).clone()
+        a1 = fn(x).clone()
+        self.assertFalse(torch.allclose(a0, a1))
+
+    @requires_cuda()
+    def test_like_rands3(self):
+        # rand_like with `device` which is different from `x.device`
+        def test_like_rands_on_different_device(device1, device2):
+            @torch.compile
+            def fn(x, device):
+                return torch.rand_like(x, device=device)
+
+            x = torch.ones(10, device=device1, dtype=torch.float32)
+            return fn(x, device2).clone()
+
+        a0 = test_like_rands_on_different_device("cpu", "cuda")
+        a1 = test_like_rands_on_different_device("cuda", "cpu")
+        self.assertTrue(a0.device.type == "cuda")
+        self.assertTrue(a1.device.type == "cpu")
 
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
@@ -5843,6 +5856,52 @@ class CommonTemplate:
         self.assertEqual(get_data_type(bitwise_or), torch.bool)
         self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
 
+    def test_AllenaiLongformerBase_repro(self):
+        def fn(query, scores, window_overlap):
+            batch_size, seq_len, num_heads, _ = query.size()
+            chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
+            diagonal_attention_scores = scores.new_zeros(
+                (
+                    batch_size * num_heads,
+                    chunks_count + 1,
+                    window_overlap,
+                    window_overlap * 2 + 1,
+                )
+            )
+            diagonal_attention_scores[:, :-1, :, window_overlap:] = scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
+            input_tensor = diagonal_attention_scores.view(
+                batch_size, num_heads, seq_len, 2 * window_overlap + 1
+            ).transpose(2, 1)
+            beginning_input = input_tensor[:, :window_overlap, :, : window_overlap + 1]
+            input_tensor[:, :window_overlap, :, : window_overlap + 1] = torch.full_like(
+                beginning_input, -float("inf")
+            )
+            return input_tensor
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                args = [
+                    ((4, 1024, 12, 64), (768, 3072, 64, 1), torch.float32, "cpu"),
+                    ((48, 3, 512, 513), (787968, 262656, 513, 1), torch.float32, "cpu"),
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(*args, 256), opt_fn(*args, 256))
+
+    def test_slice(self):
+        def fn(a, b):
+            return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x, 2), opt_fn(x, 2))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -6170,9 +6229,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     ),
                     f"{fn}, {ndims}, {dyn_shape}",
                 )
-
-
-if HAS_CUDA and not TEST_WITH_ASAN:
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
