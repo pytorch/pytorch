@@ -4,9 +4,10 @@ import operator
 import types
 from typing import Dict, List
 
+import sympy
+
 import torch.fx
 import torch.random
-import sympy
 from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
 
 from .. import config, variables
@@ -235,8 +236,13 @@ class TensorVariable(VariableTracker):
                 length = self.size[0]
             else:
                 dyn_length = self.call_method(tx, "size", [ConstantVariable(0)], {})
-                assert isinstance(dyn_length, SymNodeVariable)
-                length = dyn_length.evaluate_expr(tx.output)
+                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values prouced through
+                # symbolic_shapes, but that end up as int/sympy.Integer
+                assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+                if isinstance(dyn_length, SymNodeVariable):
+                    length = dyn_length.evaluate_expr(tx.output)
+                else:
+                    length = dyn_length.value
             idxes = range(length)
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
@@ -469,7 +475,7 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable(sym_num)
+            return ConstantVariable(int(sym_num))
 
         return SymNodeVariable(proxy, sym_num, **options)
 

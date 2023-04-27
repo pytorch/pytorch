@@ -34,7 +34,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import CompileProfiler, ifdyn, ifunspec, ifdynstaticdefault
+from torch._dynamo.utils import CompileProfiler, ifdyn, ifdynstaticdefault, ifunspec
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -154,7 +154,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack4, 2, expected_ops=5, expected_ops_dynamic=ifdynstaticdefault(6, 7)
+            self,
+            unpack4,
+            2,
+            expected_ops=5,
+            expected_ops_dynamic=ifdynstaticdefault(6, 7),
         )
 
     def test_unpack5(self):
@@ -167,7 +171,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return o
 
         torch._dynamo.testing.standard_test(
-            self, unpack5, 2, expected_ops=5, expected_ops_dynamic=ifdynstaticdefault(6, 7)
+            self,
+            unpack5,
+            2,
+            expected_ops=5,
+            expected_ops_dynamic=ifdynstaticdefault(6, 7),
         )
 
     def test_matmul1(self):
@@ -334,7 +342,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
 
-        expected_op_count = ifdynstaticdefault(3, 12) if torch._dynamo.testing.config.dynamic_shapes else 1
+        expected_op_count = (
+            ifdynstaticdefault(3, 12)
+            if torch._dynamo.testing.config.dynamic_shapes
+            else 1
+        )
         self.assertEqual(counts.op_count, expected_op_count)
 
     def test_user_defined_binop(self):
@@ -359,7 +371,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
-        expected_op_count = ifdynstaticdefault(2, 4) if torch._dynamo.testing.config.dynamic_shapes else 1
+        expected_op_count = (
+            ifdynstaticdefault(2, 4)
+            if torch._dynamo.testing.config.dynamic_shapes
+            else 1
+        )
         self.assertEqual(counts.op_count, expected_op_count)
 
     def test_compare_shapes_eq(self):
@@ -512,12 +528,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
             return _fn
 
-
         torch._dynamo.testing.standard_test(
-            self, get_test_fn(func=min), 2, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(3, 14)
+            self,
+            get_test_fn(func=min),
+            2,
+            expected_ops=1,
+            expected_ops_dynamic=ifdynstaticdefault(3, 14),
         )
         torch._dynamo.testing.standard_test(
-            self, get_test_fn(func=max), 2, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(3, 14)
+            self,
+            get_test_fn(func=max),
+            2,
+            expected_ops=1,
+            expected_ops_dynamic=ifdynstaticdefault(3, 17),
         )
 
     def test_config_obj(self):
@@ -770,7 +793,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             )
 
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=5, expected_ops_dynamic=ifdynstaticdefault(6, 8)
+            self,
+            fn=fn,
+            nargs=1,
+            expected_ops=5,
+            expected_ops_dynamic=ifdynstaticdefault(6, 8),
         )
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
@@ -2232,7 +2259,7 @@ def fn():
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn_no_breaks)
         opt_fn(x)
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.frame_count, 2)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()

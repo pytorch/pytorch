@@ -31,7 +31,7 @@ import torch.library
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
-from torch._dynamo.utils import ifdyn, ifunspec,  ifdynstaticdefault
+from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
 from torch.nn import functional as F
 
 

@@ -1270,7 +1270,9 @@ class BuiltinVariable(VariableTracker):
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(b, (SymNodeVariable, ConstantVariable)):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -1283,7 +1285,9 @@ class BuiltinVariable(VariableTracker):
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(b, (SymNodeVariable, ConstantVariable)):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
