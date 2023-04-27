@@ -161,7 +161,7 @@ void apply_ldl_factor_cusolver(
     const Tensor& pivots,
     const Tensor& info,
     bool upper) {
-#if !defined(USE_CUSOLVER) && !defined(USE_HIPSOLVER)
+#if !defined(USE_LINALG_SOLVER)
   TORCH_CHECK(
       false,
       "Calling torch.linalg.ldl_factor on a CUDA tensor requires compiling ",
@@ -487,7 +487,7 @@ void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos) {
   });
 }
 
-#if defined(USE_CUSOLVER) || defined(USE_HIPSOLVER)
+#if defined(USE_LINALG_SOLVER)
 
 inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
   auto size = self.sizes();
@@ -1789,6 +1789,6 @@ void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tens
   });
 }
 
-#endif  // USE_CUSOLVER || USE_HIPSOLVER
+#endif  // USE_LINALG_SOLVER
 
 } // namespace at::native
