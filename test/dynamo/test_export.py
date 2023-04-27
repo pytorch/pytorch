@@ -2230,7 +2230,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
-
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
 

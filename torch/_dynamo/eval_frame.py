@@ -649,6 +649,8 @@ class Constraint(ConstraintTarget):
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: StrictMinMaxConstraint
+    # Represent that `constraint_range` is shared with another ConstraintTarget, which
+    # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[ConstraintTarget] = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):

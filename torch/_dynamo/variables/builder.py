@@ -1185,6 +1185,12 @@ def wrap_to_fake_tensor_and_record(
                 if constraint.t_id == t_id:
                     update_dim2constraint(constraint.dim, constraint.constraint_range)
                 if constraint.shared is not None and constraint.shared.t_id == t_id:
+                    # We process constraint ranges for each shared dimension separately
+                    # so that we can directly check range constraint violations on them
+                    # without looking up which other shared dimensions have this info.
+                    # In other words, for this t_id, we will have processed all of its
+                    # constraint ranges, no matter where / how they were specified, by
+                    # by the end of this loop.
                     update_dim2constraint(
                         constraint.shared.dim, constraint.constraint_range
                     )
