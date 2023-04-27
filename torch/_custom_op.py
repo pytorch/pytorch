@@ -141,6 +141,15 @@ def custom_op(schema: str, *, ns: str) -> typing.Callable:
     return inner
 
 
+# Global dictionary holding references to all CustomOp objects
+# Yes, it keeps all CustomOps alive (see NOTE [CustomOp lifetime])
+# Used to query the CustomOp associated with a specific C++ dispatcher operator.
+# An example usage is FakeTensor: FakeTensor checks if a specific operator
+# has an implementation registered via the CustomOp API.
+# Indexed by qualname (e.g. aten::foo)
+global_registry: typing.Dict[str, "CustomOp"] = {}
+
+
 class CustomOp:
     r"""Class for custom operators in PyTorch.
 
@@ -159,6 +168,7 @@ class CustomOp:
                 "BC for it. Please use custom_op(...) to create a CustomOp object"
             )
         name = f"{cpp_ns}::{str(operator_name.name)}"
+        self._cpp_ns = cpp_ns
         self._lib: library.Library = lib
         self._ophandle: _C._DispatchOperatorHandle = ophandle
         # Has the name of the op, e.g. "foo". We cache here for convenience.
@@ -169,6 +179,21 @@ class CustomOp:
         self._abstract_impl: typing.Optional[FuncAndLocation] = None
 
         global_registry[self._qualname] = self
+
+    def _destroy(self):
+        # NOTE: [CustomOp lifetime]
+        # A CustomOp, once created, lives forever. The mechanism is that the
+        # global registry holds a reference to it. However, to make testing
+        # easier, we want to be able to destroy CustomOp objects.
+        # CustomOp._destroy does the job, though it leaves the CustomOp
+        # in a garbage state.
+        del self._lib
+
+        opnamespace = getattr(torch.ops, self._cpp_ns)
+        if hasattr(opnamespace, self._opname):
+            delattr(opnamespace, self._opname)
+
+        del global_registry[self._qualname]
 
     def __repr__(self):
         return f'<CustomOp(op="{self._qualname}")>'
@@ -455,13 +480,6 @@ def validate_function_matches_schema(
             f"Schema has kwonlyarg names {kwonlyarg_names} but function has "
             f"{arg_spec.kwonlyargs}."
         )
-
-
-# Global dictionary holding weak references to all CustomOp objects
-# Used to query the CustomOp associated with a specific C++ dispatcher operator.
-# An example usage is FakeTensor: FakeTensor checks if a specific operator
-# has an implementation registered via the CustomOp API.
-global_registry: weakref.WeakValueDictionary = weakref.WeakValueDictionary({})
 
 
 def get_none():
