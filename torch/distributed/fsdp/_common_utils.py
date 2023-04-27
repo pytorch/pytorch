@@ -87,7 +87,7 @@ class _UninitializedDeviceHandle(_FSDPDeviceHandle):
         pass
 
     def __getattribute__(self, __name: str) -> Any:
-        raise RuntimeError("Try to use an uninitialized device handle.")
+        raise RuntimeError("Trying to use an uninitialized device handle.")
 
 
 class _FSDPState(_State):
