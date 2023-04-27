@@ -154,6 +154,8 @@ def livevars_analysis(instructions, instruction):
                     pass
                 else:
                     raise NotImplementedError(f"unhandled {inst.opname}")
+            if inst.exn_tab_entry:
+                walk(may, indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
                 walk(may, indexof[inst.target])
                 state = may

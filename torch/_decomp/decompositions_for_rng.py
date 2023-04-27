@@ -183,10 +183,21 @@ class PhiloxStateTracker:
     def get_current_relative_offset(cls):
         return cls.running_state.relative_offset
 
+    @staticmethod
+    def multiple_of_4(offset):
+        # torch cuda rng state offset must be a multiple of 4. For inductor, as
+        # we sum up all the numel, the result might not be a multiple of 4. This
+        # method achieves that.
+        return (offset + 3) // 4 * 4
+
     @classmethod
     def get_updated_fwd_offset(cls):
-        return cls.fwd_state.base_offset + cls.fwd_state.relative_offset
+        return cls.multiple_of_4(
+            cls.fwd_state.base_offset + cls.fwd_state.relative_offset
+        )
 
     @classmethod
     def get_updated_bwd_offset(cls):
-        return cls.bwd_state.base_offset + cls.bwd_state.relative_offset
+        return cls.multiple_of_4(
+            cls.bwd_state.base_offset + cls.bwd_state.relative_offset
+        )
