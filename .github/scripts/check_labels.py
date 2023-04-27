@@ -37,7 +37,7 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
-    if not has_required_labels(pr):
+    if True or not has_required_labels(pr):
         print(LABEL_ERR_MSG)
         add_label_err_comment(pr)
     else:
