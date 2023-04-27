@@ -86,8 +86,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    Tensor philox_seed,
-    Tensor philox_offset,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset,
     c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   /*
@@ -333,8 +333,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    Tensor philox_seed,
-    Tensor philox_offset,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
     c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});

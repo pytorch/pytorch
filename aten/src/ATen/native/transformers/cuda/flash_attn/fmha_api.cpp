@@ -329,8 +329,8 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         // generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         std::tie(seed, offset) = at::cuda::philox::unpack(philox_state);
-        seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)));
-        offset_t = at::tensor({static_cast<int64_t>(offset)});//at::scalar_tensor(at::Scalar(offset));
+        seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
+        offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));//at::scalar_tensor(at::Scalar(offset));
         launch_params.params.philox_args = philox_state;
     }
 
@@ -502,16 +502,15 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         !is_dropout || at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None,
         "scaled_dot_product_flash_attention does not support dropout with cuda graph capture mode enabled");
     at::PhiloxCudaState philox_args;
+    if (is_dropout) {
     if (at::cuda::currentStreamCaptureStatus() ==
-            at::cuda::CaptureStatus::None ||
-        !is_dropout) {
+            at::cuda::CaptureStatus::None)
+    {
           philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
     } else { // dropout + capture
-       // in reality will be tensors right away
-        // at::Tensor seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_seed)));
-        // at::Tensor offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(philox_offset)));
         philox_args = at::PhiloxCudaState(
             philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
+    }
     }
     params.philox_args = philox_args;
 
