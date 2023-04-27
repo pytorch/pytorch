@@ -1408,7 +1408,8 @@ def emit_body(
                 expr = expr + ".vec()"
 
             # todo(crcrpar): ideally do this replacement before refining `expr` in if-else above.
-            # Naively moving this processing to before if-else seems to cause some weirdos.
+            # Naively moving this processing to before if-else seems to cause some weirdos where
+            # some variable expressions are just wrong, e.g. trying to construct SavedVariable with a TensorList
             if foreacharg is not None:
                 name_in_expr = (
                     f"{foreacharg.name}{'[i]' if is_foreacharg_list_type else ''}"
