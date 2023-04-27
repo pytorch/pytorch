@@ -39,6 +39,24 @@ def _get_device_module(device='cuda'):
     device_module = getattr(torch, device)
     return device_module
 
+class _DefaultDevice(object):
+    _default_device_type = "cuda"
+
+    @staticmethod
+    def set_device_type(device: str = "cuda"):
+        _DefaultDevice._default_device_type = device
+
+    @staticmethod
+    def get_device_type():
+        return _DefaultDevice._default_device_type
+
+def infer_device_type(*args):
+    device_types = list({arg.device.type for arg in args
+                        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
+    if len(device_types) > 1:
+        raise ValueError("Expected all tensor args except CPU tensor to be on the same device,"
+                         " but found at least two devices, ", device_types)
+    return _DefaultDevice.get_device_type() if len(device_types) == 0 else device_types[0]
 
 # We can't know if the run_fn will internally move some args to different devices,
 # which would require logic to preserve rng states for those devices as well.
@@ -52,14 +70,9 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # the conditionals short-circuit.
     fwd_device_ids = list({arg.get_device() for arg in args
                           if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
-    device_types = list({arg.device.type for arg in args
-                        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
-    if len(device_types) > 1:
-        raise ValueError("Expected all tensor args except CPU tensor to be on the same device,"
-                         " but found at least two devices, ", device_types)
+
     fwd_device_states = []
-    if len(fwd_device_ids) > 0 and len(device_types) > 0:
-        device_module = _get_device_module(device_types[0])
+    device_module = _get_device_module(infer_device_type(*args))
 
     for device_id in fwd_device_ids:
         with device_module.device(device_id):
@@ -68,8 +81,8 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     return fwd_device_ids, fwd_device_states
 
 
-def set_device_states(devices, states, device='cuda') -> None:
-    device_module = _get_device_module(device)
+def set_device_states(devices, states) -> None:
+    device_module = _get_device_module(infer_device_type(states))
     for device, state in zip(devices, states):
         with device_module.device(device):
             device_module.set_rng_state(state)
@@ -93,12 +106,6 @@ def _get_autocast_kwargs(device="cuda"):
     return device_autocast_kwargs, cpu_autocast_kwargs
 
 class CheckpointFunction(torch.autograd.Function):
-    _device = "cuda"
-
-    @staticmethod
-    def _set_device(device="cuda"):
-        # set default device for CheckpointFunction, default is cuda
-        CheckpointFunction._device = device
 
     @staticmethod
     def forward(ctx, run_function, preserve_rng_state, *args):
@@ -106,7 +113,7 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
         # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-        ctx.device = CheckpointFunction._device
+        ctx.device = infer_device_type(*args)
         ctx.device_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs(ctx.device)
         if preserve_rng_state:
             ctx.fwd_cpu_state = torch.get_rng_state()
@@ -166,7 +173,7 @@ class CheckpointFunction(torch.autograd.Function):
             if ctx.preserve_rng_state:
                 torch.set_rng_state(ctx.fwd_cpu_state)
                 if ctx.had_device_in_fwd:
-                    set_device_states(ctx.fwd_devices, ctx.fwd_device_states, ctx.device)
+                    set_device_states(ctx.fwd_devices, ctx.fwd_device_states)
             detached_inputs = detach_variable(tuple(inputs))
             with torch.enable_grad(), \
                  device_module.amp.autocast(**ctx.device_autocast_kwargs), \
@@ -302,7 +309,6 @@ def checkpoint(
     """
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
-    device = kwargs.pop('device', 'cuda')
     if kwargs and use_reentrant:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
@@ -366,7 +372,6 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
     """
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
-    device = kwargs.pop('device', 'cuda')
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
@@ -389,8 +394,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
             run_function(start, end, functions),
             input,
             use_reentrant=use_reentrant,
-            preserve_rng_state=preserve,
-            device=device
+            preserve_rng_state=preserve
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
@@ -725,7 +729,7 @@ def _checkpoint_without_reentrant(
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
-    device = kwargs.pop('device', 'cuda')
+    device = infer_device_type(*args)
     device_module = _get_device_module(device)
     forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
@@ -754,7 +758,7 @@ def _checkpoint_without_reentrant(
             if preserve_rng_state:
                 torch.set_rng_state(fwd_cpu_state)
                 if had_device_in_fwd:
-                    set_device_states(fwd_devices, fwd_device_states, device=device)
+                    set_device_states(fwd_devices, fwd_device_states)
 
             with device_module.amp.autocast(**device_autocast_kwargs), \
                  torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
