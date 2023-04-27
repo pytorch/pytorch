@@ -2487,6 +2487,30 @@ class CompilerTest(test_c10d_common.CompilerTest):
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return torch.device("cpu")
+
+    @requires_gloo()
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="gloo")
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
