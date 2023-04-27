@@ -350,6 +350,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     fixme("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
     skip("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     skip("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
+    skip("tile", opsets=[opsets_before(13)], reason=reason_onnx_does_not_support("Tile")),
     fixme("unflatten", opsets=[opsets_before(13)], reason="Helper function is needed to support legacy ops."),
 )
 # fmt: on

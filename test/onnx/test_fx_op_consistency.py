@@ -1,15 +1,16 @@
 # Owner(s): ["module: onnx"]
 
-"""Test consistency between the output values of torch.onnx exported operators
+"""Test consistency between the output values of torch.onnx FX exported operators
 and torch operators given the same inputs.
 
 Usage:
 
-    pytest test/onnx/test_fx_op_consistency.py
+    pytest test/onnx/test_op_consistency.py
 
     To run tests on a specific operator (e.g. torch.ceil):
 
-    pytest test/onnx/test_fx_op_consistency.py -k ceil
+    pytest test/onnx/test_op_consistency.py -k ceil
+    pytest test/onnx/test_op_consistency.py -k nn_functional_scaled_dot_product_attention
 
     Read more on Running and writing tests:
         https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
