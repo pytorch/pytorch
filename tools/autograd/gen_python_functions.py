@@ -68,7 +68,7 @@ from torchgen.model import (
     Variant,
 )
 from torchgen.utils import FileManager, split_name_params
-from torchgen.yaml import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 
 from .gen_trace_type import should_trace
 
