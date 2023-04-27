@@ -215,45 +215,6 @@ cudnn_grid_sample_backward_batch_rule(
   return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
 }
 
-static std::tuple<Tensor, optional<int64_t>> cross_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
-    const Tensor& other, optional<int64_t> other_bdim,
-    const optional<int64_t> dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto other_ = moveBatchDimToFront(other, other_bdim);
-
-  if (other_bdim.has_value() && !self_bdim.has_value()) {
-    self_ = self_.expand_as(other_);
-  }
-  if (self_bdim.has_value() && !other_bdim.has_value()) {
-    other_ = other_.expand_as(self_);
-  }
-  auto new_dim = dim;
-  if (dim.has_value()) {
-    auto t = (self_bdim.has_value()) ? self_ : other_;
-    bool flag = (self_bdim.has_value()) ? true : other_bdim.has_value();
-    new_dim = getPhysicalDim(t, flag, *dim);
-  } else {
-    // if batch size is 3 we have to avoid that bdim is used as cross' dim argument
-    // according to cross API:
-    // > If dim is not given, it defaults to the first dimension found with the size 3
-    // we have to skip batch dim and find another dim with size 3
-    auto bs = (self_bdim.has_value()) ? self_.size(0) : (other_bdim.has_value()) ? other_.size(0) : -1;
-    if (bs == 3) {
-      auto t = (self_bdim.has_value()) ? self_ : other_;
-      int64_t idx = 1;
-      for (auto it = t.sizes().begin() + 1; it < t.sizes().end(); ++it, ++idx) {
-        if (*it == 3) {
-          new_dim = idx;
-          break;
-        }
-      }
-    }
-  }
-  optional<int64_t> out_dim = (self_bdim.has_value() || other_bdim.has_value()) ? 0 : (optional<int64_t>) nullopt;
-  return std::make_tuple(at::cross(self_, other_, new_dim), out_dim);
-}
-
 // TODO: replace with targetable functionalization
 static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
