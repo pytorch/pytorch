@@ -45,7 +45,7 @@ def _onnx_function_diagnose_call_append_symbolic_source_location(
     # TODO(bowbao): Record source location of symbolic.
     # Need this separate step because normally only the source location of
     # class `onnxscript.OnnxFunction.__call__` is recorded.
-    pass
+    ...
 
 
 # TODO(bowbao): Delete this once diagnostics is introduced in onnxscript.
