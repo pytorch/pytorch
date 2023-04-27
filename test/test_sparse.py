@@ -4648,7 +4648,7 @@ class TestSparseAny(TestCase):
             return choices[i]
 
 
-        def run_test(m, n, k, dtype_inout):
+        def run_test(m, n, k, dtype_inout, activation):
             a = make_tensor((m, k), dtype_inout[0]).cuda()
             b = make_tensor((n, k), dtype_inout[0]).cuda().T
             c = make_tensor((m, 1), dtype_inout[1]).cuda()
@@ -4665,17 +4665,27 @@ class TestSparseAny(TestCase):
 
                 dtype_dense = torch.float
                 c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense)) + c.to(dtype_dense)
+                if activation == "relu":
+                    relu = torch.nn.ReLU()
+                    c1 = relu(c1)
+                elif activation == "silu":
+                    silu = torch.nn.SiLU()
+                    c1 = silu(c1)
 
-                c0, meta_reordered = torch._cutlass_linear(a_sparse, b, c, mask)
+                c0, meta_reordered = torch._cutlass_linear(a_sparse, b, c, mask, activation=activation)
 
                 torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
 
         dtypes_inout = [[torch.int8, torch.int32], [torch.half, torch.half]]
-        for (dtype_inout, m, n, k) in itertools.product(dtypes_inout, range(4), range(4), range(4)):
+        activations = ["none", "relu", "silu"]
+        for (dtype_inout, activation, m, n, k) in itertools.product(dtypes_inout, activations, range(4), range(4), range(4)):
+            if activation == "silu" and dtype_inout[0] == torch.int8:
+                continue # SiLU not supported for integer inputs
+
             m = (m + 1) * 32
             n = (n + 1) * 32
             k = (k + 1) * 128
-            run_test(m, n, k, dtype_inout)
+            run_test(m, n, k, dtype_inout, activation)
 
 
     @onlyNativeDeviceTypes
