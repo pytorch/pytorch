@@ -419,7 +419,7 @@ class TestCustomOp(TestCase):
         def blah5(x, *, y):
             pass
 
-        del blah5
+        blah5._destroy()
 
     def test_custom_op_behaves_like_function(self):
         from torch.testing._internal.custom_op_db import numpy_mul
@@ -465,10 +465,10 @@ class TestCustomOp(TestCase):
 
         for schema in schemas:
             op = custom_op(schema, ns='_torch_testing')(foo)
-            del op
+            op._destroy()
         for schema in other_schemas:
             op = custom_op(schema, ns='_torch_testing')(bar)
-            del op
+            op._destroy()
 
     def test_reserved_ns(self):
         from torch._custom_op import RESERVED_NS
@@ -483,15 +483,16 @@ class TestCustomOp(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'CustomOp constructor is private'):
             CustomOp(None, None, None, None)
 
-    def test_lifetime_is_tied_to_object(self):
+    def test_lifetime(self):
         @custom_op('foo(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
-        # If there is more than one reference then we've got a problem - something
-        # will keep the object alive.
-        # NB: sys.getrefcount(foo) reports one more than the number (since it creates a ref)
-        self.assertEqual(sys.getrefcount(foo), 2)
+        # 3 references:
+        # - foo (in this function)
+        # - arg passed to sys.getrefcount
+        # - global_registry
+        self.assertEqual(sys.getrefcount(foo), 3)
 
         # We can't define an op multiple times,
         with self.assertRaisesRegex(RuntimeError, 'multiple times'):
@@ -500,13 +501,14 @@ class TestCustomOp(TestCase):
                 ...
 
         # Unless we delete the original op.
-        del foo
+        foo._destroy()
 
+        # Smoke test
         @custom_op('foo(Tensor x) -> Tensor', ns='_torch_testing')
         def foo(x):
             ...
 
-        del foo
+        foo._destroy()
 
     def test_autograd_notimplemented(self):
         @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
@@ -516,7 +518,7 @@ class TestCustomOp(TestCase):
         x = torch.randn(3, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, 'Autograd has not been implemented'):
             foo(x)
-        del foo
+        foo._destroy()
 
         @custom_op('(Tensor[] xs) -> Tensor', ns='_torch_testing')
         def foo(xs):
@@ -526,7 +528,7 @@ class TestCustomOp(TestCase):
         y = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, 'Autograd has not been implemented'):
             foo([y, x])
-        del foo
+        foo._destroy()
 
         @custom_op('(Tensor x, Tensor y) -> Tensor', ns='_torch_testing')
         def foo(x, y):
@@ -536,21 +538,21 @@ class TestCustomOp(TestCase):
         y = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, 'Autograd has not been implemented'):
             foo(y, x)
-        del foo
+        foo._destroy()
 
     def test_impl_cpu(self):
         @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
-        def bar(x):
+        def foo(x):
             ...
 
-        @bar.impl('cpu')
-        def bar_cpu(x):
+        @foo.impl('cpu')
+        def foo_cpu(x):
             return x.sin()
 
         x = torch.randn(3)
-        result = bar(x)
-        self.assertEqual(result, bar_cpu(x))
-        del bar
+        result = foo(x)
+        self.assertEqual(result, foo_cpu(x))
+        foo._destroy()
 
     def test_impl_invalid_devices(self):
         @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
@@ -572,7 +574,7 @@ class TestCustomOp(TestCase):
         for invalid_type in ['hip', 'xla', 'mkldnn', ['cpu', 'hip']]:
             with self.assertRaisesRegex(ValueError, "we only support device_type"):
                 foo.impl(invalid_type)(foo_impl)
-        del foo
+        foo._destroy()
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_separate(self):
@@ -595,26 +597,26 @@ class TestCustomOp(TestCase):
         x_cuda = x.cuda()
         result = foo(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
-        del foo
+        foo._destroy()
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_multiple(self):
         @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
-        def baz(x):
+        def foo(x):
             ...
 
-        @baz.impl(['cpu', 'cuda'])
-        def baz_impl(x):
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
             return x.cos()
 
         x = torch.randn(3)
-        result = baz(x)
-        self.assertEqual(result, baz_impl(x))
+        result = foo(x)
+        self.assertEqual(result, foo_impl(x))
 
         x_cuda = x.cuda()
-        result = baz(x_cuda)
-        self.assertEqual(result, baz_impl(x_cuda))
-        del baz
+        result = foo(x_cuda)
+        self.assertEqual(result, foo_impl(x_cuda))
+        foo._destroy()
 
     def test_impl_meta(self):
         @custom_op('(Tensor x, int dim) -> Tensor', ns='_torch_testing')
@@ -630,15 +632,15 @@ class TestCustomOp(TestCase):
         x = torch.randn(2, 3, device='meta')
         result = foo(x, 1)
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
-        del foo
+        foo._destroy()
 
     def test_new_data_dependent_symint(self):
         @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
-        def foo999(x):
+        def foo(x):
             ...
 
-        @foo999.impl_abstract()
-        def foo999_meta(x):
+        @foo.impl_abstract()
+        def foo_meta(x):
             ctx = torch._custom_op.get_ctx()
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
                 ctx.create_unbacked_symint(min=1)
@@ -649,8 +651,8 @@ class TestCustomOp(TestCase):
             return torch.clone(x)
 
         x = torch.randn(2, 3, device='cpu')
-        make_fx(foo999, tracing_mode='symbolic')(x)
-        del foo999
+        make_fx(foo, tracing_mode='symbolic')(x)
+        foo._destroy()
 
     def test_meta_for_data_dependent_shape_operation(self):
         from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -673,7 +675,7 @@ class TestCustomOp(TestCase):
         x = torch.randn(3)
         gm = make_fx(foo, tracing_mode='symbolic')(x)
         self.assertTrue('_torch_testing.foo' in gm.code)
-        del foo
+        foo._destroy()
 
     def test_abstract_registration_location(self):
         loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
