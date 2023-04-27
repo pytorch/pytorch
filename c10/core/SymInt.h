@@ -321,14 +321,19 @@ DECLARE_SYMINT_OP_INTONLY(int64_t, SymInt)
 DECLARE_SYMINT_OP_INTONLY(int32_t, SymInt)
 DECLARE_SYMINT_OP_INTONLY(uint64_t, SymInt)
 DECLARE_SYMINT_OP_INTONLY(uint32_t, SymInt)
-DECLARE_SYMINT_OP_INTONLY(size_t, SymInt) // needed for osx
 DECLARE_SYMINT_OP(int64_t, SymInt)
 DECLARE_SYMINT_OP(int32_t, SymInt) // make sure constants work
 DECLARE_SYMINT_OP(uint64_t, SymInt)
 DECLARE_SYMINT_OP(uint32_t, SymInt)
-DECLARE_SYMINT_OP(size_t, SymInt) // needed for osx
 DECLARE_SYMINT_OP(double, SymFloat)
 DECLARE_SYMINT_OP(float, SymFloat) // just for completeness
+
+// On OSX size_t is different than uint64_t so we have to
+// define it separately
+#if defined(__APPLE__)
+DECLARE_SYMINT_OP_INTONLY(size_t, SymInt)
+DECLARE_SYMINT_OP(size_t, SymInt)
+#endif
 
 #undef DECLARE_SYMINT_OP
 
