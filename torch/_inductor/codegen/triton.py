@@ -193,19 +193,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"tl.where({a} != {a}, {a}, tl.where({a} < {b}, {a}, {b}))"
+        return f"triton_helpers.minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"tl.where({a} != {a}, {a}, tl.where({a} > {b}, {a}, {b}))"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"tl.where({a} < {b}, {a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"tl.where({a} > {b}, {a}, {b})"
+        return f"triton_helpers.maximum({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -1183,7 +1175,8 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            module = "triton_helpers" if reduction_type in ("prod",) else "tl"
+            use_helper = reduction_type in {"max", "min", "prod"}
+            module = "triton_helpers" if use_helper else "tl"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         dim = len(self.range_trees) - 1
@@ -1210,10 +1203,14 @@ class TritonKernel(Kernel):
                 )
 
             updated = value
-            if reduction_type in {"min", "argmin"}:
+            if reduction_type == "argmin":
                 masks.append(f"({accumulator} > {value})")
-            elif reduction_type in {"max", "argmax"}:
+            elif reduction_type == "argmax":
                 masks.append(f"({accumulator} < {value})")
+            elif reduction_type == "min":
+                updated = f"triton_helpers.minimum({accumulator}, {value})"
+            elif reduction_type == "max":
+                updated = f"triton_helpers.maximum({accumulator}, {value})"
             elif reduction_type == "sum":
                 updated = f"{accumulator} + {value}"
             elif reduction_type == "prod":
