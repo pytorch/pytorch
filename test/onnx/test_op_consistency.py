@@ -357,6 +357,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
 
 SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
     skip(
+        "nn.functional.scaled_dot_product_attention",
+        matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
+        reason="dropout is random so the results do not match",
+    ),
+    skip(
+        "repeat",
+        reason="Empty repeats value leads to an invalid graph",
+        matcher=lambda sample: not sample.args[0],
+    ),
+    skip(
         "stft",
         reason="ONNX STFT does not support complex results",
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,
