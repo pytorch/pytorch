@@ -2439,4 +2439,4 @@ class Module:
 
         See :func:`torch.compile` for details on the arguments for this function.
         """
-        self.__call__ = torch.compile(self._call_impl, *args, **kwargs)
+        __call__ = torch.compile(self._call_impl, *args, **kwargs)
