@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import sys
 from unittest.mock import patch
 
 import functorch

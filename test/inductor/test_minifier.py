@@ -322,8 +322,6 @@ inner(torch.randn(20, 20).to("cpu"))
 
 
 if __name__ == "__main__":
-    import sys
-
     from torch._dynamo.test_case import run_tests
 
     # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
