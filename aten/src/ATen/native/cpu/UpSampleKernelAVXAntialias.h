@@ -323,11 +323,13 @@ void upsample_avx_bilinear_uint8(
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
   unsigned int horiz_weights_precision, vert_weights_precision;
 
-  bool needs_unpacking = (num_channels == 3 || num_channels == 4) && input.is_contiguous(at::MemoryFormat::ChannelsLast);
+  bool skip_unpacking = (num_channels == 3 || num_channels == 4) && \
+      input.is_contiguous(at::MemoryFormat::ChannelsLast) && \
+      output.is_contiguous(at::MemoryFormat::ChannelsLast);
 
   if (need_horizontal) {
     int interp_dim = 3;
-    auto stride = (needs_unpacking) ? num_channels : 4;
+    auto stride = (skip_unpacking) ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/xin,
@@ -343,7 +345,7 @@ void upsample_avx_bilinear_uint8(
 
   if (need_vertical) {
     int interp_dim = 2;
-    auto stride = (needs_unpacking) ? num_channels * xout : 4 * xout;
+    auto stride = (skip_unpacking) ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
         F::compute_indices_int16_weights_aa(
             /*input_size=*/yin,
@@ -361,24 +363,24 @@ void upsample_avx_bilinear_uint8(
   // Minor optimization: we can avoid allocating an extra buffer if we're performing
   // horizontal-only or vertical-only interpolation, and if the tensor doesn't
   // need unpacking
-  if (need_horizontal && !(needs_unpacking && !need_vertical)) {
-    auto c = (needs_unpacking) ? num_channels : 4;
+  if (need_horizontal && !(skip_unpacking && !need_vertical)) {
+    auto c = (skip_unpacking) ? num_channels : 4;
     buffer_horiz = at::empty({c, yin, xout}, input.options());
   }
-  if (need_vertical && !needs_unpacking) {
-    auto c = (needs_unpacking) ? num_channels : 4;
+  if (need_vertical && !skip_unpacking) {
+    auto c = (skip_unpacking) ? num_channels : 4;
     buffer_vert = at::empty({c, yout, xout}, input.options());
   }
 
   for (const auto i : c10::irange(batch_size)) {
 
-    at::Tensor unpacked_input = (needs_unpacking) ? input[i] : unpack_rgb(input[i]);
+    at::Tensor unpacked_input = (skip_unpacking) ? input[i] : unpack_rgb(input[i]);
     at::Tensor unpacked_output;
 
     if (need_horizontal) {
-      at::Tensor unpacked_output_temp = (needs_unpacking && !need_vertical) ? output[i] : buffer_horiz;
+      at::Tensor unpacked_output_temp = (skip_unpacking && !need_vertical) ? output[i] : buffer_horiz;
 
-      if (needs_unpacking && num_channels == 3) {
+      if (skip_unpacking && num_channels == 3) {
         ImagingResampleHorizontal<3>(
           unpacked_output_temp,
           unpacked_input,
@@ -396,7 +398,7 @@ void upsample_avx_bilinear_uint8(
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
-      unpacked_output = (needs_unpacking) ? output[i] : buffer_vert;
+      unpacked_output = (skip_unpacking) ? output[i] : buffer_vert;
 
       ImagingResampleVertical(
           unpacked_output,
@@ -409,7 +411,7 @@ void upsample_avx_bilinear_uint8(
 
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
 
-    if (!needs_unpacking) {
+    if (!skip_unpacking) {
       pack_rgb(unpacked_output, output[i]);
     }
   }
