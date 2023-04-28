@@ -4341,7 +4341,7 @@ def empty_like(
     )
 
 
-@register_decomposition(aten.arange)
+@register_decomposition([aten.arange.start_step, aten.arange.start_out])
 @out_wrapper()
 def arange(
     start: NumberType = 0,
