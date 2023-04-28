@@ -478,6 +478,7 @@ inline static PyObject* eval_custom_code(
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
   // THP_EVAL_API_FRAME_OBJECT (_PyInterpreterFrame) is a regular C struct, so
   // it should be safe to use system malloc over Python malloc, e.g. PyMem_Malloc
+  // FIXME: leaking for now, since it seems to prevent some segfaults???
   THP_EVAL_API_FRAME_OBJECT* shadow = malloc(size * sizeof(PyObject*));
   if (shadow == NULL) {
     Py_DECREF(func);
@@ -491,6 +492,7 @@ inline static PyObject* eval_custom_code(
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
 
+  // localsplus are XINCREF'd by default eval frame, so all values must be valid.
   for (int i = 0; i < code->co_nlocalsplus; i++) {
     fastlocals_new[i] = NULL;
   }
@@ -504,7 +506,7 @@ inline static PyObject* eval_custom_code(
   if (name_to_idx == NULL) {
     DEBUG_TRACE0("unable to create localsplus name dict");
     _PyFrame_Clear(shadow);
-    free(shadow);
+    // free(shadow);
     Py_DECREF(func);
     return NULL;
   }
@@ -515,7 +517,7 @@ inline static PyObject* eval_custom_code(
     if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
       Py_DECREF(name_to_idx);
       _PyFrame_Clear(shadow);
-      free(shadow);
+      // free(shadow);
       Py_DECREF(func);
       return NULL;
     }
@@ -528,7 +530,7 @@ inline static PyObject* eval_custom_code(
     if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
       Py_DECREF(name_to_idx);
       _PyFrame_Clear(shadow);
-      free(shadow);
+      // free(shadow);
       Py_DECREF(func);
       return NULL;
     }
@@ -568,7 +570,7 @@ inline static PyObject* eval_custom_code(
   #if IS_PYTHON_3_11_PLUS
 
   _PyFrame_Clear(shadow);
-  free(shadow);
+  // free(shadow);
   Py_DECREF(func);
 
   #else
