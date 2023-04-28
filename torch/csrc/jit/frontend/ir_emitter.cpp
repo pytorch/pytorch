@@ -2126,12 +2126,19 @@ struct to_ir {
     };
 
     lhs_types.push_back(lhs_val->type());
-    gather_rhs(classinfo);
+    bool canParseRHS = true;
+
+    RefinementSet refinement;
+
+    try {
+      gather_rhs(classinfo);
+    } catch(const ErrorReport&) {
+      TORCH_WARN("isinstance(.., ", classinfo.range().text().str(), ") could not parse the type. Assuming isinstance() is False");
+      return CondValue(*graph, obj.range(), false, std::move(refinement));
+    }
 
     standardizeVectorForUnion(&lhs_types);
     standardizeVectorForUnion(&rhs_types);
-
-    RefinementSet refinement;
 
     TypePtr unified_true = nullptr;
     TypePtr unified_false = nullptr;
