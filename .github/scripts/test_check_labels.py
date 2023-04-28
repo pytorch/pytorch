@@ -40,7 +40,7 @@ def mock_get_comments() -> List[GitHubComment]:
             author_association="",
             editor_login=None,
             database_id=1,
-            url=""
+            url="",
         ),
         # Case 2 - a label err comment
         GitHubComment(
@@ -50,7 +50,7 @@ def mock_get_comments() -> List[GitHubComment]:
             author_association="",
             editor_login=None,
             database_id=2,
-            url=""
+            url="",
         ),
     ]
 
