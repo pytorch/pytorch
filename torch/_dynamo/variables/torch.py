@@ -828,6 +828,13 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             )
 
+        # NOTE: [speculate_subgraph vs old_speculate_subgraph]
+        # We're in the middle of rewriting how Dynamo capture for HigherOrderOperators
+        # works. If you are writing a new HigherOrderOperator, please prefer using
+        # `speculate_subgraph`.
+        # The main reason why we cannot get rid of `old_speculate_subgraph` yet is
+        # that `speculate_subgraph` does not yet support calling nn.Modules or
+        # accessing attributes of nn.Modules.
         def old_speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
             if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
                 # closure vars other than 'self' are not in scope of generated code, so error early
@@ -865,13 +872,13 @@ class TorchHigherOrderOperator(VariableTracker):
             # One argument to graph per sub_args
             for a in sub_args:
                 if isinstance(a, TensorVariable):
-                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    tx.output.current_tracer.create_graph_input(a.as_proxy().node.name)
                     args.append(a)
                 else:
                     # call_function() needs a TensorVariable, therefore we construct
                     # one with inner graph proxy.
                     assert isinstance(a, torch.Tensor)
-                    proxy = tx.output.create_graph_input("arg")
+                    proxy = tx.output.current_tracer.create_graph_input("arg")
                     args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
                 # NB: we don't bother populating graphargs, as
                 # they won't actually get used by anything
@@ -889,7 +896,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             tx.output.guards.update(output.guards)
             tx.output.create_node(
-                "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+                "output", "output", (tx.output.current_tracer.create_arg((output.as_proxy(),))), {}
             )
 
             tx.output.side_effects.prune_dead_object_new(tx)
@@ -911,30 +918,26 @@ class TorchHigherOrderOperator(VariableTracker):
                 comparable_state,
             )
 
-        # See NOTE [HigherOrderOperator tracing design] for more details.
+        # See NOTE [HigherOrderOperator tracing design] for details of the design
+        # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
         def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
             try:
                 with tx.output.new_subtracer() as tracer:
                     args = []
                     # One argument to graph per sub_args
                     for a in sub_args:
-                        if isinstance(a, TensorVariable):
-                            tracer.create_graph_input(a.as_proxy().node.name)
-                            args.append(a)
-                        else:
-                            # call_function() needs a TensorVariable, therefore we construct
-                            # one with inner graph proxy.
-                            assert isinstance(a, torch.Tensor)
-                            proxy = tracer.create_graph_input("arg")
-                            args.append(
-                                wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a)
-                            )
+                        assert not isinstance(a, torch.Tensor), "Tensors should already be tracked?"
+                        if not isinstance(a, TensorVariable):
+                            unimplemented("HigherOrderOperator with body that accepts non-Tensors as input")
+                        tracer.create_graph_input(a.as_proxy().node.name)
+                        args.append(a)
 
                     output = f.call_function(tx, args, {})
                     # Register output to graph
                     # Modeled off of compile_and_call_fx_graph
                     # TODO: support non single Tensor output
-                    assert isinstance(output, TensorVariable)
+                    if not isinstance(output, TensorVariable):
+                        unimplemented("HigherOrderOperator with body with non single Tensor output")
 
                     tx.output.guards.update(output.guards)
                     tx.output.create_node(
