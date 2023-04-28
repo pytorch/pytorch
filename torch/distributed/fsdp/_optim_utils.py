@@ -212,7 +212,7 @@ def _communicate_optim_state(
             dist.all_gather_into_tensor(
                 tensor_buffer, value, group=fsdp_state.process_group
             )
-            torch.cuda.synchronize()
+            fsdp_state._device_handle.synchronize()
             unpadded_numel = cast(
                 nn.Parameter, flat_param._unpadded_unsharded_size
             ).numel()
@@ -278,7 +278,7 @@ def _unflatten_communicated_optim_state(
                     optim_state,
                     fsdp_state.rank,
                     fsdp_state.world_size,
-                    torch.cuda.device_count(),
+                    fsdp_state._device_handle.device_count(),
                     fsdp_state.process_group,
                 )
             unflat_state_param[state_name] = optim_state
@@ -1602,7 +1602,7 @@ def _gather_orig_param_state(
                 value,
                 fsdp_state.rank,
                 fsdp_state.world_size,
-                torch.cuda.device_count(),
+                fsdp_state._device_handle.device_count(),
                 fsdp_state.process_group,
             )
         value = value.cpu()
