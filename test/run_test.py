@@ -85,6 +85,18 @@ def strtobool(s):
     return True
 
 
+def parse_test_module(test):
+    return test.split(".")[0]
+
+
+class TestChoices(list):
+    def __init__(self, *args, **kwargs):
+        super().__init__(args[0])
+
+    def __contains__(self, item):
+        return list.__contains__(self, parse_test_module(item))
+
+
 def discover_tests(
     base_dir: Optional[pathlib.Path] = None,
     cpp_tests_dir: Optional[pathlib.Path] = None,
@@ -120,12 +132,15 @@ def discover_tests(
     all_cpp_files = [
         pathlib.Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
     ]
+    # Remove .exe extension on Windows
+    if sys.platform == "win32":
+        all_cpp_files = [os.path.splitext(p)[0] for p in all_cpp_files]
 
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Add the cpp prefix for C++ tests so that we can tell them apart
     rc.extend(
         [
-            f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
+            parse_test_module(f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}")
             for fname in all_cpp_files
         ]
     )
@@ -538,7 +553,9 @@ def run_test(
                 test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
             )
 
-        argv = [cpp_test] + unittest_args
+        argv = [
+            cpp_test if sys.platform != "win32" else cpp_test + ".exe"
+        ] + unittest_args
     else:
         # Can't call `python -m unittest test_*` here because it doesn't run code
         # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -970,18 +987,6 @@ CUSTOM_HANDLERS = {
 
 
 PYTEST_SKIP_RETRIES = {"test_public_bindings"}
-
-
-def parse_test_module(test):
-    return test.split(".")[0]
-
-
-class TestChoices(list):
-    def __init__(self, *args, **kwargs):
-        super().__init__(args[0])
-
-    def __contains__(self, item):
-        return list.__contains__(self, parse_test_module(item))
 
 
 def parse_args():
