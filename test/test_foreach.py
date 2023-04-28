@@ -765,7 +765,11 @@ class TestForeach(TestCase):
         ord, N = 2, 10
         max_value = torch.finfo(dtype).max
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
-        inputs = ([t * scaler for t in list(op.sample_inputs(device, dtype, [N], low=1))[0].input],)
+        inputs = ([
+            t * scaler for t in list(
+                op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1)
+            )[0].input
+        ],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
