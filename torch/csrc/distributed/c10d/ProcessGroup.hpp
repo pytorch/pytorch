@@ -548,7 +548,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10::DeviceType deviceType,
       BackendType backendType,
       const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
+    // TODO: should we add these entries after the backend setting succeeds?
     deviceTypeToBackendType_[deviceType] = backendType;
+    deviceTypes_.insert(deviceType);
     // if the backendType is already set then reuse it for this device
     if (backendTypeToBackend_.find(backendType) !=
         backendTypeToBackend_.end()) {
@@ -585,6 +587,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendTypeToBackend_.at(backendType);
   }
 
+  // Return device types supported by this ProcessGroup.
+  // Note: the return type is `Device` rather than `DeviceType` for the purpose
+  // of easy comparison at Python level. The `Device` will have default index
+  // (-1).
+  std::vector<c10::Device> getDeviceTypes() const {
+    std::vector<c10::Device> devices;
+    devices.reserve(deviceTypes_.size());
+    for (auto& dt : deviceTypes_) {
+      devices.push_back(c10::Device(dt));
+    }
+    return devices;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -603,6 +618,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   DebugLevel dist_debug_level_;
 
   // Backend classes for this ProcessGroup
+  std::unordered_set<c10::DeviceType> deviceTypes_;
   std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;
