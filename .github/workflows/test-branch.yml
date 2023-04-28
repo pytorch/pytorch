@@ -1,4 +1,4 @@
-name: A zain test
+name: A zain branch test
 
 on:
   push:
@@ -20,12 +20,6 @@ jobs:
       GH_SHA: ${{ github.sha }}
       GH_REF: ${{ github.ref_name }}
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-
-      # invoke the upload-pytest-cache github action
-      
-
       - name: "print GH_REF"
         run: |
           echo GH_REF: ${GH_REF}
@@ -43,6 +37,10 @@ jobs:
         run: |
           echo ${THE_REST}
           
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      # invoke the upload-pytest-cache github action
       - name: Get workflow job id
         id: upload-pytest-cache
         uses: ./.github/actions/upload-pytest-cache
