@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE,
-    parametrize,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
 )
