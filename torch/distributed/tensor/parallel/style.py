@@ -14,7 +14,9 @@ from torch.distributed.tensor.parallel._utils import (
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
+    "RowwiseParallelForPairwise",
     "ColwiseParallel",
+    "ColwiseParallelForPairwise",
     "PairwiseParallel",
     "PairwiseSequenceParallel",
     "make_input_replicate_1d",
@@ -98,6 +100,28 @@ class ColwiseParallel(ParallelStyle):
 
     def __init__(self) -> None:
         super().__init__(make_input_replicate_1d, make_output_replicate_1d)
+
+
+class ColwiseParallelForPairwise(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    We don't perform reshard for output.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, None)
+
+
+class RowwiseParallelForPairwise(ParallelStyle):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
+    We don't perform reshard for input.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(None, make_output_replicate_1d)
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
