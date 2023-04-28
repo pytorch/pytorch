@@ -99,7 +99,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
-    skipIfCrossRef, IS_MACOS, skipIfTorchDynamo
+    skipIfCrossRef, IS_MACOS, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -16242,7 +16242,8 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
-    run_tests()
-    import jit.test_module_interface
-    suite = unittest.findTestCases(jit.test_module_interface)
-    unittest.TextTestRunner().run(suite)
+    if not TEST_WITH_TORCHDYNAMO:
+        run_tests()
+        import jit.test_module_interface
+        suite = unittest.findTestCases(jit.test_module_interface)
+        unittest.TextTestRunner().run(suite)
