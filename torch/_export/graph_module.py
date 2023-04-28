@@ -1,11 +1,16 @@
+import copy
 import dataclasses
-from typing import Any, Dict, List, Optional, Tuple, Union
+import pickle
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import warnings
 
 import torch
 import torch.fx as fx
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from . import error
+from .logical_schema import TensorMeta  # type: ignore[attr-defined]
 
 ExportGraphModule = fx.GraphModule
 
@@ -55,6 +60,100 @@ def is_export_graph_module(gm: fx.GraphModule) -> bool:
     return EXPORT_METADATA in gm.meta
 
 
+def _extract_tensor_meta(result: torch.Tensor) -> TensorMeta:
+    """
+    Extract a TensorMeta describing `result`.
+    """
+    return TensorMeta(
+        dtype=result.dtype,
+        sizes=result.shape,
+        requires_grad=result.requires_grad,
+        device=result.device,
+        strides=result.stride(),
+        storage_offset=0,
+        layout=result.layout,
+    )
+
+
+def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
+    """
+    Function used to deserialize a graph module.
+    To serialize the graph, we mapped all of the targets within nodes to their
+    string names since we cannot serialize the operations themselves. During
+    deserialization, we will then replace the string target names with their
+    actual operations.
+
+    Args:
+        body: Dictionary of properties for a graph module
+
+    Returns:
+        A loaded ExportGraphModule.
+    """
+
+    def str_to_op(str_op: str):
+        # For HigherOrderOperators
+        if str_op.startswith("torch.ops."):
+            return getattr(torch.ops, str_op[len("torch.ops.") :])
+        target = None
+        for name in str_op.split("."):
+            target = (
+                getattr(torch.ops, name) if target is None else getattr(target, name)
+            )
+        return target
+
+    body = pickle.loads(state_bytes)
+
+    # Get the target ops since we serialized the targets with just their name
+    graph = body["_graph"]
+    fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
+    for node in graph.nodes:
+
+        # Given the name of an operation, find the actual Op object
+        # Ex. Given `aten.add.Tensor` we will return `OpOverload(op='aten.add', overload='Tensor')`
+        if node.op == "call_function" and isinstance(node.target, str):
+            node.target = str_to_op(node.target)
+
+        if (original_aten := node.meta.get("original_aten", None)) is not None:
+            node.meta["original_aten"] = str_to_op(original_aten)
+
+        if (source_fn := node.meta.get("source_fn", None)) is not None:
+            node.meta["source_fn"] = str_to_op(source_fn)
+
+        if (val := node.meta.get("val", None)) is not None:
+
+            def _extract_faketensor(tensor_meta: TensorMeta):
+                return FakeTensor(
+                    fake_tensor_mode,
+                    torch.empty(
+                        tensor_meta.sizes,
+                        dtype=tensor_meta.dtype,
+                        device="meta",
+                        requires_grad=tensor_meta.requires_grad,
+                    ),
+                    torch.device("cpu"),
+                )
+
+            node.meta["val"] = pytree.tree_map_only(
+                TensorMeta, _extract_faketensor, val
+            )
+
+    # fx.GraphModule constructor expects the totally flattened dictionary for
+    # attributes but directly passing the module dict doesn't comply with that
+    # format. (some attributes are saved under `_buffers` in module dict etc)
+    # So, we work around this by creating a dummy module which contains the
+    # original module's attributes
+    root = torch.nn.Module()
+    root.__dict__ = body
+
+    exir_meta = body["meta"][EXPORT_METADATA]
+    gm = make_export_graph_module(
+        root, graph, in_spec=exir_meta.in_spec, out_spec=exir_meta.out_spec, class_name=body["_graphmodule_cls_name"]
+    )
+
+    gm.recompile()
+    return gm
+
+
 class ExportGraphModuleMixin:
     def forward(self, *args: Any) -> Any:
         meta = self.meta[EXPORT_METADATA]  # type: ignore[attr-defined]
@@ -88,6 +187,67 @@ class ExportGraphModuleMixin:
         python_code = self._graph.python_code(root_module="self")  # type: ignore[attr-defined]
         self._code = python_code.src
         return python_code
+
+    def __reduce__(self) -> Tuple[Callable[..., "ExportGraphModule"], Tuple[bytes]]:
+        """
+        Serialization of the ExportGraphModule. The FX serialization does not
+        serialize the underlying graph to preserve backwards-compatiblity and
+        instead retraces the graph module when loading.  This results in loss of
+        metadata that is later used for optimizations directly on the graph
+        module.  Since we want to preserve this metadata and we do not care that
+        much about BC, we will write our own serialization method.
+        """
+
+        def op_to_str(op):
+            # Replace the targets with their names since we cannot serialize the ops
+            if isinstance(op, torch._ops.HigherOrderOperator):
+                return f"torch.ops.{op.__name__}"
+            elif "torch" in op.__module__:
+                return str(op)
+            else:
+                warnings.warn(f"Could not convert op {op} to str")
+                return ""
+
+        gm_dict = self.__dict__.copy()
+        gm_dict["_graphmodule_cls_name"] = self.__class__.__name__
+
+        graph = copy.deepcopy(gm_dict["_graph"])
+        for node in graph.nodes:
+            # Replace the ops with their names since we cannot serialize the ops
+            if node.op == "call_function":
+                node.target = op_to_str(node.target)
+
+            if (original_aten := node.meta.get("original_aten", None)) is not None:
+                node.meta["original_aten"] = op_to_str(original_aten)
+
+            if (source_fn := node.meta.get("source_fn", None)) is not None:
+                node.meta["source_fn"] = op_to_str(source_fn)
+
+            # Replace the faketensor metadata with the tensor metadata dataclass
+            # since we cannot serialize faketensors
+            if (val := node.meta.get("val", None)) is not None:
+                node.meta["val"] = pytree.tree_map_only(
+                    torch.Tensor, _extract_tensor_meta, val
+                )
+
+            # Check if other metadata are pickleable
+            unpickleable_keys = []
+            for key, val in node.meta.items():
+                try:
+                    pickle.dumps(val)
+                except Exception:
+                    warnings.warn(
+                        f"Cannot pickle node {node}'s metadata {key} with value {val}."
+                    )
+                    unpickleable_keys.append(key)
+
+            for key in unpickleable_keys:
+                del node.meta[key]
+
+        gm_dict["_graph"] = graph
+        pickled_state = pickle.dumps(gm_dict)
+
+        return (reduce_graph_module, (pickled_state,))
 
 
 def attach_export_graph_metadata(gm: fx.GraphModule, meta: ExportMetadata) -> None:
