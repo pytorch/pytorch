@@ -109,6 +109,7 @@ static void _cublasAdjustLdLevel3(
   }
 }
 
+#if !defined(USE_ROCM)
 uint32_t _getAlignment(uintptr_t address) {
   // alignment are in bytes
   uint32_t alignment = 256;
@@ -118,6 +119,7 @@ uint32_t _getAlignment(uintptr_t address) {
     }
   }
 }
+#endif
 
 } // anonymous namespace
 
@@ -577,8 +579,10 @@ namespace {
                 at::cuda::blas::_hipblasGetErrorEnum(__err),    \
                 " when calling `" #EXPR "`");                   \
   } while (0)
-// hipblaslt expexts hipblasDatatype_t, but it's a mess right now
+// hipblaslt expects hipblasDatatype_t, but it's a mess right now
+#define HIP_R_8I HIPBLAS_R_8I
 #define HIP_R_16F HIPBLAS_R_16F
+#define HIP_R_32I HIPBLAS_R_32I
 #define HIP_R_32F HIPBLAS_R_32F
 #define HIP_R_64F HIPBLAS_R_64F
 #define CUDA_R_16BF HIPBLAS_R_16B
@@ -745,6 +749,7 @@ void gemm_and_bias(
       &workspaceSize,
       sizeof(workspaceSize)));
 
+#if !defined(USE_ROCM)
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
   uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
@@ -765,6 +770,7 @@ void gemm_and_bias(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
       &d_alignment, sizeof(d_alignment)));
+#endif !defined(USE_ROCM)
 
   auto workspace = at::empty(
       {static_cast<int64_t>(workspaceSize)},
@@ -871,7 +877,10 @@ template void gemm_and_bias(
     at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
+#endif // (defined(ROCM_VERSION) && ROCM_VERSION >= 50500) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
 
+// HIPBlasLT doesn't have support for int8 compute yet
+#if !defined(USE_ROCM)
 void int8_gemm(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -963,7 +972,7 @@ void int8_gemm(
       " scaleType ",
       scaleType);
 }
-#endif // (defined(ROCM_VERSION) && ROCM_VERSION >= 50500) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
+#endif // (!defined(USE_ROCM)
 
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
