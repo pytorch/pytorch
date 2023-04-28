@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 import torch
 import torch._ops
@@ -11,6 +11,7 @@ from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
+from torch.utils import _pytree as pytree
 
 
 class Functionalize(_pass.Transform):
@@ -65,12 +66,37 @@ class Functionalize(_pass.Transform):
         super().__init__(module)
         self.enable_dynamic_axes = enable_dynamic_axes
 
+    def _functionalize(self, function: Callable) -> Callable:
+        # Working around a dispatcher issue with `torch.func.functionalize` when used
+        # together with `make_fx`.
+        # Ref: https://github.com/pytorch/pytorch/issues/99774#issuecomment-1527949391
+        def wrapped(*inputs):
+            inputs_functional = pytree.tree_map_only(
+                torch.Tensor, torch._to_functional_tensor, inputs
+            )
+            torch._enable_functionalization(reapply_views=True)
+            try:
+                out = function(*inputs_functional)
+            finally:
+                torch._disable_functionalization()
+            flat_inputs, _ = pytree.tree_flatten(inputs)
+            flat_inputs_functional, _ = pytree.tree_flatten(inputs_functional)
+            for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
+                if isinstance(input_functional, torch.Tensor):
+                    torch._sync(input_functional)
+                    inpt_new = torch._from_functional_tensor(input_functional)
+            pytree.tree_map(torch._sync, out)
+            out_unwrapped = pytree.tree_map(torch._from_functional_tensor, out)
+            return out_unwrapped
+
+        return wrapped
+
     @_beartype.beartype
     def _run(self, *args) -> torch.fx.GraphModule:
         # To preserve stack trace info after `make_fx`.
         module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
 
-        functionalized_callable = torch.func.functionalize(module)
+        functionalized_callable = self._functionalize(module)
         fx_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
         graph_module = proxy_tensor.make_fx(
