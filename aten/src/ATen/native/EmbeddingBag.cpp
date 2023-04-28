@@ -1189,7 +1189,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
 
 // Assumes all input tensors except for `weight` are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
+static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
     const Tensor& weight,
     const Tensor& indices_,
     const Tensor& offsets_,
@@ -1754,7 +1754,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
       });
 }
 
-Tensor _embedding_bag_sparse_backward(
+static Tensor _embedding_bag_sparse_backward(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
     bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
