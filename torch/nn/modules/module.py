@@ -11,11 +11,12 @@ import torch.utils.hooks as hooks
 from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
+from contextlib import contextmanager
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
            'register_module_full_backward_hook', 'register_module_buffer_registration_hook',
-           'register_module_module_registration_hook', 'register_module_parameter_registration_hook', 'Module']
+           'register_module_module_registration_hook', 'register_module_parameter_registration_hook', 'eval', 'Module']
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -23,6 +24,45 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar('T', bound='Module')
 
+@contextmanager
+def eval(module: 'Module') -> Iterator[None]:
+    r"""
+    Context-manager that sets the module in evaluation mode.
+
+    This has any effect only on certain modules. See documentations of
+    particular modules for details of their behaviors in training/evaluation
+    mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+    etc.
+
+    This context manager sets eval mode using
+        :meth:`self.train(False) <torch.nn.Module.train>`.
+    and restores previous train mode using the same function
+
+    See :ref:`locally-disable-grad-doc` for a comparison between
+    `.eval()` and several similar mechanisms that may be confused with it.
+
+    Example::
+        >>> # Change the module to evaluation mode
+        >>> module = torch.nn.LSTM(1, 200, 2)
+        >>> with torch.nn.modules.module.eval(module):
+        ...     module.training
+        False
+        >>> module.training
+        True
+        >>> # Change evaluation mode of module already in evaluation mode
+        >>> module.eval()
+        >>> with torch.nn.modules.module.eval(module):
+        ...     module.training
+        False
+        >>> module.training
+        False
+    """
+    try:
+        previous_training_state = module.training
+        module.train(False)
+        yield
+    finally:
+        module.train(previous_training_state)
 
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
