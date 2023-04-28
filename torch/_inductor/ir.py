@@ -625,7 +625,7 @@ class Reduction(Loops):
             indices = []
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
-                if all([r in md.index.free_symbols for r in range_vars]):
+                if all(r in md.index.free_symbols for r in range_vars):
                     indices.append(md.index)
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
@@ -651,7 +651,7 @@ class Reduction(Loops):
         for i in indices:
             i = V.graph.sizevars.simplify_with_ranges(i, ranges)
             strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
-            outer = all([s > 1 for s in strides])
+            outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -682,6 +682,11 @@ class Reduction(Loops):
             def combine_fn(a, b):
                 return ops.mul(a, b)
 
+        elif reduction_type == "xor_sum":
+
+            def combine_fn(a, b):
+                return ops.bitwise_xor(a, b)
+
         elif reduction_type == "min":
 
             def combine_fn(a, b):
@@ -700,15 +705,31 @@ class Reduction(Loops):
         elif reduction_type == "argmin":
 
             def combine_fn(a, b):
-                return ops.minimum(a[0], b[0]), ops.where(
-                    ops.lt(b[0], a[0]), b[1], a[1]
+                a_value, a_index = a
+                b_value, b_index = b
+                mask = ops.lt(b_value, a_value)
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
+
+                return (
+                    ops.where(mask, b_value, a_value),
+                    ops.where(mask, b_index, a_index),
                 )
 
         elif reduction_type == "argmax":
 
             def combine_fn(a, b):
-                return ops.maximum(a[0], b[0]), ops.where(
-                    ops.gt(b[0], a[0]), b[1], a[1]
+                a_value, a_index = a
+                b_value, b_index = b
+                mask = ops.gt(b_value, a_value)
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
+
+                return (
+                    ops.where(mask, b_value, a_value),
+                    ops.where(mask, b_index, a_index),
                 )
 
         else:
@@ -774,6 +795,7 @@ class Reduction(Loops):
 
             rtypes_to_inits = {
                 "sum": py_cnst(0),
+                "xor_sum": py_cnst(0),
                 "prod": py_cnst(1),
                 "any": py_cnst(0),
                 # "all" is desugared to `!any(!val)`
@@ -837,8 +859,8 @@ class Reduction(Loops):
                 return isinstance(x, (int, sympy.Integer))
 
             sr_qualified = (
-                all([_is_static(r) for r in ranges])
-                and all([_is_static(r) for r in reduction_ranges])
+                all(_is_static(r) for r in ranges)
+                and all(_is_static(r) for r in reduction_ranges)
                 and _is_static(reduction_numel)
             )
 
@@ -911,6 +933,7 @@ class Reduction(Loops):
         return {
             "sum": 0,
             "prod": 1,
+            "xor_sum": 0,
             "any": 0,
         }[reduction_type]
 
@@ -3015,10 +3038,12 @@ class DeviceCopy(ExternKernelOut):
         assert len(args) == 1
         if self.output_view:
             wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]})"
+                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
             )
         else:
-            wrapper.writeline(f"{self.codegen_reference()}.copy_({args[0]})")
+            wrapper.writeline(
+                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
+            )
 
 
 class DynamicScalar(IRNode):
@@ -3051,8 +3076,15 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(nontensor_args),
         )
         if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
-            self.kernel = f"aten.{kernel.__name__}"
+            self.kernel = (
+                f"at::{kernel.__name__}"
+                if V.graph.cpp_wrapper
+                else f"aten.{kernel.__name__}"
+            )
         else:
+            assert (
+                not V.graph.cpp_wrapper
+            ), f"{kernel.__name__} is not supported with cpp wrapper"
             self.kernel = (
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
@@ -3112,10 +3144,10 @@ class FallbackKernel(ExternKernelAlloc):
             unflatten_args,
         )
 
-        def generate_output(output, index=""):
+        def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
                 return type(output)(
-                    generate_output(output[i], f"{index}[{i}]")
+                    generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
                 )
             elif isinstance(output, torch.Tensor):
@@ -3127,7 +3159,7 @@ class FallbackKernel(ExternKernelAlloc):
                         convert_shape_to_inductor(output.stride()),
                     ),
                     packed,
-                    index,
+                    indices,
                 )
             elif isinstance(output, int):
                 return output
@@ -3135,7 +3167,7 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output)
+        return generate_output(example_output, [])
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3147,16 +3179,33 @@ class MultiOutputLayout(IRNode):
 
 
 class MultiOutput(ExternKernel):
-    def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
-        )
-        self.codegen_size_asserts(wrapper)
+    def codegen_list_tuple_access(self, basename, indices):
+        if len(indices) > 0:
+            itype, i = indices[0]
+            if itype == list:
+                return self.codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
+            elif itype == tuple:
+                # cpp wrapper code needs to use std::get<> to access a tuple
+                tuple_access = V.graph.wrapper_code.codegen_tuple_access(
+                    basename, str(i)
+                )
+                return self.codegen_list_tuple_access(tuple_access, indices[1:])
+            else:
+                raise AssertionError("non supported index type")
+        else:
+            return basename
 
-    def __init__(self, layout, input, index: str):
+    def codegen(self, wrapper):
+        line = V.graph.wrapper_code.declare
+        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
+        line += V.graph.wrapper_code.ending
+        V.graph.wrapper_code.writeline(line)
+        self.codegen_size_asserts(V.graph.wrapper_code)
+
+    def __init__(self, layout, input, indices: List[Tuple]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
-        self.index = index
+        self.indices = indices
 
     def should_allocate(self):
         return False
@@ -3444,10 +3493,15 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
-        (inputs, constant_args, _, _) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            _,
+            req_stride_order,
+        ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        other = cls.realize_input(other)
+        other = cls.require_stride_order(other, req_stride_order)
         V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
         constant_args = constant_args + [
@@ -3795,7 +3849,7 @@ class StorageBox(MutableBox):
             """
             heavy_ops = ["exp"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
-            return any([(op + "(") in fn_str for op in heavy_ops])
+            return any((op + "(") in fn_str for op in heavy_ops)
 
         if (
             users > 1
@@ -4133,6 +4187,127 @@ class CollectiveKernel(ExternKernel):
         self.codegen_collective(wrapper, output_name, input_names)
 
         wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+
+
+class MultiOutputNoSizeAssert(MultiOutput):
+    """
+    Extract partial output from a multi-output OP.
+        Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
+    """
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+        )
+
+
+class ForceInPlace(ExternKernel):
+    """
+    Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
+    Wrap the input of your inplace op to enable this behavior.
+
+    The design is based on two key decisions:
+    - this node is resposible for allocating the in/out buffer used by the collective.
+        This is controlled by the ``should_allocate`` method that returns True here and
+        False for the collective node
+    - The scheduler special-case this node and enable it to reuse its input.
+    """
+
+    def codegen(self, wrapper):
+        input_name = self.inputs[0].codegen_reference()
+        output_name = self.get_name()
+        if not wrapper.did_reuse(self, self.inputs[0]):
+            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
+
+    def __init__(self, layout, input):
+        input = self.realize_input(input)
+        super().__init__(None, layout, self.unwrap_storage([input]), ())
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+
+class AllReduceCoalesced(ExternKernel):
+    def __init__(self, layout, inputs, constant_args, reduce_op):
+        super().__init__(None, layout, inputs, constant_args)
+        self.reduce_op = reduce_op
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    @classmethod
+    def create(
+        cls,
+        inputs: List["TensorBox"],
+        reduce_op: str,
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        res = []
+
+        def wrap_input(var):
+            nonlocal res
+            op = ForceInPlace(
+                FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
+            )
+            res.append(op)
+            return TensorBox.create(op)
+
+        inputs = list(map(wrap_input, inputs))
+
+        layout = MultiOutputLayout(inputs[0].get_device())
+
+        packed = AllReduceCoalesced(
+            layout=layout,
+            inputs=inputs,
+            constant_args=[tag, ranks, group_size],
+            reduce_op=reduce_op,
+        )
+        for i, in_t in enumerate(inputs):
+            res.append(
+                MultiOutputNoSizeAssert(
+                    FlexibleLayout(
+                        in_t.get_device(), in_t.get_dtype(), in_t.get_size()
+                    ),
+                    packed,
+                    f"[{i}]",
+                )
+            )
+        return res
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        output_name = self.get_name()
+        tag, ranks, group_size = self.constant_args
+
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        inputs = []
+        for inp in self.inputs:
+            inputs.append(inp.codegen_reference())
+
+        wrapper.writeline(f"{output_name} = [{','.join(inputs)}] ")
+
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_reduce_coalesced("
+            f"{output_name}, "
+            f"op=_str_to_reduce_op('{str(self.reduce_op)}'), "
+            f"group={output_name}_pg, "
+            "async_op=True)"
+        )
+        wrapper.writeline(f"_register_tensor_work({inputs[0]}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):

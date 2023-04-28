@@ -53,6 +53,7 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
+    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -582,7 +583,7 @@ class VariableBuilder:
         if (
             istype(value, (tuple, list))
             and all(
-                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
             )
             and not config.dynamic_shapes
         ):
@@ -835,6 +836,7 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
+                and not isinstance(self.get_source(), RandomValueSource)
             ):
                 if value < 0 or torch._dynamo.config.specialize_int:
                     # Negative values don't create_symbol correctly,
@@ -850,7 +852,28 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                dynamic_dim = DimDynamic.DYNAMIC
+                name = self.source.name()
+                if name not in self.tx.output.frame_state:
+                    curr_size = value
+                else:
+                    curr_size = self.tx.output.frame_state[name]
+                    if curr_size != value:
+                        curr_size = None
+                self.tx.output.frame_state[name] = curr_size
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                if curr_size is None or not config.assume_static_by_default:
+                    dynamic_dim = DimDynamic.DYNAMIC
+                else:  # assume_static_by_default
+                    # TODO: dynamic_dim = DimDynamic.STATIC should work but
+                    # for some reason it doesn't
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -1058,7 +1081,7 @@ def wrap_fx_proxy_cls(
         else:
             return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
-        [isinstance(x, int) for x in example_value]
+        isinstance(x, int) for x in example_value
     ):
         sizes = [ConstantVariable(x) for x in example_value]
         return SizeVariable(sizes, **options)
@@ -1073,7 +1096,8 @@ def wrap_fx_proxy_cls(
                 )
             else:
                 unpacked.append(
-                    wrap_fx_proxy(
+                    wrap_fx_proxy_cls(
+                        target_cls,
                         tx,
                         proxy.tracer.create_proxy(
                             "call_function", operator.getitem, (proxy, i), {}
@@ -1106,6 +1130,15 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
+    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
+        proxy.node.meta["example_value"] = example_value
+        return target_cls(proxy, **options)
+    elif isinstance(example_value, int) and proxy.node.target in [
+        getattr,
+        operator.getitem,
+    ]:
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
