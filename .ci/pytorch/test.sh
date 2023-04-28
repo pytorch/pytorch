@@ -548,7 +548,7 @@ test_libtorch() {
 
     # Start background download
     MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}"  &
+    python tools/download_mnist.py --quiet -d "${MNIST_DIR}" &
 
     # Prepare the model used by test_jit, the model needs to be in the test directory
     # to get picked up by run_test
