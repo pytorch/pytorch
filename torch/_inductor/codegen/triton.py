@@ -13,6 +13,7 @@ import sympy
 import torch
 
 import torch._logging
+from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -107,6 +108,13 @@ def triton_compute_type(dtype):
         # float16 math is done in float32 inside the kernel
         triton_type_name = "float32"
     return f"tl.{triton_type_name}"
+
+
+def triton_acc_type(dtype):
+    if is_integer_dtype(dtype) and dtype.is_signed:
+        nbits = 64 if dtype == torch.int64 else 32
+        return f"tl.int{nbits}"
+    return triton_compute_type(dtype)
 
 
 def triton_constant(value):
@@ -366,11 +374,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"tl.math.isinf({x})"
+        return f"tl.math.isinf({x}).to(tl.int1)"
 
     @staticmethod
     def isnan(x):
-        return f"tl.math.isnan({x})"
+        return f"tl.math.isnan({x}).to(tl.int1)"
 
     @staticmethod
     def round(x):
@@ -944,20 +952,18 @@ class TritonKernel(Kernel):
 
         expand_str = None
 
-        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
-            if copy_shape:
-                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
-                expand_str = f"{copy_shape}.shape"
-            else:
-                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-                expand_str = self.dense_size_str()
-            if isinstance(index, sympy.Integer):
-                return index_str, set(), "None", expand_str
-            else:
-                mask_vars = dense_mask_vars
-        elif not have_loop_vars and copy_shape:
+        if isinstance(index, sympy.Integer):
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
+            return index_str, set(), "None", expand_str
+
+        if need_dense and not have_dense:
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             mask_vars = dense_mask_vars
-            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+        elif not have_loop_vars and copy_shape:
+            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+            mask_vars = dense_mask_vars
 
         if override_mask:
             mask_vars = {override_mask}
@@ -1213,13 +1219,8 @@ class TritonKernel(Kernel):
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
-            # NOTE: We should be using tl.full here, but this also does type
-            # promotion e.g. bool to int32, which is sometimes necessary if
-            # similar promotion happened elsewhere in the pre-reduction
-            # operation. We should identify any such cases and fix them.
-            default_value = f" + {default}" if default != 0 else ""
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
+                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_acc_type(src_dtype)})"
             )
 
             if reduction_type in {"argmax", "argmin"}:
@@ -1259,7 +1260,23 @@ class TritonKernel(Kernel):
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
-                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
+
+                if src_dtype == torch.bool:
+                    # This is only really used for aten.any. It changes the
+                    # final reduction of a non-persistent reduction from
+                    #     tmp5 = triton_helpers.max(_tmp5, 1)[:, None]
+                    # to
+                    #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
+                    # which is needed because tl.reduce doesn't support tl.int1
+                    accumulator = f"{accumulator}.to(tl.int8)"
+                    result_type = triton_compute_type(dtype)
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
+                    )
+                else:
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}"
+                    )
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
