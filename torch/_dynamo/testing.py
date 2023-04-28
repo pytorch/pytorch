@@ -12,7 +12,7 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import config, eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -249,6 +249,37 @@ def requires_static_shapes(fn):
         if config.dynamic_shapes:
             raise unittest.SkipTest("requires static shapes")
         return fn(*args, **kwargs)
+
+    return _fn
+
+
+@contextlib.contextmanager
+def trace_numpy() -> None:
+    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
+    try:
+        yield
+    finally:
+        config.numpy_ndarray_as_tensor = prev
+
+
+def requires_numpy_pytorch_interop(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
+
+    return _fn
+
+
+def requires_numpy(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires numpy")
 
     return _fn
 
