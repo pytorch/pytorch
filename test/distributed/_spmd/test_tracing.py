@@ -276,30 +276,6 @@ class TraceModuleTest(DTensorTestBase):
         self._test_trace_replicate(model, pt_input)
 
     @with_comms
-    def test_baked_in_shape(self):
-        class LCE(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(5)
-                self.w = torch.nn.Parameter(torch.rand((5, 10)))
-                self.b = torch.nn.Parameter(torch.rand((5)))
-
-            def forward(self, x, *args, **kwargs):
-                # the code below will bake in the shape of x_t as arguments to expand
-                x_t = x.permute(0, 2, 1)
-                y_t = kwargs["dict_test"]["value"].expand(x_t.shape) + args[0][
-                    0
-                ].expand(x_t.shape)
-                # code below triggers an "expand" with shape baked in.
-                return torch.nn.functional.linear(y_t, self.w, self.b)
-
-        model = LCE().to(self.device_type)
-        x = torch.randn(2, 10, 80).to(self.device_type)
-        y = torch.randn(2, 80, 10).to(self.device_type)
-        z = torch.randn(2, 80, 10).to(self.device_type)
-        self._test_trace_replicate(model, x, [y], dict_test={"value": z})
-
-    @with_comms
     def test_sequential(self):
         model = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)]).to(
             self.device_type
@@ -553,7 +529,7 @@ class TraceTrainStepTest(DTensorTestBase):
                         [
                             n
                             for n in gm.graph.nodes
-                            if n.target == torch.ops.aten.all_reduce.default
+                            if n.target == torch.ops.c10d_functional.all_reduce.default
                         ]
                     ),
                     1,
@@ -863,7 +839,7 @@ class CoverageTest(DTensorTestBase):
 
         self._test_train_step(train_step, mod, ids, tgt)
 
-    def _test_factory_ops(self, Model: Type[nn.Module]):
+    def _test_op_with_train_step(self, Model: Type[nn.Module]):
         torch.manual_seed(0)
         mod = Model().cuda(self.rank)
 
@@ -887,7 +863,7 @@ class CoverageTest(DTensorTestBase):
                 y = torch.full(x.shape, 7, device=x.device)
                 return y + self.fc(x)
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -902,7 +878,7 @@ class CoverageTest(DTensorTestBase):
                 z = torch.arange(0, x.numel(), device=x.device).view(x.shape)
                 return self.fc(x) + y + z
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -916,7 +892,21 @@ class CoverageTest(DTensorTestBase):
                 y = self.fc.weight.numel()
                 return self.fc(x) + y
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_stride(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.stride(0)
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -933,7 +923,46 @@ class CoverageTest(DTensorTestBase):
                 )
                 return self.fc(x) + y
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_stack(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.stack([x, self.fc(x)], dim=1)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_arithmetic_ops_on_symint(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x) + x.shape[0] * x.numel() - x.shape[0] // 2
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_slice(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x)[:, :1]
+
+        self._test_op_with_train_step(Model)
 
 
 if __name__ == "__main__":

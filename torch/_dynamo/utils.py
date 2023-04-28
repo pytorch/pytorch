@@ -526,6 +526,8 @@ def clone_input(x):
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
 
     with torch.no_grad():
@@ -555,6 +557,8 @@ def clone_input(x):
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return result
 
 
@@ -792,11 +796,12 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value):
+def enum_repr(value, local):
     enum_name = str(value)
 
     name, val = enum_name.split(".")
-    local_name = f'L["{name}"].{val}'
+    scope = "L" if local else "G"
+    local_name = f'{scope}["{name}"].{val}'
     return local_name
 
 
@@ -808,11 +813,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys):
+def dict_const_keys_repr(const_keys, *, local):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -886,7 +891,7 @@ def same(
         assert set(ref.keys()) == set(
             res.keys()
         ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        for k in ref.keys():
+        for k in sorted(ref.keys()):
             if not (
                 same(
                     ref[k],
@@ -1246,7 +1251,7 @@ def get_fake_value(node, tx):
         raise TorchRuntimeError() from e
 
 
-def run_node(output_graph, node, args, kwargs, nnmodule):
+def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
 
@@ -1255,7 +1260,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     run_node is useful for extracting real values out of nodes.
     See get_real_value for more info on common usage.
 
-    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The tracer arg is only used for 'get_attr' ops
     Note: The nnmodule arg is only used for 'call_module' ops
 
     Nodes that are not call_function, call_method, call_module, or get_attr will
@@ -1271,7 +1276,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             assert nnmodule is not None
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
-            return output_graph.get_submodule(node.target)
+            return tracer.get_submodule(node.target)
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
@@ -1282,23 +1287,23 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     raise AssertionError(op)
 
 
-def get_real_value(node, output_graph):
+def get_real_value(node, tracer):
     """
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
-    cache = output_graph.real_value_cache
+    cache = tracer.real_value_cache
     if node in cache:
         return cache[node]
 
     op = node.op
     args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
-        lambda n: get_real_value(n, output_graph),
+        lambda n: get_real_value(n, tracer),
     )
 
     if op == "call_module":
-        nn_module = output_graph.nn_modules[node.target]
+        nn_module = tracer.output_graph.nn_modules[node.target]
         if not is_lazy_module(nn_module):
             nn_module = copy.deepcopy(nn_module)
         else:
@@ -1309,7 +1314,7 @@ def get_real_value(node, output_graph):
         nn_module = None
 
     try:
-        real_value = run_node(output_graph, node, args, kwargs, nn_module)
+        real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
         raise TorchRuntimeError() from e
