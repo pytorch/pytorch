@@ -4714,7 +4714,7 @@ opt_fn = torch._dynamo.optimize("eager")(f)
 opt_fn(torch.ones(2))
 """
         proc = subprocess.run(
-            ["python3", "-c", code],
+            [sys.executable, "-c", code],
             capture_output=True,
         )
         # process did not segfault, C assert fail (abort), etc.
