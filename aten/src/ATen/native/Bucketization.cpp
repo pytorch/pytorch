@@ -10,6 +10,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/bucketize_native.h>
+#include <ATen/ops/searchsorted_native.h>
 #endif
 
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
@@ -140,7 +142,7 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 }
 
-static Tensor& searchsorted_out_cpu(
+Tensor& searchsorted_out_cpu(
     const Tensor& sorted_sequence,
     const Tensor& self,
     bool out_int32,
@@ -187,7 +189,7 @@ static Tensor& searchsorted_out_cpu(
   return result;
 }
 
-static Tensor searchsorted_cpu(
+Tensor searchsorted_cpu(
       const Tensor& sorted_sequence,
       const Tensor& self,
       bool out_int32,
@@ -201,7 +203,7 @@ static Tensor searchsorted_cpu(
   return result;
 }
 
-static Tensor searchsorted_cpu(
+Tensor searchsorted_cpu(
     const Tensor& sorted_sequence,
     const Scalar& self,
     bool out_int32,
@@ -212,13 +214,13 @@ static Tensor searchsorted_cpu(
   return searchsorted_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt);
 }
 
-static Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
+Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
   at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, nullopt, nullopt, result);
   return result;
 }
 
-static Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
@@ -226,7 +228,7 @@ static Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool o
   return result;
 }
 
-static Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
   return bucketize_cpu(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
