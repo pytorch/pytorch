@@ -43,11 +43,11 @@ class _DefaultDevice(object):
     _default_device_type = "cuda"
 
     @staticmethod
-    def set_device_type(device: str = "cuda"):
+    def _set_device_type(device: str = "cuda"):
         _DefaultDevice._default_device_type = device
 
     @staticmethod
-    def get_device_type():
+    def _get_device_type():
         return _DefaultDevice._default_device_type
 
 def _infer_device_type(*args):
@@ -60,7 +60,7 @@ def _infer_device_type(*args):
                       "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
                       "detected, it will be prioritized; otherwise, the first device encountered will be selected.)")
     if len(device_types) == 0:
-        return _DefaultDevice.get_device_type()
+        return _DefaultDevice._get_device_type()
     elif "cuda" in device_types:
         return "cuda"
     else:
@@ -97,6 +97,7 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
+
     if device == "cuda":
         device_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
                                   "dtype": torch.get_autocast_gpu_dtype(),
