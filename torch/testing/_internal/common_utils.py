@@ -23,6 +23,7 @@ import platform
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -582,6 +583,15 @@ def wait_for_process(p, timeout=None):
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except subprocess.TimeoutExpired:
+        # send SIGINT to give pytest a chance to make xml
+        p.send_signal(signal.SIGINT)
         exit_status = p.wait(timeout=5)
         if exit_status is not None:
             return exit_status
@@ -4368,8 +4378,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-        if op.name == "cat":
-            self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
 
 def make_lazy_class(cls):
 

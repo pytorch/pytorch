@@ -518,6 +518,24 @@ void initDispatchBindings(PyObject* module) {
   m.def("_to_functionality_key", [](c10::DispatchKey k) {
     return c10::toFunctionalityKey(k);
   });
+  // E.g. given `DispatchKey::AutogradFunctionality`, returns a keyset of:
+  //  AutogradCPU
+  //  AutogradCUDA
+  //  ...
+  //  AutogradPrivateUse3
+  m.def("_functionality_to_backend_keys", [](c10::DispatchKey key) {
+    std::vector<c10::DispatchKey> keys;
+    if (c10::isPerBackendFunctionalityKey(key)) {
+      auto ks = c10::DispatchKeySet(key) |
+          c10::DispatchKeySet(c10::DispatchKeySet::RAW, c10::full_backend_mask);
+      for (auto k : ks) {
+        keys.push_back(k);
+      }
+    } else {
+      keys.push_back(key);
+    }
+    return keys;
+  });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
