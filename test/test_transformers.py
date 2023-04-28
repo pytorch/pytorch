@@ -1806,10 +1806,6 @@ class TestSDPA(NNTestCase):
         is_dropout = dropout_p > 0.0
 
         # Create real output
-        if isSM86or89Device and head_dim in range(65, 129):
-            self.assertRaises(RuntimeError, lambda: torch.ops.aten._scaled_dot_product_flash_attention(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True))
-            return
         output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
             query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         out = output_tuple[0]
@@ -1843,6 +1839,10 @@ class TestSDPA(NNTestCase):
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
+        # backward for flash attention on sm86 and sm89 for headdim > 64 currently disabled
+        if isSM86or89Device and head_dim in range(65, 129):
+            self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
+            return
         out.backward(upstream_grad)
         out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
