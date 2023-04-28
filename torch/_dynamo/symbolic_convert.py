@@ -55,7 +55,13 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
 )
-from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
+from .utils import (
+    counters,
+    get_fake_value,
+    graph_break_dup_warning_checker,
+    istype,
+    proxy_args_kwargs,
+)
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -249,12 +255,35 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
                 return
 
-            # Manually insert torch._assert instead of python assert and jump over
+            # TODO maybe should respect DtoH sync intention of users later??
+            # Manually insert torch._assert_async instead of python assert and jump over
             # assert related instructions as we don't need them anymore.
+
+            # if we see Tensor as assert statement, no need to call scalar_tensor
+            if isinstance(value, TensorVariable):
+                self.output.create_proxy(
+                    "call_function",
+                    torch._assert_async,
+                    *proxy_args_kwargs((value, error_msg), {}),
+                )
+                self.jump(inst)
+                return
+
+            scalar_to_tensor_proxy = self.output.create_proxy(
+                "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
+            )
+
+            scalar_to_tensor = wrap_fx_proxy(
+                self,
+                scalar_to_tensor_proxy,
+                example_value=get_fake_value(scalar_to_tensor_proxy.node, self),
+                **VariableTracker.propagate([value]),
+            )
+
             self.output.create_proxy(
                 "call_function",
-                torch._assert,
-                *proxy_args_kwargs((value, error_msg), {}),
+                torch._assert_async,
+                *proxy_args_kwargs((scalar_to_tensor, error_msg), {}),
             )
             self.jump(inst)
             return
@@ -269,7 +298,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # compile a partial subgraph prefix then jump into user code
             if self.has_backedge():
                 msg = (
-                    "Skipping frame because there is a graph break in a for/while loop"
+                    "Skipping frame because there is a graph break in a for/while loop\n"
+                    f"{self.frame_summary()}"
                 )
                 log.info(msg)
                 raise exc.SkipFrame(msg)
@@ -355,7 +385,10 @@ def break_graph_if_unsupported(*, push):
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
-                    msg = "Skipping frame because there is a graph break in a for/while loop"
+                    msg = (
+                        "Skipping frame because there is a graph break in a for/while loop\n"
+                        f"{self.frame_summary()}"
+                    )
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
@@ -948,31 +981,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack.pop()
 
     def SETUP_WITH(self, inst):
-        state = self.copy_graphstate()
-        ctx = self.pop()
-        if not isinstance(ctx, ContextWrappingVariable):
-            unimplemented(f"SETUP_WITH {ctx}")
-
-        if isinstance(ctx, GenericContextWrappingVariable):
-            # Save the checkpoint to restore if there is
-            # graph break under the GenericContextWrappingVariable.
-            self.states_before_block.append(state)
-
-        self.output.guards.update(ctx.guards)
-
-        if isinstance(self, InstructionTranslator):
-            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
-        else:
-            # can't restore this while inlining
-            self.block_stack.append(BlockStackEntry(inst.target))
-        self.push(
-            WithExitFunctionVariable(
-                ctx,
-                inst.target,
-                **VariableTracker.propagate(ctx),
-            )
-        )
-        self.push(ctx.enter(self))
+        self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
         self.block_stack.append(BlockStackEntry(inst.target))
@@ -1701,10 +1710,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         pass
 
     def BEFORE_WITH(self, inst):
+        self.setup_or_before_with(inst)
+
+    def setup_or_before_with(self, inst):
         state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
-            unimplemented(f"BEFORE_WITH {ctx}")
+            unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
             # Save the checkpoint to restore if there is
@@ -1718,10 +1730,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inst.target,
             **VariableTracker.propagate(ctx),
         )
-        # see create_call_resume_at for block stack details
-        assert self.next_instruction
-        assert self.next_instruction.exn_tab_entry
-        target = self.next_instruction.exn_tab_entry.target
+        if sys.version_info >= (3, 11):
+            # see create_call_resume_at for block stack details
+            assert self.next_instruction
+            assert self.next_instruction.exn_tab_entry
+            target = self.next_instruction.exn_tab_entry.target
+        else:
+            target = inst.target
         if isinstance(self, InstructionTranslator):
             self.block_stack.append(BlockStackEntry(target, len(self.stack), ctx))
         else:
@@ -1902,7 +1917,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
     ):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
+        _step_logger()(
+            logging.INFO,
+            f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
+        )
         super().__init__(
             output=OutputGraph(
                 f_globals,
@@ -1938,12 +1956,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
-                VariableBuilder(
-                    self,
-                    LocalSource(k)
-                    if k in code_options["co_varnames"]
-                    else LocalSource((k)),
-                )(f_locals[k]),
+                VariableBuilder(self, LocalSource(k))(f_locals[k]),
             )
             for k in vars
             if k in f_locals

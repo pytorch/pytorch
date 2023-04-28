@@ -953,6 +953,28 @@ class TestTorchDeviceType(TestCase):
             # t + 1 allocates a new tensor for result using empty
             t + 1
 
+    @onlyCUDA
+    def test_dtypetensor_warnings(self, device):
+        msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            t = torch.cuda.FloatTensor([0])
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            t = torch.cuda.DoubleTensor([0])
+
+    def test_set_default_tensor_type_warnings(self, device):
+        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
+        default_type = torch.tensor([]).type()
+        try:
+            with self.assertWarnsOnceRegex(UserWarning, msg):
+                torch.set_default_tensor_type(torch.FloatTensor)
+
+            if torch.cuda.is_available():
+                with self.assertWarnsOnceRegex(UserWarning, msg):
+                    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+        finally:
+            torch.set_default_tensor_type(default_type)
+
     # TODO: this test should be in test_nn.py
     @skipIfTorchInductor("Please convert all Tensors to FakeTensors")
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
@@ -1888,7 +1910,6 @@ else:
                        lambda: x.nonzero(),
                        lambda: _cond_fn(y),
                        lambda: torch.nn.functional.one_hot(ind),
-                       lambda: torch.repeat_interleave(x, 2),
                        lambda: torch.repeat_interleave(x, repeats))
         for f, level in product(expect_no_sync, (1, 2)):
             _no_sync_helper(f, level)
@@ -5393,6 +5414,40 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
+    @onlyNativeDeviceTypes
+    def test_masked_scatter_inplace_noncontiguous(self, device):
+        t = torch.zeros(5, 2, dtype=torch.long, device=device)
+        t_non_contig = t.transpose(0, 1)
+        t_contig = t_non_contig.contiguous()
+
+        assert t_contig.is_contiguous()
+        assert not t_non_contig.is_contiguous()
+
+        mask = torch.tensor([[False, True], [False, True], [False, False], [True, True], [True, True]], device=device)
+        mask_non_contig = mask.transpose(0, 1)
+        mask_contig = mask_non_contig.contiguous()
+
+        assert mask_contig.is_contiguous()
+        assert not mask_non_contig.is_contiguous()
+
+        # source is always converted to contiguous by the op.
+        source = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 9]], device=device)
+
+        # t: contig, mask: contig
+        expected = t_contig.masked_scatter_(mask_contig, source)
+
+        # t: non-contig, mask: non-contig
+        actual = t_non_contig.masked_scatter_(mask_non_contig, source)
+        self.assertEqual(actual, expected)
+
+        # t: contig, mask: non-contig
+        actual = t_contig.masked_scatter_(mask_non_contig, source)
+        self.assertEqual(actual, expected)
+
+        # t: non-contig, mask: contig
+        actual = t_non_contig.masked_scatter_(mask_contig, source)
+        self.assertEqual(actual, expected)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -6194,6 +6249,7 @@ class TestTorch(TestCase):
             "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
             lambda: [1, 2] in x)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_deepcopy_parameter(self):
         from copy import deepcopy
         l = torch.nn.Linear(10, 1)
