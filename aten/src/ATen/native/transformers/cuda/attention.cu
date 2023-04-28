@@ -873,23 +873,18 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
 // this would avoid runtime architecture checks, we should look into it
-  TORCH_CHECK(query.dim() == 4);
-  TORCH_CHECK(key.dim() == 4);
-  TORCH_CHECK(value.dim() == 4);
 
-  // Batch sizes
-  TORCH_CHECK(query.size(0) == key.size(0));
-  TORCH_CHECK(query.size(0) == value.size(0));
-
+  // Sanity Checks
+  // We techincally check a different dim than transpose, so in theory
+  // we could have mismatch but probs should remove
   // Sequence length
+  // {
   TORCH_CHECK(key.size(1) == value.size(1));
 
   // Num heads
   TORCH_CHECK(query.size(2) == key.size(2));
   TORCH_CHECK(query.size(2) == value.size(2));
-
-  // Embedding per head
-  TORCH_CHECK(query.size(3) == key.size(3));
+  //  }
 
   int64_t max_seqlen_q = 0, max_seqlen_k=0;
   TORCH_CHECK(cu_seqlens_q.has_value() == cu_seqlens_k.has_value());

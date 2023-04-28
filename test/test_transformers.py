@@ -1301,12 +1301,27 @@ class TestSDPAFailureModes(NNTestCase):
         if SM80OrLater
         else [SDPBackend.EFFICIENT_ATTENTION],
     )
-    def test_invalid_batch_size_0(self, kernel: SDPBackend):
+    def test_invalid_batch_size_0(self, device, kernel: SDPBackend):
+        with self.assertWarnsRegex(UserWarning, "Both fused kernels require batch_size to be greater than 0."):
+            with sdp_kernel(**backend_map[kernel]):
+                shape = (0, 4, 8, 16)
+                make_tensor = partial(rand_sdpa_tensor, shape=shape, type="dense", device=device, dtype=torch.float16)
+                query, key, value = make_tensor(), make_tensor(), make_tensor()
+                self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+    )
+    def test_invalid_key_and_value_sequences(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
-            shape = (0, 4, 8, 16)
-            make_tensor = partial(rand_sdpa_tensor, shape=shape, type="dense", device="cuda", dtype=torch.float16)
-            query, key, value = make_tensor(), make_tensor(), make_tensor()
-            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+            query_shape = (1, 4, 8, 16)
+            key_shape = (1, 4, 8, 16)
+            value_shape = (1, 4, 16, 16)
+            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float16)
+            query, key, value = make_tensor(query_shape), make_tensor(key_shape), make_tensor(value_shape)
+            with self.assertRaisesRegex(RuntimeError, "Expected key and value to have the same sequence length."):
+                F.scaled_dot_product_attention(query, key, value)
 
 
 class TestSDPA(NNTestCase):

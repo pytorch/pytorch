@@ -553,6 +553,10 @@ inline void validate_sdpa_input(
       query_.dim() >= 2 && key.dim() >= 2 && value.dim() >= 2,
       "Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: ",
       query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
+  TORCH_CHECK(
+      (key.is_nested() || value.is_nested()) || key.sym_size(-2) == value.sym_size(-2),
+      "Expected key and value to have the same sequence length, but got key.size(-2): ",
+      key.sym_size(-2), " and value.size(-2): ", value.sym_size(-2), " instead.");
   if (attn_mask_.has_value()){
     auto mask_dtype = attn_mask_->dtype();
     TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),

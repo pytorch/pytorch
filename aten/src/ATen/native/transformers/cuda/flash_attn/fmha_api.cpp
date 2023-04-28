@@ -211,32 +211,10 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         const bool is_causal,
         const bool return_softmax,
         const int num_splits) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
-    bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
-    bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-    bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
-    TORCH_CHECK(is_sm90 || is_sm8x || is_sm75);
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     bool is_dropout = p_dropout > 0.0;
+    auto dprops = at::cuda::getCurrentDeviceProperties();
     Launch_params<FMHA_fprop_params> launch_params(dprops, stream, is_dropout, return_softmax);
-
-    auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == at::kHalf || (is_sm8x && q_dtype == at::kBFloat16));
-    TORCH_CHECK(k.dtype() == q_dtype);
-    TORCH_CHECK(v.dtype() == q_dtype);
-    TORCH_CHECK(out.dtype() == q_dtype);
-    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
-    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
-
-    TORCH_CHECK(out.is_cuda());
-    TORCH_CHECK(cu_seqlens_q.is_cuda());
-    TORCH_CHECK(cu_seqlens_k.is_cuda());
-
-    TORCH_CHECK(q.stride(-1) == 1);
-    TORCH_CHECK(k.stride(-1) == 1);
-    TORCH_CHECK(v.stride(-1) == 1);
-    TORCH_CHECK(cu_seqlens_q.is_contiguous());
-    TORCH_CHECK(cu_seqlens_k.is_contiguous());
 
     const auto sizes = q.sizes();
 
@@ -246,12 +224,21 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     const int head_size = sizes[D_DIM];
     const int total_k = k.size(TOTAL_DIM);
 
+    // Sanity Checks:
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
+    TORCH_CHECK(out.is_cuda());
+    TORCH_CHECK(cu_seqlens_q.is_cuda());
+    TORCH_CHECK(cu_seqlens_k.is_cuda());
+    TORCH_CHECK(cu_seqlens_q.is_contiguous());
+    TORCH_CHECK(cu_seqlens_k.is_contiguous());
     CHECK_SHAPE(q, total_q, num_heads, head_size);
     CHECK_SHAPE(k, total_k, num_heads, head_size);
     CHECK_SHAPE(v, total_k, num_heads, head_size);
     CHECK_SHAPE(out, total_q, num_heads, head_size);
     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
     CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+
 
     int blocksize_c = head_size > 64 ? 128 : 256;
     // Need to round max_seqlen_k to multiples of blocksize_c
@@ -362,47 +349,9 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const uint64_t philox_offset
 ) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
-    bool is_sm80 = dprops->major == 8 && dprops->minor == 0;
-    bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-    bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
-    TORCH_CHECK(is_sm90 || is_sm8x || is_sm75);
     auto launch = &run_fmha_bwd;
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();
-
-    auto q_dtype = q.dtype();
-
-    TORCH_CHECK(q_dtype == at::kHalf || ((is_sm8x || is_sm90) && q_dtype == at::kBFloat16));
-    TORCH_CHECK(k.dtype() == q_dtype);
-    TORCH_CHECK(v.dtype() == q_dtype);
-    TORCH_CHECK(out.dtype() == q_dtype);
-    TORCH_CHECK(dout.dtype() == q_dtype);
-    TORCH_CHECK(dq.dtype() == q_dtype);
-    TORCH_CHECK(dk.dtype() == q_dtype);
-    TORCH_CHECK(dv.dtype() == q_dtype);
-    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
-    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
-
-    TORCH_CHECK(q.is_cuda());
-    TORCH_CHECK(k.is_cuda());
-    TORCH_CHECK(v.is_cuda());
-    TORCH_CHECK(out.is_cuda());
-    TORCH_CHECK(dout.is_cuda());
-    TORCH_CHECK(softmax_lse_.is_cuda());
-    TORCH_CHECK(cu_seqlens_q.is_cuda());
-    TORCH_CHECK(cu_seqlens_k.is_cuda());
-
-    TORCH_CHECK(q.stride(-1) == 1);
-    TORCH_CHECK(k.stride(-1) == 1);
-    TORCH_CHECK(v.stride(-1) == 1);
-    TORCH_CHECK(out.is_contiguous());
-    TORCH_CHECK(dout.is_contiguous());
-    TORCH_CHECK(dq.stride(-1) == 1);
-    TORCH_CHECK(dk.stride(-1) == 1);
-    TORCH_CHECK(dv.stride(-1) == 1);
-    TORCH_CHECK(cu_seqlens_q.is_contiguous());
-    TORCH_CHECK(cu_seqlens_k.is_contiguous());
 
     const auto sizes = q.sizes();
 
@@ -411,12 +360,29 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     const int num_heads = sizes[H_DIM];
     const int head_size = sizes[D_DIM];
     const int total_k = k.size(TOTAL_DIM);
-    TORCH_CHECK(batch_size > 0);
-    TORCH_CHECK((head_size % 8 == 0) && (head_size <= 128));
-    if (head_size > 64) {  // TODO: eventually we should support SM86 and SM70 with d=128 as well
-        TORCH_CHECK(is_sm80 || is_sm90);
-    }
 
+    // Sanity Checks:
+    auto q_dtype = q.dtype();
+    TORCH_CHECK(dout.is_cuda());
+    TORCH_CHECK(dout.dtype() == q_dtype);
+    TORCH_CHECK(dq.dtype() == q_dtype);
+    TORCH_CHECK(dk.dtype() == q_dtype);
+    TORCH_CHECK(dv.dtype() == q_dtype);
+    TORCH_CHECK(out.is_contiguous());
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt);
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt);
+    TORCH_CHECK(dout.is_cuda());
+    TORCH_CHECK(softmax_lse_.is_cuda());
+    TORCH_CHECK(cu_seqlens_q.is_cuda());
+    TORCH_CHECK(cu_seqlens_k.is_cuda());
+
+
+    TORCH_CHECK(dout.is_contiguous());
+    TORCH_CHECK(dq.stride(-1) == 1);
+    TORCH_CHECK(dk.stride(-1) == 1);
+    TORCH_CHECK(dv.stride(-1) == 1);
+    TORCH_CHECK(cu_seqlens_q.is_contiguous());
+    TORCH_CHECK(cu_seqlens_k.is_contiguous());
     CHECK_SHAPE(q, total_q, num_heads, head_size);
     CHECK_SHAPE(k, total_k, num_heads, head_size);
     CHECK_SHAPE(v, total_k, num_heads, head_size);
@@ -428,6 +394,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
     CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
 
+    bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     int blocksize_c = (head_size > 64 || (is_sm75 && head_size > 32)) ? 128 : 256;
     int max_seqlen_k = ((max_seqlen_k_ + blocksize_c - 1) / blocksize_c) * blocksize_c;
     if( max_seqlen_k_ <= 128 ) {
