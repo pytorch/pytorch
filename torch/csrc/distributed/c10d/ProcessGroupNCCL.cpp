@@ -513,7 +513,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
     while (!isCompleted()) {
-      bool timedOut = checkTimeout(c10::make_optional(timeout));
+      bool timedOut = checkTimeout(timeout == kNoTimeout ? c10::nullopt : c10::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
       // If throwing timed out excepiton without aborting nccl communicators
