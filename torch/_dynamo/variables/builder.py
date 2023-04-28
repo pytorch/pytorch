@@ -591,6 +591,11 @@ class VariableBuilder:
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
             guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+
+        for item in value:
+            if item is value:
+                unimplemented("list elements are pointing to the list itself")
+
         output = [
             VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
                 item
