@@ -760,6 +760,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             finally:
                 torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
+                torch._inductor.cudagraph_trees.get_container(self.device_idx).tree_manager = None
 
         def test_peristed_output_livenes(self):
             @torch.compile
