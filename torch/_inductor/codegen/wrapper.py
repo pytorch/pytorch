@@ -343,7 +343,9 @@ class WrapperCodeGen(CodeGen):
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
         if config.generate_intermediate_hooks and origin_node is not None:
-            self.writeline(f"run_intermediate_hooks({origin_node.name!r}, {output_name})")
+            self.writeline(
+                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+            )
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
