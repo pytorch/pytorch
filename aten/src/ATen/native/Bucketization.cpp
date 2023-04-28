@@ -140,7 +140,7 @@ void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, boo
 
 }
 
-Tensor& searchsorted_out_cpu(
+static Tensor& searchsorted_out_cpu(
     const Tensor& sorted_sequence,
     const Tensor& self,
     bool out_int32,
@@ -187,7 +187,7 @@ Tensor& searchsorted_out_cpu(
   return result;
 }
 
-Tensor searchsorted_cpu(
+static Tensor searchsorted_cpu(
       const Tensor& sorted_sequence,
       const Tensor& self,
       bool out_int32,
@@ -201,7 +201,7 @@ Tensor searchsorted_cpu(
   return result;
 }
 
-Tensor searchsorted_cpu(
+static Tensor searchsorted_cpu(
     const Tensor& sorted_sequence,
     const Scalar& self,
     bool out_int32,
@@ -212,13 +212,13 @@ Tensor searchsorted_cpu(
   return searchsorted_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt);
 }
 
-Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
+static Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
   at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, nullopt, nullopt, result);
   return result;
 }
 
-Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
+static Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
@@ -226,7 +226,7 @@ Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int3
   return result;
 }
 
-Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
+static Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
   return bucketize_cpu(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
