@@ -88,11 +88,7 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   TORCH_CHECK(
       range.second - range.first == t.size(),
       "inconsistent range for TensorList output");
-  std::copy_if(
-      t.begin(),
-      t.end(),
-      out.begin() + range.first,
-      [](const auto& tensor) -> bool { return tensor.defined(); });
+  std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
 Tensor copysign_tensor_self_backward(
