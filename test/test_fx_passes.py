@@ -231,8 +231,7 @@ class TestPartitionFunctions:
     def forward17(a, b, c, d):
         a0 = a + b
         a1 = c + d
-        out = torch.stack([a0, a1])
-        return out
+        return (a0, a1)
 
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
