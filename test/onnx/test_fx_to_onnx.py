@@ -1,33 +1,25 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-from typing import Protocol
-
 import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.infra import sarif
+from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
 
 
-class _SarifLogBuilder(Protocol):
-    def sarif_log(self) -> sarif.SarifLog:
-        ...
-
-
 def assert_has_diagnostics(
-    sarif_log_builder: _SarifLogBuilder,
+    diagnostic_context: diagnostics.DiagnosticContext,
     rule: infra.Rule,
     level: infra.Level,
     expected_error_node: str,
     expected_error_message: str,
 ):
     rule_level_pairs = (rule.id, level.name.lower())
-    sarif_log = sarif_log_builder.sarif_log()
+    sarif_log = diagnostic_context.sarif_log()
     actual_results = []
     for run in sarif_log.runs:
         if run.results is None:
