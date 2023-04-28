@@ -11,6 +11,7 @@ try:
         test_modules,
         test_repros,
         test_subgraphs,
+        test_higher_order_ops,
     )
 except ImportError:
     import test_ctx_manager
@@ -20,6 +21,7 @@ except ImportError:
     import test_modules
     import test_repros
     import test_subgraphs
+    import test_higher_order_ops
 
 import unittest
 
@@ -79,6 +81,7 @@ tests = [
     test_modules.NNModuleTests,
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
+    test_higher_order_ops.HigherOrderOpTests,
 ]
 for test in tests:
     make_dynamic_cls(test)
