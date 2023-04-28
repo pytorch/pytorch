@@ -562,7 +562,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.output.guards.update(fn.guards)
             return result
         except Exception as e:
-            print(e)
             self.restore_graphstate(state)
             raise
 

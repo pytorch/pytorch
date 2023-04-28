@@ -924,14 +924,16 @@ class TorchHigherOrderOperator(VariableTracker):
                         elif isinstance(a, TensorVariable):
                             tracer.create_graph_input(a.as_proxy().node.name)
                             args.append(a)
-                        else:
+                        elif isinstance(a, torch.Tensor):
                             # call_function() needs a TensorVariable, therefore we construct
                             # one with inner graph proxy.
-                            assert isinstance(a, torch.Tensor), breakpoint()
+                            assert isinstance(a, torch.Tensor)
                             proxy = tracer.create_graph_input("arg")
                             args.append(
                                 wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a)
                             )
+                        else:
+                            raise unimplemented("Speculate subgraph with unsupported inputs.")
 
                     output = f.call_function(tx, args, {})
                     # breakpoint()
@@ -958,7 +960,6 @@ class TorchHigherOrderOperator(VariableTracker):
                     )
 
             except torch._dynamo.exc.Unsupported as ex:
-                breakpoint()
                 tx.output.graph = graph_checkpoint
                 tx.restore_graphstate(checkpoint)
                 raise
@@ -1184,9 +1185,7 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = r
         elif self.value.__name__ == "trampoline_autograd_fn":
             fn = TorchVariable(
-                self.value,
-                source=self.source,
-                # guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                self.value
             )
 
             checkpoint = tx.copy_graphstate()
@@ -1203,22 +1202,13 @@ class TorchHigherOrderOperator(VariableTracker):
                 graph_checkpoint,
                 checkpoint,
             )
-            # breakpoint()
-
-            # body_name = add_subgraph(
-            #     "body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-            # )
-            # body_node = make_attr("body")
             p_args = (
-                # {},
                 *(arg.as_proxy() for arg in args),
                 *(arg for arg in body_lifted_freevars),
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
-            # breakpoint()
         else:
-            # breakpoint()
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
