@@ -828,6 +828,15 @@ def export(
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
 
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        log.warning(
+            "Summary of dimension constraints:%s",
+            dim_constraints.prettify_results(inspect.signature(f)),
+        )
+
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
