@@ -367,8 +367,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         # Note: In order to match the PT2E numerics exactly, we need to feed the
         # example inputs to the model once before calling prepare, since this is
         # what torchdynamo.export does. Otherwise, the BN running mean and variance
-        # would diverge in the two flows and this test would fail. In the future,
-        # we should fix this "bug" in torchdynamo instead.
+        # would diverge in the two flows and this test would fail. For more detail,
+        # see https://github.com/pytorch/pytorch/issues/95900.
         model_fx = copy.deepcopy(model)
         model_fx(*example_inputs)
         if is_per_channel:
