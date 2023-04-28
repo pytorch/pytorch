@@ -8,8 +8,8 @@ BertForQuestionAnswering,pass,7
 BlenderbotSmallForCausalLM,pass,7
 BlenderbotSmallForConditionalGeneration,pass,7
 CamemBert,pass,7
-DebertaForMaskedLM,pass,52
-DebertaForQuestionAnswering,pass,52
+DebertaForMaskedLM,pass,7
+DebertaForQuestionAnswering,pass,7
 DebertaV2ForMaskedLM,pass_due_to_skip,0
 DistilBertForMaskedLM,pass,7
 DistilBertForQuestionAnswering,pass,7
