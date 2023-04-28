@@ -221,16 +221,10 @@ def generate_inputs_for_model(
     vocab_size = model.config.vocab_size
     if model_name.endswith("MultipleChoice"):
         input = rand_int_tensor(device, 0, vocab_size, (bs, num_choices, seq_length))
-        if seq_length > 1:
-            torch._dynamo.mark_dynamic(input, 2)
     elif model_name.startswith("Roberta"):
         input = rand_int_tensor(device, 0, 1, (bs, seq_length))
-        if seq_length > 1:
-            torch._dynamo.mark_dynamic(input, 1)
     else:
         input = rand_int_tensor(device, 0, vocab_size, (bs, seq_length))
-        if seq_length > 1:
-            torch._dynamo.mark_dynamic(input, 1)
 
     if "Bart" in model_name:
         input[:, -1] = model.config.eos_token_id
