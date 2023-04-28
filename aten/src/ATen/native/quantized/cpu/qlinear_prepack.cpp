@@ -208,7 +208,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
 #endif // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-inline ideep::tensor&& pack_weight(
+inline ideep::tensor pack_weight(
     const at::Tensor& weight,
     torch::List<int64_t>& input_shape) {
   std::vector<int64_t> w_dims = weight.sizes().vec();
@@ -217,8 +217,7 @@ inline ideep::tensor&& pack_weight(
   ideep::dims input_dims = input_shape.vec();
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wei.get_dims(), dnnl::memory::data_type::s8,
                                                              dnnl::memory::data_type::u8);
-  wei = wei.reorder_if_differ_in(w_desc);
-  return std::move(wei);
+  return wei.reorder_if_differ_in(w_desc);
 }
 
 inline ideep::tensor pack_bias(
@@ -298,7 +297,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   // ideep::tensor exp_wgt(w_desc);
   // exp_wgt.feed_from(wgt);
   ///////////////////////
-  auto&& exp_wgt = pack_weight(weight_copy, input_shape);
+  auto exp_wgt = pack_weight(weight_copy, input_shape);
   ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
