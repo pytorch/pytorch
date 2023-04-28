@@ -562,7 +562,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             # the status of the group or time out officially, throwing runtime error
             store.wait([last_worker_key], logging_interval)
             break
-        except RuntimeError as e:
+        except Exception as e:
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
             logger.info(
