@@ -42,6 +42,9 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# Optimize away split cat patterns (Experimental)
+split_cat_fx_passes = True
+
 # enable reordering pass
 reordering = False
 
@@ -59,6 +62,11 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+
+coordinate_descent_tuning = (
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
+)
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have
@@ -151,6 +159,15 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
 
+# Generate hook calls to torch._inductor.hooks.run_intermediate_hooks for
+# every intermediate for which we can correlate it with an intermediate
+# from the original FX graph
+generate_intermediate_hooks = False
+
+# Populate traceback field on IRNode; good for debugging why origin_node is
+# not populated, or finding out where an IRNode was constructed
+debug_ir_traceback = False
+
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
@@ -200,7 +217,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = False
+    cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = False
@@ -231,6 +248,9 @@ class triton:
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
 
+    # assert that indirect indexing does not read / write out of bounds
+    assert_indirect_indexing = True
+
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
@@ -245,7 +265,9 @@ class triton:
     descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = True
+    persistent_reductions = (
+        os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
+    )
 
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
@@ -256,6 +278,13 @@ class triton:
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
+
+    # the max number of spills we allow for the configs we benchmark.
+    # Setting this to 0 means we skip a config if it spills even a single
+    # register.
+    # Settting it to a larger value allows a config spilling a small amount
+    # of registers being benchmarked.
+    spill_threshold = 0
 
 
 # create a directory containing lots of debug information

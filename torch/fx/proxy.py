@@ -7,6 +7,9 @@ import operator
 import traceback
 import collections
 
+from dataclasses import is_dataclass, fields
+
+
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
@@ -258,6 +261,11 @@ class TracerBase:
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
+
+        if is_dataclass(a):
+            kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
+            return self.create_node("call_function", a.__class__, (), kwargs)
+
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
