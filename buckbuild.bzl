@@ -2110,6 +2110,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/prim_ops_registery.cpp",
             "torch/csrc/jit/runtime/operator.cpp",
             "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
+            "torch/csrc/utils/cpp_stacktraces.cpp",
         ],
         header_namespace = "",
         exported_headers = [
