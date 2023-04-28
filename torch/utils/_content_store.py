@@ -137,12 +137,13 @@ class ContentStoreWriter:
     #       0000..00
     #   tensors/
     #     name
-    def __init__(self, loc: str) -> None:
+    def __init__(self, loc: str, stable_hash: bool = False) -> None:
         self.loc: str = loc
         self.seen_storage_hashes: Set[str] = set()
+        self.stable_hash = stable_hash
 
     def write_storage(self, storage: torch.UntypedStorage) -> str:
-        h = hash_storage(storage)
+        h = hash_storage(storage, stable_hash=self.stable_hash)
         if h in self.seen_storage_hashes:
             return h
         # TODO: consider not using torch.save for this; we don't actually

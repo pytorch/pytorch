@@ -13,7 +13,6 @@ from datetime import timedelta
 from itertools import product
 from sys import platform
 from typing import Callable, Dict, Optional
-from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -148,7 +147,14 @@ class TimeoutTest(TestCase):
             try:
                 # 1 missing worker will cause it to timeout
                 if rank != world_size - 1:
-                    c10d._store_based_barrier(rank, barrier_store, timeout, logging_interval=timeout / 2)
+                    c10d._store_based_barrier(
+                        rank=rank,
+                        store=barrier_store,
+                        group_name="_",
+                        rendezvous_count=world_size,
+                        timeout=timeout,
+                        logging_interval=timeout / 2
+                    )
             except RuntimeError as e:
                 error_list.append(e)
 
@@ -156,25 +162,22 @@ class TimeoutTest(TestCase):
         error_list = []
         threads = []
         for init_type in ["file", "tcp", "hash"]:
-            # mock get_world_size() in _store_based_barrier so we don't need to initialize a default process group
-            with mock.patch('torch.distributed.distributed_c10d.get_world_size') as mock_get_world_size:
-                mock_get_world_size.return_value = world_size
-                for rank in range(world_size):
-                    t = threading.Thread(
-                        target=thread_work, args=(timedelta(seconds=3), init_type, world_size, rank, error_list,)
-                    )
-                    threads.append(t)
-                    t.start()
+            for rank in range(world_size):
+                t = threading.Thread(
+                    target=thread_work, args=(timedelta(seconds=3), init_type, world_size, rank, error_list,)
+                )
+                threads.append(t)
+                t.start()
 
-                for i, thread in enumerate(threads):
-                    thread.join()
+            for i, thread in enumerate(threads):
+                thread.join()
 
-                # we expect the world_size-1 threads to have failed
-                self.assertEqual(len(error_list), world_size - 1)
-                for error in error_list:
-                    self.assertTrue("Timed out initializing process group in store based barrier" in error.args[0])
-                error_list = []
-                threads = []
+            # we expect the world_size-1 threads to have failed
+            self.assertEqual(len(error_list), world_size - 1)
+            for error in error_list:
+                self.assertTrue("Timed out initializing process group in store based barrier" in error.args[0])
+            error_list = []
+            threads = []
 
 class Net(nn.Module):
     def __init__(self):
@@ -1344,6 +1347,76 @@ class AbstractCommTest:
         dist.all_gather(tensor_list, tensor_c)
         dist.all_gather(tensor_list_c, tensor)
         dist.all_gather(tensor_list_c, tensor_c)
+
+
+# Variant of AbstractCommTest that expects world size of 4
+class AbstractLargeCommTest(object):
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 4
+
+    @property
+    def device(self):
+        raise RuntimeError("Implement me")
+
+    def _test_new_group_local_sync(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+        ranks_in = [rank, (rank + 2) % self.world_size]
+        ranks_out = [i for i in range(self.world_size) if i not in ranks_in]
+        self.assertIn(rank, ranks_in)
+        self.assertNotIn(rank, ranks_out)
+
+        self.assertIsNone(dist.new_group(ranks=ranks_out, use_local_synchronization=True))
+
+        new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+        self.assertIsInstance(new_pg, dist.ProcessGroup)
+
+        # PTD sorts ranks before creating the PG, so [3, 1] actually gets assigned ranks [1, 0]
+        ranks_in.sort()
+        self.assertEqual(dist.get_group_rank(new_pg, rank), ranks_in.index(rank))
+        self.assertEqual(
+            ranks_in,
+            dist.get_process_group_ranks(new_pg),
+            f"expecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}"
+        )
+
+    def _test_new_group_local_sync_sanity_check(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # split the world in 2 PGs
+        rank = dist.get_rank()
+        pg_idx = rank // 2
+        ranks_in = [pg_idx * 2, pg_idx * 2 + 1]
+        new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+
+        input_tensor = torch.tensor([pg_idx, rank], device=self.device)
+        output_tensor_list = [torch.tensor([-1, -1], device=self.device,) for _ in range(new_pg.size())]
+        dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+        expected = [
+            torch.tensor([pg_idx, ranks_in[0]], device=self.device),
+            torch.tensor([pg_idx, ranks_in[1]], device=self.device)
+        ]
+        self.assertEqual(output_tensor_list, expected)
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
