@@ -357,7 +357,7 @@ RegisterOperators logging_operators(
            }
            torch::jit::logging::getLogger()->addStatValue(*key, val);
          },
-         aliasAnalysisFromSchema()),
+         aliasAnalysisConservative()),
      Operator(
          "prim::TimePoint() -> int",
          [](Stack& stack) {
