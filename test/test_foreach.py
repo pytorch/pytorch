@@ -878,6 +878,16 @@ class TestForeach(TestCase):
         self.assertIsNotNone(tensors[0].grad_fn)
         self.assertIsNone(tensors[1].grad_fn)
 
+    @onlyCUDA
+    @ops(foreach_unary_op_db, dtypes=(torch.float,))
+    def test_outplace_with_invalid_grads(self, device, dtype, op):
+        func, *_ = self._get_funcs(op)
+        inputs = [torch.tensor(i + 1, device=device, dtype=dtype, requires_grad=True) for i in range(2)]
+        (out1, out2) = func([inputs], is_cuda=False, is_fastpath=False, zero_size=False,)
+        out1.backward()
+        self.assertIsNotNone(inputs[0].grad)
+        self.assertIsNone(inputs[1].grad)
+
 
 instantiate_device_type_tests(TestForeach, globals())
 
