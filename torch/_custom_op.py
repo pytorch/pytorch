@@ -1,3 +1,6 @@
+import contextlib
+import dataclasses
+import functools
 import inspect
 import typing
 import weakref
@@ -20,7 +23,7 @@ This file contains the implementation for a Simple Custom Operator API (CustomOp
 Using CustomOp, you are able to define a custom operator and implement interactions
 between the CustomOp and various PyTorch subsystems, including all the subsystems
 that are necessary for a custom operator to work with torch.compile (i.e.,
-autograd, meta, functionalization).
+autograd, FakeTensor, functionalization).
 
 CustomOp is positioned as being safer and easier to use than
 torch.library/TORCH_LIBRARY, which require deep understanding of PyTorch internals.
@@ -29,7 +32,7 @@ comprehensive than autograd.Function, which only supports implementing gradient
 computation and vmap rules.
 """
 
-__all__ = ["custom_op", "CustomOp"]
+__all__ = ["custom_op", "CustomOp", "get_ctx", "AbstractImplCtx"]
 
 
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
@@ -161,11 +164,14 @@ class CustomOp:
         # Has the name of the op, e.g. "foo". We cache here for convenience.
         self._opname: str = str(operator_name)
         # this is _opname but with namespace. e.g. "custom::foo"
-        self._namespaced_opname: str = name
+        self._qualname: str = name
         self.__name__ = None  # mypy requires this
+        self._abstract_impl: typing.Optional[FuncAndLocation] = None
+
+        global_registry[self._qualname] = self
 
     def __repr__(self):
-        return f'<CustomOp(op="{self._namespaced_opname}")>'
+        return f'<CustomOp(op="{self._qualname}")>'
 
     def __call__(self, *args, **kwargs):
         # Bypass torch.ops.* and directly do OperatorHandle::callBoxed.
@@ -226,41 +232,120 @@ class CustomOp:
 
         return inner
 
-    def impl_meta(self) -> typing.Callable:
-        r"""Register a meta implementation for this CustomOp object.
+    def impl_abstract(self) -> typing.Callable:
+        r"""Register an abstract implementation for this operator.
 
-        The meta implementation is a shape propagation rule that gets invoked
-        for device='meta' Tensors and FakeTensors (Tensors that do not have storage).
+        An "abstract implementation" specifies the behavior of this operator on
+        Tensors that carry no data. Given some input Tensors with certain properties
+        (sizes/strides/storage_offset/device), it specifies what the properties of
+        the output Tensors are.
 
-        To register a data-dependent shape propagation rule, use the
-        not-yet-implemented method to register a rule for FakeTensor.
+        The abstract implementation has the same signature as the operator.
+        It is run for both FakeTensors and meta tensors. To write an abstract
+        implementation, assume that all Tensor inputs to the operator are
+        regular CPU/CUDA/Meta tensors, but they do not have storage, and
+        you are trying to return regular CPU/CUDA/Meta tensor(s) as output.
+        The abstract implementation must consist of only PyTorch operations
+        (and may not directly access the storage or data of any input or
+        intermediate Tensors).
 
         This API is used as a decorator (see examples).
 
         Examples::
             >>> import numpy as np
             >>>
-            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
-            >>> def numpy_sin(x):
+            >>> # Example 1: an operator without data-dependent output shape
+            >>> @custom_op('(Tensor x, Tensor weight, Tensor bias) -> Tensor', ns='custom')
+            >>> def custom_linear(x, weight, bias):
             >>>     ...
             >>>
-            >>> @custom_sum.impl_meta():
-            >>> def custom_sum(tensor, dim):
-            >>>     output_shape = list(tensor.shape)
-            >>>     del output_shape[dim]
-            >>>     return tensor.new_empty(output_shape)
+            >>> @custom_linear.impl_abstract():
+            >>> def custom_linear_abstract(x, weight):
+            >>>     assert x.dim() == 2
+            >>>     assert weight.dim() == 2
+            >>>     assert bias.dim() == 1
+            >>>     assert x.shape[1] == weight.shape[1]
+            >>>     assert weight.shape[0] == bias.shape[0]
+            >>>     assert x.device == weight.device
             >>>
-            >>> x = torch.randn(2, 3, device='meta')
-            >>> y = custom_sum(x, 1)
-            >>> assert y.shape == (2,)
+            >>>     return (x @ weight.t()) + bias
+            >>>
+            >>> # Example 2: an operator with data-dependent output shape
+            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
+            >>> def custom_nonzero(x):
+            >>>     ...
+            >>>
+            >>> @custom_nonzero.impl_abstract():
+            >>> def custom_nonzero_abstract(x):
+            >>>     # Number of nonzero-elements is data-dependent.
+            >>>     # Since we cannot peek at the data in an abstract impl,
+            >>>     # we use the ctx object to construct a new symint that
+            >>>     # represents the data-dependent size.
+            >>>     ctx = torch._custom_op.get_ctx()
+            >>>     nnz = ctx.create_unbacked_symint()
+            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
+            >>>     # range to at least 2. Note that the operator implementation
+            >>>     # must also do this.
+            >>>     ctx.constrain_range(nnz, min=2)
+            >>>     shape = [x.dim(), nnz]
+            >>>     result = x.new_empty(shape, dtype=torch.long)
+            >>>     return result
+            >>>
+            >>> @numpy_nonzero.impl(['cpu', 'cuda'])
+            >>> def custom_nonzero_impl(x):
+            >>>     x_np = to_numpy(x)
+            >>>     res = np.stack(np.nonzero(x_np), axis=1)
+            >>>     # symbolic ints in PyTorch must be >= 2, so we constrain the
+            >>>     # range to at least 2.
+            >>>     if res.shape[0] <= 1:
+            >>>         raise RuntimeError("not supported")
+            >>>     return torch.tensor(res, device=x.device)
 
         """
 
         def inner(f):
-            library.impl(self._lib, self._opname, "Meta")(f)
+            frame = inspect.stack()[1]
+            if self._abstract_impl is not None:
+                raise RuntimeError(
+                    f"Attempting to register an abstract impl for operator {self._qualname} "
+                    f"that already has an abstract impl registered from Python at "
+                    f"{self._abstract_impl.location}. This is not supported."
+                )
+            new_location = f"{frame.filename}:{frame.lineno}"
+
+            # FakeTensor will look at _abstract_impl
+            self._abstract_impl = FuncAndLocation(f, new_location)
+
+            qualname = self._qualname
+
+            # Handle DispatchKey.Meta registration
+            @functools.wraps(f)
+            def f_with_ctx(*args, **kwargs):
+                def error_on_ctx():
+                    raise RuntimeError(
+                        f"Attempted to call get_ctx() for the meta implementation "
+                        f"for {qualname}."
+                        f"You have presumably called get_ctx() because the operator "
+                        f"has a data-dependent output shape; if so, there is no "
+                        f"such meta implementation and this error is the correct "
+                        f"behavior. Otherwise, please remove the call to get_ctx() "
+                        f"in the implementation registered with impl_abstract "
+                        f"at {new_location}"
+                    )
+
+                with set_ctx_getter(error_on_ctx):
+                    return f(*args, **kwargs)
+
+            self._lib.impl(self._opname, f_with_ctx, "Meta")
             return f
 
         return inner
+
+
+@dataclasses.dataclass
+class FuncAndLocation:
+    func: typing.Callable
+    location: str
 
 
 def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):
@@ -370,3 +455,131 @@ def validate_function_matches_schema(
             f"Schema has kwonlyarg names {kwonlyarg_names} but function has "
             f"{arg_spec.kwonlyargs}."
         )
+
+
+# Global dictionary holding weak references to all CustomOp objects
+# Used to query the CustomOp associated with a specific C++ dispatcher operator.
+# An example usage is FakeTensor: FakeTensor checks if a specific operator
+# has an implementation registered via the CustomOp API.
+global_registry: weakref.WeakValueDictionary = weakref.WeakValueDictionary({})
+
+
+def get_none():
+    return None
+
+
+global_ctx_getter: typing.Callable = get_none
+
+
+# NOTE [ctx inside the fake implementation]
+# If a user has an operator with data-dependent output shape, then when writing
+# a fake implementation they must query the current ctx and use methods on the
+# ctx to construct a new unbacked symint.
+#
+# This is done via us setting the global_ctx_getter function every time a fake
+# implementation is invoked.
+def get_ctx() -> "AbstractImplCtx":
+    """get_ctx() returns the current AbstractImplCtx object.
+
+    Calling ``get_ctx()`` is only valid inside of an abstract implementation.
+    """
+    return global_ctx_getter()
+
+
+@contextlib.contextmanager
+def set_ctx_getter(ctx_getter):
+    global global_ctx_getter
+    prev = global_ctx_getter
+    try:
+        global_ctx_getter = ctx_getter
+        yield
+    finally:
+        global_ctx_getter = prev
+
+
+class AbstractImplCtx:
+    """
+    Context object for writing abstract implementations for custom operators.
+    """
+
+    def __init__(self, _shape_env, _op):
+        self._shape_env = _shape_env
+        self._op = _op
+
+    def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
+        """Constructs a new symint (symbolic int) representing a data-dependent value.
+
+        This is useful for writing the abstract implementation (which is necessary
+        for torch.compile) for a CustomOp where an output Tensor has a size
+        that depends on the data of the input Tensors.
+
+        Args:
+            min (int): A statically known inclusive lower bound for this symint.
+                min must be at least 2 due to implementation details of
+                torch.compile. Default: 2.
+            max (Optional[int]): A statically known inclusive upper bound for this
+                symint. Default: None
+
+        .. warning:
+
+            It is important that the ``min`` and ``max`` (if not None) values are set
+            correctly, otherwise, there will be undefined behavior under
+            torch.compile. The default value of ``min`` is 2 due to torch.compile
+            specializing on 0/1 sizes.
+
+            You must also verify that your implementation on concrete Tensors
+            (e.g. CPU/CUDA) only returns Tensors where the size that corresponds
+            to the symint also has respects these constraint.
+            The easiest way to do this is to add an assertion in the CPU/CUDA/etc
+            implementation that the size follows these bounds.
+
+        Example::
+
+            >>> # an operator with data-dependent output shape
+            >>> @custom_op('(Tensor x) -> Tensor', ns='custom')
+            >>> def custom_nonzero(x):
+            >>>     ...
+            >>>
+            >>> @custom_nonzero.impl_abstract():
+            >>> def custom_nonzero_abstract(x):
+            >>>     # Number of nonzero-elements is data-dependent
+            >>>     ctx = torch._custom_op.get_ctx()
+            >>>     nnz = ctx.create_unbacked_symint()
+            >>>     shape = [x.dim(), nnz]
+            >>>     result = x.new_empty(shape, dtype=torch.long)
+            >>>     return result
+            >>>
+            >>> @numpy_nonzero.impl(['cpu', 'cuda'])
+            >>> def custom_nonzero_impl(x):
+            >>>     x_np = to_numpy(x)
+            >>>     res = np.stack(np.nonzero(x_np), axis=1)
+            >>>     # the size associated with ctx.create_unbacked_symint()
+            >>>     # must be constrained in the same way, so we add an assertion here.
+            >>>     if res.shape[0] < 2 or res.shape[0] > x.numel():
+            >>>         raise RuntimeError("not supported")
+            >>>     return torch.tensor(res, device=x.device)
+
+        """
+        if (
+            self._shape_env is None
+            or not self._shape_env.allow_dynamic_output_shape_ops
+        ):
+            raise torch._subclasses.fake_tensor.DynamicOutputShapeException(self._op)
+
+        if isinstance(min, torch.SymInt) or isinstance(max, torch.SymInt):
+            raise ValueError(
+                f"ctx.create_unbacked_symint(min={min}, max={max}): expected "
+                f"min and max to be statically known ints but got SymInt. "
+                f"This is not supported."
+            )
+
+        if min < 2:
+            raise ValueError(
+                f"ctx.create_unbacked_symint(min={min}, ...): expected min to be "
+                f"greater than or equal to 2. PyTorch only supports new "
+                f"data-dependent sizes of >= 2"
+            )
+
+        result = self._shape_env.create_unbacked_symint()
+        torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max)
+        return result

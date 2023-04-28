@@ -8,6 +8,8 @@ from enum import Enum
 from typing import Dict, List, Sequence
 from unittest.mock import patch
 
+import pytest
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
@@ -2268,6 +2270,78 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata(self):
+        from torch._export.constraints import constrain_as_size
+
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        gm, _ = torch._dynamo.export(
+            f,
+            *example_inputs,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertEqual(
+            gm.meta["input_shape_constraints"],
+            [c.serializable_spec for c in constraints],
+        )
+        self.assertEqual(gm.meta["example_inputs"], example_inputs)
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
+    @pytest.mark.xfail(reason="Saving example_fake_inputs breaks the serialization")
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_exported_graph_serialization(self):
+        import io
+
+        from torch._export.constraints import constrain_as_size
+
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        gm, _ = torch._dynamo.export(
+            f,
+            *example_inputs,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        # Ensure the exported graph module with metadata is serializable,
+        # metadata won't be saved in the serialized module
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
 
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
