@@ -123,6 +123,8 @@ def _operator_dispatch(
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
 ) -> Tuple[object, OpSchema, OutputSharding]:
+    if torch.distributed.get_rank() == 0:
+        print("===== operator_dispatch =====", op_call, args, kwargs)
     # check that we are not getting mixed vanilla and Distributed tensors
     arg_list, _ = tree_flatten(args)
     mesh = None
