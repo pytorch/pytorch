@@ -348,9 +348,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       bidirectional,
       batch_first,
       train);
+  Tensor bias_ih, bias_hh;
+  if (has_biases) {
+    bias_ih = weight2;
+    bias_hh = weight3;
+  } else {
+    bias_ih = at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight0.options());
+    bias_hh = at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight0.options());
+  }
   auto input_ = input;
   input_ = input_[0];
-  auto gates = at::linear(input_, weight0, weight2).add_(at::linear(hx_, weight1, weight3));
+  auto gates = at::linear(input_, weight0, bias_ih).add_(at::linear(hx_, weight1, bias_hh));
   auto chunked_gates = gates.unsafe_chunk(4, 1);
   auto i = chunked_gates[0].sigmoid_();
   auto f = chunked_gates[1].sigmoid_();
