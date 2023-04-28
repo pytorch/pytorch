@@ -20,6 +20,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 import logging
 import sys
+import torch._dynamo
+import torch.testing._internal.custom_op_db
+import re
 
 
 class TestDispatcherPythonBindings(TestCase):
@@ -618,7 +621,7 @@ class TestCustomOp(TestCase):
         def foo(x, dim):
             ...
 
-        @foo.impl_meta()
+        @foo.impl_abstract()
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -629,6 +632,33 @@ class TestCustomOp(TestCase):
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
         del foo
 
+    def test_new_data_dependent_symint(self):
+        @custom_op('(Tensor x) -> Tensor', ns='_torch_testing')
+        def foo999(x):
+            ...
+
+        @foo999.impl_abstract()
+        def foo999_meta(x):
+            ctx = torch._custom_op.get_ctx()
+            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
+                ctx.create_unbacked_symint(min=1)
+            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
+                ctx.create_unbacked_symint(min=-1)
+            with self.assertRaisesRegex(ValueError, "SymInt"):
+                ctx.create_unbacked_symint(max=x.numel())
+            return torch.clone(x)
+
+        x = torch.randn(2, 3, device='cpu')
+        make_fx(foo999, tracing_mode='symbolic')(x)
+        del foo999
+
+    def test_meta_for_data_dependent_shape_operation(self):
+        from torch.testing._internal.custom_op_db import numpy_nonzero
+
+        x = torch.randn(10, device='meta')
+        with self.assertRaisesRegex(RuntimeError, 'data-dependent output shape'):
+            numpy_nonzero(x)
+
     def test_basic_make_fx(self):
         # More serious tests are in our CustomOp opinfo db,
         # this one is just a sanity check.
@@ -636,7 +666,7 @@ class TestCustomOp(TestCase):
         def foo(x):
             ...
 
-        @foo.impl_meta()
+        @foo.impl_abstract()
         def foo_meta(x):
             return x.sum()
 
@@ -644,6 +674,68 @@ class TestCustomOp(TestCase):
         gm = make_fx(foo, tracing_mode='symbolic')(x)
         self.assertTrue('_torch_testing.foo' in gm.code)
         del foo
+
+    def test_abstract_registration_location(self):
+        loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
+        matches = re.match(r'.*custom_op_db.py:\d+', loc)
+        self.assertIsNotNone(matches)
+
+    def test_data_dependent_basic(self):
+        from torch.testing._internal.custom_op_db import numpy_nonzero
+
+        def f(x):
+            return numpy_nonzero(x)
+
+        x = torch.randn(5, 5)
+        gm = make_fx(f, tracing_mode='symbolic')(x)
+        self.assertTrue('nonzero' in gm.code)
+
+    def test_data_dependent_fake_tracing(self):
+        from torch.testing._internal.custom_op_db import numpy_nonzero
+
+        def f(x):
+            return numpy_nonzero(x)
+
+        x = torch.randn(5, 5)
+        with self.assertRaises(torch._subclasses.fake_tensor.DynamicOutputShapeException):
+            make_fx(f, tracing_mode='fake')(x)
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
+    def test_data_dependent_compile(self):
+        import torch._dynamo.testing
+        from torch._dynamo.utils import counters
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return torch.ops._torch_testing.numpy_nonzero(x.clone()).clone()
+
+        f(torch.randn(10))
+
+        self.assertEqual(
+            dict(counters['graph_break']),
+            {'dynamic shape operator: _torch_testing.numpy_nonzero.default': 1},
+        )
+
+    # pre-existing problem: torch.compile(dynamic=True) will, by default,
+    # graph break on data-dependent operations. Eventually we'll make it so
+    # that it never graph breaks on data-dependent operations.
+    @unittest.expectedFailure
+    def test_data_dependent_nms_dynamic_compile(self):
+        import torch._dynamo.testing
+        from torch._dynamo.utils import counters
+        counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def f(x, s, i):
+            return torch.ops._torch_testing.numpy_nms(x.clone(), s, i).clone()
+
+        f(torch.randn(20, 4), torch.randn(20), 0.1)
+
+        self.assertEqual(len(counters['graph_break']), 0)
+
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:

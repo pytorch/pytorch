@@ -419,6 +419,7 @@ class ExportPassBase(PassBase):
         )
 
     def call(self, graph_module: fx.GraphModule) -> PassResult:
+        self.current_gm = graph_module
         if not getattr(self, "_initialized", False):
             raise ExportPassBaseError(
                 "ExportPass is not initialized with __init__().",

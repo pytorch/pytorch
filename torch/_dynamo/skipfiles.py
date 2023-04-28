@@ -31,7 +31,6 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
-import torch.ao.quantization._pt2e.qat_utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
@@ -126,7 +125,11 @@ FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.
 # They are exported to aten graphs before being passed to the FX subgraph rewriter.
-FILENAME_ALLOWLIST |= {torch.ao.quantization._pt2e.qat_utils.__file__}
+# TODO: find a better way to express this path without having to import
+# `torch.ao.quantization._pt2e`, which interferes with memory profiling
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
+}
 
 
 SKIP_DIRS_RE = None

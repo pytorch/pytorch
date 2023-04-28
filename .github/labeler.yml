@@ -9,6 +9,7 @@
 - test/inductor/**
 
 "ciflow/inductor":
+- torch/_decomp/**
 - torch/_dynamo/**
 - torch/_inductor/**
 - benchmarks/dynamo/**
