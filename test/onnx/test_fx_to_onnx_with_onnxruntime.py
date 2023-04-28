@@ -155,9 +155,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (tensor_x,), {"b": torch.tensor(5.0)}
         )
 
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.skip_dynamic_fx_test(
         "https://github.com/pytorch/pytorch/issues/99534"
-        "To make it work, convert the float argument into a 0d tensor"
+        "Constant is not traceable in dynamo."
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -300,7 +300,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.m(x)
 
         input = torch.randn(2)
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, Model(), (input,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
     @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "
