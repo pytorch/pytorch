@@ -213,7 +213,7 @@ TORCH_API std::vector<Tensor> from_functional_tensor(ITensorListRef t_list);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
-TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
+TORCH_API void sync(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API void sync(ITensorListRef t_list);
 
 TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);

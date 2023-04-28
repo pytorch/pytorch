@@ -34,7 +34,7 @@
  *
  * 3. How to figure out the shape/dtype
  * ------------------------------------
- * Unfortunatley there isn't a one-stop-shop for learning the output shape
+ * Unfortunately there isn't a one-stop-shop for learning the output shape
  * formulae for all operators.  This is partly because some operators are not
  * part of our 'public' API, including backward operators which users don't
  * directly invoke.
@@ -427,8 +427,8 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     at::IntArrayRef size,
     bool implicit) {
-  TORCH_CHECK_GE(size.size(), self.dim());
-  int64_t num_new_dimensions = size.size() - self.dim();
+  TORCH_CHECK_GE(static_cast<int64_t>(size.size()), self.dim());
+  size_t num_new_dimensions = size.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
   padded_self.insert(
       padded_self.end(), self.sizes().begin(), self.sizes().end());
@@ -443,33 +443,32 @@ std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
     bool implicit) {
-  TORCH_CHECK_GE(size.size(), self.dim());
+  TORCH_CHECK_GE(static_cast<int64_t>(size.size()), self.dim());
   std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
-  int64_t num_new_dimensions = _sizes.size() - self.dim();
+  size_t num_new_dimensions = _sizes.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
   padded_self.insert(
       padded_self.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(_sizes.size());
   for (const auto idx : c10::irange(_sizes.size())) {
-    if (_sizes[idx].is_symbolic()) {
-      c10::SymNode symbolicIntNode = _sizes[idx].toSymNodeImpl();
-      auto* lazySymNode =
-          dynamic_cast<torch::lazy::SymNodeImpl*>(symbolicIntNode.get());
+    if (auto ma = _sizes[idx].maybe_as_int()) {
+      target_size[idx] = *ma;
+      if (*ma == -1) {
+        // -1 can't be specified for non-existing dimensions
+        TORCH_CHECK(idx >= num_new_dimensions);
+        target_size[idx] = padded_self[idx];
+      } else {
+        target_size[idx] = *ma;
+      }
+    } else {
+      auto* lazySymNode = dynamic_cast<torch::lazy::SymNodeImpl*>(
+          _sizes[idx].toSymNodeImplUnowned());
       TORCH_INTERNAL_ASSERT(lazySymNode);
       auto size_node = lazySymNode->node_;
       auto static_value =
           std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
               ->getStaticValue();
       target_size[idx] = static_value;
-    } else {
-      target_size[idx] = _sizes[idx].as_int_unchecked();
-      if (_sizes[idx].as_int_unchecked() == -1) {
-        // -1 can't be specified for non-existing dimensions
-        TORCH_CHECK(idx >= num_new_dimensions);
-        target_size[idx] = padded_self[idx];
-      } else {
-        target_size[idx] = _sizes[idx].as_int_unchecked();
-      }
     }
   }
   return {Shape(self.scalar_type(), target_size)};
@@ -1138,8 +1137,8 @@ std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
 std::vector<Shape> compute_shape_repeat(
     const at::Tensor& self,
     at::IntArrayRef repeats) {
-  TORCH_CHECK_GE(repeats.size(), self.dim());
-  int64_t num_new_dimensions = repeats.size() - self.dim();
+  TORCH_CHECK_GE(static_cast<int64_t>(repeats.size()), self.dim());
+  size_t num_new_dimensions = repeats.size() - self.dim();
   std::vector<int64_t> padded_size(num_new_dimensions, 1);
   padded_size.insert(
       padded_size.end(), self.sizes().begin(), self.sizes().end());

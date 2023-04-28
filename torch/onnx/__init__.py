@@ -45,6 +45,13 @@ from .utils import (
     unregister_custom_op_symbolic,
 )
 
+from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
+    ExportOptions,
+    ExportOutput,
+    ExportOutputSerializer,
+    dynamo_export,
+)
+
 __all__ = [
     # Modules
     "symbolic_helper",
@@ -81,11 +88,20 @@ __all__ = [
     "enable_log",
     # Errors
     "CheckerError",  # Backwards compatibility
+    # Dynamo Exporter
+    "ExportOptions",
+    "ExportOutput",
+    "ExportOutputSerializer",
+    "dynamo_export",
 ]
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
+ExportOptions.__module__ = "torch.onnx"
+ExportOutput.__module__ = "torch.onnx"
+ExportOutputSerializer.__module__ = "torch.onnx"
+dynamo_export.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

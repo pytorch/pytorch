@@ -307,7 +307,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
       const vector<int64_t>& ind_slice,
       int bs,
       int idx) {
-    // implement the functinality index_select(core, 1, ind_slice)
+    // implement the functionality index_select(core, 1, ind_slice)
     auto num_of_elements = ranks[idx] * factor_j[idx] * ranks[idx + 1];
     for (const auto i : c10::irange(bs)) {
       memcpy(
@@ -495,7 +495,7 @@ class TTSparseLengthsSumGradientOp final : public Operator<Context> {
   ~TTSparseLengthsSumGradientOp() {}
 };
 
-// implement the graident op for TTLengthSumGradient op
+// implement the gradient op for TTLengthSumGradient op
 template <typename T, class Context>
 bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   const auto& core0 = Input(0);
@@ -646,7 +646,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
       &context_);
 
   // =======================================================
-  // Calcuate dCore1_data:
+  // Calculate dCore1_data:
   // 1) Transpose core1_out_grad and multiply with core0_out
   // 2) Transpose the result and then add to dCore1_data
   vector<vector<T>> dCore1_data_slice_grad(
@@ -688,7 +688,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
         sizeof(T) * num_of_elements);
   }
 
-  // Calcuate core0_out_grad
+  // Calculate core0_out_grad
   vector<vector<T>> core0_out_grad(
       bs, vector<T>(core0_out_shape[1] * core0_out_shape[2], 0));
 

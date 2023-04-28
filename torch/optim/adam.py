@@ -83,8 +83,10 @@ class Adam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
+                    # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+                    # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
-                        torch.zeros((1,), dtype=torch.float, device=p.device)
+                        torch.zeros((), dtype=torch.float, device=p.device)
                         if group['capturable'] or group['fused']
                         else torch.tensor(0.)
                     )

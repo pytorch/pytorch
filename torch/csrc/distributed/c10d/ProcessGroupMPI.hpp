@@ -71,8 +71,8 @@ struct WorkEntry {
 // MPI_THREAD_SERIALIZED, ProcessGroupMPI will only support a singe process
 // group. In other words, no more than 1 process group can be created globally.
 //
-// If you would like to use multiple ProcessGroupMPI, it requres your MPI
-// implemenation to have a thread support value of MPI_THREAD_MULTIPLE, that is,
+// If you would like to use multiple ProcessGroupMPI, it requires your MPI
+// implementation to have a thread support value of MPI_THREAD_MULTIPLE, that is,
 // multiple threads may call MPI, with no restriction.
 //
 // Also note that ProcessGroupMPI only supports a single Tensor operation. In
@@ -229,7 +229,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
+  // Creating a new ProcessGroupMPI, will initialize MPI if not initialized
   static c10::intrusive_ptr<ProcessGroupMPI> createProcessGroupMPI(
       std::vector<int> ranks = {});
 

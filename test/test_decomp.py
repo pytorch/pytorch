@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
-from torch._ops import has_key, DispatchKey
+from torch._ops import DispatchKey
 
 import itertools
 import functools
@@ -59,9 +59,9 @@ def diff_arg(arg, requires_grad=True):
             return arg.is_floating_point() or arg.is_complex()
 
     if is_iterable_of_tensors(arg):
-        if all([is_differentiable_arg(a) for a in arg]):
+        if all(is_differentiable_arg(a) for a in arg):
             return True
-        if all([not is_differentiable_arg(a) for a in arg]):
+        if all(not is_differentiable_arg(a) for a in arg):
             return False
         raise RuntimeError("NYI: The test runner can't handle this")
     return isinstance(arg, Tensor) and is_differentiable_arg(arg)
@@ -174,6 +174,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
+        # see https://github.com/pytorch/pytorch/pull/96264
+        (torch.float16, torch.ops.aten.mv.default): 1e-5,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -715,7 +717,7 @@ class HasDecompTest(TestCase):
 
             try:
                 # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                return not has_key(op, DispatchKey.CompositeImplicitAutograd)
+                return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
             except RuntimeError as e:
                 # has_key fails for some jit-registered ops, which shouldn't be
                 # relevant here anyway

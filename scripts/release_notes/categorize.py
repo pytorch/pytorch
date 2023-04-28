@@ -1,14 +1,30 @@
 import argparse
 import os
 import textwrap
-from common import categories, topics, get_commit_data_cache
+from common import topics, get_commit_data_cache
 from commitlist import CommitList
 
+# Imports for working with classi
+from classifier import CommitClassifier, CategoryConfig, XLMR_BASE, get_author_map, get_file_map, CommitClassifierInputs
+import common
+import torch
+from pathlib import Path
+
 class Categorizer:
-    def __init__(self, path, category='Uncategorized'):
+    def __init__(self, path, category='Uncategorized', use_classifier:bool = False):
         self.cache = get_commit_data_cache()
         self.commits = CommitList.from_existing(path)
-
+        if use_classifier:
+            print("Using a classifier to aid with categorization.")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            classifier_config = CategoryConfig(common.categories)
+            author_map = get_author_map(Path("results/classifier"), regen_data=False, assert_stored=True)
+            file_map = get_file_map(Path("results/classifier"), regen_data=False, assert_stored=True)
+            self.classifier = CommitClassifier(XLMR_BASE, author_map, file_map, classifier_config).to(device)
+            self.classifier.load_state_dict(torch.load(Path("results/classifier/commit_classifier.pt")))
+            self.classifier.eval()
+        else:
+            self.classifier = None
         # Special categories: 'Uncategorized'
         # All other categories must be real
         self.category = category
@@ -64,6 +80,15 @@ class Categorizer:
             potential_reverts = ""
 
         features = self.features(commit)
+        if self.classifier is not None:
+            # Some commits don't have authors:
+            author = features.author if features.author else "Unknown"
+            files = ' '.join(features.files_changed)
+            classifier_input = CommitClassifierInputs(title=[features.title], files=[files], author=[author])
+            classifier_category = self.classifier.get_most_likely_category_name(classifier_input)[0]
+
+        else:
+            classifier_category = commit.category
 
         breaking_alarm = ""
         if 'module: bc-breaking' in features.labels:
@@ -88,17 +113,19 @@ Labels: {features.labels}
 
 Current category: {commit.category}
 
-Select from: {', '.join(categories)}
+Select from: {', '.join(common.categories)}
 
         ''')
         print(view)
         cat_choice = None
         while cat_choice is None:
-            value = input('category> ').strip()
+            print("Enter category: ")
+            value = input(f'{classifier_category} ').strip()
             if len(value) == 0:
-                cat_choice = commit.category
+                # The user just pressed enter and likes the default value
+                cat_choice = classifier_category
                 continue
-            choices = [cat for cat in categories
+            choices = [cat for cat in common.categories
                        if cat.startswith(value)]
             if len(choices) != 1:
                 print(f'Possible matches: {choices}, try again')
@@ -124,7 +151,7 @@ Select from: {', '.join(categories)}
         return None
 
     def update_commit(self, commit, category, topic):
-        assert category in categories
+        assert category in common.categories
         assert topic in topics
         commit.category = category
         commit.topic = topic
@@ -136,9 +163,10 @@ def main():
                         help='Which category to filter by. "Uncategorized", None, or a category name')
     parser.add_argument('--file', help='The location of the commits CSV',
                         default='results/commitlist.csv')
+    parser.add_argument('--use_classifier', action='store_true', help="Whether or not to use a classifier to aid in categorization.")
 
     args = parser.parse_args()
-    categorizer = Categorizer(args.file, args.category)
+    categorizer = Categorizer(args.file, args.category, args.use_classifier)
     categorizer.categorize()
 
 

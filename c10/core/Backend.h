@@ -112,9 +112,10 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedXPU;
   } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
     return Backend::HPU;
-  } else if (t == DispatchKey::MTIA) {
+  } else if (t == DispatchKey::MTIA || t == DispatchKey::AutogradMTIA) {
     return Backend::MTIA;
-  } else if (t == DispatchKey::PrivateUse1) {
+  } else if (
+      t == DispatchKey::PrivateUse1 || t == DispatchKey::AutogradPrivateUse1) {
     return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;

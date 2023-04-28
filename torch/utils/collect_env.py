@@ -49,8 +49,9 @@ SystemEnv = namedtuple('SystemEnv', [
 
 def run(command):
     """Returns (return-code, stdout, stderr)"""
+    shell = True if type(command) is str else False
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, shell=True)
+                         stderr=subprocess.PIPE, shell=shell)
     raw_output, raw_err = p.communicate()
     rc = p.returncode
     if get_platform() == 'win32':
@@ -108,6 +109,7 @@ def get_conda_packages(run_lambda):
                 "mkl",
                 "magma",
                 "mkl",
+                "triton",
             }
         )
     )
@@ -374,9 +376,9 @@ def get_pip_packages(run_lambda):
     """Returns `pip list` output. Note: will also find conda-installed pytorch
     and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
-    # But here it is incoved as `python -mpip`
+    # But here it is invoked as `python -mpip`
     def run_with_pip(pip):
-        out = run_and_read_all(run_lambda, "{} list --format=freeze".format(pip))
+        out = run_and_read_all(run_lambda, pip + ["list", "--format=freeze"])
         return "\n".join(
             line
             for line in out.splitlines()
@@ -386,12 +388,14 @@ def get_pip_packages(run_lambda):
                     "torch",
                     "numpy",
                     "mypy",
+                    "flake8",
+                    "triton",
                 }
             )
         )
 
     pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
-    out = run_with_pip(sys.executable + ' -mpip')
+    out = run_with_pip([sys.executable, '-mpip'])
 
     return pip_version, out
 

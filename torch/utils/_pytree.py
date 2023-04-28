@@ -51,7 +51,7 @@ def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
-    return {key: value for key, value in zip(context, values)}
+    return dict(zip(context, values))
 
 def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None
@@ -103,7 +103,7 @@ def _get_node_type(pytree: Any) -> Any:
 
 # A leaf is defined as anything that is not a Node.
 def _is_leaf(pytree: PyTree) -> bool:
-    return _get_node_type(pytree) not in SUPPORTED_NODES.keys()
+    return _get_node_type(pytree) not in SUPPORTED_NODES
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
