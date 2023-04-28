@@ -5392,6 +5392,7 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
+    @onlyNativeDeviceTypes
     def test_masked_scatter_inplace_noncontiguous(self, device):
         t = torch.zeros(5, 2, dtype=torch.long, device=device)
         t_non_contig = t.transpose(0, 1)
