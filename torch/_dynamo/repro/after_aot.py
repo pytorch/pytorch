@@ -305,7 +305,7 @@ class InputWriter:
             "import torch._dynamo.repro.after_aot",
             f"reader = torch._dynamo.repro.after_aot.InputReader(save_dir={self.save_dir!r}, total={len(self._lines)})",
         ]
-        r.extend(f"    {l}" for l in self._lines)
+        r.extend(self._lines)
         return r
 
     # Storages are untyped, but we need to initialize them with data if
@@ -452,7 +452,7 @@ def save_graph_repro(
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
         f"    run_repro(mod, args, accuracy={accuracy!r}, minify={minify!r}, "
-        "save_dir={save_dir!r}, patch_code=isolate_fails_code_str)\n"
+        f"save_dir={save_dir!r}, patch_code=isolate_fails_code_str)\n"
     )
 
 
@@ -524,8 +524,8 @@ def isolate_fails(
                 """
             )
         )
-    with open(file_name, "r") as fd:
-        print(fd.read())
+    # with open(file_name, "r") as fd:
+    #     print(fd.read())
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
     stdout, stderr = TemporaryFile(), TemporaryFile()
