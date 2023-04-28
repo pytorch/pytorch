@@ -217,7 +217,9 @@ inline ideep::tensor pack_weight(
   ideep::dims input_dims = input_shape.vec();
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wei.get_dims(), dnnl::memory::data_type::s8,
                                                              dnnl::memory::data_type::u8);
-  return wei.reorder_if_differ_in(w_desc);
+  ideep::tensor exp_wgt(w_desc);
+  exp_wgt.feed_from(wgt);
+  return exp_wgt;
 }
 
 inline ideep::tensor pack_bias(
