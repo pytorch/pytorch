@@ -10,7 +10,12 @@ from typing import Dict, List
 import torch
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..allowed_functions import is_allowed, is_builtin_callable
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_rot_n,
+)
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import istensor, istype, make_cell
@@ -46,6 +51,10 @@ def wrap_bound_arg(tx, val, options, source=None):
         val, (torch.Size, torch.device, torch.dtype)
     ):
         return variables.ConstantVariable(val, **options)
+    elif is_builtin_callable(val):
+        return variables.BuiltinVariable(val, source=source, **options)
+    elif is_allowed(val):
+        return variables.TorchVariable(val, source=source, **options)
     elif isinstance(val, types.FunctionType):
         return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
@@ -279,6 +288,11 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
+        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
+        # since we ensure `forward` of allowed modules can be traced by AOT safely.
+        # Note this is not only for allowed modules, as user customized modules can extend from
+        # allowed modules but using parent's `forward` method, which is also covered by this branch.
         if isinstance(self.obj, variables.NNModuleVariable):
             module_attr = getattr(self.fn, "__module__", "")
             if (
@@ -357,6 +371,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         annotations,
         closure,
         closure_scope,
+        wraps_source=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -373,6 +388,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if closure is None:
             closure_scope = None
         self.closure_scope = closure_scope
+        self.wraps_source = wraps_source
 
     def self_args(self):
         return []
@@ -424,7 +440,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
-
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
@@ -452,8 +467,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             flags |= 0x02
             codegen(self.kwdefaults)
-        if isinstance(self.annotations, variables.ConstDictVariable) or isinstance(
-            self.annotations, variables.TupleVariable
+        if isinstance(
+            self.annotations, (variables.ConstDictVariable, variables.TupleVariable)
         ):
             flags |= 0x04
             try:
@@ -475,4 +490,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen(self.code)
         if sys.version_info < (3, 11):
             codegen(self.fn_name)
-        return [create_instruction("MAKE_FUNCTION", flags)]
+        codegen.extend_output([create_instruction("MAKE_FUNCTION", arg=flags)])
+
+        if self.wraps_source:
+            codegen.load_import_from("functools", "wraps")
+            codegen(self.wraps_source)
+            codegen.extend_output(create_call_function(1, True))
+            codegen.extend_output(create_rot_n(2))
+            codegen.extend_output(create_call_function(1, True))
+
+        return []

@@ -149,7 +149,7 @@ class JitTestCase(JitCommonTestCase):
     def tearDown(self):
         super().tearDown()
         # needs to be cleared because python might be unloaded before
-        # the callback gets destucted
+        # the callback gets destructed
         self.clearHooks()
         clear_class_registry()
 
@@ -767,7 +767,7 @@ def _get_py3_code(code, fn_name):
         spec = importlib.util.spec_from_file_location(fn_name, script_path)
         module = importlib.util.module_from_spec(spec)
         loader = spec.loader
-        assert isinstance(loader, Loader)  # Assert type to meet MyPy requriement
+        assert isinstance(loader, Loader)  # Assert type to meet MyPy requirement
         loader.exec_module(module)
         fn = getattr(module, fn_name)
         return fn

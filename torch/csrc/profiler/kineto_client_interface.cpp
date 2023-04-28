@@ -22,18 +22,27 @@ class LibKinetoClient : public libkineto::ClientInterface {
  public:
   void init() override {}
 
-  void warmup(bool setupOpInputsCollection) override {
-    reportInputShapes_ = setupOpInputsCollection;
+  void prepare(
+      bool report_input_shapes = false,
+      bool profile_memory = false,
+      bool with_stack = false,
+      bool with_flops = false,
+      bool with_modules = false) override {
+    reportInputShapes_ = report_input_shapes;
+    profileMemory_ = profile_memory;
+    withStack_ = with_stack;
+    withFlops_ = with_flops;
+    withModules_ = with_modules;
   }
 
   void start() override {
     ProfilerConfig cfg{
         ProfilerState::KINETO_ONDEMAND,
         /*report_input_shapes=*/reportInputShapes_,
-        /*profile_memory=*/false,
+        /*profile_memory=*/profileMemory_,
         /*with_stack=*/withStack_,
-        /*with_flops=*/false,
-        /*with_modules=*/false};
+        /*with_flops=*/withFlops_,
+        /*with_modules=*/withModules_};
     std::set<ActivityType> activities{ActivityType::CPU};
     std::unordered_set<at::RecordScope> scopes;
     scopes.insert(at::RecordScope::FUNCTION);
@@ -46,14 +55,14 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  void set_withstack(bool withStack) override {
-    withStack_ = withStack;
-  }
-
  private:
-  bool reportInputShapes_{true};
+  // Temporarily disable shape collection until
+  // we re-roll out the feature for on-demand cases
+  bool reportInputShapes_{false};
+  bool profileMemory_{false};
   bool withStack_{false};
+  bool withFlops_{false};
+  bool withModules_{false};
 };
 
 } // namespace

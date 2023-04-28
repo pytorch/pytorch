@@ -245,6 +245,7 @@ def get_aten_preprocessor_flags():
         "-DCAFFE2_USE_LITE_PROTO",
         "-DATEN_CUDNN_ENABLED_FBXPLAT=0",
         "-DATEN_MKLDNN_ENABLED_FBXPLAT=0",
+        "-DATEN_MKLDNN_ACL_ENABLED_FBXPLAT=0",
         "-DATEN_NNPACK_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_SEQUENTIAL_FBXPLAT=0",
@@ -565,13 +566,21 @@ def pt_operator_query_codegen(
         apple_sdks = None):
     oplist_dir_name = name + "_pt_oplist"
 
+    # Use a helper rule to properly resolves any `select()`s in deps.
+    fb_native.cxx_library(
+        name = oplist_dir_name + "-deps",
+        compatible_with = compatible_with,
+        deps = deps,
+        visibility = ["PUBLIC"],
+    )
+
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = oplist_dir_name,
         cmd = ("$(exe {}tools:gen_oplist) ".format(ROOT_PATH) +
-               "--model_file_list_path $(@query_outputs 'attrfilter(labels, pt_operator_library, deps(set({deps})))') " +
+               "--model_file_list_path $(@query_outputs 'attrfilter(labels, pt_operator_library, deps(\":{name}-deps\"))') " +
                ("" if enforce_traced_op_list else "--allow_include_all_overloads ") +
-               "--output_dir $OUT ").format(deps = " ".join(["\"{}\"".format(d) for d in deps])),
+               "--output_dir $OUT ").format(name = oplist_dir_name),
         outs = get_gen_oplist_outs(),
         default_outs = ["."],
         compatible_with = compatible_with,
@@ -1042,6 +1051,9 @@ def define_buck_targets(
             "@AT_MKLDNN_ENABLED@",
             "ATEN_MKLDNN_ENABLED_FBXPLAT",
             "--replace",
+            "@AT_MKLDNN_ACL_ENABLED@",
+            "ATEN_MKLDNN_ACL_ENABLED_FBXPLAT",
+            "--replace",
             "@AT_MKL_ENABLED@",
             "ATEN_MKL_ENABLED_FBXPLAT",
             "--replace",
@@ -1463,6 +1475,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            "torch/csrc/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],

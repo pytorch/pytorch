@@ -600,7 +600,7 @@ method_only_ops = [
 
 
 def get_nn_functional_top_list():
-    top_nn_functional_ = {k: v for k, v in top_nn_functional}
+    top_nn_functional_ = dict(top_nn_functional)
     for _, count, functional_name in top_nn_module:
         if functional_name is None:
             continue

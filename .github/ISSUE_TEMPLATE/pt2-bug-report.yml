@@ -33,7 +33,7 @@ body:
       label: Minified repro
       description: |
         Please run the minifier on your example and paste the minified code below
-        Learn more here https://pytorch.org/docs/master/dynamo/troubleshooting.html
+        Learn more here https://pytorch.org/docs/master/compile/troubleshooting.html
       placeholder: |
         env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
         or
@@ -53,9 +53,9 @@ body:
       description: |
         Please run the following and paste the output below.
         ```sh
-        wget https://raw.githubusercontent.com/pytorch/pytorch/master/torch/utils/collect_env.py
+        curl -OL https://raw.githubusercontent.com/pytorch/pytorch/main/torch/utils/collect_env.py
         # For security purposes, please check the contents of collect_env.py before running it.
-        python collect_env.py
+        python3 collect_env.py
         ```
     validations:
       required: true

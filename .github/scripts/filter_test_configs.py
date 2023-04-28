@@ -6,9 +6,8 @@ import re
 import sys
 import warnings
 from typing import Any, Dict, List, Set
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
-import requests
 import yaml
 
 PREFIX = "test-config/"
@@ -92,27 +91,24 @@ def get_labels(pr_number: int) -> Set[str]:
     Dynamical get the latest list of labels from the pull request
     """
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
-    PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
-    PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
-    GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+    pytorch_repo = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
+    pytorch_github_api = f"https://api.github.com/repos/{pytorch_repo}"
+    github_token = os.environ["GITHUB_TOKEN"]
 
-    REQUEST_HEADERS = {
+    headers = {
         "Accept": "application/vnd.github.v3+json",
-        "Authorization": "token " + GITHUB_TOKEN,
+        "Authorization": f"token {github_token}",
     }
-
-    response = requests.get(
-        f"{PYTORCH_GITHUB_API}/issues/{pr_number}/labels",
-        headers=REQUEST_HEADERS,
+    json_response = download_json(
+        url=f"{pytorch_github_api}/issues/{pr_number}/labels",
+        headers=headers,
     )
 
-    if response.status_code != requests.codes.ok:
-        warnings.warn(
-            f"Failed to get the labels for #{pr_number} (status code {response.status_code})"
-        )
+    if not json_response:
+        warnings.warn(f"Failed to get the labels for #{pr_number}")
         return set()
 
-    return {label.get("name") for label in response.json() if label.get("name")}
+    return {label.get("name") for label in json_response if label.get("name")}
 
 
 def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, List[Any]]:
@@ -208,7 +204,7 @@ def remove_disabled_jobs(
     # The result will be stored here
     filtered_test_matrix: Dict[str, List[Any]] = {"include": []}
 
-    for _, record in download_json(DISABLED_JOBS_URL).items():
+    for _, record in download_json(url=DISABLED_JOBS_URL, headers={}).items():
         (
             author,
             _,
@@ -286,10 +282,11 @@ def remove_disabled_jobs(
     return test_matrix
 
 
-def download_json(url: str, num_retries: int = 3) -> Any:
+def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> Any:
     for _ in range(num_retries):
         try:
-            content = urlopen(url, timeout=5).read().decode("utf-8")
+            req = Request(url=url, headers=headers)
+            content = urlopen(req, timeout=5).read().decode("utf-8")
             return json.loads(content)
         except Exception as e:
             warnings.warn(f"Could not download {url}: {e}")

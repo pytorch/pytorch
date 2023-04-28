@@ -88,20 +88,6 @@ _UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.6.2
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
     CUDNN_VERSION=8
@@ -146,9 +132,10 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
+    ONNX=yes
     ;;
   pytorch-linux-focal-py3-clang7-android-ndk-r19c)
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.8
     CLANG_VERSION=7
     LLVMDEV=yes
     PROTOBUF=yes
@@ -197,6 +184,7 @@ case "$image" in
     ROCM_VERSION=5.3
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.8
@@ -207,6 +195,7 @@ case "$image" in
     ROCM_VERSION=5.4.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-py3.8-gcc7)
     ANACONDA_PYTHON_VERSION=3.8
@@ -216,16 +205,6 @@ case "$image" in
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
-    ANACONDA_PYTHON_VERSION=3.8
-    CUDA_VERSION=11.6
-    CUDNN_VERSION=8
-    CLANG_VERSION=12
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
@@ -271,6 +250,7 @@ case "$image" in
     if [[ "$image" == *rocm* ]]; then
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
+      TRITON=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
@@ -340,6 +320,7 @@ docker build \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
+       --build-arg "ONNX=${ONNX}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

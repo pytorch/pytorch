@@ -114,9 +114,9 @@ BATCH_SIZE_DIVISORS = {
     "BlenderbotSmallForCausalLM": 4,
     "BlenderbotSmallForConditionalGeneration": 2,
     "CamemBert": 2,
-    "DebertaForMaskedLM": 8,
-    "DebertaForQuestionAnswering": 4,
-    "DebertaV2ForMaskedLM": 8,
+    "DebertaForMaskedLM": 4,
+    "DebertaForQuestionAnswering": 2,
+    "DebertaV2ForMaskedLM": 4,
     "DebertaV2ForQuestionAnswering": 4,
     "DistilBertForMaskedLM": 2,
     "DistilBertForQuestionAnswering": 2,
@@ -137,7 +137,7 @@ BATCH_SIZE_DIVISORS = {
     "MT5ForConditionalGeneration": 2,
     "MegatronBertForCausalLM": 4,
     "MegatronBertForQuestionAnswering": 2,
-    "MobileBertForMaskedLM": 4,
+    "MobileBertForMaskedLM": 2,
     "MobileBertForQuestionAnswering": 2,
     "OPTForCausalLM": 2,
     "PLBartForCausalLM": 2,
@@ -373,7 +373,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
@@ -513,7 +512,6 @@ def refresh_model_names_and_batch_sizes():
     lm_seen = set()
     family_seen = set()
     for cls_name in hf_fx._SUPPORTED_MODELS:
-
         if "For" not in cls_name:
             continue
 

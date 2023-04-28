@@ -2,14 +2,25 @@
 
 #pragma once
 
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/TensorFactory.h>
+#include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
 #include <unordered_map>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -42,12 +53,21 @@ void runMPSGraph(
     NSDictionary* results);
 
 MPSDataType getMPSDataType(ScalarType scalar_type);
+static inline MPSDataType getMPSDataType(const Tensor& t) {
+  return getMPSDataType(t.scalar_type());
+}
 MPSDataType getMPSScalarType(ScalarType scalar_type);
+static inline MPSDataType getMPSScalarType(const Tensor& t) {
+  return getMPSScalarType(t.scalar_type());
+}
 MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type, bool short_name = false);
+static inline std::string getMPSTypeString(const Tensor& t, bool short_name = false) {
+  return getMPSTypeString(t.scalar_type(), short_name);
+}
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim);
+NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = false);
 std::string getArrayRefString(const IntArrayRef s);
@@ -90,6 +110,7 @@ class Placeholder {
 };
 
 void resize_tensor(Tensor* output);
+Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
@@ -139,12 +160,30 @@ struct MPSUnaryCachedGraph : public MPSCachedGraph
   MPSGraphTensor *outputTensor_ = nil;
 };
 
+struct MPSUnaryGradCachedGraph : public MPSCachedGraph
+{
+  MPSUnaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *gradOutputTensor_ = nil;
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *outputTensor_ = nil; // some backward input is actually the forward's output
+  MPSGraphTensor *gradInputTensor_ = nil;
+};
+
 struct MPSBinaryCachedGraph : public MPSCachedGraph
 {
   MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
   MPSGraphTensor *inputTensor_ = nil;
   MPSGraphTensor *otherTensor_ = nil;
   MPSGraphTensor *outputTensor_ = nil;
+};
+
+struct MPSBinaryGradCachedGraph : public MPSCachedGraph
+{
+  MPSBinaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+  MPSGraphTensor *gradOutputTensor_ = nil;
+  MPSGraphTensor *inputTensor_ = nil;
+  MPSGraphTensor *otherTensor_ = nil;
+  MPSGraphTensor *gradInputTensor_ = nil;
 };
 
 // TODO: Improve the overall design of MPSGraphCache.
@@ -241,6 +280,25 @@ struct MPSGraphCache
   dispatch_queue_t serialQueue_ = nullptr;
 
 };
+
+// Common template for creating graph with a specified cache if missing
+template<typename T>
+inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(MPSGraph*, T*)> instantiate) {
+  auto cache_ = MPSGraphCache::getInstance();
+  if (auto rc  = cache_->LookUpAs<T>(key)) {
+    return rc;
+  }
+  return cache_->CreateCachedGraphAs<T>(key, ^mps::MPSCachedGraph*() {
+    T* newCachedGraph = nil;
+    @autoreleasepool {
+      // Initialize graph
+      auto mpsGraph = mps::make_mps_graph();
+      newCachedGraph = new T(mpsGraph);
+      instantiate(mpsGraph, newCachedGraph);
+    }
+    return newCachedGraph;
+  });
+}
 
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);

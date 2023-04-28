@@ -67,7 +67,7 @@ struct CanEmitInline {
   Node* scanValue(Node* block_point, Value* v) {
     // this node is a candidate for inline, if our reverse scan of the
     // node list lines up with the use of v, we know it will be emitted in
-    // tree order, and we can inlining. Scan continutes for further nodes.
+    // tree order, and we can inlining. Scan continues for further nodes.
     if (v->node() == block_point && canInline(v)) {
       // since we inlined this node, we may be able to recursively inline
       // its inputs, so we continue scanning it
