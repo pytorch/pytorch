@@ -1033,6 +1033,10 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
+def cross_entropy_loss(self: List[int], target: List[int], weight: Optional[List[int]] = None, reduction: int = 1, ignore_index: int = -100, label_smoothing: float = 0.) -> List[int]:
+    result_shape = nll_loss_forward(self, target, weight, reduction)[0]
+    return result_shape
+
 """
 Currently deferring the enabling of this, as part of the propoasal to suspend
 adding ops.
@@ -1135,7 +1139,7 @@ add_shape_compute_mapping("aten::max.dim(Tensor self, int dim, bool keepdim=Fals
 add_shape_compute_mapping("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", addmm)
-add_shape_compute_mapping("aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)", upsample_nearest2d)
+add_shape_compute_mapping("aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> (Tensor)", upsample_nearest2d)
 add_shape_compute_mapping("aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", unary)
 add_shape_compute_mapping("aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", unary)
 add_shape_compute_mapping("aten::dequantize(Tensor self) -> Tensor", unary)
@@ -1149,6 +1153,7 @@ add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalize
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
 add_shape_compute_mapping("aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
 add_shape_compute_mapping("aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor", cross_entropy_loss)
 # add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
