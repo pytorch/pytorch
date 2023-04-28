@@ -9,6 +9,7 @@ import torch.ao.quantization.fx._decomposed
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
@@ -495,47 +496,6 @@ def dequantize_per_tensor_tensor_decomp_impl(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
-
-
-"""
-Some decomps result in differences from eager related to randomness.
-We put these decomps in a separate table `extra_random_decomps` to allow
-turning them on and off via `config.fallback_random`.
-"""
-extra_random_decomps = get_decompositions(
-    [
-        aten.cauchy,
-        aten.cauchy_,
-        aten.exponential,
-        aten.exponential_,
-        aten.geometric,
-        aten.geometric_,
-        aten.normal,
-        aten.normal_,
-        aten.normal_functional,
-        aten.log_normal,
-        aten.log_normal_,
-        aten.uniform_,
-    ]
-)
-register_extra_random_decomp = functools.partial(
-    decomp.register_decomposition, registry=extra_random_decomps
-)
-
-
-@register_extra_random_decomp([aten.bernoulli_])
-def bernoulli_(self, p=0.5):
-    if self.device == torch.device("cpu"):
-        return NotImplemented
-    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
-
-
-@register_extra_random_decomp([aten.bernoulli.p])
-def bernoulli_p(self, p=0.5, *, generator=None):
-    if self.device == torch.device("cpu"):
-        return NotImplemented
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 @functools.lru_cache(None)
