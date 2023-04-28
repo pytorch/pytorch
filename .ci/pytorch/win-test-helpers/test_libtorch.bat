@@ -47,11 +47,6 @@ if "%~1" == "reshape_op_gpu_test" goto :eof
 if "%~1" == "utility_ops_gpu_test" goto :eof
 
 echo Running "%~2"
-if "%~1" == "c10_intrusive_ptr_benchmark" (
-  python test\run_test.py --cpp --verbose -i "cpp/%~1"
-  goto :eof
-)
-
 python test\run_test.py --cpp --verbose -i "cpp/%~1"
 if errorlevel 1 (
   echo %1 failed with exit code %errorlevel%

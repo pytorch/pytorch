@@ -546,6 +546,8 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
+    export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
+
     # Start background download
     MNIST_DIR="${PWD}/test/cpp/api/mnist"
     python tools/download_mnist.py --quiet -d "${MNIST_DIR}" &
@@ -998,15 +1000,13 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  # REVERT ME
-  test_aten
   test_python_shard 1
+  test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  # REVERT ME
+  test_python_shard 2
   test_libtorch
   test_aot_compilation
-  test_python_shard 2
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
