@@ -22,7 +22,7 @@ void _assert_match(const O& original, const C& compared, const std::string& name
   }
 }
 
-static void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef sizes, at::OptionalIntArrayRef strides, c10::optional<c10::ScalarType> dtype) {
+void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef sizes, at::OptionalIntArrayRef strides, c10::optional<c10::ScalarType> dtype) {
   _assert_match(tensor.sizes(), sizes, "sizes");
   _assert_match(tensor.strides(), strides, "strides");
   _assert_match(tensor.dtype(), dtype, "dtype");
