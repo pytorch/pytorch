@@ -18,7 +18,7 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, diagnostics
+from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
     context as fx_context,
     fx_symbolic_graph_extractor,
@@ -73,23 +73,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.diag_ctx = diagnostics.engine.create_diagnostic_context(
-            "test_fx_export", version=torch.__version__
-        )
         self.opset_version = 18
         self.ort_version = onnxruntime.__version__
-
-    def tearDown(self):
-        # TODO(bowbao): Don't dump logs by default. Set as configurable with
-        # `DiagnosticOptions`.
-        diagnostics.engine.dump(
-            f"test_report_{self._testMethodName}"
-            f"_op_level_debug_{self.op_level_debug}"
-            f"_dynamic_axes_{self.dynamic_shapes}"
-            ".sarif",
-            compress=False,
-        )
-        super().tearDown()
 
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -300,7 +285,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.m(x)
 
         input = torch.randn(2)
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, Model(), (input,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
     @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "

@@ -1,4 +1,8 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
+
+from typing import Protocol
+
 import pytorch_test_common
 import torch
 from torch import nn
@@ -6,18 +10,24 @@ from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics.infra import sarif
 from torch.testing._internal import common_utils
 
 
+class _SarifLogBuilder(Protocol):
+    def sarif_log(self) -> sarif.SarifLog:
+        ...
+
+
 def assert_has_diagnostics(
-    engine: diagnostics.ExportDiagnosticEngine,
+    sarif_log_builder: _SarifLogBuilder,
     rule: infra.Rule,
     level: infra.Level,
     expected_error_node: str,
     expected_error_message: str,
 ):
     rule_level_pairs = (rule.id, level.name.lower())
-    sarif_log = engine.sarif_log()
+    sarif_log = sarif_log_builder.sarif_log()
     actual_results = []
     for run in sarif_log.runs:
         if run.results is None:
@@ -45,15 +55,9 @@ def assert_has_diagnostics(
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
-        self.diag_ctx = diagnostics.engine.create_diagnostic_context(
-            "test_fx_export", version=torch.__version__
-        )
         self.export_options = ExportOptions()
 
     def tearDown(self):
-        diagnostics.engine.dump(
-            f"test_report_{self._testMethodName}.sarif", compress=False
-        )
         super().tearDown()
 
     def test_simple_function(self):
@@ -136,14 +140,14 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         x = torch.randint(4, (4, 3, 2))
         embedding_matrix = torch.rand(10, 3)
 
-        _ = dynamo_export(
+        export_output = dynamo_export(
             model,
             x,
             embedding_matrix,
             export_options=ExportOptions(op_level_debug=True),
         )
         assert_has_diagnostics(
-            diagnostics.engine,
+            export_output.diagnostic_context,
             diagnostics.rules.fx_node_to_onnx,
             diagnostics.levels.WARNING,
             expected_error_node="aten.embedding.default",
@@ -162,11 +166,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.conv2(input)
 
         x = torch.randn(20, 16, 50, 50)
-        _ = dynamo_export(
+        export_output = dynamo_export(
             TraceModel(), x, export_options=ExportOptions(op_level_debug=True)
         )
         assert_has_diagnostics(
-            diagnostics.engine,
+            export_output.diagnostic_context,
             diagnostics.rules.fx_node_to_onnx,
             diagnostics.levels.WARNING,
             expected_error_node="aten.convolution.default",
