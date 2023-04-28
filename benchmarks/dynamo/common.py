@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import collections
+import contextlib
 import copy
 import csv
 import functools
@@ -328,19 +329,15 @@ def output_csv(filename, headers, row):
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
                 lines[0] = headers
+            else:
+                headers = lines[0]
     else:
         lines = [headers]
-    lines.append([(f"{x:.4f}" if isinstance(x, float) else x) for x in row])
+    lines.append([(f"{x:.6f}" if isinstance(x, float) else x) for x in row])
     with open(filename, "w") as fd:
-        csv.writer(fd, lineterminator="\n").writerows(lines)
-
-
-class NullContext:
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        writer = csv.writer(fd, lineterminator="\n")
+        for line in lines:
+            writer.writerow(line + ["0"] * (len(headers) - len(line)))
 
 
 def nothing(f):
@@ -590,7 +587,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
-    is_correct = True
 
     import contextlib
 
@@ -659,7 +655,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
         p.export_chrome_trace(name)
-    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -675,6 +670,26 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
+    msg = f"{speedup:.3f}x"
+    if args.baseline:
+        headers.extend(
+            [
+                "baseline",
+                "speedup_vs_baseline",
+            ]
+        )
+        df = pd.read_csv(args.baseline)
+        try:
+            baseline_speedup = df[df["name"] == current_name]["speedup"].item()
+            row.extend([baseline_speedup, speedup / baseline_speedup])
+            msg = f"{baseline_speedup:.3f}x →  {speedup:.3f}x [{speedup / baseline_speedup:.3f}x]"
+        except (KeyError, ZeroDivisionError):
+            row.extend(
+                [
+                    0.0,
+                    0.0,
+                ]
+            )
     if "compilation_latency" in kwargs:
         headers += [
             "compilation_latency",
@@ -704,7 +719,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_headers + headers,
         first_fields + data,
     )
-    return format_speedup(speedup, pvalue, is_correct=is_correct)
+    return msg
 
 
 def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
@@ -1021,7 +1036,7 @@ def get_dynamo_stats():
 
 def maybe_fresh_cache(fn, is_cold_start):
     def inner(*args, **kwargs):
-        cache_minder = NullContext()
+        cache_minder = contextlib.nullcontext()
         if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_inductor_cache(cache_entries)
@@ -1068,7 +1083,7 @@ class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
-        self.autocast = NullContext
+        self.autocast = contextlib.nullcontext
         self.optimizer = None
         self._args = None
 
@@ -1486,11 +1501,12 @@ class BenchmarkRunner:
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
-            print(
-                f"memory: eager: {eager_peak_mem:.2f} GB, "
-                f"dynamo: {dynamo_peak_mem:.2f} GB, "
-                f"ratio: {compression_ratio:.2f}"
-            )
+            if self.args.print_memory:
+                print(
+                    f"memory: eager: {eager_peak_mem:.2f} GB, "
+                    f"dynamo: {dynamo_peak_mem:.2f} GB, "
+                    f"ratio: {compression_ratio:.2f}"
+                )
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1795,6 +1811,10 @@ def parse_args(args=None):
         help="Overrides the directory to place output files.",
     )
     parser.add_argument(
+        "--baseline",
+        help="Compare with a prior --output",
+    )
+    parser.add_argument(
         "--part",
         default=None,
         help="Specify the part of the model to run.",
@@ -1826,6 +1846,11 @@ def parse_args(args=None):
         "--stats",
         action="store_true",
         help="print graph counter stats",
+    )
+    parser.add_argument(
+        "--print-memory",
+        action="store_true",
+        help="print extra memory statistics",
     )
     parser.add_argument(
         "--cold-start-latency",
@@ -2005,7 +2030,6 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
-
     return parser.parse_args(args)
 
 
@@ -2013,6 +2037,8 @@ def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args()
+    if args.baseline:
+        args.baseline = os.path.abspath(args.baseline)
 
     if should_diff_branch(args):
         import git
@@ -2242,7 +2268,7 @@ def run(runner, args, original_dir=None):
 
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
-    optimize_ctx = NullContext()
+    optimize_ctx = contextlib.nullcontext()
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
