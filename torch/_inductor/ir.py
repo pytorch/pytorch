@@ -5,6 +5,7 @@ import itertools
 import logging
 import re
 import textwrap
+import traceback
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
@@ -286,6 +287,10 @@ class IRNode:
 
     def __post_init__(self):
         self.origins = set(self._current_origins)
+        self.traceback = traceback.format_stack() if config.debug_ir_traceback else None
+
+    def get_traceback(self):
+        return self.traceback
 
     def common_repr(self):
         origins = f"origins={getattr(self, 'origins', '')}"
@@ -321,7 +326,12 @@ class Loops(IRNode):
                 self.inner_fn_str(),
             ]
             + [f"{name}={getattr(self, name)}" for name in names]
+            + [f"origin_node={self.origin_node!r}"]
         )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.origin_node = None
 
     __repr__ = __str__
 
@@ -331,6 +341,9 @@ class Loops(IRNode):
     def get_device(self):
         return self.device
 
+    def get_origin_node(self):
+        return self.origin_node
+
     def get_size(self):
         return self.ranges
 
@@ -339,7 +352,14 @@ class Loops(IRNode):
 
     @classmethod
     def create(cls, *args, **kwargs):
-        return TensorBox.create(cls(*args, **kwargs))
+        origin_node = kwargs.pop("origin_node", None)
+        tb = kwargs.pop("traceback", None)
+        r = cls(*args, **kwargs)
+        r.origin_node = origin_node
+        r.traceback = (
+            tb or traceback.format_stack() if config.debug_ir_traceback else None
+        )
+        return TensorBox.create(r)
 
     @staticmethod
     def _index(ranges, prefix="i"):
@@ -1111,6 +1131,9 @@ class BaseView(IRNode):
     def get_device(self):
         return self.data.get_device()
 
+    def get_origin_node(self):
+        return None
+
     def get_name(self):
         return self.data.get_name()
 
@@ -1494,6 +1517,7 @@ class ReinterpretView(BaseView):
     layout: "Layout"
 
     def __post_init__(self):
+        super().__post_init__()
         if isinstance(self.data, BaseView):
             self.data = self.data.unwrap_view()
 
@@ -1512,6 +1536,9 @@ class ReinterpretView(BaseView):
 
     def get_device(self):
         return self.layout.device
+
+    def get_origin_node(self):
+        return None
 
     def get_dtype(self):
         return self.layout.dtype
@@ -1608,6 +1635,9 @@ class BaseConstant(IRNode):
 
     def get_device(self):
         return self.device
+
+    def get_origin_node(self):
+        return None
 
     def mark_reuse(self, users):
         pass
@@ -1983,6 +2013,10 @@ class Buffer(IRNode):
     name: str
     layout: Layout
 
+    def __post_init__(self):
+        super().__post_init__()
+        self.origin_node = None
+
     def make_indexer(self):
         return self.layout.make_indexer()
 
@@ -1992,6 +2026,9 @@ class Buffer(IRNode):
 
     def get_device(self):
         return self.layout.device
+
+    def get_origin_node(self):
+        return self.origin_node
 
     def get_dtype(self):
         return getattr(self.layout, "dtype", None)
@@ -2551,6 +2588,8 @@ class ExternKernel(InputsKernel):
             dtype=x.get_dtype(),
             inner_fn=x.make_loader(),
             ranges=x.get_size(),
+            origin_node=x.get_origin_node(),
+            traceback=x.get_traceback(),
         )
         pw.realize()
         return pw
@@ -2817,7 +2856,10 @@ class ExternKernel(InputsKernel):
             f"{field.name}={getattr(self, field.name)}"
             for field in dataclasses.fields(self)
         ]
+        lines.append(f"origin_node={self.origin_node!r}")
         return self.str_helper(lines)
+
+    __repr__ = __str__
 
 
 @dataclasses.dataclass
@@ -2860,7 +2902,7 @@ class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         V.graph.wrapper_code.generate_extern_kernel_alloc(
-            self.get_name(), self.kernel, args
+            self.get_name(), self.kernel, args, self.get_origin_node()
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3829,6 +3871,8 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
+        origin_node = self.data.get_origin_node()
+        traceback = self.data.get_traceback()
         self.data = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
@@ -3840,6 +3884,8 @@ class StorageBox(MutableBox):
         )
         self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
+        self.data.origin_node = origin_node
+        self.data.traceback = traceback
         return self.data.name
 
     def realize_hint(self):
