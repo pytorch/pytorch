@@ -132,9 +132,6 @@ def discover_tests(
     all_cpp_files = [
         pathlib.Path(p) for p in glob.glob(f"{cpp_tests_dir}/**/*", recursive=True)
     ]
-    # Remove .exe extension on Windows
-    if sys.platform == "win32":
-        all_cpp_files = [os.path.splitext(p)[0] for p in all_cpp_files]
 
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Add the cpp prefix for C++ tests so that we can tell them apart
