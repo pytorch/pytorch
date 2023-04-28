@@ -507,11 +507,11 @@ def squeeze(x, dim=None):
     dim = canonicalize_dims(len(x.get_size()), dim)
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 
-    new_shape = [
-        s
-        for d, s in enumerate(x.get_size())
-        if not (d in dims and V.graph.sizevars.maybe_guard_equals(s, 1))
-    ]
+    new_shape = []
+    for d, s in enumerate(x.get_size()):
+        if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
+            new_shape.append(s)
+
     # squeeze does nothing if the size isn't 1
     return view(x, new_shape) if new_shape != x.get_size() else x
 
@@ -1127,6 +1127,57 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
+def philox_rand_offset(shape):
+    """
+    TorchInductor offset calculation differs from PyTorch eager offset
+    calculation for random ops (tl.rand vs torch.rand). In future, we should
+    strive for same impl for tl.rand and torch.rand.
+    """
+    numel = 1
+    for s in shape:
+        numel = numel * s
+    return tensor(numel, dtype=torch.int64)
+
+
+@register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
+def philox_rand(size, seed, offset, stride, device, dtype):
+    # stride arg is optional and will be used in future for distributed random
+    # ops. Currently, its ununsed.
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+    offset_loader = offset.make_loader()
+
+    def inner_fn(index):
+        # Both seed and offset in the philox_rand op are tensors.
+        # torch seed and offsets are of type int64, but tl.rand accepts int32
+        seed_index_expr = ops.to_dtype(seed_loader([]), torch.int32)
+        offset_index_expr = ops.to_dtype(offset_loader([]), torch.int32)
+        # Get the offset'd position
+        rand_index_expr = ops.add(
+            ops.index_expr(random_pos(index), torch.int32), offset_index_expr
+        )
+        return ops.rand(
+            seed_index_expr,
+            rand_index_expr,
+            dtype,
+        )
+
+    random_values_node = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
+
+    offset_node = philox_rand_offset(size)
+    return random_values_node, offset_node
+
+
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
     assert train and p not in (0, 1), "inference should have been handled as a decomp"
@@ -1229,8 +1280,10 @@ def make_rand(fn_name):
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
+fallback_randint = fallback_handler(aten.randint)
 fast_rand = make_rand("rand")
 fast_randn = make_rand("randn")
+fast_randint = make_rand("randint")
 
 
 @register_lowering([aten.rand, torch.rand])
@@ -1249,6 +1302,22 @@ def randn(*args, **kwargs):
     else:
         kwargs.pop("generator", None)
         return fast_randn(*args, **kwargs)
+
+
+@register_lowering([aten.randint])
+def randint(*args, **kwargs):
+    if (
+        config.fallback_random
+        or kwargs.get("generator", None) is not None
+        or kwargs.get("dtype", None) is not torch.int32
+        or len(args) != 3
+        or args[0] != -(2**31)
+        or args[1] != 2**31
+    ):
+        return fallback_randint(*args, **kwargs)
+    else:
+        kwargs.pop("generator", None)
+        return fast_randint(args[2], **kwargs)
 
 
 @register_lowering(overrides.philox_seed_like._overloadpacket)
@@ -1468,7 +1537,6 @@ make_fallback(aten.multi_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
-make_fallback(aten.smooth_l1_loss_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.softshrink_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
@@ -1571,7 +1639,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = end + dim_size
     if start is None:
         start = 0
-    if end is None or V.graph.sizevars.maybe_guard_leq(x.get_size()[dim], end):
+    if end is None or V.graph.sizevars.statically_known_leq(x.get_size()[dim], end):
         end = dim_size
 
     src_size = list(x.get_size())
@@ -1648,7 +1716,13 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, (float, int)):
+    if isinstance(data, sympy.Symbol):
+        ranges = []
+
+        def inner_fn(index):
+            return ops.index_expr(data, dtype)
+
+    elif isinstance(data, (float, int)):
         ranges = []
 
         def inner_fn(index):
@@ -2646,7 +2720,7 @@ def rev(x, dims):
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
-        return x
+        return clone(x)
 
     sizes = x.get_size()
 
@@ -2940,10 +3014,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -2953,15 +3027,11 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            ph, ops.sub(phend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
                     ),
                 ]
@@ -3348,18 +3418,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.int_minimum(
+        hend = ops.minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.int_minimum(
+        wend = ops.minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3376,10 +3446,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3397,13 +3467,13 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
                             ),
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
@@ -3796,6 +3866,7 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
 register_lowering(aten.max)(make_reduction("max"))
 register_lowering(aten.min)(make_reduction("min"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
@@ -3987,6 +4058,11 @@ try:
         return TensorBox.create(
             ir.ReduceScatterTensor.create(input, reduce_op, tag, ranks, group_size)
         )
+
+    @register_lowering(c10d_functional.all_reduce_coalesced)
+    def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
+        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
 
 except ImportError:
     log.info(
