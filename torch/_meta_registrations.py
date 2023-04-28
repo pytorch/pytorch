@@ -2440,10 +2440,10 @@ def meta__scaled_dot_product_flash(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-# note: device for seed and offset below depends on whether we are
-# capturing or not, but at the time of tracing we don't know if we
-# are going to use cudagraphs or not, so we return cpu tensors here
-# it's possible we'll need to have some special handling in inductor for sdpa
+    # note: device for seed and offset below depends on whether we are
+    # capturing or not, but at the time of tracing we don't know if we
+    # are going to use cudagraphs or not, so we return cpu tensors here
+    # it's possible we'll need to have some special handling in inductor for sdpa
 
     return (
         output,

@@ -1879,8 +1879,11 @@ class TestSDPA(NNTestCase):
     @parametrize("dtype", [torch.float16,])
     @parametrize("scale", [None, "l1"])
     def test_flash_attention_graph_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str):
+                                                     head_dim: int,
+                                                     is_causal: bool,
+                                                     dropout_p: float,
+                                                     dtype: torch.dtype,
+                                                     scale: str):
 
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
@@ -1901,12 +1904,12 @@ class TestSDPA(NNTestCase):
         value_ref = value.clone().detach().to(torch.float32).requires_grad_(True)
 
         is_dropout = dropout_p > 0.0
-        #warmup
+        # warmup
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         torch.cuda.current_stream().wait_stream(s)
         out = output_tuple[0]
         dbug_mask = output_tuple[-1]
