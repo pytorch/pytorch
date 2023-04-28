@@ -295,6 +295,16 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
+@register_meta(aten._assert_async.default)
+def assert_async(val):
+    return
+
+
+@register_meta(aten._assert_async.msg)
+def assert_async_meta(val, assert_msg):
+    return
+
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
     assert (

@@ -116,6 +116,7 @@ exclude_patterns = [
     'torch/_functorch/partitioners.py',
     'torch/_functorch/top_operators_github_usage.py',
     'torch/_functorch/vmap.py',
+    'torch/_subclasses/schema_check_mode.py',
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',

@@ -369,18 +369,16 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertTrue("tensor_constant" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
-    def test_prepare_qat_conv_bn_relu_numerics(self):
+    def test_prepare_qat_conv_bn_numerics(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.bn = torch.nn.BatchNorm2d(3)
-                self.relu = torch.nn.ReLU()
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.bn(x)
-                x = self.relu(x)
                 return x
 
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
@@ -407,6 +405,8 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         # Verify that numerics match
         self.assertEqual(result, result_fx)
+
+    # TODO: add numerics test once https://github.com/pytorch/pytorch/pull/100271 lands
 
 
 class TestQuantizePT2EModels(QuantizationTestCase):
