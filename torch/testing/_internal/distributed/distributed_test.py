@@ -4908,6 +4908,9 @@ class DistributedTest:
         # Commenting out the following 3 tests as they cause Sandcastle jobs to fail
         # Failure signature:
         # AttributeError: type object 'TestDistBackendWithSpawn' has no attribute 'test_ddp_hook_with_optimizer_parity_adamw
+
+        from torch.testing._internal.common_utils import parametrize
+
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259",
