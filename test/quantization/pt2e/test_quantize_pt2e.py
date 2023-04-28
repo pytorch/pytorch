@@ -337,10 +337,10 @@ class TestQuantizePT2E(QuantizationTestCase):
                 return x
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._test_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
-        self._test_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
-    def _test_symmetric_qnnpack_qat_numerics(
+    def _verify_symmetric_qnnpack_qat_numerics(
         self,
         model: torch.nn.Module,
         example_inputs: Tuple[Any, ...],
