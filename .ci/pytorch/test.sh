@@ -547,7 +547,8 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     # Start background download
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
+    MNIST_DIR="${PWD}/test/cpp/api/mnist"
+    python tools/download_mnist.py --quiet -d "${MNIST_DIR}"  &
 
     # Prepare the model used by test_jit, the model needs to be in the test directory
     # to get picked up by run_test
@@ -570,12 +571,15 @@ test_libtorch() {
       python test/run_test.py --cpp --verbose -i cpp/test_lazy
     fi
 
-    python test/cpp/jit/tests_setup.py shutdown
+    # Cleaning up test artifacts in the test folder
+    pushd test
+    python cpp/jit/tests_setup.py shutdown
+    popd
 
     # Wait for background download to finish
     wait
-    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" python test/run_test.py --cpp --verbose -i cpp/test_api
+
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api
     python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
 
     if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
@@ -994,18 +998,18 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  # TODO: REVERT ME
+  # REVERT ME
   test_aten
   test_python_shard 1
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  # TODO: REVERT ME
+  # REVERT ME
   test_libtorch
   test_aot_compilation
+  test_python_shard 2
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-  test_python_shard 2
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
