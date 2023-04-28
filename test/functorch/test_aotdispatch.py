@@ -2457,11 +2457,6 @@ aot_autograd_failures = {
     xfail('fft.rfft', ''),
     xfail('fft.rfftn', ''),
 
-    xfail('linalg.svdvals', ''),
-    xfail('linalg.cond', ''),
-    xfail('linalg.norm', ''),
-    xfail('linalg.norm', 'subgradients_at_zero'),
-    xfail('linalg.svd', ''),
     xfail('svd', ''),
     xfail('svd_lowrank', ''),
     xfail('stft', ''),
@@ -2505,7 +2500,6 @@ symbolic_aot_autograd_failures = {
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.cholesky_ex', ''),  # could not find kernel for aten.linalg_solve_triangular.default
-    xfail('linalg.cond', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/deco...
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
@@ -2520,8 +2514,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
     xfail('linalg.matrix_power', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.norm', 'subgradients_at_zero'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/dec...
     xfail('linalg.pinv', 'hermitian'),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta fu...
     xfail('linalg.qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
@@ -2529,8 +2521,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomp...
     xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/dec...
     xfail('linalg.solve_triangular', ''),  # aten.linalg_solve_triangular.default - couldn't find symbolic me...
-    xfail('linalg.svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.svdvals', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.tensorinv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2793,7 +2783,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReplicationPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReplicationPad2d,  # Cannot call sizes() on tensor with symbolic sizes/strides

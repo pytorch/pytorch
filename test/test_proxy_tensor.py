@@ -1420,10 +1420,7 @@ fake_tensor_failures = {
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 
-    xfail("linalg.matrix_norm"),
     xfail("linalg.norm"),
-    xfail("linalg.matrix_norm"),
-    xfail("linalg.matrix_rank"),
     xfail("linalg.norm"),
     xfail("linalg.norm", "subgradients_at_zero"),
     xfail("linalg.svd"),
@@ -1434,7 +1431,6 @@ fake_tensor_failures = {
     xfail("stft"),
     xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("linalg.matrix_norm"),
 }
 
 symbolic_tensor_failures = {
@@ -1469,7 +1465,6 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
-    xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
