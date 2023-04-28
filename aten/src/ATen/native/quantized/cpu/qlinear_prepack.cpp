@@ -291,14 +291,14 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   // auto input_shape = torch::List<int64_t>();
   auto weight_copy = weight.clone();
   ///////////////////////
-  ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
-  wgt.transpose_(0, 1); // ONEDNN requires transposed weight
-  auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), dnnl::memory::data_type::s8,
-                                                             dnnl::memory::data_type::u8);
-  ideep::tensor exp_wgt(w_desc);
-  exp_wgt.feed_from(wgt);
+  // ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
+  // wgt.transpose_(0, 1); // ONEDNN requires transposed weight
+  // auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), dnnl::memory::data_type::s8,
+  //                                                            dnnl::memory::data_type::u8);
+  // ideep::tensor exp_wgt(w_desc);
+  // exp_wgt.feed_from(wgt);
   ///////////////////////
-  // auto exp_wgt = pack_weight(weight_copy, input_shape);
+  auto exp_wgt = pack_weight(weight_copy, input_shape);
   ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
   packed_weight_p->set_zero_point(wgt_zero_points);
