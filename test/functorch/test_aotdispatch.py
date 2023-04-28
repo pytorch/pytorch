@@ -2030,7 +2030,7 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
         self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
         _, outs = get_ins_outs(fw_graph)
-        self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
+        self.assertTrue(all(is_sym_node(n) for n in outs[1:]))
 
     def test_default_partitioner_output_tensor_shape_tensor(self):
 
@@ -2494,7 +2494,6 @@ symbolic_aot_autograd_failures = {
     xfail('cholesky_solve', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
-    xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2615,8 +2614,6 @@ symbolic_aot_autograd_failures = {
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2651,7 +2648,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
         reset_grads()
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all([x is None for x in orig_grad]):
+        if all(x is None for x in orig_grad):
             with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f)
         else:
@@ -2672,7 +2669,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
 
         reset_grads()
         # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all([x is None for x in orig_grad]):
+        if all(x is None for x in orig_grad):
             with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
                 call_forwards_backwards(compiled_f)
         else:
@@ -2798,7 +2795,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReplicationPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReplicationPad2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
