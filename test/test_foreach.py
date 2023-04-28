@@ -879,14 +879,22 @@ class TestForeach(TestCase):
         self.assertIsNone(tensors[1].grad_fn)
 
     @onlyCUDA
-    @ops(foreach_unary_op_db, dtypes=(torch.float,))
+    @ops(
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        dtypes=(torch.float,),
+    )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
         func, *_ = self._get_funcs(op)
-        inputs = [torch.tensor(i + 1, device=device, dtype=dtype, requires_grad=True) for i in range(2)]
-        (out1, out2) = func([inputs], is_cuda=False, is_fastpath=False, zero_size=False,)
-        out1.backward()
-        self.assertIsNotNone(inputs[0].grad)
-        self.assertIsNone(inputs[1].grad)
+        sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
+        self.assertTrue(all(t.requires_grad for t in sample.input))
+        sample.kwargs.pop("disable_fastpath")
+        if func.func in (torch._foreach_addcmul, torch._foreach_addcdiv):
+            if sample.kwargs.get("values") is None:
+                sample.kwargs.pop("values")
+        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
+        out1.backward(torch.ones_like(out1))
+        self.assertIsNotNone(sample.input[0].grad)
+        self.assertIsNone(sample.input[1].grad)
 
 
 instantiate_device_type_tests(TestForeach, globals())
