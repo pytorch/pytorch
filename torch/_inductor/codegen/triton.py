@@ -374,11 +374,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"tl.math.isinf({x})"
+        return f"tl.math.isinf({x}).to(tl.int1)"
 
     @staticmethod
     def isnan(x):
-        return f"tl.math.isnan({x})"
+        return f"tl.math.isnan({x}).to(tl.int1)"
 
     @staticmethod
     def round(x):
@@ -1248,7 +1248,14 @@ class TritonKernel(Kernel):
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
-                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
+
+                if src_dtype == torch.bool:
+                    # tl.reduce doesn't support tl.int1
+                    accumulator = f"{accumulator}.to(tl.int8)"
+                    result_type = triton_compute_type(dtype)
+                    self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}.to({result_type})")
+                else:
+                    self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
