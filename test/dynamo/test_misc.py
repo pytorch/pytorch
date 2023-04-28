@@ -951,7 +951,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(2), (2, 3) * 4)
         self.assertEqual(cnts.frame_count, ifunspec(1, 0))
-        self.assertEqual(cnts.op_count, ifunspec(ifdynstaticdefault(2, 14), 0))
+        self.assertEqual(cnts.op_count, ifunspec(ifdynstaticdefault(2, 2), 0))
 
     def test_tuple_mul_with_shape(self):
         def fn(a):
