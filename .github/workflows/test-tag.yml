@@ -25,20 +25,11 @@ jobs:
 
       # invoke the upload-pytest-cache github action
       
-      - name: Get workflow job id
-        id: upload-pytest-cache
-        uses: ./.github/actions/upload-pytest-cache
-        with:
-          github-token: ${{ github.ref }}
-
-      - name: Get output from action
-        run: |
-          echo ${{ steps.upload-pytest-cache.outputs.pr-identifier }}
 
       - name: "print GH_REF"
         run: |
-          echo ${GH_REF}
-          echo ${GITHUB_REF}
+          echo GH_REF: ${GH_REF}
+          echo GITHUB_REF: ${GITHUB_REF}
       - name: "print PR_NUMBER"
         run: |
           echo ${PR_NUMBER}
@@ -51,3 +42,13 @@ jobs:
       - name: "print THE_REST"
         run: |
           echo ${THE_REST}
+          
+      - name: Get workflow job id
+        id: upload-pytest-cache
+        uses: ./.github/actions/upload-pytest-cache
+        with:
+          github-token: ${{ github.ref }}
+
+      - name: Get output from action
+        run: |
+          echo ${{ steps.upload-pytest-cache.outputs.pr-identifier }}
