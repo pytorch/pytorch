@@ -54,8 +54,11 @@ def _infer_device_type(*args):
     device_types = list({arg.device.type for arg in args
                         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
     if len(device_types) > 1:
-        warnings.warn("Tensor args except CPU tensor are on at least two devices ", device_types,
-                      "but now we only support to reslove cuda deive if there has cuda or the first device.")
+        warnings.warn("Tensor arguments, excluding CPU tensors, are detected on at least two types of devices. "
+                      "Device state will only be saved for devices of a single device type, and the remaining "
+                      "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
+                      "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
+                      "detected, it will be prioritized; otherwise, the first device encountered will be selected.)")
     if len(device_types) == 0:
         return _DefaultDevice.get_device_type()
     elif "cuda" in device_types:
@@ -87,7 +90,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
 
 
 def set_device_states(devices, states) -> None:
-    device_module = _get_device_module(_infer_device_type(states))
+    device_module = _get_device_module(_infer_device_type(*states))
     for device, state in zip(devices, states):
         with device_module.device(device):
             device_module.set_rng_state(state)
