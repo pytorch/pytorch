@@ -168,9 +168,13 @@ def _allowed_function_ids():
         torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
-                # Don't handle HigherOrderOperator as builtin
+                # Dynamo allows all builtins into the graph and does not attempt
+                # to introspect into them. We don't want to allow instances of
+                # HigherOrderOperator into the graph all the time (Dynamo needs
+                # to introspect the body functions of these HigherOrderOperator
+                # first, decide they are safe, and then allow them into the graph).
+                # So we exclude HigherOrderOperator from being a builtin.
                 import torch._ops
-
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
                 if isinstance(obj, types.ModuleType):

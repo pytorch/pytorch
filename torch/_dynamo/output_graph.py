@@ -190,6 +190,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
+
+    OutputGraph is 1:1 with a frame being processed. Each frame is associated
+    with some root InstructionTranslator. When user code calls a function,
+    we construct a InliningInstructionTranslator that continues to write into
+    the root InstructionTranslator's OutputGraph.
     """
 
     def __init__(
@@ -290,8 +295,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def real_value_cache(self):
         return self.current_tracer.real_value_cache
 
-    def create_graph_input(self, *args, **kwargs):
-        return self.root_tracer.create_graph_input(*args, **kwargs)
+    # If you are here, and you're looking for create_graph_input,
+    # to avoid ambiguity, please call one of the following:
+    # - self.current_tracer.create_graph_input
+    # - self.root_tracer.create_graph_input
+    # See NOTE [HigherOrderOperator tracing design] for more context.
 
     def create_proxy(self, *args, **kwargs):
         return self.current_tracer.create_proxy(*args, **kwargs)
@@ -301,9 +309,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def remove_node(self, *args, **kwargs):
         return self.current_tracer.remove_node(*args, **kwargs)
-
-    def create_arg(self, *args, **kwargs):
-        return self.current_tracer.create_arg(*args, **kwargs)
 
     @contextlib.contextmanager
     def new_subtracer(self):
@@ -401,7 +406,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 return
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
-            proxy = self.create_graph_input(str(s.node.expr), torch.SymInt, before=True)
+            proxy = self.root_tracer.create_graph_input(str(s.node.expr), torch.SymInt, before=True)
             proxy.node.meta["grapharg"] = GraphArg(
                 prop(arg.source),
                 s,
@@ -757,7 +762,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.guards.update(output.guards)
 
         self.create_node(
-            "output", "output", (self.create_arg(tuple(x.as_proxy() for x in rv)),), {}
+            "output", "output", (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),), {}
         )
         self.remove_unused_graphargs()
         ncalls = count_calls(self.graph)
@@ -968,7 +973,32 @@ class SubgraphTracer(fx.Tracer):
         type_expr=None,
         proxy_factory_fn=None,
     ):
-        # If there are any freevars, lift them to being inputs
+        # NOTE: [Nested SubgraphTracer and free_variable handling]
+        # --------------------------------------------------------
+        # Read NOTE [HigherOrderOperator tracing design] first.
+        #
+        # Let's say we're in the middle of introspecting the body of a possibly
+        # nested HigherOrderOperator, and we see a free variable.
+        #
+        # There are two cases:
+        # 1. We see a free variable that is already tracked by Dynamo.
+        # 2. We see a free variable that has not been tracked by Dynamo
+        #
+        # In case 1, we call `lift_tracked_freevar_to_input` (below)
+        # which will lift the freevar to be an input of this subgraph
+        # and also recursively lift it to be an input on the parent(s).
+        #
+        # In case 2, before the call to `create_proxy`, the InstructionTranslator
+        # will see the freevar when it gets loaded by Python bytecode.
+        # E.g. for Python 3.11 the bytecodes that may do this are LOAD_DEREF or
+        # LOAD_GLOBAL.
+        # There, the InstructionTranslator asks Dynamo to begin tracking the
+        # freevar by building a new Variable.
+        # Building a new Variable automatically lifts the freevar to be an
+        # input of the root SubgraphTracer.
+        #
+        # After that happens, since the variable is now being tracked,
+        # we are now back to case 1.
         if self.parent is not None:
             flat_args, _ = pytree.tree_flatten(args)
             for arg in flat_args:
@@ -981,7 +1011,7 @@ class SubgraphTracer(fx.Tracer):
                     continue
                 if arg.node.name in self.input_name_to_proxy:
                     continue
-                self.lift_freevar_to_input(arg)
+                self.lift_tracked_freevar_to_input(arg)
 
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
@@ -1069,11 +1099,15 @@ class SubgraphTracer(fx.Tracer):
                 return True
         return False
 
-    def lift_freevar_to_input(self, proxy):
+    # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
+    def lift_tracked_freevar_to_input(self, proxy):
+        # You're doing something wrong if we are the root SubgraphTracer because
+        # Dynamo adds tensors to graph inputs before creating a proxy for them.
+        assert self.parent is not None, "lift_tracked_freevar_to_input on root SubgraphTracer"
         self.create_graph_input(proxy.node.name)
         self.lifted_freevars.add(proxy)
         if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
-            self.parent.lift_freevar_to_input(proxy)
+            self.parent.lift_tracked_freevar_to_input(proxy)
 
 
 # NOTE: [HigherOrderOperator tracing design]
@@ -1081,11 +1115,11 @@ class SubgraphTracer(fx.Tracer):
 # OutputGraph represents the graph being built by Dynamo that may be compiled
 # and executed. It holds a root SubgraphTracer where the FX graph is built.
 #
-# HigherOrderOperators are operators that take functions (represented by
-# torch.fx.GraphModule) as their arguments. When Dynamo encounters a
-# HigherOrderOperator, then it attempts to introspect the function passed
-# to it (call this the "body function"), capture it into a GraphModule,
-# and rewrite the call to the HigherOrderOperator to use the GraphModule.
+# HigherOrderOperators are operators that take functions as their arguments.
+# When Dynamo encounters a HigherOrderOperator, then it attempts to introspect
+# the function passed to it (call this the "body function"), capture it into a
+# GraphModule, and rewrite the call to the HigherOrderOperator to use the
+# GraphModule.
 #
 # The way we handle the capture of body functions is through having
 # (possibly nested) SubgraphTracers, one per body function.
