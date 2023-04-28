@@ -4905,10 +4905,6 @@ class DistributedTest:
                         )
                     dist.barrier()
 
-        """
-        # Commenting out the following 3 tests as they cause Sandcastle jobs to fail
-        # Failure signature:
-        # AttributeError: type object 'TestDistBackendWithSpawn' has no attribute 'test_ddp_hook_with_optimizer_parity_adamw
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259",
@@ -4977,7 +4973,6 @@ class DistributedTest:
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
             )
-        """
 
         @skip_if_lt_x_gpu(2)
         def test_get_data_parallel_params(self):
