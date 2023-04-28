@@ -40,7 +40,7 @@ class NormalizeSplit(PatternEntry):
         if isinstance(split_size, (list, tuple)):
             return
         if "example_value" not in split_node.meta:
-            log.warning("example value absent for node", split_node)
+            log.warning("example value absent for node: %s", split_node)
             return
         assert isinstance(split_node.meta["example_value"], (list, tuple))
         split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
