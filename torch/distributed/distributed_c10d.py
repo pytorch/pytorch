@@ -204,6 +204,13 @@ class Backend:
 
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
+    backend_capability: Dict[str, List[str]] = {
+        GLOO : ["cpu", "cuda"],
+        NCCL : ["cuda"],
+        UCC : ["cpu", "cuda"],
+        MPI : ["cpu"],
+    }
+
     def __new__(cls, name: str):
         if not isinstance(name, str):
             raise ValueError(f"Backend name must be a string, but got: {name}")
@@ -255,19 +262,20 @@ class BackendConfig:
     def __init__(self, backend: Union[str, Backend]):
         self.device_backend_map: Dict[torch.device, Backend] = {}
 
-        # Cases for when backend is a single string (without device types)
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
+            # supported since PyTorch 2.0
             self.device_backend_map = {
                 "cpu": Backend.GLOO,
                 "cuda": Backend.NCCL,
             }
         elif backend.lower() in Backend.backend_list:
-            # backend applies to all devices (e.g. "NCCL", "GLOO", "UCC", "MPI", "custom_backend")
+            # Cases for when backend is a single string (without device types)
+            # e.g. "nccl", "gloo", "ucc", "mpi"
+            supported_devices = Backend.backend_capability[backend.lower()]
             backend_val = Backend(backend)
             self.device_backend_map = {
-                "cpu": backend_val,
-                "cuda": backend_val,
+                device : backend_val for device in supported_devices
             }
         else:
             # make sure the backend string is in the correct format
@@ -288,6 +296,10 @@ class BackendConfig:
                     raise ValueError(f"Duplicate device type {device} \
                                      in backend string: {backend}. {backend_str_error_message}")
                 self.device_backend_map[device] = Backend(backend)
+
+        logger.info(
+            f"Using backend config: {self.device_backend_map}"  # noqa: G004
+        )
 
     def __repr__(self):
         # string with all the device:backend pairs separated by commas
@@ -521,14 +533,35 @@ _default_pg_init_method = None
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 
-def _get_pg_device(group: ProcessGroup):
+def _get_object_coll_device(group: Optional[ProcessGroup] = None):
+    group = group or _get_default_group()
     """
-    Returns the device to use with ``group``.
-    This is cuda for NCCL and CPU for everything else
+    ``group._device_types`` is a property pybind that returns the devices
+    ("cpu", "cuda", etc) supported by ``group``. Can be multiple if the
+    ``group`` supports multiple devices.
     """
-    if _check_for_nccl_backend(group):
-        return torch.device("cuda", torch.cuda.current_device())
-    return torch.device("cpu")
+    devices = group._device_types
+
+    if len(devices) == 1:
+        # User fixed exactly one backend in `init_process_group`
+        return devices[0]
+    elif len(devices) == 0:
+        # No backend has been registered with this PG (maybe because no
+        # collective has been run?) We pick cpu as the default and hopefully
+        # this would lazily init Gloo or other available cpu backend.
+        return torch.device("cpu")
+    elif torch.device("cpu") in devices:
+        # There are multiple backends in this PG and cpu is among them.
+        # cpu is preferred as the object is in cpu memory. No need for device
+        # copy.
+        return torch.device("cpu")
+    else:
+        # No cpu in the backend list. Randomly pick the first backend
+        return devices[0]
+    """
+    TODO: see if we can cache this object_coll_device so that we only need to
+    find it once
+    """
 
 
 # Environment variable to control whether we do a barrier after process group
@@ -2236,7 +2269,7 @@ def all_gather_object(object_list, obj, group=None):
         _warn_not_in_group("all_gather_object")
         return
 
-    current_device = _get_pg_device(group)
+    current_device = _get_object_coll_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2337,7 +2370,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Ensure object_gather_list is specified appropriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
-    current_device = _get_pg_device(group)
+    current_device = _get_object_coll_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2451,7 +2484,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    current_device = device or _get_pg_device(group)
+    current_device = device or _get_object_coll_device(group)
     my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
     if my_rank == src:
@@ -2556,7 +2589,7 @@ def scatter_object_list(
         )
 
     my_rank = get_rank()
-    pg_device = _get_pg_device(group)
+    pg_device = _get_object_coll_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
             *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
