@@ -213,7 +213,7 @@ class BaseSchedulerNode:
                 # o what have i done.  lets make this an api
                 or (
                     isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, ir.AllReduce)
+                    and isinstance(self.node, (ir.AllReduce, ir.ForceInPlace))
                 )
             )
             and config.inplace_buffers
@@ -333,7 +333,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # (would this have been fixed if I tracked mutations properly above?)
             return False
 
-        if not isinstance(self.node, torch._inductor.ir.AllReduce):
+        if not isinstance(
+            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.ForceInPlace)
+        ):
             # TODO make this a property of the IR
             return False
 
