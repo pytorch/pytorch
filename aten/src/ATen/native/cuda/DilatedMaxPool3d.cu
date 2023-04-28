@@ -636,7 +636,7 @@ Tensor max_pool3d_with_indices_backward_cuda(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_cuda");
-  auto gradInput = at::empty_like(input, MemoryFormat::Preserve);
+  auto gradInput = at::empty(input, input.options());
   max_pool3d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput,
