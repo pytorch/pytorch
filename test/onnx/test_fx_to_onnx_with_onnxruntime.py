@@ -312,10 +312,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skip_if_no_torchvision
     def test_resnet18(self):
-        # TODO(bowbao): So we are effectively exporting all models in traning mode by
-        # default. But for the sake of export we are really only interested in eval mode.
+        # TODO(bowbao): Note [training vs eval in dynamo_export]
+        # So we are effectively exporting all models in traning mode by
+        # default. But for the sake of this export we are only interested in eval mode.
         # The question is, should we call `model.eval()` in `dynamo_export`?
         # This particular test fails 'functionalization' in training mode.
+        # So we are explicitly calling `model.eval()` for any model that contains
+        # batch norm.
         # Ref: https://github.com/pytorch/pytorch/issues/99662#issuecomment-1528178221
         model = torchvision.models.resnet18(pretrained=False).eval()
         dummy_input = torch.randn(1, 3, 224, 224)
@@ -326,8 +329,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "Found unsupported input types on PyTorch Op aten.convolution.default with "
-        "ValueError: Unexpected input argument type is found in node arguments. arg: None;"
+        "RuntimeError: Unknown call_function target: aten.mean.dim"
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -336,7 +338,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
-        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
+        # TODO(bowbao): see Note [training vs eval in dynamo_export]
+        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False).eval()
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
 

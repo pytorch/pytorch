@@ -474,32 +474,21 @@ class FXGraphExtractor(abc.ABC):
         import torch.onnx._internal.fx.fx_exporter as fx_exporter
         import torch.onnx._internal.fx.passes as passes
 
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        # NOTE: Functionalize must run before make_fx (decomposition and aten graph
-        # lowering).
-        # https://github.com/pytorch/pytorch/issues/99662
-        module = passes.Functionalize(
-            fx_module, enable_dynamic_axes=options.dynamic_shapes
-        ).run(*fx_module_args)
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(module).run(*fx_module_args)
-
         # Apply decomposition table to the input graph.
         module = passes.Decompose(
-            module,
+            fx_module,
             options.decomposition_table,
             enable_dynamic_axes=options.dynamic_shapes,
         ).run(*fx_module_args)
 
-        # FIXME: This pass is not needed if functionalize can be applied on decomposed
-        # graph. https://github.com/pytorch/pytorch/issues/99662
-        # This is a workaround to replace inplace variant ops with outplace version.
-        # These ops are created by aten graph lowering and decomposition post
-        # functionalization. No real mutation is expected as it should have been handled
-        # by functionalization.
-        module = passes.ReplaceInplacePostFunctionalization(module).run(*fx_module_args)
+        # ONNX does not support views and mutations.
+        # Functionalize to get a semantically equivalent graph without mutations.
+        module = passes.Functionalize(
+            module, enable_dynamic_axes=options.dynamic_shapes
+        ).run(*fx_module_args)
+        # Input mutations are detected and distilled after `Functionalize` pass.
+        # Remove them since ONNX inference does not need them.
+        module = passes.RemoveInputMutation(module).run(*fx_module_args)
 
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
         # The pass added nodes with static shape into original node metadata:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional
+from typing import Callable
 
 import torch
 import torch._ops
@@ -9,7 +9,7 @@ import torch.fx
 
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import _pass, diagnostics
+from torch.onnx._internal.fx import _pass
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
 
@@ -17,13 +17,14 @@ from torch.utils import _pytree as pytree
 class Functionalize(_pass.Transform):
     """Functionalize a GraphModule.
 
-    This pass utilizes ``torch.func.functionalize`` to convert a GraphModule into a
-    functional form. The two main functionalities are (copied from its documentations):
+    This pass utilizes ``functionalization`` utility of ``torch._functorch`` to convert
+    a GraphModule into a functional form. The two main functionalities are (copied from
+    its documentations):
 
-    * ``torch.func.functionalize`` removes (intermediate) mutations and aliasing from a
+    * ``functionalization`` removes (intermediate) mutations and aliasing from a
     function, while preserving the function's semantics.
 
-    * ``torch.func.functionalize`` also removes mutations (and views) that were performed
+    * ``functionalization`` also removes mutations (and views) that were performed
     on function inputs. However to preserve semantics, functionalize will "fix up" the
     mutations after the transform has finished running, by detecting if any tensor inputs
     "should have" been mutated, and copying the new data back to the inputs if necessary.
@@ -56,9 +57,6 @@ class Functionalize(_pass.Transform):
     For ONNX inference, it is recommended to run ``RemoveInputMutation`` after this pass.
     ``RemoveInputMutation`` removes the "fix up" nodes that were added by ``Functionalize``,
     which are not needed for ONNX inference.
-
-    NOTE: Functionalize must run before decomposition and aten graph lowering.
-    https://github.com/pytorch/pytorch/issues/99662
     """
 
     @_beartype.beartype
@@ -133,110 +131,4 @@ class RemoveInputMutation(_pass.Transform):
                 and node.args[0].op == "placeholder"
             ):
                 self.module.graph.erase_node(node)
-        return self.module
-
-
-class ReplaceInplacePostFunctionalization(_pass.Transform):
-    """Replace inplace variant ops with outplace version.
-
-    This pass assumes that the graph has been functionalized and decomposed to aten level.
-    No real mutation is expected as it should have been handled by functionalization.
-
-    All inplace variant op nodes are expected to be the last user of its first argument.
-    That is, the input being mutated cannot not be used by another node afterwards.
-    Otherwise, a RuntimeError will be raised.
-
-    This pass only handles ops under "aten" namespace.
-
-    NOTE: This pass is not needed if functionalize can be applied on decomposed graph.
-    https://github.com/pytorch/pytorch/issues/99662
-    """
-
-    @_beartype.beartype
-    def _outplace_target(
-        self, inplace_target: torch._ops.OpOverload
-    ) -> Optional[torch._ops.OpOverload]:
-        assert inplace_target.namespace == "aten"
-        outplace_name = inplace_target._schema.name.split("::")[1][:-1]
-        overload_name = inplace_target._overloadname
-
-        opoverloadpacket = getattr(torch.ops.aten, outplace_name)
-        if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
-            return None
-
-        return getattr(opoverloadpacket, overload_name, None)
-
-    @_beartype.beartype
-    def _run(self, *args) -> torch.fx.GraphModule:
-        # Run through reverse nodes and record the first instance of a use
-        # of a given node. This represents the *last* use of the node in the
-        # execution order of the program, which we will use to validate that
-        # the mutated input value is not used after the mutation.
-        node_to_last_use: Dict[torch.fx.Node, torch.fx.Node] = {}
-
-        def register_last_uses(n: torch.fx.Node, user: torch.fx.Node):
-            if n not in node_to_last_use:
-                node_to_last_use[n] = user
-
-        for node in reversed(self.module.graph.nodes):
-            torch.fx.node.map_arg(node.args, lambda n: register_last_uses(n, node))
-            torch.fx.node.map_arg(node.kwargs, lambda n: register_last_uses(n, node))
-
-        for node in self.module.graph.nodes:
-            if node.op != "call_function" or not isinstance(
-                node.target, torch._ops.OpOverload
-            ):
-                continue
-
-            target = node.target
-            mutated_input = node.args[0]
-
-            name_without_overload = target._schema.name
-            is_inplace = name_without_overload.endswith(
-                "_"
-            ) and not name_without_overload.endswith("__")
-            is_aten = target.namespace == "aten"
-
-            if not is_inplace:
-                continue
-
-            if not is_aten:
-                # TODO(bowbao): Turn this into individual diagnostic.
-                diagnostic = diagnostics.export_context().inflight_diagnostic(
-                    rule=diagnostics.rules.fx_pass
-                )
-                diagnostic.level = diagnostics.levels.WARNING
-                diagnostic.with_additional_message(
-                    f"Found non-aten op {target} in graph with inplace naming convention. "
-                    f"Skip replacing this op with outplace version."
-                )
-                continue
-
-            assert isinstance(
-                mutated_input, torch.fx.Node
-            ), f"Expected mutated input to be a torch.fx.Node. Got {type(mutated_input)}"
-
-            if node_to_last_use[mutated_input] != node:
-                # TODO(bowbao): Turn this into individual diagnostic.
-                raise RuntimeError(
-                    f"Found inplace op node {node} that is not the last use of its input. "
-                    f"Its mutated input is later used by {node_to_last_use[mutated_input]}. "
-                    f"Please run Functionalize pass before ReplaceInplacePostFunctionalization."
-                )
-
-            outplace_target = self._outplace_target(target)
-
-            if outplace_target is None:
-                # TODO(bowbao): Turn this into individual diagnostic.
-                diagnostic = diagnostics.export_context().inflight_diagnostic(
-                    rule=diagnostics.rules.fx_pass
-                )
-                diagnostic.level = diagnostics.levels.WARNING
-                diagnostic.with_additional_message(
-                    f"Failed to find outplace version of {target}. Skip replacing this op."
-                )
-                continue
-
-            node.target = outplace_target
-
         return self.module
