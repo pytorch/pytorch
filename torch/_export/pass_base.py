@@ -256,6 +256,7 @@ class ExportPassBase(PassBase):
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
+        self.current_gm: Optional[torch.fx.GraphModule] = None
 
     def _fx(
         self,

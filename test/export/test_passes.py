@@ -5,7 +5,9 @@ import torch
 import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import _export
 from torch._export.passes import (
+    AddRuntimeAssertionsForConstraintsPass,
     ConstPropPass,
     ReplaceBrokenOpsWithFunctionalOpsPass,
 )
@@ -57,6 +59,20 @@ class TestPasses(TestCase):
         self.assertIsNotNone(new_gm)
         new_gm = new_gm.graph_module
         self.assertEqual(count_additions(new_gm), 1)
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_runtime_assert(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.cos()
+
+        gm = _export(M(), (torch.zeros(2, 2, 3),))
+
+        new_gm = AddRuntimeAssertionsForConstraintsPass()(gm)
+        self.assertIsNotNone(new_gm)
 
 
 if __name__ == '__main__':
