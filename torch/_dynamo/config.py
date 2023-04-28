@@ -4,7 +4,6 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
-
 from . import external_utils
 
 
@@ -49,7 +48,7 @@ constant_functions = {
 }
 
 # don't specialize on shapes and strides and put shape ops in graph
-dynamic_shapes = True
+dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
@@ -221,6 +220,9 @@ error_on_recompile = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
+
+# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
+numpy_ndarray_as_tensor = False
 
 
 def is_fbcode():

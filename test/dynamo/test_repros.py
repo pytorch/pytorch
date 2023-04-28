@@ -138,7 +138,7 @@ def shapes_to_tensor(x, device=None):
         return torch.as_tensor(x, device=device)
     if torch.jit.is_tracing():
         assert all(
-            [isinstance(t, torch.Tensor) for t in x]
+            isinstance(t, torch.Tensor) for t in x
         ), "Shape should be tensor during tracing!"
         # as_tensor should not be used in tracing because it records a constant
         ret = torch.stack(x)
@@ -877,8 +877,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # repeat_interleave is a dynamic shape operator we do not execute/
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
-        self.assertEqual(cnt.frame_count, ifdyn(4, 4))
-        self.assertEqual(cnt.op_count, ifdyn(18, 10))
+        self.assertEqual(cnt.frame_count, ifdyn(2, 4))
+        self.assertEqual(cnt.op_count, ifdyn(9, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -2642,7 +2642,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
-            self.assertEqual(example_inputs[0].size(), torch.Size([3, 4]))
+            self.assertEqual(example_inputs[-1].size(), torch.Size([1, 3, 4]))
             return gm
 
         @torch.compile(backend=backend)
@@ -2718,9 +2718,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 5)
 
-        gm, _ = torch._dynamo.export(
-            f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
-        )
+        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
     @torch._dynamo.config.patch("specialize_int", False)
@@ -2881,7 +2879,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch.zeros(6, 4),
             torch.tensor(1),
             aten_graph=True,
-            tracing_mode="symbolic",
         )
         self.assertEqual(
             f(torch.zeros(6, 4), torch.tensor(1)),
@@ -2985,7 +2982,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f,
             torch.zeros(6, 4),
             aten_graph=True,
-            tracing_mode="symbolic",
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
@@ -3085,6 +3081,34 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         finally:
             torch.set_default_device(None)
+
+    def test_hf_bigbird_unsqueeze(self):
+        def torch_bmm_nd(inp_1, inp_2, ndim=None):
+            torch._dynamo.graph_break()
+            return torch.bmm(inp1, inp2)
+
+        def fn(inp1, inp2, inp3, inp4, c):
+            a = torch_bmm_nd(inp1, inp2, 4)
+            a.unsqueeze_(2)
+            a = a * 2
+
+            b = torch_bmm_nd(inp3, inp4, 4)
+            b.unsqueeze_(2)
+            l = a + b
+
+            out = torch.cat([a, b, c], dim=2)
+            return out, l
+
+        inp1 = torch.rand(1, 64, 448)
+        inp2 = torch.rand(1, 448, 64)
+        inp3 = torch.rand(1, 64, 448)
+        inp4 = torch.rand(1, 448, 64)
+        c = torch.rand(1, 64, 1, 64)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        opt_fn(inp1, inp2, inp3, inp4, c)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":

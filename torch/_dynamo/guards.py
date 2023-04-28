@@ -753,11 +753,21 @@ class CheckFunctionManager:
                     return converted
 
                 dynamic_dims_sizes = [
-                    convert(self.output_graph.tensor_id_to_fake_clone[id(t)].size())
+                    convert(
+                        self.output_graph.tracing_context.fake_mode.from_tensor(
+                            t,
+                            memoized_only=True,
+                        ).size()
+                    )
                     for t in tensor_check_examples
                 ]
                 dynamic_dims_strides = [
-                    convert(self.output_graph.tensor_id_to_fake_clone[id(t)].stride())
+                    convert(
+                        self.output_graph.tracing_context.fake_mode.from_tensor(
+                            t,
+                            memoized_only=True,
+                        ).stride()
+                    )
                     for t in tensor_check_examples
                 ]
 

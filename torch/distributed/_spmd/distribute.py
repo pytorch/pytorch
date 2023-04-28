@@ -365,6 +365,8 @@ FACTORY_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
 # without DTensor inputs.
 FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
     aten.scalar_tensor.default: default_factory_op_rule,
+    aten.arange.start: default_factory_op_rule,
+    aten.zeros.default: default_factory_op_rule,
 }
 
 
@@ -648,13 +650,11 @@ def _rebuild_graph(
                 else:
                     value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
                     if all(
-                        [
-                            isinstance(n.target, torch._ops.OpOverload)
-                            and n.target._schema.name.startswith(
-                                ("aten::_foreach", "aten::_fused_adam")
-                            )
-                            for n in [dtn, node]
-                        ]
+                        isinstance(n.target, torch._ops.OpOverload)
+                        and n.target._schema.name.startswith(
+                            ("aten::_foreach", "aten::_fused_adam")
+                        )
+                        for n in [dtn, node]
                     ):
                         # FIXME(@mrshenli): This is a temporary solution enable
                         # foreach ops. The problem is that foreach ops returns
