@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import copy
 import functools
 import itertools
@@ -7,6 +8,7 @@ import operator
 import re
 import sys
 import traceback
+import weakref
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
@@ -17,6 +19,7 @@ import torch._guards
 import torch._logging
 
 import torch.nn
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._guards import (
     Checkpointable,
@@ -42,6 +45,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
+    DefaultDeviceSource,
     DeterministicAlgorithmsSource,
     is_constant_source,
     LocalSource,
@@ -148,19 +152,14 @@ class FakeRootModule(torch.nn.Module):
 
 
 class WrapperBackend:
-    def __init__(self, backend: CompilerFn, original_example_inputs):
+    def __init__(self, backend: CompilerFn):
         self.backend: CompilerFn = backend
-        self.original_example_inputs = original_example_inputs
-
-    @property
-    def example_inputs(self):
-        return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
-        self.candidate = self.backend(copy_gm, self.original_example_inputs)
+        self.candidate = self.backend(copy_gm, example_inputs)
 
         if self.candidate is None or self.candidate is self.gm.forward:
             return self.gm.forward
@@ -170,8 +169,8 @@ class WrapperBackend:
 
         # if verify_correctness=True
         try:
-            correct = self.gm.forward(*self.example_inputs)
-            result = self.candidate(*self.example_inputs)
+            correct = self.gm.forward(*clone_inputs(example_inputs))
+            result = self.candidate(*clone_inputs(example_inputs))
 
             # TODO: replace `same` function with the one in testing
             if same(correct, result):
@@ -187,7 +186,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
+class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -204,7 +203,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         frame_state,
     ):
         super().__init__()
-        self.graph = torch.fx.Graph()
+        self.tracers = [SubgraphTracer(self)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -236,6 +235,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
         )
 
+        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
@@ -251,8 +252,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
-        # Node => computed real value (see utils.get_real_value)
-        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
@@ -266,10 +265,54 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
 
-        # Map from graph input name to its placeholder proxy object, where the
-        # map's keys give all current placeholder node names and can be used to
-        # create unique node names
-        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+    @property
+    def root_tracer(self):
+        return self.tracers[0]
+
+    @property
+    def current_tracer(self):
+        return self.tracers[-1]
+
+    @property
+    def graph(self):
+        return self.current_tracer.graph
+
+    # TODO(rzou): can delete after we refactor speculate_subgraph to use nested GraphTracer.
+    @graph.setter
+    def graph(self, value):
+        self.current_tracer.graph = value
+
+    @property
+    def input_name_to_proxy(self):
+        return self.current_tracer.input_name_to_proxy
+
+    @property
+    def real_value_cache(self):
+        return self.current_tracer.real_value_cache
+
+    def create_graph_input(self, *args, **kwargs):
+        return self.root_tracer.create_graph_input(*args, **kwargs)
+
+    def create_proxy(self, *args, **kwargs):
+        return self.current_tracer.create_proxy(*args, **kwargs)
+
+    def create_node(self, *args, **kwargs):
+        return self.current_tracer.create_node(*args, **kwargs)
+
+    def remove_node(self, *args, **kwargs):
+        return self.current_tracer.remove_node(*args, **kwargs)
+
+    def create_arg(self, *args, **kwargs):
+        return self.current_tracer.create_arg(*args, **kwargs)
+
+    @contextlib.contextmanager
+    def new_subtracer(self):
+        try:
+            tracer = SubgraphTracer(self, parent=self.current_tracer)
+            self.tracers.append(tracer)
+            yield tracer
+        finally:
+            self.tracers.pop()
 
     @property
     def output(self):
@@ -393,40 +436,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 obj = getattr(obj, k)
         return obj
 
-    # when before=True, we will insert this input before the most recent
-    # inserted proxy.  This is a hack to get around an ordering problem,
-    # where we first insert a tensor argument, and then insert bindings
-    # for SymInts that may occur in the tensor argument.
-    # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
-    # fixed.
-    def create_graph_input(self, name, type_expr=None, before=False):
-        # unique
-        if name in self.input_name_to_proxy:
-            for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
-                    break
-
-        if self.input_name_to_proxy:
-            prev_name = next(reversed(self.input_name_to_proxy))
-            node = self.input_name_to_proxy[prev_name].node
-            if before:
-                ctx = self.graph.inserting_before(node)
-            else:
-                ctx = self.graph.inserting_after(node)
-        else:
-            ctx = self.graph.inserting_before(None)
-        with ctx:
-            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
-            if self.input_name_to_proxy and before:
-                k, v = self.input_name_to_proxy.popitem()
-                self.input_name_to_proxy[name] = proxy
-                self.input_name_to_proxy[k] = v
-            else:
-                self.input_name_to_proxy[name] = proxy
-            return proxy
-
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
         for i in itertools.count():
@@ -456,6 +465,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
+            if len(self.tracers) > 1:
+                unimplemented(
+                    "accessing attribute of nn.Module inside HigherOrderOperator"
+                )
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -567,7 +580,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: GraphCompileReason = None
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -600,7 +613,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                         )
                     )
                 else:
-                    prefix_insts.append(inst)
+                    prefix_insts.append(copy.copy(inst))
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -751,9 +764,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["calls_captured"] += ncalls
 
         # free a bit of memory
-        for node in self.graph.nodes:
-            if "example_value" in node.meta:
-                del node.meta["example_value"]
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
@@ -814,48 +824,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiler_fn = self.compiler_fn
-            # WrapperBackend needs real inputs, for now, to verify correctness
             if config.verify_correctness:
-                compiler_fn = WrapperBackend(compiler_fn, self.example_inputs())
+                compiler_fn = WrapperBackend(compiler_fn)
 
-            # NOTE: [Real Tensors in Accuracy Evaluation]
-            #
-            # Today, tensors are passed to backends as fake at compile time. See the .fake_example_inputs()
-            # call to compiler_fn below. At runtime, backends use real tensors.
-            #
-            # This should be a strong invariant we hold across all backends,
-            # and generally, it is. However, for accuracy evaluation, we need real tensors at compile time,
-            # for now, due to the unfortunate setup described below.
-            #
-            # Due to the nature of how we invoke comparison as a backend in two different ways:
-            #
-            # (1) Less bad, but still worth rewriting, WrapperBackend above, which takes
-            # real inputs for its ctor. see the config.verify_correctnes above.
-            #
-            # (2) More bad, and very worth rewriting, the minifier installs accuracy comparison as
-            # a true backend, and therefore needs to be compiled with real inputs. This is made trickier
-            # by the fact that the minifier will spawn new processes during minification. As such, we have
-            # created a global flag, MINIFIER_SPAWNED, that should be set IF AND ONLY IF this run was spawned
-            # as part of accuracy minification. This flag is not a contract, and ideally will not be here long.
-            #
-            # The longer term PoR is to:
-            # (A) Rewrite the minifier accuracy evaluation and verify_correctness code to share the same
-            # correctness and accuracy logic, so as not to have two different ways of doing the same thing.
-            #
-            # (B) Refactor minifier accuracy backend to do its comparison fully at runtime, so as not to need to
-            # pass real tensors to it at compile time.
-            is_top_level_minifying = (
-                config.repro_after is not None and config.repro_level == 4
-            )
-            if torch._dynamo.debug_utils.MINIFIER_SPAWNED or is_top_level_minifying:
-                # Disable the tracing context so we don't pick up the ambient
-                # fake tensor mode
-                with torch._guards.tracing(None):
-                    compiled_fn = compiler_fn(gm, self.example_inputs())
-            elif config.DO_NOT_USE_legacy_non_fake_example_inputs:
-                compiled_fn = compiler_fn(gm, self.example_inputs())
-            else:
-                compiled_fn = compiler_fn(gm, self.fake_example_inputs())
+            compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
@@ -863,17 +835,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 e.__traceback__
             ) from None
         return compiled_fn
-
-    def fake_example_inputs(self) -> List[torch.Tensor]:
-        result = []
-        for arg in self.graphargs:
-            if arg.fake_tensor is not None:
-                result.append(arg.fake_tensor)
-            else:
-                # Fallback, in case fake_tensor was not set
-                # Particularly for graph args that are not tensors
-                result.append(arg.example)
-        return result
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = []
@@ -903,8 +864,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             log.debug("REMOVE UNUSED GRAPHARG %s", node.meta["grapharg"].source.name())
             # I'm not really sure why you need to delete these from the
             # node since the node is going to get removed
-            if "example_value" in node.meta:
-                del node.meta["example_value"]
             del node.meta["grapharg"]
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
@@ -961,13 +920,43 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
-            if "example_value" in node.meta:
-                del node.meta["example_value"]
             if "grapharg" in node.meta:
                 del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.keepalive = []
+
+
+class SubgraphTracer(fx.Tracer):
+    """
+    Holds an FX graph that is being traced. OutputGraph owns a SubgraphTracer
+    and the separation of responsibilities is that SubgraphTracer is
+    responsible for building the graph while OutputGraph is responsible for
+    compiling and executing the graph.
+    """
+
+    def __init__(self, output_graph, parent=None):
+        super(SubgraphTracer, self).__init__()
+        self.output_graph = weakref.proxy(output_graph)
+        self.graph = torch.fx.Graph()
+        # Map from graph input name to its placeholder proxy object, where the
+        # map's keys give all current placeholder node names and can be used to
+        # create unique node names
+        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+        # Node => computed real value (see utils.get_real_value)
+        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
+
+        # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
+        self.parent = parent
+        # A list of proxies that exist in the graph being traced. We use this
+        # list to determine that, when tracing the body function of a HigherOrderOperator,
+        # if a new proxy is actually a free variable.
+        self.seen_proxies = set({})
+        # A list of previously free variables that we lifted to being inputs
+        # of the graph. If we are tracing a HigherOrderOperator's body_fn,
+        # then we need to keep track of this so we can rewrite the
+        # HigherOrderOperator call using the traced body_fn.
+        self.lifted_freevars = set({})
 
     def create_proxy(
         self,
@@ -979,12 +968,27 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         type_expr=None,
         proxy_factory_fn=None,
     ):
+        # If there are any freevars, lift them to being inputs
+        if self.parent is not None:
+            flat_args, _ = pytree.tree_flatten(args)
+            for arg in flat_args:
+                if not isinstance(arg, torch.fx.Proxy):
+                    # Is a constant
+                    continue
+                if arg in self.seen_proxies:
+                    continue
+                if not hasattr(arg, "node"):
+                    continue
+                if arg.node.name in self.input_name_to_proxy:
+                    continue
+                self.lift_freevar_to_input(arg)
+
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = self.current_tx
+        tx = self.output_graph.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
@@ -993,6 +997,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
         elif kind == "call_module":
+            if self.parent is not None:
+                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
             # For modules we store the class
             rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
@@ -1007,11 +1013,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
         rv.node.stack_trace = "".join(msgs)
 
+        self.seen_proxies.add(rv)
         return rv
 
     def create_node(self, *args, **kwargs):
         node = super().create_node(*args, **kwargs)
-        node.meta["creation_timestamp"] = self.timestamp
+        node.meta["creation_timestamp"] = self.output_graph.timestamp
         return node
 
     # Note: we did not override erase_node since
@@ -1019,3 +1026,85 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def remove_node(self, node):
         self.graph.erase_node(node)
         self.input_name_to_proxy.pop(node.name, None)
+
+    # when before=True, we will insert this input before the most recent
+    # inserted proxy.  This is a hack to get around an ordering problem,
+    # where we first insert a tensor argument, and then insert bindings
+    # for SymInts that may occur in the tensor argument.
+    # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
+    # fixed.
+    def create_graph_input(self, name, type_expr=None, before=False):
+        # unique
+        if name in self.input_name_to_proxy:
+            for i in itertools.count():
+                candidate_name = f"{name}_{i}"
+                if candidate_name not in self.input_name_to_proxy:
+                    name = candidate_name
+                    break
+
+        if self.input_name_to_proxy:
+            prev_name = next(reversed(self.input_name_to_proxy))
+            node = self.input_name_to_proxy[prev_name].node
+            if before:
+                ctx = self.graph.inserting_before(node)
+            else:
+                ctx = self.graph.inserting_after(node)
+        else:
+            ctx = self.graph.inserting_before(None)
+        with ctx:
+            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            if self.input_name_to_proxy and before:
+                k, v = self.input_name_to_proxy.popitem()
+                self.input_name_to_proxy[name] = proxy
+                self.input_name_to_proxy[k] = v
+            else:
+                self.input_name_to_proxy[name] = proxy
+            return proxy
+
+    def is_name_bound(self, name):
+        if name in self.input_name_to_proxy:
+            return True
+        for proxy in self.seen_proxies:
+            if proxy.node.name == name:
+                return True
+        return False
+
+    def lift_freevar_to_input(self, proxy):
+        self.create_graph_input(proxy.node.name)
+        self.lifted_freevars.add(proxy)
+        if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
+            self.parent.lift_freevar_to_input(proxy)
+
+
+# NOTE: [HigherOrderOperator tracing design]
+# Ignoring HigherOrderOperators for a moment,
+# OutputGraph represents the graph being built by Dynamo that may be compiled
+# and executed. It holds a root SubgraphTracer where the FX graph is built.
+#
+# HigherOrderOperators are operators that take functions (represented by
+# torch.fx.GraphModule) as their arguments. When Dynamo encounters a
+# HigherOrderOperator, then it attempts to introspect the function passed
+# to it (call this the "body function"), capture it into a GraphModule,
+# and rewrite the call to the HigherOrderOperator to use the GraphModule.
+#
+# The way we handle the capture of body functions is through having
+# (possibly nested) SubgraphTracers, one per body function.
+#
+# Mechanically, we do the introspection by:
+# - Creating a new SubgraphTracer via OutputGraph.new_subtracer
+# - Executing the body function.
+# This constructs the graph of the body function in the new SubgraphTracer
+# while modifying the state of the OutputGraph. For example:
+# - the OutputGraph can receive new GraphArgs (if we discover any new
+#   untracked Tensors)
+# - side effects from the body function get accumulated into
+#   OutputGraph.side_effects
+# - guards produced by the body function get accumulated into OutputGraph.guards
+#
+# The traced function has some special properties that make it easier for us
+# to transform later down the line:
+# - we lift all free variables to being inputs.
+#
+# If the introspection fails (due to the existence of graph breaks), then
+# we roll back the current OutputGraph state and graph break on the
+# HigherOrderOperator.
