@@ -655,7 +655,7 @@ def repro_main(options, mod, args):
         # user specify the offload strategy.
         from torch._inductor.hooks import intermediate_hook
 
-        with tqdm(desc="Compiling") as t:
+        with tqdm(desc="Compiling"):
             compiled = compile_fx_inner(mod, args)
         total = counters["inductor"]["intermediate_hooks"]
 
