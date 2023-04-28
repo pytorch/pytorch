@@ -1,6 +1,6 @@
 # Owner(s): ["module: onnx"]
 
-"""Test consistency between the output values of torch.onnx exported operators
+"""Test consistency between the output values of torch.onnx FX exported operators
 and torch operators given the same inputs.
 
 Usage:
@@ -28,19 +28,16 @@ import copy
 from typing import Optional, Tuple
 
 import onnx_test_common
+
 import parameterized
 
 import torch
-
-# For readability, these two are allowed to be imported as function
 from onnx_test_common import skip, xfail
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
     common_utils,
 )
-
-OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
@@ -54,17 +51,7 @@ OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 # Ops to be tested for numerical consistency between onnx and pytorch
 TESTED_OPS: frozenset[str] = frozenset(
     [
-        "atan",
-        "atan2",
         "ceil",
-        "flatten",
-        "logical_not",
-        "nn.functional.scaled_dot_product_attention",
-        "repeat",
-        "sqrt",
-        "stft",
-        "t",
-        "tile",
         "unflatten",
     ]
 )
@@ -81,60 +68,25 @@ TESTED_OPS: frozenset[str] = frozenset(
 #     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
-        "atan", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Atan")
-    ),
-    xfail("atan", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
-    skip(
-        "atan2", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Atan")
-    ),
-    xfail("atan2", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
-    xfail(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
-    skip("nn.functional.scaled_dot_product_attention", opsets=[onnx_test_common.opsets_before(14)], reason="Need Trilu."),
-    skip("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
-    skip("sqrt", dtypes=onnx_test_common.BOOL_TYPES, reason=onnx_test_common.reason_onnx_does_not_support("Sqrt")),
-    skip("stft", opsets=[onnx_test_common.opsets_before(17)], reason=onnx_test_common.reason_onnx_does_not_support("STFT")),
-    skip("tile", opsets=[onnx_test_common.opsets_before(13)], reason=onnx_test_common.reason_onnx_does_not_support("Tile")),
-    xfail("unflatten", opsets=[onnx_test_common.opsets_before(13)], reason="Helper function is needed to support legacy ops."),
+    xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3 (https://github.com/pytorch/pytorch/issues/99534)"),
 )
 # fmt: on
 
 SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
-    skip(
-        "nn.functional.scaled_dot_product_attention",
-        matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
-        reason="dropout is random so the results do not match",
-    ),
-    skip(
-        "repeat",
-        reason="Empty repeats value leads to an invalid graph",
-        matcher=lambda sample: not sample.args[0],
-    ),
-    skip(
-        "stft",
-        reason="ONNX STFT does not support complex results",
-        matcher=lambda sample: sample.kwargs.get("return_complex") is True,
-    ),
-    skip(
-        "tile",
-        matcher=lambda sample: any(dim == 0 for dim in sample.input.shape)
-        or not sample.input.shape,
-        reason="Logic not implemented for size 0 inputs in op.Reshape",
-    ),
-    skip(
+    xfail(
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
     ),
 )
 
-
 # END OF SECTION TO MODIFY #####################################################
 
+
+OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
@@ -180,7 +132,7 @@ def _get_test_class_name(cls, num, params_dict) -> str:
             "name": f"TestOnnxModelOutputConsistency_opset{opset}",
             "opset_version": opset,
         }
-        for opset in onnx_test_common.TESTED_OPSETS
+        for opset in onnx_test_common.FX_TESTED_OPSETS
     ],
     class_name_func=_get_test_class_name,
 )
@@ -191,6 +143,8 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """
 
     opset_version = -1
+    op_level_debug: bool = False
+    dynamic_shapes: bool = False
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
@@ -210,6 +164,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         for i, cpu_sample in enumerate(samples):
             inputs = (cpu_sample.input, *cpu_sample.args)
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
+
             with self.subTest(
                 opset=self.opset_version,
                 sample_num=i,
@@ -222,7 +177,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                 with onnx_test_common.normal_xfail_skip_test_behaviors(
                     test_behavior, reason
                 ):
-                    model = SingleOpModel(op, cpu_sample.kwargs)
+                    model = SingleOpModel(op.op, cpu_sample.kwargs)
                     model.eval()
 
                     if dtype == torch.float32:
@@ -238,10 +193,12 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                         rtol = None
                         atol = None
                     # Run the test
-                    self.run_test(model, inputs, rtol=rtol, atol=atol)
+                    self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                        model, inputs, rtol=rtol, atol=atol
+                    )
 
 
-for opset in onnx_test_common.TESTED_OPSETS:
+for opset in onnx_test_common.FX_TESTED_OPSETS:
     # The name needs to match the parameterized_class name.
     test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
     onnx_test_common.add_decorate_info(

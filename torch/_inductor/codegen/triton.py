@@ -1262,12 +1262,21 @@ class TritonKernel(Kernel):
                 )
 
                 if src_dtype == torch.bool:
-                    # tl.reduce doesn't support tl.int1
+                    # This is only really used for aten.any. It changes the
+                    # final reduction of a non-persistent reduction from
+                    #     tmp5 = triton_helpers.max(_tmp5, 1)[:, None]
+                    # to
+                    #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
+                    # which is needed because tl.reduce doesn't support tl.int1
                     accumulator = f"{accumulator}.to(tl.int8)"
                     result_type = triton_compute_type(dtype)
-                    self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}.to({result_type})")
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
+                    )
                 else:
-                    self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}"
+                    )
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
@@ -1901,6 +1910,21 @@ class TritonScheduling:
         kernel_name = self.define_kernel(src_code, node_schedule)
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+
+        if config.generate_intermediate_hooks:
+            for node in node_schedule:
+                if not isinstance(node, scheduler.BaseSchedulerNode):
+                    continue
+                # TODO: not sure if this is the right thing to do
+                name = node.get_name()
+                if kernel.args.is_removed(name):
+                    continue
+                origin_node = node.node.get_origin_node()
+                if origin_node is not None:
+                    V.graph.wrapper_code.writeline(
+                        f"run_intermediate_hooks({origin_node.name!r}, {name})"
+                    )
+
         self.scheduler.free_buffers()
 
     def define_kernel(self, src_code, node_schedule):
