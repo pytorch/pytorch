@@ -39,22 +39,25 @@ def _get_device_module(device='cuda'):
     device_module = getattr(torch, device)
     return device_module
 
-class DefaultDevice(object):
+class _DefaultDevice(object):
     _default_device_type = "cuda"
 
     @staticmethod
     def set_device_type(device: str = "cuda"):
-        DefaultDevice._default_device_type = device
+        _DefaultDevice._default_device_type = device
 
     @staticmethod
     def get_device_type():
-        return DefaultDevice._default_device_type
+        return _DefaultDevice._default_device_type
 
-def infer_device_type(*args):
+def _infer_device_type(*args):
     device_types = list({arg.device.type for arg in args
                         if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
+    if len(device_types) > 1:
+        warnings.warn("Tensor args except CPU tensor are on at least two devices ", device_types,
+                      "but now we only support to reslove cuda deive if there has cuda or the first device.")
     if len(device_types) == 0:
-        return DefaultDevice.get_device_type()
+        return _DefaultDevice.get_device_type()
     elif "cuda" in device_types:
         return "cuda"
     else:
@@ -74,7 +77,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
                           if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
 
     fwd_device_states = []
-    device_module = _get_device_module(infer_device_type(*args))
+    device_module = _get_device_module(_infer_device_type(*args))
 
     for device_id in fwd_device_ids:
         with device_module.device(device_id):
@@ -84,7 +87,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
 
 
 def set_device_states(devices, states) -> None:
-    device_module = _get_device_module(infer_device_type(states))
+    device_module = _get_device_module(_infer_device_type(states))
     for device, state in zip(devices, states):
         with device_module.device(device):
             device_module.set_rng_state(state)
@@ -115,7 +118,7 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
         # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-        ctx.device = infer_device_type(*args)
+        ctx.device = _infer_device_type(*args)
         ctx.device_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs(ctx.device)
         if preserve_rng_state:
             ctx.fwd_cpu_state = torch.get_rng_state()
@@ -731,7 +734,7 @@ def _checkpoint_without_reentrant(
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
-    device = infer_device_type(*args)
+    device = _infer_device_type(*args)
     device_module = _get_device_module(device)
     forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
@@ -780,7 +783,7 @@ def _checkpoint_without_reentrant(
         ret = fn(*args, **kwargs)
 
     if device_module._initialized and preserve_rng_state and not had_device_in_fwd:
-        # Deivce was not initialized before running the forward, so we didn't
+        # Device was not initialized before running the forward, so we didn't
         # stash the device state.
         raise RuntimeError(
             "PyTorch's device state was initialized in the forward pass "
