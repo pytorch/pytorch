@@ -116,7 +116,7 @@ def wrap_convert_context(fn):
         prior_grad_mode = torch.is_grad_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
-        fake_mode = detect_fake_mode(list([*args + (kwargs.values(),)]))
+        fake_mode = detect_fake_mode([*args + (kwargs.values(),)])
         if torch.cuda.is_available() and not fake_mode:
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src

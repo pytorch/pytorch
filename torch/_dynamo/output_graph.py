@@ -57,7 +57,6 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
-    assert_no_fake_params_or_buffers,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -236,11 +235,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         if len(fake_modes) == 1:
             fake_mode, _, _ = fake_modes[0]
-            fake_mode.shape_env = ShapeEnv(
+            fake_mode.shape_env = (
+                ShapeEnv(
                     allow_scalar_outputs=config.capture_scalar_outputs,
                     allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                     frame_id=frame_state["_id"],
-                ) if config.dynamic_shapes else None
+                )
+                if config.dynamic_shapes
+                else None
+            )
             fake_mode.allow_non_fake_inputs = False
         else:
             fake_mode = torch._subclasses.FakeTensorMode(

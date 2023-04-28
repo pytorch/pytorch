@@ -592,7 +592,7 @@ def preserve_rng_state():
     fake_mode = detect_fake_mode()
     if not fake_mode:
         rng = torch.clone(torch.random.get_rng_state())
-        if torch.cuda.is_available() :
+        if torch.cuda.is_available():
             cuda_rng = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
