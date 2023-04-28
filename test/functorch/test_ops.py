@@ -612,6 +612,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('nn.functional.multi_head_attention_forward',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('__rmatmul__',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('matmul',

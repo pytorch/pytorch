@@ -17345,12 +17345,12 @@ op_db: List[OpInfo] = [
         "nn.functional.multi_head_attention_forward",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.multi_head_attention_forward, input, *args, **kwargs),
-        dtypes=floating_types(),
-        dtypesIfCUDA=floating_types(),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
             # AssertionError: Tensor-likes are not close!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=0)}),
                          'TestDecomp', 'test_comprehensive'),
             # lambda impl
@@ -17359,6 +17359,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),),
         supports_out=False,
         supports_gradgrad=True,
+        supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
     UnaryUfuncInfo(
