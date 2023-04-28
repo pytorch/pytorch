@@ -547,7 +547,8 @@ test_libtorch() {
     # Wait for background download to finish
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" python test/run_test.py --cpp --verbose -i cpp/test_api cpp/test_tensorexpr
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" python test/run_test.py --cpp --verbose -i cpp/test_api
+    python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
 
     if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
       python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
