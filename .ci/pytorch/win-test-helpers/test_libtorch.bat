@@ -46,7 +46,6 @@ if "%~1" == "utility_ops_gpu_test" goto :eof
 echo Running "%~2"
 if "%~1" == "c10_intrusive_ptr_benchmark" (
   python test\run_test.py --cpp --verbose -i cpp/"%~1"
-  :: call "%~2"
   goto :eof
 )
 
