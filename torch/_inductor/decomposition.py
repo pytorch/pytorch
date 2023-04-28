@@ -36,6 +36,7 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.unsafe_split,
+        aten.smooth_l1_loss_backward,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
