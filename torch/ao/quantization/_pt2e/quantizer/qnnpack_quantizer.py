@@ -292,6 +292,7 @@ class QNNPackQuantizer(Quantizer):
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
+            self._annotate_conv2d_bn_relu(node, global_config)
             self._annotate_conv2d_bn(node, global_config)
             self._annotate_conv2d_relu(node, global_config)
             self._annotate_conv2d(node, global_config)
@@ -306,13 +307,13 @@ class QNNPackQuantizer(Quantizer):
         """
         Match the following pattern:
 
-          ... -> conv -> bn -> getitem[0] - ...
+          ... -> conv -> bn -> getitem[0] -> ...
 
         Annotate it to get the following pattern after prepare:
 
-                weight -> obs1
-                           |
-          ...  -> obs0 -> conv -> bn -> getitem[0] -> obs2 -> ...
+               weight -> fq1
+                          |
+          ...  -> fq0 -> conv -> bn -> getitem[0] -> fq2 -> ...
 
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
@@ -344,6 +345,72 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
         getitem_node.meta["target_dtype_info"] = {
+            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "_annotated": True,
+        }
+
+    def _annotate_conv2d_bn_relu(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+        """
+        Match the following pattern:
+
+          ... -> conv -> bn -> getitem[0] -> relu -> ...
+
+        Annotate it to get the following pattern after prepare:
+
+               weight -> fq1
+                          |
+          ...  -> fq0 -> conv -> bn -> getitem[0] -> relu -> fq2 -> ...
+
+        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+        """
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.relu_.default,
+            torch.ops.aten.relu.default,
+        ]:
+            return
+        relu_node = node
+        getitem_node = relu_node.args[0]
+        assert isinstance(getitem_node, Node)
+        if (
+            getitem_node.op != "call_function"
+            or getitem_node.target != operator.getitem
+            or getitem_node.args[1] != 0
+        ):
+            return
+        bn_node = getitem_node.args[0]
+        assert isinstance(bn_node, Node)
+        if (
+            bn_node.op != "call_function"
+            or bn_node.target != torch.ops.aten._native_batch_norm_legit.default
+        ):
+            return
+        conv_node = bn_node.args[0]
+        assert isinstance(conv_node, Node)
+        if (
+            conv_node.op != "call_function"
+            or conv_node.target != torch.ops.aten.convolution.default
+        ):
+            return
+        if _is_annotated([relu_node, getitem_node, bn_node, conv_node]):
+            return
+
+        conv_node.meta["target_dtype_info"] = {
+            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
+            "weight_index": 1,
+            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
+            "bias_index": 2,
+            "_annotated": True,
+        }
+        bn_node.meta["target_dtype_info"] = {
+            "_annotated": True,
+        }
+        getitem_node.meta["target_dtype_info"] = {
+            "_annotated": True,
+        }
+        relu_node.meta["target_dtype_info"] = {
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
