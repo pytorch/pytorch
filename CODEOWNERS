@@ -17,9 +17,9 @@
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
-/test/allowlist_for_publicAPI.json @albanD @anjali411
+/test/allowlist_for_publicAPI.json @albanD
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/tags.yaml @anjali411
+/aten/src/ATen/native/tags.yaml @ezyang
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh

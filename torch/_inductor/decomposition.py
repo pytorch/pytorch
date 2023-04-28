@@ -9,6 +9,7 @@ import torch.ao.quantization.fx._decomposed
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
@@ -155,7 +156,12 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
 
 def should_pad_bench(mat1, mat2, op, input=None):
     assert utils.has_triton()
-    from triton.testing import do_bench
+
+    import triton.testing
+
+    do_bench = functools.partial(
+        triton.testing.do_bench, warmup=5, rep=100, fast_flush=True, percentiles=None
+    )
 
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
@@ -178,13 +184,13 @@ def should_pad_bench(mat1, mat2, op, input=None):
         rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
-                lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
+                lambda: op(mat1, mat2),
             )
         else:
             if input is not None:
                 input = torch.randn_like(input)
             ori_time = do_bench(
-                lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
+                lambda: op(input, mat1, mat2),
             )
 
         mat1_pad = torch.randn_like(mat1)
@@ -203,9 +209,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
             )
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
@@ -216,9 +219,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
             )
         else:
             pad_time = do_bench(
@@ -229,9 +229,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
             )
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
@@ -499,47 +496,6 @@ def dequantize_per_tensor_tensor_decomp_impl(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
-
-
-"""
-Some decomps result in differences from eager related to randomness.
-We put these decomps in a separate table `extra_random_decomps` to allow
-turning them on and off via `config.fallback_random`.
-"""
-extra_random_decomps = get_decompositions(
-    [
-        aten.cauchy,
-        aten.cauchy_,
-        aten.exponential,
-        aten.exponential_,
-        aten.geometric,
-        aten.geometric_,
-        aten.normal,
-        aten.normal_,
-        aten.normal_functional,
-        aten.log_normal,
-        aten.log_normal_,
-        aten.uniform_,
-    ]
-)
-register_extra_random_decomp = functools.partial(
-    decomp.register_decomposition, registry=extra_random_decomps
-)
-
-
-@register_extra_random_decomp([aten.bernoulli_])
-def bernoulli_(self, p=0.5):
-    if self.device == torch.device("cpu"):
-        return NotImplemented
-    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
-
-
-@register_extra_random_decomp([aten.bernoulli.p])
-def bernoulli_p(self, p=0.5, *, generator=None):
-    if self.device == torch.device("cpu"):
-        return NotImplemented
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 @functools.lru_cache(None)
