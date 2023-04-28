@@ -1,4 +1,3 @@
-import functools
 import logging
 import operator
 import os
@@ -76,8 +75,10 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
 
 def may_get_constant_buffer_dtype(constant_buffer):
     assert isinstance(
-        constant_buffer, sympy.Symbol
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol"
+        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
+    if isinstance(constant_buffer, sympy.core.numbers.Integer):
+        return torch.int64
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
@@ -159,6 +160,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
+        self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -571,44 +573,38 @@ class GraphLowering(torch.fx.Interpreter):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    @functools.lru_cache(None)
-    def get_single_device(self):
-        return list(self.device_types)[0] if len(self.device_types) == 1 else None
-
-    def check_input_for_cpp_buffer(self, cuda):
+    def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
-            elif isinstance(value, sympy.Symbol):
+            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, cuda):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
 
-    def check_cpp_wrapper(self, cuda):
+    def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
-        self.check_input_for_cpp_buffer(cuda)
+        self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
+        self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            device = self.get_single_device()
-            assert device == "cpu" or device == "cuda"
-            cuda = device == "cuda"
-            self.check_cpp_wrapper(cuda)
+            self.check_cpp_wrapper()
             # Re-check self.cpp_wrapper because it might be disabled due to failed checking
-            if cuda:
+            if self.cuda:
                 assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
 
             if self.cpp_wrapper:
                 self.wrapper_code = (
-                    CudaWrapperCodeGen() if cuda else CppWrapperCodeGen()
+                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
                 )
                 return
 
@@ -691,9 +687,7 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
-            return AotCodeCache.compile(
-                self, code, cuda=(self.get_single_device() == "cuda")
-            )
+            return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
             return self.compile_to_module().call
 

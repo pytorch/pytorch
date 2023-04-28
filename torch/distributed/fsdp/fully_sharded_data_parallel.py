@@ -216,7 +216,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
-        process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
+        process_group (Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]):
             This is the process group used for collective communications and
             the one over which the model is sharded. For hybrid sharding strategies such as
             ``ShardingStrategy.HYBRID_SHARD`` users can
@@ -1458,9 +1458,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 corresponding to the unflattened parameters and holding the
                 sharded optimizer state.
             model (torch.nn.Module):
-                Refer to :meth:``shard_full_optim_state_dict``.
+                Refer to :meth:`shard_full_optim_state_dict`.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-            parameters.
+                parameters.
 
         Returns:
             Refer to :meth:`shard_full_optim_state_dict`.
@@ -1785,7 +1785,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to ``:meth:optim_state_dict`` except
+        The functionality is identical to :meth:`optim_state_dict` except
         for the different arguments.
 
         Args:
@@ -1916,7 +1916,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to ``:meth:optim_state_dict_to_load``
+        The functionality is identical to :meth:`optim_state_dict_to_load`
         except for the different arguments.
 
         Args:
