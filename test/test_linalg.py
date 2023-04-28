@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -2247,6 +2247,7 @@ class TestLinalg(TestCase):
                     a_norm_fro = torch.norm(a, p='fro', dim=dim, keepdim=keepdim)
                     self.assertEqual(a_norm_fro, a_norm_2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
