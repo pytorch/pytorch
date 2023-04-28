@@ -2,7 +2,7 @@ import functools
 from typing import Any
 
 import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import (  # type: ignore[attr-defined]
+from onnxscript.function_libs.torch_lib import (  # type: ignore[attr-defined]  # type: ignore[import]
     graph_building,
 )
 

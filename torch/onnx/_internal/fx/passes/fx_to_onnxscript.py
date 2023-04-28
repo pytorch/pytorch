@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import (  # type: ignore[attr-defined]
+from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # type: ignore[attr-defined]
     graph_building,
 )
 
