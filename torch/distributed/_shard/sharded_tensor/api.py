@@ -136,7 +136,7 @@ class ShardedTensorBase(torch.Tensor):
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         sharding_spec=None,
-    ) -> "ShardedTensor":
+    ) -> "ShardedTensorBase":
         """
         Initialize a ShardedTensorBase with local shards and a global
         ShardedTensorMetadata built on each rank.
@@ -879,7 +879,7 @@ class ShardedTensor(ShardedTensorBase):
         else:
             spec = sharding_spec
 
-        sharded_tensor_base = ShardedTensor.__new__(
+        sharded_tensor = ShardedTensor.__new__(
             ShardedTensor,
             spec,
             sharded_tensor_metadata.size,
@@ -957,7 +957,7 @@ class ShardedTensor(ShardedTensorBase):
         check_tensor(shards_metadata, list(sharded_tensor_metadata.size))
 
         # done validation, add local_shards
-        sharded_tensor_base._local_shards = local_shards
+        sharded_tensor._local_shards = local_shards
         sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
         # run post initialization, i.e. map registration, rpc initialization
