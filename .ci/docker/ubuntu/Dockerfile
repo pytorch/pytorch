@@ -95,11 +95,11 @@ ENV INSTALLED_VISION ${VISION}
 ARG ANDROID
 ARG ANDROID_NDK
 ARG GRADLE_VERSION
-COPY ./common/install_android.sh install_android.sh
+COPY ./common/install_android.sh ./common/common_utils.sh ./
 COPY ./android/AndroidManifest.xml AndroidManifest.xml
 COPY ./android/build.gradle build.gradle
 RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh
+RUN rm install_android.sh common_utils.sh
 RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}

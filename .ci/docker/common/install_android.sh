@@ -107,3 +107,18 @@ chgrp -R jenkins /var/lib/jenkins/.gradle
 popd
 
 rm -rf /var/lib/jenkins/.gradle/daemon
+
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+
+# Cache the test models at ~/.cache/torch/hub/
+IMPORT_SCRIPT_FILENAME="/tmp/torchvision_import_script.py"
+as_jenkins echo 'import torchvision; model = torchvision.models.mobilenet_v2(pretrained=True); model.eval();' > "${IMPORT_SCRIPT_FILENAME}"
+
+pip_install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cpu
+# Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
+# so echo the command to a file and run the file instead
+conda_run python "${IMPORT_SCRIPT_FILENAME}"
+
+# Cleaning up
+conda_run pip uninstall -y torch torchvision
+rm "${IMPORT_SCRIPT_FILENAME}" || true
