@@ -3,14 +3,13 @@ import dataclasses
 import itertools
 import logging
 import typing
-from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
 from .codegen.common import index_prevent_reordering
 from .utils import (
     get_dtype_size,
-    sympy_product,
     sympy_str,
     sympy_subs,
     sympy_symbol,
