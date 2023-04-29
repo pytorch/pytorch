@@ -37,6 +37,14 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
+try:
+    import torch_np
+
+    HAS_NUMPY_TORCH_INTEROP = True
+except ModuleNotFoundError:
+    torch_np = None
+    HAS_NUMPY_TORCH_INTEROP = False
+
 import importlib
 
 import torch
@@ -526,6 +534,8 @@ def clone_input(x):
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
 
     with torch.no_grad():
@@ -555,6 +565,8 @@ def clone_input(x):
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return result
 
 
@@ -722,7 +734,7 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(
+    return isinstance(v, (enum.Enum, type)) or istype(
         v,
         (
             types.CodeType,
@@ -737,7 +749,7 @@ def is_safe_constant(v):
             torch.device,
             torch.dtype,
         ),
-    ) or isinstance(v, enum.Enum)
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -792,11 +804,12 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value):
+def enum_repr(value, local):
     enum_name = str(value)
 
     name, val = enum_name.split(".")
-    local_name = f'L["{name}"].{val}'
+    scope = "L" if local else "G"
+    local_name = f'{scope}["{name}"].{val}'
     return local_name
 
 
@@ -808,11 +821,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys):
+def dict_const_keys_repr(const_keys, *, local):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -886,7 +899,7 @@ def same(
         assert set(ref.keys()) == set(
             res.keys()
         ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        for k in ref.keys():
+        for k in sorted(ref.keys()):
             if not (
                 same(
                     ref[k],
@@ -1529,3 +1542,15 @@ def nnmodule_has_hooks(
             ]
         )
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+
+def to_numpy_helper(___tmp_0):
+    def convert(obj):
+        if isinstance(obj, torch_np.ndarray):
+            return obj.tensor.numpy()
+        else:
+            return obj
+
+    if isinstance(___tmp_0, tuple):
+        return tuple([convert(obj) for obj in ___tmp_0])
+    return convert(___tmp_0)

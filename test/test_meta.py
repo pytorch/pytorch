@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torchgen.utils import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
 import sys
@@ -579,7 +579,7 @@ meta disagrees with real impl:
             else:
                 seen_succeeded.setdefault(func, set()).add(dtype)
                 if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                    raise RuntimeError(f"unexpected success {resolve_name(func)}")
+                    raise RuntimeError(f"unexpected success {resolve_name(func)} {meta_args} {meta_kwargs}")
 
     return rs
 
@@ -640,6 +640,10 @@ meta_function_expected_failures = {
 
 meta_function_expected_failures_only_outplace = {
     torch.nn.functional.rrelu : {f64, bf16, f32},
+}
+
+meta_function_expected_failures_conditional = {
+    torch.repeat_interleave : (lambda dtype, *args, **kwargs: not isinstance(kwargs.get("repeats", None), int)),
 }
 
 """
@@ -798,6 +802,8 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
         elif not self.inplace and self.dtype in meta_function_expected_failures_only_outplace.get(func, set()):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
+            test_expect = TestExpect.XFAILURE
+        elif meta_function_expected_failures_conditional.get(func, lambda *_, **__: False)(self.dtype, *args, **kwargs):
             test_expect = TestExpect.XFAILURE
         elif not self.inplace and \
                 self.dtype in meta_function_device_expected_failures_only_outplace[self.device_type].get(func, set()):
