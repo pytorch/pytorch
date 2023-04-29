@@ -6,6 +6,11 @@ load(
 )
 
 def define_targets(rules):
+    rules.cc_library(
+        name = "caffe2_core_macros",
+        hdrs = [":caffe2_core_macros_h"],
+    )
+
     rules.cmake_configure_file(
         name = "caffe2_core_macros_h",
         src = "caffe2/core/macros.h.in",

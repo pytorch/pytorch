@@ -40,6 +40,7 @@ def define_targets(rules):
         srcs = rules.glob(
             ["util/*.cpp"],
             exclude = [
+                "util/bit_cast_test.cpp",
                 "util/ssize_test.cpp",
                 "util/typeid_test.cpp",
             ],
@@ -51,6 +52,15 @@ def define_targets(rules):
             ":complex_test_common",
             "//c10/macros",
             "//c10/util:base",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util/bit_cast_test",
+        srcs = ["util/bit_cast_test.cpp"],
+        deps = [
+            "//c10/util:bit_cast",
             "@com_google_googletest//:gtest_main",
         ],
     )

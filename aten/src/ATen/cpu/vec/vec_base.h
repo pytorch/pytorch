@@ -14,6 +14,8 @@
 // See https://github.com/pytorch/pytorch/issues/37577 for an instance
 // of this bug in the past.
 
+#include <array>
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <functional>
@@ -957,16 +959,17 @@ inline Vectorized<dst_t> cast(const Vectorized<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
 }
 
-template <typename T>
-inline Vectorized<int_same_size_t<T>> convert_to_int_of_same_size(const Vectorized<T>& src) {
+template <typename T, typename IntType = int_same_size_t<T>>
+inline Vectorized<IntType> convert_to_int_of_same_size(const Vectorized<T>& src) {
+  static_assert(sizeof(T) == sizeof(IntType));
   static constexpr int size = Vectorized<T>::size();
-  T src_arr[size];
-  src.store(static_cast<void*>(src_arr));
-  int_same_size_t<T> buffer[size];
-  for (const auto i : c10::irange(size)) {
-    buffer[i] = static_cast<int_same_size_t<T>>(src_arr[i]);
-  }
-  return Vectorized<int_same_size_t<T>>::loadu(static_cast<void*>(buffer));
+
+  std::array<T, size> src_arr;
+  src.store(static_cast<void*>(src_arr.data()));
+  std::array<IntType, size> buffer;
+  std::transform(src_arr.cbegin(), src_arr.cend(), buffer.begin(),
+                 [](const T& x) { return static_cast<IntType>(x); });
+  return Vectorized<IntType>::loadu(static_cast<const void*>(buffer.data()));
 }
 
 // Example inputs for AVX512:

@@ -2185,7 +2185,7 @@ class TestTyping(TestCase):
             self.assertFalse(issubinstance(d, t[int]))  # type: ignore[index]
 
         # dict
-        d = dict({'1': 1, '2': 2.})
+        d = {'1': 1, '2': 2.}
         self.assertTrue(issubinstance(d, Dict))
         self.assertTrue(issubinstance(d, Dict[str, T_co]))
         self.assertFalse(issubinstance(d, Dict[str, int]))
@@ -2696,6 +2696,23 @@ class TestCircularSerialization(TestCase):
         })}
         self.assertEqual(res2, exp_res_2)
 
+
+class CustomShardingIterDataPipe(IterDataPipe):
+    def __init__(self, dp):
+        self.dp = dp
+        self.num_of_instances = 1
+        self.instance_id = 0
+
+    def apply_sharding(self, num_of_instances, instance_id):
+        self.num_of_instances = num_of_instances
+        self.instance_id = instance_id
+
+    def __iter__(self):
+        for i, d in enumerate(self.dp):
+            if i % self.num_of_instances == self.instance_id:
+                yield d
+
+
 class TestSharding(TestCase):
 
     def _get_pipeline(self):
@@ -2802,6 +2819,12 @@ class TestSharding(TestCase):
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
 
+    def test_legacy_custom_sharding(self):
+        dp = self._get_pipeline()
+        sharded_dp = CustomShardingIterDataPipe(dp)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
+        items = list(sharded_dp)
+        self.assertEqual([1, 20], items)
 
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
@@ -2829,6 +2852,19 @@ class TestSharding(TestCase):
         expected = list(dp0)
 
         dp0 = self._get_pipeline().sharding_filter()
+        dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
+        items = []
+        for i in dl:
+            items.append(i)
+
+        self.assertEqual(sorted(expected), sorted(items))
+
+    def test_legacy_custom_sharding_with_old_dataloader(self):
+        dp0 = self._get_pipeline()
+        expected = list(dp0)
+
+        dp0 = self._get_pipeline()
+        dp0 = CustomShardingIterDataPipe(dp0)
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
         items = []
         for i in dl:

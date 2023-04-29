@@ -118,8 +118,8 @@ class LocalTimerServer(TimerServer):
             os.kill(worker_id, signal.SIGKILL)
             return True
         except ProcessLookupError:
-            log.info(f"Process with pid={worker_id} does not exist. Skipping")
+            log.info("Process with pid=%s does not exist. Skipping", worker_id)
             return True
         except Exception as e:
-            log.error(f"Error terminating pid={worker_id}", exc_info=e)
+            log.error("Error terminating pid=%s", worker_id, exc_info=e)
         return False

@@ -411,7 +411,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
       mallocAsync(&r, device, size, cuda::getCurrentCUDAStream(device));
@@ -818,7 +818,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
@@ -829,7 +829,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     mallocAsync(&r, device, nbytes, stream);
     return r;
@@ -837,8 +837,33 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void raw_delete(void* ptr) override {
     freeAsync(ptr);
   }
-  bool needsPoolSpecificPeerAccess() override {
-    return true;
+  void enablePeerAccess(int dev, int dev_to_access) override {
+    // Double-checks allocator backend hasn't changed, which would definitely be
+    // an error. cudaMallocAsync pools are unaffected by
+    // cudaDeviceEnablePeerAccess. We need pool-specific enablement. See
+    // https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-2/
+    c10::cuda::CUDAGuard device_guard(dev);
+    cudaMemPool_t mempool;
+    C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev_to_access));
+    cudaMemAccessDesc desc = {};
+    desc.location.type = cudaMemLocationTypeDevice;
+    desc.location.id = dev;
+    desc.flags = cudaMemAccessFlagsProtReadWrite;
+    C10_CUDA_CHECK(cudaMemPoolSetAccess(mempool, &desc, 1 /* numDescs */));
+  }
+  virtual cudaError_t memcpyAsync(
+      void* dst,
+      int dstDevice,
+      const void* src,
+      int srcDevice,
+      size_t count,
+      cudaStream_t stream,
+      bool p2p_enabled) override {
+    if (p2p_enabled || dstDevice == srcDevice) {
+      return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
+    } else {
+      return cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);
+    }
   }
   std::string name() override {
     return "cudaMallocAsync";

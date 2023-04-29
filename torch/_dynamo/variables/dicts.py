@@ -237,6 +237,13 @@ class DefaultDictVariable(ConstDictVariable):
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
+    def is_python_constant(self):
+        # Return false for unsupported defaults. This ensures that a bad handler
+        # path is not taken in BuiltinVariable for getitem.
+        if self.default_factory not in [list, tuple, dict] and not self.items:
+            return False
+        return super().is_python_constant()
+
     def call_method(
         self,
         tx,
