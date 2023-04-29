@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import logging
 import typing
-from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
