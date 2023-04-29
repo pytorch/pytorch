@@ -822,7 +822,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
-    "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
@@ -953,7 +952,6 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
-    "aten/src/ATen/detail/MTIAHooksInterface.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
@@ -967,7 +965,6 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/HIPHooksInterface.h",
     "aten/src/ATen/detail/ORTHooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
-    "aten/src/ATen/detail/MTIAHooksInterface.h",
 ]
 
 aten_cpu_source_non_codegen_list = [

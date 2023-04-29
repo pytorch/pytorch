@@ -190,14 +190,10 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e.node, tracer, lambda: proxy)
-        elif isinstance(e, (tuple, list)):
-            if isinstance(proxy, fx.Proxy):
-                set_meta(proxy, e)
-
+        elif isinstance(e, list):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
                 wrap_with_proxy(ee, proxy[idx], get_constant(idx))
-
 
     def get_constant(idx):
         if constant is None:
@@ -205,7 +201,16 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
         else:
             return constant[idx]
 
-    wrap_with_proxy(inner_res, proxy_res, constant)
+    # Unfortunately, tree_map cannot directly be used here. As the resulting
+    # object may be a proxy that represents a tuple, we may need to
+    # explicitly unwrap the proxy by simulating the flattening operations.
+    if isinstance(inner_res, (tuple, list)):
+        if isinstance(proxy_res, fx.Proxy):
+            set_meta(proxy_res, inner_res)
+        for idx, e in enumerate(inner_res):
+            wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
+    elif isinstance(inner_res, py_sym_types + (torch.Tensor,)):
+        wrap_with_proxy(inner_res, proxy_res, constant)
 
     return inner_res
 
@@ -416,12 +421,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     else:
         constant = None
 
-    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-    # then we only want it to trace out proxies the first time that we hit an op.
-    # In particular, track_tensor_tree can call detach().
-    with inside_mode(proxy_mode):
-        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 

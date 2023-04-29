@@ -1004,7 +1004,7 @@ def find_last_2_with_filenames(lookup_file, dashboard_archive_path, dtype, filen
         fullpaths = [
             os.path.join(dashboard_archive_path, path, name) for name in filenames
         ]
-        if all(os.path.exists(fullpath) for fullpath in fullpaths):
+        if all([os.path.exists(fullpath) for fullpath in fullpaths]):
             last2.append(output_dir)
         if len(last2) >= 2:
             return last2

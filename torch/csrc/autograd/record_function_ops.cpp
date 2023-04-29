@@ -18,7 +18,7 @@ namespace profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
-static void record_function_enter(
+void record_function_enter(
     const std::string& name,
     const c10::optional<std::string>& args,
     at::RecordFunction& rec) {
@@ -33,7 +33,7 @@ static void record_function_enter(
 }
 
 // Legacy signature using cpp_custom_type_hack
-static at::Tensor record_function_enter_legacy(
+at::Tensor record_function_enter_legacy(
     const std::string& name,
     const c10::optional<std::string>& args) {
   auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
@@ -51,19 +51,18 @@ c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
   return rec;
 }
 
-static at::RecordFunction& getRecordFunctionFromTensor(
-    const at::Tensor& handle) {
+at::RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
   auto& rec = at::cpp_custom_type_hack::cast<at::RecordFunction>(handle);
   return rec;
 }
 
 // Ends the profiling scope created with record_function_enter.
-static void record_function_exit(at::RecordFunction& rec) {
+void record_function_exit(at::RecordFunction& rec) {
   rec.end();
 }
 
 // Legacy signature using cpp_custom_type_hack
-static void record_function_exit_legacy(const at::Tensor& handle) {
+void record_function_exit_legacy(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
   auto& rec = getRecordFunctionFromTensor(handle);
@@ -71,7 +70,7 @@ static void record_function_exit_legacy(const at::Tensor& handle) {
 }
 
 // New signature using custom_class
-static void record_function_exit_new(
+void record_function_exit_new(
     const c10::intrusive_ptr<PythonRecordFunction>& record) {
   record_function_exit(record->record);
 }
@@ -101,7 +100,7 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
 }
 
 // Legacy signature using cpp_custom_type_hack
-static c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_legacy(
+c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_legacy(
     const at::Tensor& handle,
     const c10::intrusive_ptr<c10::ivalue::Future>& fut) {
   return _call_end_callbacks_on_fut(

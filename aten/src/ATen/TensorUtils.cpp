@@ -99,7 +99,7 @@ void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c1
     " (while checking arguments for ", c, ")");
 }
 
-static void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
+void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
   const TensorArg* t0 = nullptr;
   for (auto& t : tensors) {
     if (!t->defined()) continue;

@@ -78,7 +78,6 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
-#include <torch/csrc/utils/verbose.h>
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -1229,6 +1228,10 @@ void initIttBindings(PyObject* module);
 } // namespace profiler
 } // namespace torch
 #endif
+
+namespace torch {
+void initVerboseBindings(PyObject* module);
+} // namespace torch
 
 static std::vector<PyMethodDef> methods;
 

@@ -30,9 +30,9 @@ import unittest
 import weakref
 
 import torch
+import torch._export.constraints as _export_constraints
 import torch._inductor.test_operators
 import torch.ao.quantization._pt2e.qat_utils
-import torch.utils._content_store
 
 from . import comptime, config, external_utils
 
@@ -109,7 +109,6 @@ FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
-    torch.utils._content_store.__file__,
     # These are dynamo files!
     external_utils.__file__,
     comptime.__file__,  # Want to inline these helpers
@@ -122,6 +121,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {_export_constraints.__file__}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.

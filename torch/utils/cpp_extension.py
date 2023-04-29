@@ -553,7 +553,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any(flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags)
+                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
             ):
                 cflags.extend(['-ccbin', _ccbin])
 
@@ -1462,7 +1462,7 @@ def _jit_compile(name,
 
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
-    with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
+    with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,

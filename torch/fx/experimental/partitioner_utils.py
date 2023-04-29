@@ -50,7 +50,7 @@ class Partition:
             # the remove this input node
             for input_node in input_nodes:
                 if all(
-                    n not in self.nodes for n in input_node.users
+                    [n not in self.nodes for n in input_node.users]
                 ) and input_node.op in {"placeholder", "get_attr"}:
                     self.nodes.remove(input_node)
             self.recalculate_mem_size()
@@ -144,8 +144,10 @@ def get_latency_of_one_partition(
             # or its input nodes in this partition are placeholders and get_attrs
             # this node is on the top bfs level in this partition
             if not any(
-                n in partition.nodes and n.op not in {"placeholder", "get_attr"}
+                [
+                    n in partition.nodes and n.op not in {"placeholder", "get_attr"}
                     for n in input_nodes
+                ]
             ):
                 top_nodes.append(node)
         return top_nodes

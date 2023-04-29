@@ -69,7 +69,8 @@ static void autogradBasedTransformProcess(
   auto num_args = op.schema().arguments().size();
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
 
-  setup_dispatch_key_tls(transform_type, {});
+  auto exclude = keysToExcludeWhenEnteringDynamicLayer(transform_type);
+  setup_dispatch_key_tls(exclude, {});
   op.callBoxed(stack);
 }
 

@@ -3450,12 +3450,9 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
         IndexError,
     )
-    if t.shape[dim] == 0:
-        return tuple()
-    else:
-        return tuple(
-            torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
-        )
+    return tuple(
+        torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
+    )
 
 
 @out_wrapper()

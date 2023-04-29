@@ -269,8 +269,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # compile a partial subgraph prefix then jump into user code
             if self.has_backedge():
                 msg = (
-                    "Skipping frame because there is a graph break in a for/while loop\n"
-                    f"{self.frame_summary()}"
+                    "Skipping frame because there is a graph break in a for/while loop"
                 )
                 log.info(msg)
                 raise exc.SkipFrame(msg)
@@ -356,10 +355,7 @@ def break_graph_if_unsupported(*, push):
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
-                    )
+                    msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
@@ -1927,7 +1923,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.symbolic_locals = collections.OrderedDict(
             (
                 k,
-                VariableBuilder(self, LocalSource(k))(f_locals[k]),
+                VariableBuilder(
+                    self,
+                    LocalSource(k)
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
+                )(f_locals[k]),
             )
             for k in vars
             if k in f_locals

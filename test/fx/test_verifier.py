@@ -1,24 +1,27 @@
-# Owner(s): ["module: dynamo"]
-import copy
-from typing import Tuple
+# Owner(s): ["module: fx"]
+import os
+import sys
 import unittest
-
-import torch  # noqa: F401
-import torch.nn as nn
-import torch._dynamo as torchdynamo
-from functorch import make_fx
-from functorch.experimental import functionalize
-from torch import Tensor
-from torch.testing._internal.common_utils import run_tests, TestCase
-from torch._dynamo.eval_frame import is_dynamo_supported
-
-from torch._export.verifier import (
+from torch.fx.verifier import (
     SpecViolationError,
     check_valid_aten_dialect,
     check_valid,
     is_valid_aten_dialect,
     is_valid,
 )
+
+
+from typing import Tuple
+
+
+from torch.testing._internal.common_utils import TestCase
+import torch  # noqa: F401
+import torch.nn as nn
+from torch import Tensor
+import torch._dynamo as torchdynamo
+import copy
+from functorch import make_fx
+from functorch.experimental import functionalize
 
 
 @torch.no_grad()
@@ -33,6 +36,7 @@ def capture(f, args):
         f,
         *copy.deepcopy(args),
         aten_graph=True,
+        tracing_mode='fake',
     )
 
     def graph_with_interpreter(*args):
@@ -115,9 +119,12 @@ class FeedForwardBlock(nn.Module):
         return y
 
 
+def skip_condition():
+    return sys.version_info >= (3, 11) or os.name == 'nt'
+
 class VerifierTest(TestCase):
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
     def test_verifier(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
@@ -125,8 +132,8 @@ class VerifierTest(TestCase):
         check_valid(egm)
         self.assertTrue(is_valid(egm))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
-    def test_verifier_call_module(self) -> None:
+    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
+    def testr_verifier_call_module(self) -> None:
         m = FeedForwardBlock(10, 10)
         gm = torch.fx.symbolic_trace(m)
         # this would have modules that are not delegates
@@ -134,7 +141,7 @@ class VerifierTest(TestCase):
             check_valid(gm)
         self.assertFalse(is_valid(gm))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
     def test_verifier_no_functional(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
@@ -145,14 +152,14 @@ class VerifierTest(TestCase):
             check_valid(egm)
         self.assertFalse(is_valid(egm))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
     def test_aten_dialect(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
         check_valid_aten_dialect(egm)
         self.assertTrue(is_valid_aten_dialect(egm))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
     def test_aten_wrong_mem_format(self) -> None:
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -171,7 +178,7 @@ class VerifierTest(TestCase):
             check_valid_aten_dialect(egm)
         self.assertFalse(is_valid_aten_dialect(egm))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @unittest.skipIf(skip_condition(), "dynamo doesnt support 3.11")
     def test_aten_wrong_mem_format_buffer(self) -> None:
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -193,4 +200,4 @@ class VerifierTest(TestCase):
 
 
 if __name__ == '__main__':
-    run_tests()
+    unittest.main()

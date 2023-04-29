@@ -13,7 +13,7 @@ namespace torch {
 namespace utils {
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
-static c10::TensorOptions typeIdWithDefault(
+c10::TensorOptions typeIdWithDefault(
     PythonArgs& r,
     int device_idx,
     c10::DispatchKey dispatch_key) {

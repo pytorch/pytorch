@@ -159,7 +159,8 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
   }
 }
 
-NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
+  int64_t ndim = t.dim();
   auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
   for (const auto i : c10::irange(ndim)) {
     axes[i] = [NSNumber numberWithInteger:i];
@@ -167,15 +168,7 @@ NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   return axes;
 }
 
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
-  return getTensorAxes(t.dim());
-}
-
-NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
-  return getTensorAxes(sizes.size());
-}
-
-NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim) {
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim) {
   if (dim.has_value() && dim.value().size() != 0) {
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
@@ -187,7 +180,7 @@ NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArray
     return axes;
   }
 
-  return getTensorAxes(sizes);
+  return getTensorAxes(t);
 }
 
 std::string getMPSShapeString(MPSShape* shape) {

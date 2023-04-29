@@ -79,7 +79,7 @@ most_recent_backend: Optional[CompilerFn] = None
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
-    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
+    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_exporter.py"),
 }
 
 
@@ -110,8 +110,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
-            self._forward = self.forward
-            self.forward = self._call_lazy_check
+            self.__call__ = self._call_lazy_check
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -136,7 +135,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return self._forward(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
 
 
 def remove_from_cache(f):
@@ -677,13 +676,11 @@ def export(
     f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
-    pre_autograd: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
-    tracing_mode: str = "symbolic",
+    tracing_mode: str = "real",
     constraints: List[Constraint] = None,
-    assume_static_by_default: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -696,12 +693,6 @@ def export(
 
         aten_graph (bool): If True, exports a graph with ATen operators.
         If False, exports a graph with Python operators. Default is False.
-
-        pre_autograd (bool): If True, exports a graph with ATen operators,
-        but before autograd has run. This can be useful if you want to apply further tranformations
-        on a graph before running it through autograd.
-        This flag is only valid if aten_graph=True is set.
-        Default is False.
 
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
         Required if aten_graph or tracing_mode is specified. Default is None.
@@ -726,12 +717,10 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None:
+    if decomposition_table is not None or tracing_mode != "real":
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-    if pre_autograd:
-        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
 
     graph = None
@@ -804,9 +793,7 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
-        summarize_dim_constraints=True,
-        specialize_int=True,
-        assume_static_by_default=assume_static_by_default,
+        summarize_dim_constraints=True, specialize_int=True
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -888,7 +875,6 @@ def export(
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
-                    pre_autograd=pre_autograd,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error

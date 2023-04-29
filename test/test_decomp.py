@@ -59,9 +59,9 @@ def diff_arg(arg, requires_grad=True):
             return arg.is_floating_point() or arg.is_complex()
 
     if is_iterable_of_tensors(arg):
-        if all(is_differentiable_arg(a) for a in arg):
+        if all([is_differentiable_arg(a) for a in arg]):
             return True
-        if all(not is_differentiable_arg(a) for a in arg):
+        if all([not is_differentiable_arg(a) for a in arg]):
             return False
         raise RuntimeError("NYI: The test runner can't handle this")
     return isinstance(arg, Tensor) and is_differentiable_arg(arg)

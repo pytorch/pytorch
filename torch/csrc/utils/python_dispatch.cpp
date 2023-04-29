@@ -36,7 +36,7 @@ static ska::flat_hash_map<
     ska::flat_hash_map<c10::DispatchKey, std::shared_ptr<c10::SafePyObject>>>
     python_registrations_;
 
-static torch::Library::Kind parseKind(const std::string& k) {
+torch::Library::Kind parseKind(const std::string& k) {
   static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
       {"DEF", torch::Library::DEF},
       {"IMPL", torch::Library::IMPL},
@@ -46,7 +46,7 @@ static torch::Library::Kind parseKind(const std::string& k) {
   TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
   return it->second;
 }
-static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
+c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
   static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
       {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
       {"FROM_SCHEMA", c10::AliasAnalysisKind::FROM_SCHEMA},
@@ -180,7 +180,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
-static torch::_RegisterOrVerify register_or_verify() {
+torch::_RegisterOrVerify register_or_verify() {
   if (isMainPyInterpreter()) {
     return torch::_RegisterOrVerify::REGISTER;
   } else {
@@ -517,24 +517,6 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
   m.def("_to_functionality_key", [](c10::DispatchKey k) {
     return c10::toFunctionalityKey(k);
-  });
-  // E.g. given `DispatchKey::AutogradFunctionality`, returns a keyset of:
-  //  AutogradCPU
-  //  AutogradCUDA
-  //  ...
-  //  AutogradPrivateUse3
-  m.def("_functionality_to_backend_keys", [](c10::DispatchKey key) {
-    std::vector<c10::DispatchKey> keys;
-    if (c10::isPerBackendFunctionalityKey(key)) {
-      auto ks = c10::DispatchKeySet(key) |
-          c10::DispatchKeySet(c10::DispatchKeySet::RAW, c10::full_backend_mask);
-      for (auto k : ks) {
-        keys.push_back(k);
-      }
-    } else {
-      keys.push_back(key);
-    }
-    return keys;
   });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 

@@ -18,12 +18,8 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, diagnostics
-from torch.onnx._internal.fx import (
-    context as fx_context,
-    fx_symbolic_graph_extractor,
-    serialization as fx_serialization,
-)
+from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
+from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
 from torch.testing._internal import common_utils
 
 try:
@@ -252,7 +248,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
-                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
+                self.conv2 = nn.Conv2d(32, 64, 3, 2, bias=True)
                 self.fc1 = nn.Linear(9216, 128, bias=True)
                 self.fc2 = nn.Linear(128, 10, bias=True)
 
@@ -261,12 +257,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 tensor_x = self.conv2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                tensor_x = torch.max_pool2d(tensor_x, 2)
                 tensor_x = torch.flatten(tensor_x, 1)
                 tensor_x = self.fc1(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                tensor_x = self.fc2(tensor_x)
-                output = torch.log_softmax(tensor_x, dim=1)
+                output = self.fc2(tensor_x)
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
@@ -685,7 +679,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ftm = fake_tensor.FakeTensorMode(
                 allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
-            ctx = fx_context.FxToOnnxContext()
+            ctx = fx_onnx.FxToOnnxContext()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
@@ -700,22 +694,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
 
-                options = torch.onnx.ExportOptions(
-                    opset_version=self.opset_version,
-                    dynamic_shapes=self.dynamic_shapes,
-                    op_level_debug=self.op_level_debug,
-                )
-                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
-                    options
-                )
-                export_options.fx_tracer = (
-                    fx_symbolic_graph_extractor.FXSymbolicTracer()
-                )
-                export_output = torch.onnx.dynamo_export(
-                    fake_model,
-                    *fake_args,
-                    export_options=export_options,
-                )
+                export_output = FXSymbolicTraceExporter(
+                    options=torch.onnx.ExportOptions(
+                        opset_version=self.opset_version,
+                        dynamic_shapes=self.dynamic_shapes,
+                        op_level_debug=self.op_level_debug,
+                    ),
+                    model=fake_model,
+                    model_args=fake_args,
+                    model_kwargs={},
+                ).export()
 
                 onnx_model = export_output.model_proto
 
@@ -730,7 +718,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
             onnx_model_location = model_name + "_external_data.onnx"
             onnx_initializer_location = model_name + "_initializers"
-            fx_serialization.save_model_with_external_data(
+            fx_onnx.save_model_with_external_data(
                 tmp_folder,
                 onnx_model_location,
                 onnx_initializer_location,

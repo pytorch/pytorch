@@ -78,10 +78,8 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
         from torch._ops import push_mode_for_key, get_cached_ops
         # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
         # Clear the cache of every op that has been used so far, for this particular key.
-        ks = torch._C._functionality_to_backend_keys(k)
         for op in get_cached_ops():
-            for key in ks:
-                op._uncache_dispatch(key)
+            op._uncache_dispatch(k)
         push_mode_for_key(k, mode)
     # Note [Per-Dispatch-Key Modes Must Be Reentrant]
     # The idea here is that we are allowed to push modes onto any dispatch key's mode stack, but:

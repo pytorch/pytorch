@@ -15,13 +15,13 @@ namespace jit {
 
 static const auto countsAttribute = Symbol::attr("none_counts");
 
-static bool hasGradSumToSizeUses(Value* v) {
+bool hasGradSumToSizeUses(Value* v) {
   return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
     return use.user->kind() == aten::_grad_sum_to_size;
   });
 }
 
-static void insertProfileNodesForSpecializeAutogradZero(
+void insertProfileNodesForSpecializeAutogradZero(
     Block* block,
     ProfilingRecord* pr) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
