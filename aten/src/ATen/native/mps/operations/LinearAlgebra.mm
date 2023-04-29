@@ -990,7 +990,7 @@ std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
     TORCH_CHECK(
         status == 0,
         "lu_factor(): LU factorization failure at the ",
-        i,
+        i + 1,
         " sample with status: ",
         status,
         ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
