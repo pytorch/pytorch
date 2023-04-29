@@ -1312,6 +1312,11 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
+
+  TORCH_CHECK(
+    m1.dtype() == m2.dtype(),
+    "expected m1 and m2 to have the same dtype, but got: ", m1.dtype(), " != ", m2.dtype()
+  )
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();

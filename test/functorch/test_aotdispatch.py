@@ -2440,8 +2440,6 @@ aot_autograd_failures = {
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # many complex operators incorrect striding, metadata
-    xfail("pca_lowrank"),
-    xfail("norm", "nuc"),
     xfail('fft.fft', ''),
     xfail('fft.hfft2', ''),
     xfail('fft.hfft', ''),
@@ -2457,8 +2455,6 @@ aot_autograd_failures = {
     xfail('fft.rfft', ''),
     xfail('fft.rfftn', ''),
 
-    xfail('svd', ''),
-    xfail('svd_lowrank', ''),
     xfail('stft', ''),
 
     # Misc
@@ -2480,8 +2476,6 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
@@ -2529,8 +2523,6 @@ symbolic_aot_autograd_failures = {
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
-    xfail('masked.amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2575,10 +2567,8 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
-    xfail('norm', 'nuc'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('pca_lowrank', ''),  # could not find kernel
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomp...
     xfail('polar', ''),  # could not find kernel
     xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
@@ -2597,8 +2587,6 @@ symbolic_aot_autograd_failures = {
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('svd_lowrank', ''),  # could not find kernel
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
