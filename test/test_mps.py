@@ -282,7 +282,7 @@ def mps_ops_modifier(ops):
         'nn.functional.tanhshrink': [torch.uint8],
         'nn.functional.triplet_margin_loss': [torch.uint8],
         'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
-        'nn.functional.pairwise_distance': [torch.uint8, torch.float16],
+        'nn.functional.pairwise_distance': [torch.uint8],
         'outer': [torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
@@ -320,7 +320,6 @@ def mps_ops_modifier(ops):
                            torch.int32, torch.int64, torch.uint8, torch.int8],
         'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
                   torch.int32, torch.int64, torch.uint8, torch.int8],
-        'dist': [torch.float16],  # cpu result off, showing inf values
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -576,9 +575,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'view_as_complex': None,
-        'segment_reduce': None,
         'segment_reduce_': None,
-        '_segment_reduce_lengths': None,
         '_upsample_bilinear2d_aa': None,
         'geometric' : None,
         'geometric_': None,
@@ -2060,6 +2057,34 @@ class TestMPS(TestCaseMPS):
         res = torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         res_cpu = torch.norm(d_cpu[0, :, :]), torch.norm(d_cpu[1, :, :])
         self.assertEqual(res, res_cpu)
+
+    def test_linalg_vector_norm(self):
+        x_mps = torch.tensor([0, 0, 0, 2, 3], dtype=torch.float, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.linalg.vector_norm(x_mps, ord=0)
+        res_cpu = torch.linalg.vector_norm(x_cpu, ord=0)
+        self.assertEqual(res_mps, res_cpu)
+
+        a_mps = torch.arange(27, dtype=torch.float, device="mps") - 4
+        a_cpu = torch.arange(27, dtype=torch.float, device="cpu") - 4
+
+        B_mps = a_mps.reshape(3, 3, 3)
+        B_cpu = a_cpu.reshape(3, 3, 3)
+
+        res_mps = torch.linalg.vector_norm(a_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(a_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        res_mps = torch.linalg.vector_norm(B_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        for dim in range(0, B_mps.dim()):
+            res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
+            res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
+            self.assertEqual(res_mps, res_cpu)
+
 
     def test_layer_norm(self):
         # TODO: Test non-contiguous
@@ -6917,6 +6942,29 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
 
+    def test_lu_factor(self):
+        def helper(shape):
+            cpu_A = torch.randn(shape, device='cpu', dtype=torch.float32, requires_grad=True)
+            A = cpu_A.detach().clone().to('mps').requires_grad_()
+            LU_cpu, pivots_cpu = torch.linalg.lu_factor(cpu_A)
+            LU, pivots = torch.linalg.lu_factor(A)
+
+            self.assertEqual(LU, LU_cpu)
+            self.assertEqual(pivots, pivots_cpu)
+
+            # TODO: implement at::lu_unpack for backward pass
+            # cpu_grad = torch.randn(LU.shape)
+            # grad = cpu_grad.to('mps')
+
+            # LU_cpu.backward(gradient=cpu_grad)
+            # LU.backward(gradient=grad)
+
+            #self.assertRqual(cpu_A.grad, A.grad)
+
+        helper((3, 3))  # unbatched
+        helper((2, 3, 3))  # batched
+        helper((2, 2, 4))  # batched and non-square
+
     # test eye
     def test_eye(self):
         def helper(n, m, dtype):
@@ -10377,7 +10425,7 @@ class TestConsistency(TestCaseMPS):
                 elif (op.name == "native_layer_norm"):
                     atol = 1e-4
                     rtol = 1.3e-5
-                elif op.name == "norm" and dtype == torch.float16:
+                elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
                     atol = 7e-4
                     rtol = 1.5e-3
                 elif op.name == "unique" and cpu_kwargs["sorted"] is False:

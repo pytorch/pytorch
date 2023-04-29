@@ -1441,10 +1441,10 @@ static void addmm_impl_cpu_(
               transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
               m, n, k,
               alpha.to<opmath_t>(),
-              a.data_ptr<scalar_t>(), lda,
-              b.data_ptr<scalar_t>(), ldb,
+              a.const_data_ptr<scalar_t>(), lda,
+              b.const_data_ptr<scalar_t>(), ldb,
               beta.to<opmath_t>(),
-              c.data_ptr<scalar_t>(), ldc);
+              c.mutable_data_ptr<scalar_t>(), ldc);
         });
   }
 

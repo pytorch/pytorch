@@ -24,6 +24,7 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::EXTERNAL_CORRELATION,
     libkineto::ActivityType::XPU_RUNTIME,
     libkineto::ActivityType::CUDA_RUNTIME,
+    libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::PYTHON_FUNCTION,
 };
 
@@ -33,6 +34,7 @@ const std::set<libkineto::ActivityType> kCudaTypes = {
     libkineto::ActivityType::CONCURRENT_KERNEL,
     // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
+    libkineto::ActivityType::CUDA_DRIVER,
 };
 const std::set<libkineto::ActivityType> kXpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
@@ -321,6 +323,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::PYTHON_FUNCTION:
+    case libkineto::ActivityType::CUDA_DRIVER:
       return c10::DeviceType::CPU;
     default: {
       TORCH_WARN(
