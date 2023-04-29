@@ -112,13 +112,33 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "acosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Acosh")
     ),
+    skip(
+        "acos", dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Acos")
+    ),
+    skip(
+        "acosh", dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Acosh")
+    ),
     xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
     ),
     xfail(
+        "add",
+        dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support(
+            "Add", "int8, int16, uint8"
+        ),
+    ),
+    xfail(
         "addmm", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
+    ),
+    xfail(
+        "all",
+        dtypes=(torch.uint8,),
+        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "uint8"),
     ),
     xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
@@ -129,12 +149,43 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("Amax", "bool")
     ),
     xfail(
+        "amax",
+        dtypes=(torch.int16,),
+        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "int16"),
+    ),
+    xfail(
         "amin", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Amin", "bool")
     ),
     xfail(
+        "amin", dtypes=(torch.int16,),
+        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "int16"),
+    ),
+    xfail(
         "any", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Any")
+    ),
+    xfail(
+        "argmax",
+        dtypes=(
+            torch.int16,
+            torch.int64,
+        ),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "ArgMax", "int16, int64"
+        ),
+    ),
+    xfail(
+        "argmin",
+        dtypes=(
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int64,
+        ),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "ArgMin", "uint8, int8, int16, int64"
+        ),
     ),
     xfail(
         "as_strided",
@@ -150,12 +201,58 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Asinh", "bool and int")
     ),
     xfail(
+        "asin",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Asin", "float64"),
+    ),
+    xfail(
+        "asinh",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Asinh", "float64"
+        ),
+    ),
+    xfail(
         "atan", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atan", "bool and int")
     ),
     xfail(
+        "atan",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", "float64"),
+    ),
+    xfail(
+        "atanh",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Atanh", "float64"
+        ),
+    ),
+    xfail(
         "atanh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atanh", "bool and int")
+    ),
+    xfail(
+        "baddbmm",
+        dtypes=(
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+        ),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Matmul", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
+        "bmm",
+        dtypes=(
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+        ),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Matmul", "uint8, int8, int16"
+        ),
     ),
     skip(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
@@ -166,12 +263,71 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Chunk", "bool")
     ),
     xfail(
+        "chunk",
+        dtypes=(torch.uint8, torch.int8, torch.int16, torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Chunk", "uint8, int8, int16, float16"
+        ),
+    ),
+    xfail(
+        "clamp",
+        dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Max", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
         "clamp_max", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Clamp_max", "bool")
     ),
     xfail(
+        "clamp_max",
+        dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Max", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
+        "clamp_min",
+        dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Max", "uint8, int8, int16"
+        ),
+    ),
+    xfail(
         "clamp_min", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Clamp_min", "bool")
+    ),
+    xfail(
+        "constant_pad_nd",
+        dtypes=(torch.int16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Constant_pad_nd", "int16"
+        ),
+    ),
+    xfail(
+        "nn.functional.conv1d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
+    ),
+    xfail(
+        "nn.functional.conv1d",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Conv1d", "float64"
+        ),
+    ),
+    xfail(
+        "nn.functional.conv2d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv2d", "int64"),
+    ),
+    xfail(
+        "nn.functional.conv2d",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Conv2d", "float64"
+        ),
     ),
     skip(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
@@ -182,27 +338,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
 
 SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
-        "acos",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Acos", "float64"),
-    ),
-    xfail(
-        "acosh",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Acosh", "float64"
-        ),
-    ),
-    xfail(
-        "add",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8"
-        ),
-    ),
-    xfail(
-        "addmm",
+        "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
         in (torch.uint8, torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_script_does_not_support(
@@ -214,30 +350,15 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: not (len(sample.kwargs) == 0),
         reason="Need dispatcher: this Aten overload only support one tensor as input by design",
     ),
-    xfail(
-        "all",
-        matcher=lambda sample: sample.input.dtype == torch.uint8,
-        reason="all uses op.ReduceMin which doesn't support uint8.",
-    ),
     skip(
         "amax",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme (core dump): ORT aborts on scalar inputs to ReduceMax-18",
     ),
-    xfail(
-        "amax",
-        matcher=lambda sample: sample.input.dtype == torch.int16,
-        reason="ReduceMax-18 doesn't support int16",
-    ),
     skip(
         "amin",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme (core dump): ORT aborts on scalar inputs to ReduceMin-18",
-    ),
-    xfail(
-        "amin",
-        matcher=lambda sample: sample.input.dtype == torch.int16,
-        reason="ReduceMin-18 doesn't support int16",
     ),
     skip(
         "arange",
@@ -250,105 +371,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         and sample.kwargs["dtype"] == torch.float64,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Arange"),
     ),
-    xfail(
-        "argmax",
-        matcher=lambda sample: sample.input.dtype == torch.int16
-        or sample.input.dtype == torch.int64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "ArgMax", "int16, int64"
-        ),
-    ),
-    xfail(
-        "argmin",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16, torch.int64),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "ArgMin", "uint8, int8, int16, int64"
-        ),
-    ),
-    xfail(
-        "asin",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Asin", "float64"),
-    ),
-    xfail(
-        "asinh",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Asinh", "float64"
-        ),
-    ),
-    xfail(
-        "atan",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", "float64"),
-    ),
-    xfail(
-        "atanh",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Atanh", "float64"
-        ),
-    ),
-    xfail(
-        "baddbmm",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Matmul", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
-        "bmm",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Matmul", "uint8, int8, int16"
-        ),
-    ),
     skip(
         "cat",
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
-    ),
-    xfail(
-        "chunk",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16, torch.float16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Chunk", "uint8, int8, int16, float16"
-        ),
-    ),
-    xfail(
-        "clamp",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Max", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
-        "clamp_max",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Max", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
-        "clamp_min",
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Max", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
-        "constant_pad_nd",
-        matcher=lambda sample: sample.input.dtype == torch.int16,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Constant_pad_nd", "int16"
-        ),
     ),
     xfail(
         "nn.functional.celu",
@@ -360,34 +386,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
         reason="String padding is not accepted by aten::conv1d",
     ),
-    xfail(
-        "nn.functional.conv1d",
-        matcher=lambda sample: sample.input.dtype == torch.int64,
-        reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int"),
-    ),
-    xfail(
-        "nn.functional.conv1d",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Conv1d", "float64"
-        ),
-    ),
     skip(
         "nn.functional.conv2d",
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
         reason="String padding is not accepted by aten::conv2d",
-    ),
-    xfail(
-        "nn.functional.conv2d",
-        matcher=lambda sample: sample.input.dtype == torch.int64,
-        reason=onnx_test_common.reason_onnx_does_not_support("Conv2d", "int"),
-    ),
-    xfail(
-        "nn.functional.conv2d",
-        matcher=lambda sample: sample.input.dtype == torch.float64,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Conv2d", "float64"
-        ),
     ),
     xfail(
         "unflatten",
