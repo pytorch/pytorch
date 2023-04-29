@@ -37,8 +37,6 @@ class TestMixedPrecision(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule(self):
-        # fully_shard() node should always cast forward inputs
-        # unless 'cast_root_forward_inputs' is set as False
         self.run_subtests(
             {
                 "cast_root_forward_inputs_submodule": [True, False],

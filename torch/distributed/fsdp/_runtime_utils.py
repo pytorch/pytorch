@@ -608,6 +608,7 @@ def _root_pre_forward(
         return _root_cast_forward_input(state, args, kwargs)
 
 
+@no_type_check
 def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
         all(not handle._force_full_precision for handle in state._handles)
