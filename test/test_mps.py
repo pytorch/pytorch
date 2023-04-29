@@ -449,7 +449,7 @@ def mps_ops_modifier(ops):
         'linalg.lu': None,
         'linalg.lu_factor': None,
         'linalg.lu_factor_ex': None,
-        #'linalg.lu_solve': None,
+        'linalg.lu_solve': None,
         'linalg.matrix_norm': [torch.float32],
         'linalg.norm': [torch.float32],
         'linalg.normsubgradients_at_zero': [torch.float32],
@@ -464,7 +464,7 @@ def mps_ops_modifier(ops):
         'logcumsumexp': None,
         'logdet': None,
         'lu': None,
-        #'lu_solve': None,
+        'lu_solve': None,
         'lu_unpack': None,
         'masked.cumprod': None,
         'masked.median': None,
@@ -6959,7 +6959,7 @@ class TestNLLLoss(TestCaseMPS):
             # LU_cpu.backward(gradient=cpu_grad)
             # LU.backward(gradient=grad)
 
-            #self.assertRqual(cpu_A.grad, A.grad)
+            # self.assertEqual(cpu_A.grad, A.grad)
 
         helper((3, 3))  # unbatched
         helper((2, 3, 3))  # batched
