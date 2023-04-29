@@ -208,7 +208,7 @@ class CppPrinter(ExprPrinter):
         mod = self.paren(self.doprint(mod))
         if div != "1":
             x = f"({x} / {div})"
-        return f"{x} % {mod}"
+        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
