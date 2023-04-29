@@ -112,7 +112,7 @@ def diagnose_call(
             diag = diagnostic_type(
                 rule,
                 level,
-                diagnostic_message_formatter(fn, args, kwargs),
+                diagnostic_message_formatter(fn, *args, **kwargs),
             )
 
             # pop the decorator frame
