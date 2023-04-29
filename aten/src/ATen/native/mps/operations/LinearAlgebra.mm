@@ -94,7 +94,7 @@ void prepare_matrices_for_broadcasting(const Tensor* bias,
 
 enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 
-std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   using namespace mps;
 
   Tensor A_t = A;
@@ -102,13 +102,22 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
   uint64_t numPivots = std::min(aRows, aCols);
-  uint64_t batchSize = A_t.sizes().size() > 2 ? A_t.size(0) : 1;
   resize_output(LU, A_t.sizes());
-
-  auto pivot_sizes = A_t.sizes().vec();
-  pivot_sizes.pop_back();
-  pivot_sizes[-1] = numPivots;
+  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2); // 6 5
+  pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
+
+  if (A_t.numel() == 0 || LU.numel() == 0) {
+    LU.zero_();
+    return;
+  }
+
+  Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
+  if (!A_.is_contiguous()) {
+    A_ = A_.clone(at::MemoryFormat::Contiguous);
+  }
+
+  uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
 
   std::vector<Tensor> status_tensors;
   std::vector<Tensor> pivots_list;
@@ -120,18 +129,11 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
     pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
   }
 
-  if (A_t.numel() == 0 || LU.numel() == 0) {
-    LU.zero_();
-    return status_tensors;
-  }
-
-  Tensor A_ = A_t;
-  if (!A_t.is_contiguous()) {
-    A_ = A_t.clone(at::MemoryFormat::Contiguous);
-  }
   // Since the LUDecomposition functions in-place if the result matrix completely aliases the source matrix,
-  // We copy LU from A as the new A.
-  A_ = LU.copy_(A_);
+  // We copy LU from A as the new A if there is only one batch dim.
+  if (A_t.dim() <= 3) {
+    A_ = LU.copy_(A_);
+  }
 
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
 
@@ -180,10 +182,24 @@ std::vector<Tensor> linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, T
     }
   });
   auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
-  pivots.copy_(stacked_pivots);
+  if (A_t.dim() > 3) {
+    LU.copy_(A_.view(A_t.sizes()));
+    pivots.copy_(stacked_pivots.view(pivot_sizes));
+  } else {
+    pivots.copy_(stacked_pivots);
+  }
   pivots += 1; // PyTorch's `pivots` is 1-index.
 
-  return status_tensors;
+  for (const auto i : c10::irange(status_tensors.size())) {
+    int status = status_tensors[i].item<int>();
+    TORCH_CHECK(
+        status == 0,
+        "lu_factor(): LU factorization failure at the ",
+        i + 1,
+        " sample with status: ",
+        status,
+        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+  }
 }
 
 Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -875,27 +891,14 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
 }
 
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out_mps(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
-  auto status_tensors = mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
-  for (const auto i : c10::irange(status_tensors.size())) {
-    TORCH_CHECK(
-        status_tensors[i].item<int>() == 0, "lu_factor(): LU factorization failure:", status_tensors[i].item<int>());
-  }
+  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
   return std::tie(LU, pivots);
 }
+
 std::tuple<Tensor, Tensor> linalg_lu_factor_mps(const Tensor& A, bool pivot) {
   Tensor LU = at::empty({0}, A.options());
   Tensor pivots = at::empty({0}, A.options().dtype(kInt));
-  auto status_tensors = mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
-  for (const auto i : c10::irange(status_tensors.size())) {
-    int status = status_tensors[i].item<int>();
-    TORCH_CHECK(
-        status == 0,
-        "lu_factor(): LU factorization failure at the ",
-        i + 1,
-        " sample with status: ",
-        status,
-        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
-  }
+  mps::linalg_lu_factor_out_mps_impl(A, pivot, LU, pivots);
   return std::make_tuple(std::move(LU), std::move(pivots));
 }
 
