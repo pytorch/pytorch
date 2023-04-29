@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import collections
-import contextlib
 import copy
 import csv
 import functools
@@ -338,6 +337,14 @@ def output_csv(filename, headers, row):
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
             writer.writerow(line + ["0"] * (len(headers) - len(line)))
+
+
+class NullContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 def nothing(f):
@@ -1036,7 +1043,7 @@ def get_dynamo_stats():
 
 def maybe_fresh_cache(fn, is_cold_start):
     def inner(*args, **kwargs):
-        cache_minder = contextlib.nullcontext()
+        cache_minder = NullContext()
         if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_inductor_cache(cache_entries)
@@ -1083,7 +1090,7 @@ class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
-        self.autocast = contextlib.nullcontext
+        self.autocast = NullContext
         self.optimizer = None
         self._args = None
 
@@ -2268,7 +2275,7 @@ def run(runner, args, original_dir=None):
 
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
-    optimize_ctx = contextlib.nullcontext()
+    optimize_ctx = NullContext()
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
