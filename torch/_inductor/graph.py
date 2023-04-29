@@ -212,6 +212,20 @@ class GraphLowering(torch.fx.Interpreter):
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
 
+    def get_numel(self, buffer_name: str):
+        from .ir import MultiOutputLayout
+
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].numel()
+        if buffer_name in self.name_to_buffer:
+            buf = self.name_to_buffer[buffer_name]
+            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+                return 1
+            return buf.get_numel()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_numel()
+        raise KeyError(f"could not find {buffer_name}")
+
     def random_seed_buffer(self, device: torch.device):
         """
         Return a device-unique 1-element tensor storing our RNG seed.
