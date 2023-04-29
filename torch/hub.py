@@ -11,9 +11,9 @@ import torch
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Callable, Dict, Optional, Any
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen, Request
+from urllib.request import urlopen, build_opener, Request, ProxyHandler
 from urllib.parse import urlparse  # noqa: F401
 from torch.serialization import MAP_LOCATION
 
@@ -62,6 +62,8 @@ __all__ = [
     'load',
     'load_state_dict_from_url',
     'set_dir',
+    'set_proxy',
+    'unset_proxy',
 ]
 
 # matches bfd8deac from resnet18-bfd8deac.pth
@@ -76,6 +78,14 @@ VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
 _hub_dir = None
+_url_opener: Callable[str, Any] = urlopen
+
+try:
+    import socks
+    import sockshandler
+    _pysocks_available = True
+except ImportError:
+    _pysocks_available = False
 
 
 @contextlib.contextmanager
@@ -139,7 +149,7 @@ def _parse_repo_info(github):
         # default branch: main or master. Our assumption is that if main exists
         # then it's the default branch, otherwise it's master.
         try:
-            with urlopen(f"https://github.com/{repo_owner}/{repo_name}/tree/main/"):
+            with _url_opener(f"https://github.com/{repo_owner}/{repo_name}/tree/main/"):
                 ref = 'main'
         except HTTPError as e:
             if e.code == 404:
@@ -161,12 +171,12 @@ def _parse_repo_info(github):
 
 
 def _read_url(url):
-    with urlopen(url) as r:
+    with _url_opener(url) as r:
         return r.read().decode(r.headers.get_content_charset('utf-8'))
 
 
 def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
-    # Use urlopen to avoid depending on local git.
+    # Use _url_opener to avoid depending on local git.
     headers = {'Accept': 'application/vnd.github.v3+json'}
     token = os.environ.get(ENV_GITHUB_TOKEN)
     if token is not None:
@@ -609,7 +619,7 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
     """
     file_size = None
     req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
+    u = _url_opener(req)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
         content_length = meta.getheaders("Content-Length")
@@ -752,3 +762,43 @@ def load_state_dict_from_url(
     if _is_legacy_zip_format(cached_file):
         return _legacy_zip_load(cached_file, model_dir, map_location, weights_only)
     return torch.load(cached_file, map_location=map_location, weights_only=weights_only)
+
+
+def set_proxy(protocol, host, port):
+    r"""Sets the proxy server used for PyTorch Hub's network connections.
+
+    Args:
+        protocol (str): ``"http"``, ``"https"``, ``"socks4"`` or ``"socks5"``
+            Determines the network protocol used to access the proxy server denoted by the hostname.
+
+    .. note::
+        ``PySocks`` must be installed in order to use the ``"socks4"`` and ``"socks5"`` protocols.
+
+        host (str): Hostname of the proxy server
+        port (int): Network port to use when connecting to the proxy server
+
+    Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
+        >>> torch.hub.set_proxy('http', 'localhost', 9701)
+    """
+    global _url_opener
+    if protocol in ['http', 'https']:
+        full_host = protocol + '://' + host + ':' + str(port) + '/'
+        handler = ProxyHandler({'http': full_host, 'https': full_host})
+    elif protocol in ['socks4', 'socks5']:
+        if not _pysocks_available:
+            raise NotImplementedError("PySocks must be installed to use SOCKS proxies")
+        protocol_socks = socks.SOCKS4 if protocol == 'socks4' else socks.SOCKS5
+        handler = sockshandler.SocksiPyHandler(protocol_socks, host, port)
+    else:
+        raise ValueError("Invalid proxy protocol: {}".format(protocol))
+    _url_opener = build_opener(handler).open
+
+
+def unset_proxy():
+    r"""Clears any proxy configuration changes created by ``torch.hub.set_proxy``.
+
+    After calling this function, PyTorch Hub's network connections will no longer be routed through a proxy server.
+    """
+    global _url_opener
+    _url_opener = urlopen
