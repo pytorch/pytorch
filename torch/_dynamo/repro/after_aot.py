@@ -274,6 +274,7 @@ class InputReader:
         return t
 
     def symint(self, val):
+        self._update()
         return val
 
 
