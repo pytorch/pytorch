@@ -2,6 +2,7 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/op_registration/op_allowlist.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
