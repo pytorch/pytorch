@@ -545,12 +545,7 @@ def run_test(
     os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
-    )
+    should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
     timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
@@ -562,7 +557,7 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1 if should_file_rerun else 0,
+            retries=2 if should_file_rerun else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
