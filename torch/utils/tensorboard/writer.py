@@ -83,10 +83,6 @@ class FileWriter:
 
     @property
     def event_writer(self):
-        print("EVENT WRITER CREATED")
-        import traceback
-        traceback.print_stack()
-
         if self._event_writer is None:
             self._event_writer = EventFileWriter(
                 self._log_dir, self._max_queue, self._flush_secs, self._filename_suffix
