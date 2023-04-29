@@ -340,7 +340,6 @@ ONNX_SERIAL_LIST = [
     "onnx/test_models_onnxruntime",
     "onnx/test_custom_ops",
     "onnx/test_utility_funs",
-    "onnx/test_fx_to_onnx_with_onnxruntime",
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
