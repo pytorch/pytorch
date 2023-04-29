@@ -572,6 +572,8 @@ test_libtorch() {
     python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
 
     if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+      # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
+      export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
       python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
     fi
 
