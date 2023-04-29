@@ -849,6 +849,20 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
 
   auto index_contig = index.contiguous();
 
+  if (source.dim() != 0) {
+    if (source.size(dim) != index.numel()) {
+      AT_ERROR("source tensor shape along dim does not match index tensor length.");
+    }
+
+    auto self_sizes = self.sizes().vec();
+    auto source_sizes = source.sizes().vec();
+    self_sizes.erase(self_sizes.begin() + dim);
+    source_sizes.erase(source_sizes.begin() + dim);
+    if (self_sizes != source_sizes) {
+      AT_ERROR("source tensor sizes must be broadcastable to self tensor sizes (excluding the specified dimension)");
+    }
+  }
+
   if (result.dim() > 1) {
     // Equivalent to:
     //   for (const auto i : c10::irange(numel)) {
