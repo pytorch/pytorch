@@ -3111,6 +3111,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(inp1, inp2, inp3, inp4, c)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_torch_variable_type(self):
+        # from torchvision
+        def check_type(obj, types_or_checks):
+            for type_or_check in types_or_checks:
+                if (
+                    isinstance(obj, type_or_check)
+                    if isinstance(type_or_check, type)
+                    else type_or_check(obj)
+                ):
+                    return True
+            return False
+
+        opt_check_type = torch._dynamo.optimize("eager")(check_type)
+        ref = check_type(torch.randn(4), [torch.Tensor])
+        res = opt_check_type(torch.randn(4), [torch.Tensor])
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
