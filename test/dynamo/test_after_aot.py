@@ -48,9 +48,7 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             with tempfile.TemporaryDirectory() as d:
                 writer = InputWriter(d, stable_hash=True)
                 x = writer.tensor(tensor)
-                self.assertExpectedInline(
-                    "\n".join(writer._lines), expected, skip=1
-                )
+                self.assertExpectedInline("\n".join(writer._lines), expected, skip=1)
                 env = {}
                 # TODO: assert no logs
                 exec("\n".join(writer.lines()), env)

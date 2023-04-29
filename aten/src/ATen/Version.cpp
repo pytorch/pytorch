@@ -90,7 +90,7 @@ std::string get_openmp_version() {
   return ss.str();
 }
 
-std::string used_cpu_capability() {
+static std::string used_cpu_capability() {
   // It is possible that we override the cpu_capability with
   // environment variable
   std::ostringstream ss;

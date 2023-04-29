@@ -228,10 +228,13 @@ class InputReader:
         self.total = total
         self.pbar = tqdm(desc="Loading inputs", total=total)
 
-    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+    def _update(self):
         self.pbar.update(1)
         if self.pbar.n >= self.total:
             self.pbar.close()
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        self._update()
         device = _device_or_default(device)
         dtype_hint = _dtype_or_default(dtype_hint)
         if self.store is not None and storage_hash is not None:
@@ -261,6 +264,7 @@ class InputReader:
         dtype=None,
         **metadata,
     ):
+        self._update()
         stride = _stride_or_default(stride, shape=shape)
         storage_offset = _storage_offset_or_default(storage_offset)
         dtype = _dtype_or_default(dtype)

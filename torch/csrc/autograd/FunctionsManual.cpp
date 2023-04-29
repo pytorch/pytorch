@@ -5787,7 +5787,7 @@ Tensor block_diag_jvp(at::TensorList tensors) {
 
 Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
   // Basically copy of cat_jvp above
-  // TOD0: consolidate with the logic of cat_jvp
+  // TODO: consolidate with the logic of cat_jvp
   Tensor out_fw_grad;
 
   auto any_defined = false;
