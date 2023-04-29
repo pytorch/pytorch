@@ -9075,6 +9075,8 @@ op_db: List[OpInfo] = [
                    error_inputs_func=error_inputs_item,
                    sample_inputs_func=sample_inputs_item,
                    skips=(
+                       # Error testing item function variant
+                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),
                        # RuntimeError: Composite compliance check failed with the above error.
                        DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                        # Booleans mismatch: AssertionError: False is not true

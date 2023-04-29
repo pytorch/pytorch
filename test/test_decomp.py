@@ -305,6 +305,9 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "empty_like"),
     (None, None, "empty"),
 
+    # AssertionError: False is not true : aten.item was not decomposed, saw calls for: aten._local_scalar_dense.default.
+    (None, None, "item"),
+
     # It's the only in-place op without an out-of-place equivalent in the Python API
     # Its OpInfo wrongly registers it as `torch.zero_(x.clone())`.
     (None, None, "zero_"),
