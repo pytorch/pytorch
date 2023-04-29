@@ -41,6 +41,7 @@ from .summary import (
 
 __all__ = ['FileWriter', 'SummaryWriter']
 
+
 class FileWriter:
     """Writes protocol buffers to event files to be consumed by TensorBoard.
 
@@ -73,13 +74,28 @@ class FileWriter:
         # TODO: See if we can remove this in the future if we are
         # actually the ones passing in a PosixPath
         log_dir = str(log_dir)
-        self.event_writer = EventFileWriter(
-            log_dir, max_queue, flush_secs, filename_suffix
-        )
+
+        self._log_dir = log_dir
+        self._max_queue = max_queue
+        self._flush_secs = flush_secs
+        self._filename_suffix = filename_suffix
+        self._event_writer = None
+
+    @property
+    def event_writer(self):
+        print("EVENT WRITER CREATED")
+        import traceback
+        traceback.print_stack()
+
+        if self._event_writer is None:
+            self._event_writer = EventFileWriter(
+                self._log_dir, self._max_queue, self._flush_secs, self._filename_suffix
+            )
+        return self._event_writer
 
     def get_logdir(self):
         """Returns the directory where event file will be written."""
-        return self.event_writer.get_logdir()
+        return self._log_dir
 
     def add_event(self, event, step=None, walltime=None):
         """Adds an event to the event file.
@@ -147,13 +163,15 @@ class FileWriter:
         Call this method to make sure that all pending events have been written to
         disk.
         """
-        self.event_writer.flush()
+        if self._event_writer:
+            self.event_writer.flush()
 
     def close(self):
         """Flushes the event file to disk and close the file.
         Call this method when you do not need the summary writer anymore.
         """
-        self.event_writer.close()
+        if self._event_writer:
+            self.event_writer.close()
 
     def reopen(self):
         """Reopens the EventFileWriter.
@@ -161,7 +179,8 @@ class FileWriter:
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
         """
-        self.event_writer.reopen()
+        if self._event_writer:
+            self.event_writer.reopen()
 
 
 class SummaryWriter:

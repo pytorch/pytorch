@@ -63,7 +63,7 @@ class BaseTestCase(TestCase):
     def createSummaryWriter(self):
         # Just to get the name of the directory in a writable place. tearDown()
         # is responsible for clean-ups.
-        temp_dir = tempfile.TemporaryDirectory(prefix="test_tensorboard").name
+        temp_dir = tempfile.TemporaryDirectory(prefix="test_tensorboard_").name
         self.temp_dirs.append(temp_dir)
         return SummaryWriter(temp_dir)
 
@@ -294,6 +294,14 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
             p = pathlib.Path(d)
             with SummaryWriter(p) as writer:
                 writer.add_scalar('test', 1)
+
+    def test_lazy_initialization(self):
+        # Simply creating a SummaryWriter shouldn't generate a file
+        with self.createSummaryWriter() as writer:
+            ...
+
+        for temp_dir in self.temp_dirs:
+            self.assertTrue(not os.path.exists(temp_dir) or not os.listdir(temp_dir))
 
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
