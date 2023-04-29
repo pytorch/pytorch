@@ -382,6 +382,36 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
     yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
 
+
+def sample_inputs_item(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+
+    cases = (
+        (),
+        (()),
+        (1),
+        ((1,)),
+    )
+
+    for shape in cases:
+        yield SampleInput(make_arg(shape))
+
+def error_inputs_item(op, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float64, device=device, requires_grad=False)
+
+    cases = (
+        (M),
+        ((S,)),
+        (S, S),
+        (S, M, L),
+    )
+
+    for shape in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(shape)), error_type=RuntimeError,
+            error_regex="elements cannot be converted to Scalar")
+
+
 def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_arg_without_requires_grad = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -9036,6 +9066,21 @@ op_db: List[OpInfo] = [
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
+    UnaryUfuncInfo('item',
+                   op=torch.Tensor.item,
+                   ref=np.ndarray.item,
+                   dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.chalf, torch.bool),
+                   supports_out=False,
+                   supports_autograd=False,
+                   error_inputs_func=error_inputs_item,
+                   sample_inputs_func=sample_inputs_item,
+                   skips=(
+                       # RuntimeError: Composite compliance check failed with the above error.
+                       DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+                       # Booleans mismatch: AssertionError: False is not true
+                       DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+                       # Booleans mismatch: AssertionError: False is not true
+                       DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),)),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
@@ -18446,6 +18491,22 @@ python_ref_db = [
         # Fails on int32
         # https://github.com/pytorch/pytorch/issues/85258
         supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.item",
+        torch_opinfo_name="item",
+        supports_nvfuser=False,
+        skips=(
+            # ValueError: Can't convert a tensor with 943593 elements to a number!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # ValueError: Can't convert a tensor with 943593 elements to a number!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # RuntimeError: Cannot cast FakeTensor(FakeTensor(..., device='meta', size=()), cpu) to number
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            # ValueError: Can't convert a tensor with 10 elements to a number!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+            # ValueError: Can't convert a tensor with 0 elements to a number!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.conj_physical",
