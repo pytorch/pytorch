@@ -9,13 +9,11 @@ from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, utils
 
 
-MessageFormatterType = Callable[[Callable, Tuple[Any, ...], Dict[str, Any]], str]
+MessageFormatterType = Callable[..., str]
 
 
 @_beartype.beartype
-def format_message_in_text(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> str:
+def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
     return f"{formatter.display_name(fn)}"
 
 
