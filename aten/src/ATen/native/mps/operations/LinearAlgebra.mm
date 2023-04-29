@@ -103,7 +103,7 @@ void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tens
   uint64_t aElemSize = A_t.element_size();
   uint64_t numPivots = std::min(aRows, aCols);
   resize_output(LU, A_t.sizes());
-  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2); // 6 5
+  std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
 
