@@ -682,7 +682,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         try:
             baseline_speedup = df[df["name"] == current_name]["speedup"].item()
             row.extend([baseline_speedup, speedup / baseline_speedup])
-            msg = f"{baseline_speedup:.3f}x →  {speedup:.3f}x [{speedup / baseline_speedup:.3f}x]"
+            msg = f"{baseline_speedup:.3f}x -> {speedup:.3f}x [{speedup / baseline_speedup:.3f}x]"
         except (KeyError, ZeroDivisionError):
             row.extend(
                 [
