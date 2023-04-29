@@ -313,7 +313,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
+def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=False):
     """
     Check two models have same accuracy.
     """
@@ -340,6 +340,8 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
     except Exception:
+        if require_fp64:
+            raise RuntimeError("Could not generate fp64 outputs")
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
