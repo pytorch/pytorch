@@ -111,6 +111,7 @@ def simple_reduce_tests(rank, world_size):
 
     return tests
 
+
 class RendezvousEnvTest(TestCase):
     @requires_ucc()
     @retry_on_connect_failures
@@ -233,7 +234,29 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
     # TODO: test_allreduce_basics_cuda times out locally
 
-    # TODO: allgather tests from gloo use multi tensor input, which ucc does not support currently
+    def _test_allgather_basics(self, fn):
+        pg = self._create_process_group_ucc()
+
+        # TODO: Run with N input tensor per rank; for now, UCC only supports single tensor input so N=1
+        for n in [1]:
+            input = [fn(torch.tensor([n * self.rank + i])) for i in range(n)]
+            output = [
+                [fn(torch.tensor([-1])) for _ in range(n * self.world_size)]
+                for _ in range(n)
+            ]
+            expected_output = [
+                [fn(torch.tensor([i])) for i in range(n * self.world_size)]
+                for _ in range(n)
+            ]
+            fut = pg.allgather(output, input).get_future()
+            fut.wait()
+            result = fut.value()
+            if n == 1:
+                result = [result]
+            self.assertEqual(expected_output, result)
+
+    def test_allgather_basics(self):
+        self._test_allgather_basics(lambda t: t.clone())
 
     def _test_reduce_basics(self, fn):
         pg = self._create_process_group_ucc()
@@ -293,7 +316,25 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 continue
             self.assertEqual(torch.tensor([i]), outputs[i])
 
-    # TODO: test_barrier_implies_wait seems to fail even after Sergey's barrier blocking fix
+    # TODO: test_barrier_implies_wait fails with numerical mismatch, will investigate later
+    @skip_but_pass_in_sandcastle("fails with numerical mismatch, skip for now")
+    @requires_ucc()
+    def test_barrier_implies_wait(self):
+        pg = self._create_process_group_ucc()
+
+        # Kick off allreduce operations
+        size = (100, 100)
+        num = 16
+        tensors = [torch.full(size, float(i)) for i in range(num)]
+        for tensor in tensors:
+            # Note: leak the returned work handle
+            pg.allreduce(tensor)
+
+        # Barrier should ensure all previous work has completed
+        pg.barrier().get_future().wait()
+
+        for i, tensor in enumerate(tensors):
+            self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
 
 class DistributedDataParallelTest(
@@ -1031,18 +1072,60 @@ class CompilerTest(test_c10d_common.CompilerTest):
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
-    @skip_if_lt_x_gpu(2)
     def test_consecutive_comm_work_wait_gpu(self):
         self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
+    def test_allreduce_work_wait_cpu(self):
+        self._test_allreduce_work_wait(
+            torch.ones(2, 2) * self.rank,
+        )
+
+    def test_allgather_work_wait_cpu(self):
+        self._test_allgather_work_wait(
+            torch.ones(2, 2) * self.rank
+        )
+
+    def test_broadcast_work_wait_cpu(self):
+        self._test_broadcast_work_wait(
+            torch.ones(2, 2) * self.rank
+        )
+
+    def test_nested_comm_tensor_wrapping_cpu(self):
+        self._test_nested_comm_tensor_wrapping(
+            torch.ones(2, 2) * self.rank
+        )
+
+    def test_consecutive_comm_work_wait_cpu(self):
+        self._test_consecutive_comm_work_wait(
+            torch.ones(2, 2) * self.rank
+        )
+
 
 class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
+        # includes reduce, broadcast, all_reduce, all_gather, reduce_scatter, barrier, all_to_all, scatter
         self._test_collectives(backend="ucc")
+
+    @requires_ucc()
+    @skip_if_lt_x_gpu(1)
+    def test_allgather_base(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "ucc",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        tensor = torch.ones(10, 10, device=torch.device(device))
+        output_tensor = torch.zeros(10, 10, device=torch.device(device))
+        dist.all_gather_into_tensor(output_tensor, tensor)
+        self.assertEqual(output_tensor, tensor)
 
 
 if __name__ == "__main__":

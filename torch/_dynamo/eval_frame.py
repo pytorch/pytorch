@@ -7,6 +7,7 @@ import functools
 import inspect
 import logging
 import os
+import re
 import sys
 import textwrap
 import threading
@@ -672,6 +673,22 @@ class Constraint:
             "you can specify them separately instead."
         )
 
+    @property
+    def serializable_spec(self):
+        # We need a serialization compatible format of the constraint so that it
+        # can be savedin the graph module w/o breaking the module serialization.
+        # The saved constraints will be used directly for the post-exporting pass
+        # that converts constraints to runtime assertion. The saved constraints
+        # will not be saved in the serialized module.
+        # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
+        # which is not reliable
+        return {
+            "t_id": self.t_id,
+            "dim": self.dim,
+            "min": self.constraint_range.vr.lower,
+            "max": self.constraint_range.vr.upper,
+        }
+
 
 def export(
     f: Callable[..., Any],
@@ -775,6 +792,7 @@ def export(
 
     fake_mode = None
     example_inputs = []
+    var_to_range_map = {}
 
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, inner_example_inputs
@@ -785,9 +803,11 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal fake_mode, example_inputs
+        nonlocal fake_mode, example_inputs, var_to_range_map
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
+        if fake_mode and fake_mode.shape_env:
+            var_to_range_map = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -906,6 +926,21 @@ def export(
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
+    new_graph.meta["example_inputs"] = example_inputs
+    new_graph.meta["input_shape_constraints"] = (
+        [constraint.serializable_spec for constraint in constraints]
+        if constraints
+        else None
+    )
+    new_graph.meta["inline_constraints"] = {
+        node.meta["val"].node.expr: var_to_range_map[node.meta["val"].node.expr]
+        for node in new_graph.graph.nodes
+        if node.op != "placeholder" and "val" in node.meta
+        # Find constraints frome unbacked symints
+        and re.match(r"^i\d+$", str(node.meta["val"]))
+    }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object

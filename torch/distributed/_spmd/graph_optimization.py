@@ -40,7 +40,11 @@ aten = torch.ops.aten
 fake_tensor_mode = FakeTensorMode()
 
 _optimized_func: Set[str] = set()
-_run_before_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
+# The key is the target pass and the value is the prerequisites of the pass.
+_prerequisite_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
+# The key is the target pass and the value is the passes that must applied before
+# the key.
+_apply_before_sets: DefaultDict[str, Set[str]] = collections.defaultdict(set)
 _dump_graph_folder: str = ""
 
 
@@ -51,44 +55,69 @@ def enable_graph_optimization_dump(folder: str = ""):
     _dump_graph_folder = folder
 
 
-# TODO(@fegin): Support run_before argument.
 # TODO(@fegin): Support multiple runs of graph optimization
-# TODO(@fegin): Ensure that _optimized_func does not have conflict.
-def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
+# TODO(@fegin): With this design, circular imports will happen when a pass
+# developer accidentally create a pass dependency cycle. As a result, we need to
+# break this file into a finer granularity to avoid incorrect circular import.
+def graph_optimization_pass(
+    prerequisites: Iterable[Callable],
+    apply_after: Iterable[Callable],
+) -> Callable:
     """
-    The contract of graph optimization pass. All the passes should be wrapped with
-    this decorator. `run_after` is used to denote which optimizer passes must be
-    run before the wrapped optimizer pass. Optimizer pass developers are required
-    to add this field accordingly and users need to follow the restrictions to
-    avoid the assert.
+    The contract of graph optimization pass. All the passes should be wrapped
+    with this decorator.
 
-    Current design has one limitation: users can only apply the optimizations once.
-    In some cases, we may need to run multiple the same optimization multiple time,
-    e.g., optimization passes -> profiling the result -> apply optimization passes
-    with the profiling result again. Will address this limitation in the future.
+    `prerequisites` is used to annotate the prerequisite passes of the this pass.
+    `apply_after` means that this wrapped pass must be applied after the passes
+    in `apply_after`. The difference between `prerequisites` and `apply_after`
+    is that all the passes in `prerequisites` must be applied to the graph and
+    must be applifed before the wrapped pass while the passes `apply_after` are
+    optional. But if a pass in `apply_after` is applied to the graph, it has to
+    be done before the wrapped pass.
+    Optimizer pass developers are required to add these fields accordingly and
+    users need to follow the restrictions to avoid the assert.
+
+    Current design has one limitation: users can only apply the optimizations
+    once.  In some cases, we may need to run multiple the same optimization
+    multiple time, e.g., optimization passes -> profiling the result -> apply
+    optimization passes with the profiling result again. This limitation will be
+    addressed limitation in the future.
 
     Args:
-        run_after (Iterable[str]): the list of string to the names of passes which
-            must be run before this optimization pass.
+        prerequisites (Iterable[Callable]): the list of string to the names of
+            passes which are the prerequisites of this pass.
+        apply_after (Iterable[Callable]): the list of string to the names of
+            passes that can not be applied after the wrapped pass.
     """
 
     def inner(func: Callable) -> Callable:
-        for name in run_after:
-            _run_before_sets[name].add(func.__name__)
+        def make_key(func: Callable) -> str:
+            return f"{func.__module__}.{func.__name__}"
+
+        func_key = make_key(func)
+        _prerequisite_sets[func_key] = {make_key(f) for f in prerequisites}
+        for apply_after_pass in apply_after:
+            _apply_before_sets[make_key(apply_after_pass)].add(func_key)
 
         @wraps(func)
         def pass_wrapper(
             gm: Union[fx.GraphModule, IterGraphModule], *args: Any, **kwargs: Any
         ) -> None:
             begin = time.time()
-            func_key = ".".join([func.__module__, func.__name__])
             assert isinstance(gm, (fx.GraphModule, IterGraphModule)), (
                 "The first argument of the pass must be either "
                 "fx.GraphModule or IterGraphModule."
             )
             assert func_key not in _optimized_func, f"Cannot apply {func_key} twice."
-            invalid_passes = _run_before_sets[func_key].intersection(_optimized_func)
-            assert not invalid_passes, f"{invalid_passes} must run after {func_key}."
+            invalid_passes = _apply_before_sets[func_key].intersection(_optimized_func)
+            assert (
+                not invalid_passes
+            ), f"{invalid_passes} must be applied after {func_key}."
+            assert _prerequisite_sets[func_key].issubset(_optimized_func), (
+                f"{_prerequisite_sets[func_key] - _optimized_func} are the "
+                f"prerequisites of {func_key} but are not applified. "
+                f"Applied passes are {_optimized_func}."
+            )
 
             func(gm, *args, **kwargs)
             gm.graph.lint()
@@ -436,7 +465,10 @@ def _expedite_comm_ops(gm: IterGraphModule, comm_blocks: List[CommBlock]) -> Non
         gm.graph.node_append(last_input, comm_block.comm_node)
 
 
-@graph_optimization_pass(run_after=tuple())
+@graph_optimization_pass(
+    prerequisites=[],
+    apply_after=[],
+)
 def comm_fusion_with_concat(
     gm: IterGraphModule,
     bucket_size_mb: int,
@@ -470,7 +502,10 @@ def comm_fusion_with_concat(
             _fuse_with_cat(gm, comm_blocks[begin:end], node_indices)
 
 
-@graph_optimization_pass(run_after=("comm_fusion_with_concat",))
+@graph_optimization_pass(
+    prerequisites=[comm_fusion_with_concat],
+    apply_after=[],
+)
 def schedule_comm_wait(gm: IterGraphModule) -> None:
     """
     Delay the execution of wait tensors of allreduce until its first user.
@@ -508,7 +543,10 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
         gm.graph.move_before(allreduce.node_list[wait_idx:], target_node)
 
 
-@graph_optimization_pass(run_after=tuple())
+@graph_optimization_pass(
+    prerequisites=[],
+    apply_after=[],
+)
 def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
     """
     Erase the the orphant copy_ that generated when tracing optimizer.
@@ -901,7 +939,10 @@ def split_fused_optimizer(
 
 # TODO(fegin): The API only support fused adam now. Should extend it to support
 # foreach as well.
-@graph_optimization_pass(run_after=("schedule_comm_wait", "remove_copy_from_optimizer"))
+@graph_optimization_pass(
+    prerequisites=[remove_copy_from_optimizer],
+    apply_after=[schedule_comm_wait],
+)
 def iter_move_grads_and_optimizers(
     gm: IterGraphModule,
     target_comm_node: str,
