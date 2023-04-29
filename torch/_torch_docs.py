@@ -13225,11 +13225,23 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 .. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
    :noindex:
 
+Repeats 0 t[0] times, 1 t[1] times, 2 t[2] times, etc.
+
 Args:
-    input (Tensor, optional): the input tensor.
-    repeats (Tensor or int): The number of repetitions for each element.
-        repeats is broadcasted to fit the shape of the given axis.
-    dim (int, optional): The dimension along which to repeat values.
+    repeats (Tensor): The number of repetitions for each element.
+
+Keyword args:
+    output_size (int, optional): Total output size for the given axis
+        ( e.g. sum of repeats). If given, it will avoid stream synchronization
+        needed to calculate output shape of the tensor.
+
+Returns:
+    Tensor: Repeated tensor of size `sum(repeats)`.
+
+Example::
+
+    >>> torch.repeat_interleave(torch.tensor([1, 2, 3]))
+    tensor([1, 2, 2, 3, 3, 3])
 
 """.format(
         **common_args
