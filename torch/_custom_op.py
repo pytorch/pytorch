@@ -35,6 +35,7 @@ __all__ = ["custom_op", "CustomOp"]
 SUPPORTED_DEVICE_TYPE_TO_KEY = {
     "cpu": "CPU",
     "cuda": "CUDA",
+    "factory": "BackendSelect",
 }
 
 # We will not let users register CustomOps with anything that could look like
@@ -300,11 +301,6 @@ def validate_schema(schema: FunctionSchema) -> None:
     if is_non_mutating_view:
         raise ValueError(f"custom_op does not support view functions. Got: {schema}")
 
-    # Requires us to have handling for factory functions
-    if not schema.arguments.has_tensor_arg():
-        raise ValueError(
-            f"custom_op does not support function schema with no Tensor inputs. Got: {schema}"
-        )
     # Just seems weird so banning for now
     if not schema.returns:
         raise ValueError(

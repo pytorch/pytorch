@@ -261,6 +261,7 @@ class InputReader:
         dtype=None,
         **metadata,
     ):
+        self.pbar.update(1)
         stride = _stride_or_default(stride, shape=shape)
         storage_offset = _storage_offset_or_default(storage_offset)
         dtype = _dtype_or_default(dtype)
@@ -270,6 +271,7 @@ class InputReader:
         return t
 
     def symint(self, val):
+        self.pbar.update(1)
         return val
 
 
@@ -456,16 +458,21 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name):
-    subdir = os.path.join(minifier_dir(), "checkpoints")
-    if not os.path.exists(subdir):
-        os.makedirs(subdir, exist_ok=True)
-    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
+def dump_compiler_graph_state(gm, args, compiler_name, *, save_dir=None):
+    if save_dir is None:
+        save_dir = os.path.join(minifier_dir(), "checkpoints")
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+    file_name = os.path.join(save_dir, f"{len(gm.graph.nodes)}.py")
+    if os.path.exists(file_name):
+        # TODO: Don't overwrite the most RECENT checkpoint
+        log.warning("Overwriting preexisting checkpoint at %s", file_name)
+        os.rename(file_name, f"{file_name}.bak")
     log.warning(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
-        save_graph_repro(fd, gm, args, compiler_name, save_dir=subdir)
+        save_graph_repro(fd, gm, args, compiler_name, save_dir=save_dir)
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
     try:
@@ -503,6 +510,9 @@ def isolate_fails(
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
+        fd.write("import torch._functorch.fx_minifier\n")  # Hack before relocating custom op
+        fd.write("import torch.utils._content_store\n")  # Hack before relocating custom op
+        fd.write(f"torch._functorch.fx_minifier.READER = torch.utils._content_store.ContentStoreReader({save_dir!r})\n")  # Hack before relocating custom op
         repro_code = generate_compiler_repro_string(fx_g, args, save_dir=save_dir)
         if patch_code is not None:
             repro_code = repro_code.replace(TEST_REPLACEABLE_COMMENT, patch_code)
@@ -610,6 +620,9 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_main(options, mod, args):
     from torch._inductor.compile_fx import compile_fx_inner
+    import torch._functorch.fx_minifier as fx_minifier
+
+    fx_minifier.READER = ContentStoreReader(options.save_dir)
 
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters()) and not any(mod.named_buffers())
@@ -618,8 +631,6 @@ def repro_main(options, mod, args):
     torch._inductor.config.generate_intermediate_hooks = True
 
     if options.minify:
-        from functorch.compile import minifier
-
         favored_device = 1 if torch.cuda.device_count() >= 2 else 0
         env_variables = {"CUDA_VISIBLE_DEVICES": str(favored_device)}
 
@@ -638,13 +649,19 @@ def repro_main(options, mod, args):
                 inductor_accuracy_fails if options.accuracy else inductor_fails
             )
 
-        minifier(
+        fx_minifier.minifier(
             mod,
             args,
             module_fails=module_fails,
             dump_state=functools.partial(
-                dump_compiler_graph_state, compiler_name=compiler_name
+                dump_compiler_graph_state,
+                compiler_name=compiler_name,
+                save_dir=options.save_dir if options.inplace else None,
             ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
         )
 
     elif options.analyze:
@@ -863,6 +880,11 @@ def run_repro(
         help="skip saving float64 intermediates on --analyze",
     )
     parser.add_argument(
+        "--skip-saving-eager-intermediates",
+        action="store_true",
+        help="skip saving eager intermediates on --minify",
+    )
+    parser.add_argument(
         "--skip-check-deterministic",
         action="store_true",
         help="skip checking that the network is deterministic on --analyze",
@@ -871,6 +893,23 @@ def run_repro(
         "--stable-hash",
         action="store_true",
         help="use SHA-1 checksum instead of fast (but possibly unsound) hash",
+    )
+    # TODO: make this control --analyze too, aka have an in-memory version of
+    # analyze
+    parser.add_argument(
+        "--offload-to-disk",
+        action="store_true",
+        help="during minification, offload delta debugging intermediates to disk.  Use if you're OOMing",
+    )
+    parser.add_argument(
+        "--inplace",
+        action="store_true",
+        help="run minification in same directory as script; useful if you're resuming from checkpoint",
+    )
+    parser.add_argument(
+        "--skip-sanity",
+        action="store_true",
+        help="skip sanity check at beginning of minification on original graph",
     )
 
     options = parser.parse_args()

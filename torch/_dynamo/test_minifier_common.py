@@ -27,7 +27,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         # Comment me out to retain temporary directory
-        shutil.rmtree(cls.DEBUG_DIR)
+        # shutil.rmtree(cls.DEBUG_DIR)
         cls._exit_stack.close()
 
     # Search for the name of the first function defined in a code string.

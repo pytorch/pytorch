@@ -1,51 +1,99 @@
 import torch.fx as fx
 import copy
 import torch
+import os
 import math
+from torch.hub import tqdm
+import torch.cuda
 from typing import Callable, List
 from functools import wraps, partial
 from dataclasses import dataclass
 from .compile_utils import get_placeholders, get_outputs
+from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
+from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
+
+is_tuple = object()
+is_saved = object()
 
 class ConcreteProp(torch.fx.Interpreter):
+    def __init__(self, mod, *, writer=None, skip_offload=False):
+        super().__init__(mod)
+        self.writer = writer
+        self.skip_offload = skip_offload
+
     def run_node(self, n):
-        result = super().run_node(n)
+        self.pbar.update(1)
+        r = super().run_node(n)
+        name = n.name
 
-        found_tensor = False
-
-        def extract_tensor_meta(obj):
-            if isinstance(obj, torch.Tensor):
-                nonlocal found_tensor
-                found_tensor = True
-                return obj
+        # TODO: need to not save the modified load calls...
+        # for resumption
+        if isinstance(r, torch.Tensor):
+            if self.writer is None:
+                n.meta['concrete_value'] = r
             else:
-                return obj
+                if not self.skip_offload:
+                    self.writer.write_tensor(os.path.join("eager", name), r)
+                n.meta['concrete_value'] = r.device
+        else:
+            n.meta['concrete_value'] = is_tuple
 
-        from torch.fx.node import map_aggregate
-        concrete_value = map_aggregate(result, extract_tensor_meta)
-        if found_tensor:
-            n.meta['concrete_value'] = concrete_value
-        return result
+        return r
 
     def propagate(self, *args):
-        return super().run(*args)
+        with tqdm(desc="Saving intermediates for delta debugging", total=len(self.module.graph.nodes)) as pbar:
+            self.pbar = pbar
+            r = super().run(*args)
+            pbar.set_description("Saved!  To skip next time, run with --skip-saving-eager-intermediates")
+            return r
+
+
+READER = None
+
+from torch._custom_op import custom_op
+
+@custom_op('(str name, *, Device? device=None) -> Tensor', ns='minifier')
+def load_tensor(name, *, device=None):
+    ...
+
+@load_tensor.impl("factory")
+def load_tensor_factory(name, *, device=None):
+    assert READER is not None
+    return READER.read_tensor(os.path.join("eager", name), device=device)
 
 
 # inplace modifies node/inps
-def _convert_node_to_placeholder(node, inps):
+def _convert_node_to_placeholder(graph, node, inps):
     if node.op == 'output' or node.op == "placeholder":
         return
-    node.op = 'placeholder'
-    node.args = ()
-    node.kwargs = {}
-    node.target = node.name
+
+    if node.op == 'call_function' and node.target is torch.ops.minifier.load_tensor.default:
+        return
+
     concrete_val = node.meta.get('concrete_value', None)
+
     if isinstance(concrete_val, torch.Tensor):
+        node.op = 'placeholder'
+        node.target = node.name
+        node.args = ()
+        node.kwargs = {}
+
         inps.append(concrete_val)
-    else:
-        inps.append(torch.zeros(()))
+
+    elif concrete_val is is_tuple:
         for tuple_user in list(node.users):
-            _convert_node_to_placeholder(tuple_user, inps)
+            _convert_node_to_placeholder(graph, tuple_user, inps)
+        # This changes the iteration order
+        # graph.erase_node(node)
+
+    elif isinstance(concrete_val, torch.device):
+        node.op = 'call_function'
+        node.target = torch.ops.minifier.load_tensor.default
+        node.args = (node.name,)
+        # This is required to make sure fake tensor fills in the correct
+        # device, otherwise you will segfault
+        node.kwargs = {'device': concrete_val}
+
 
 def dump_state(fx_g, inps):
     print(f"""
@@ -60,7 +108,10 @@ class ReproState:
     graph: fx.Graph
     inps: List[torch.Tensor]
 
-def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = dump_state):
+def minifier(
+    fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = dump_state, *,
+    save_dir = None, offload_to_disk = False, skip_offload = False, skip_sanity = False
+):
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
 
@@ -92,8 +143,12 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         mod.graph.lint()
         return module_fails(mod, inps)
 
-    ConcreteProp(fail_f).propagate(*inps)
-    if not graph_fails(failing_graph, inps):
+    writer = None
+    if offload_to_disk:
+        writer = ContentStoreWriter(save_dir)
+
+    ConcreteProp(fail_f, writer=writer, skip_offload=skip_offload).propagate(*inps)
+    if not skip_sanity and not graph_fails(failing_graph, inps):
         raise RuntimeError("Input graph did not fail the tester")
     print(f"Started off with {cur_size} nodes")
 
@@ -234,15 +289,17 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
             end_range = min(num_nodes, start_range + granularity)
             for idx in range(start_range, end_range):
                 new_node = list(new_graph.nodes)[idx]
-                if new_node.op not in ['placeholder', 'output']:
+                if new_node.op not in ['placeholder', 'output'] and not (new_node.op == 'call_function' and new_node.target is torch.ops.minifier.load_tensor.default):
                     is_removing = True
-                    _convert_node_to_placeholder(new_node, new_inps)
+                    _convert_node_to_placeholder(new_graph, new_node, new_inps)
             if not is_removing:
                 continue
             new_graph = _consolidate_placeholders(new_graph)
-            new_state = remove_unused_inputs_unchecked(ReproState(new_graph, new_inps))
-            if new_state is None:
-                new_state = ReproState(new_graph, new_inps)
+            new_graph.eliminate_dead_code()
+            # new_state = remove_unused_inputs_unchecked(ReproState(new_graph, new_inps))
+            # new_state = remove_unused_inputs_unchecked(ReproState(new_graph, new_inps))
+            # if new_state is None:
+            new_state = ReproState(new_graph, new_inps)
             if graph_fails(new_state.graph, new_state.inps):
                 return ReproState(new_state.graph, new_state.inps)
 
@@ -271,6 +328,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         return None
 
     while True:
+        # TODO: skip this if sanity
         dump_state(fx.GraphModule(fail_f, failing_state.graph), failing_state.inps)
         granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
         new_state = try_granularity(failing_state, granularity, use_non_granular=True)

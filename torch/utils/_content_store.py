@@ -27,6 +27,7 @@
 # map to the same (padded) storage.  We think this will be immaterial for most
 # users.
 
+from collections import defaultdict
 import ctypes
 import hashlib
 import os.path
@@ -120,7 +121,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         if pad > 0:
             x = F.pad(x, (0, pad), "constant", 0)
         x = x.view(torch.int32)
-        torch._dynamo.mark_dynamic(x, 0)
+        # torch._dynamo.mark_dynamic(x, 0)
         # We run the 32-bit hash five times with differing parameters to
         # reduce chance of collision
         ITER = 5
@@ -152,8 +153,11 @@ class ContentStoreWriter:
         subfolder = os.path.join(self.loc, "storages")
         os.makedirs(subfolder, exist_ok=True)
         target = os.path.join(subfolder, h)
+        """
+        # make this configurable
         if os.path.exists(target):
             return h
+        """
         torch.save(storage, target)
         self.seen_storage_hashes.add(h)
         return h
@@ -184,30 +188,33 @@ class ContentStoreWriter:
 class ContentStoreReader:
     def __init__(self, loc: str) -> None:
         self.loc = loc
-        self.storage_cache: Dict[str, StorageWeakRef] = {}
+        self.storage_cache: Dict[Optional[torch.device], Dict[str, StorageWeakRef]] = defaultdict(dict)
 
-    def read_storage(self, h: str) -> torch.UntypedStorage:
-        ws = self.storage_cache.get(h)
+    def read_storage(self, h: str, *, device=None) -> torch.UntypedStorage:
+        if device is not None:
+            device = torch.device(device)
+        ws = self.storage_cache[device].get(h)
         s: Optional[torch.UntypedStorage]
         if ws is not None:
             s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
             if s is not None:
                 return s
         s = torch.load(
-            os.path.join(self.loc, "storages", h), weights_only=True
+            os.path.join(self.loc, "storages", h), weights_only=True,
+            map_location=device
         )._untyped_storage
         assert s is not None
-        self.storage_cache[h] = StorageWeakRef(s)
+        self.storage_cache[device][h] = StorageWeakRef(s)
         return s
 
     def read_tensor_metadata(self, name: str):
         return torch.load(os.path.join(self.loc, "tensors", name), weights_only=True)
 
-    def read_tensor(self, name: str) -> torch.Tensor:
+    def read_tensor(self, name: str, *, device=None) -> torch.Tensor:
         dtype, h, storage_offset, size, stride, metadata = self.read_tensor_metadata(
             name
         )
-        storage = self.read_storage(h)
+        storage = self.read_storage(h, device=device)
         t = torch.tensor([], dtype=dtype, device=storage.device)
         t.set_(storage, storage_offset, size, stride)
         torch._utils.set_tensor_metadata(t, metadata)
