@@ -71,7 +71,7 @@ coordinate_descent_tuning = (
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
-realize_reads_threshold = 4
+realize_reads_threshold = 2
 realize_bytes_threshold = 2000
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
