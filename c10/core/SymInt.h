@@ -195,14 +195,6 @@ class C10_API SymInt {
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
 
-  SymInt operator*(int64_t sci) const;
-  bool operator<(int64_t sci) const;
-  bool operator==(int64_t sci) const;
-  bool operator!=(int64_t sci) const;
-  bool operator<=(int64_t sci) const;
-  bool operator>(int64_t sci) const;
-  bool operator>=(int64_t sci) const;
-
   operator SymFloat() const;
 
   // Don't use this.  Prefer maybe_as_int instead
@@ -298,39 +290,52 @@ inline c10::SymInt multiply_integers(Iter begin, Iter end) {
       [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-inline SymInt operator+(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) + b;
-}
-inline SymInt operator-(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) - b;
-}
-inline SymInt operator*(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) * b;
-}
-inline SymInt operator/(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) / b;
-}
-inline SymInt operator%(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) % b;
-}
-inline bool operator==(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) == b;
-}
-inline bool operator!=(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) != b;
-}
-inline bool operator<(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) < b;
-}
-inline bool operator<=(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) <= b;
-}
-inline bool operator>(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) > b;
-}
-inline bool operator>=(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) >= b;
-}
+#define DECLARE_SYMINT_OP_INTONLY(scalar_t, RetTy)      \
+  C10_API RetTy operator%(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator%(scalar_t a, const SymInt& b);
+
+#define DECLARE_SYMINT_OP(scalar_t, RetTy)              \
+  C10_API                                               \
+  C10_API RetTy operator+(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator-(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator*(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator/(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator+(scalar_t a, const SymInt& b); \
+  C10_API RetTy operator-(scalar_t a, const SymInt& b); \
+  C10_API RetTy operator*(scalar_t a, const SymInt& b); \
+  C10_API RetTy operator/(scalar_t a, const SymInt& b); \
+  C10_API bool operator==(const SymInt& a, scalar_t b); \
+  C10_API bool operator!=(const SymInt& a, scalar_t b); \
+  C10_API bool operator<(const SymInt& a, scalar_t b);  \
+  C10_API bool operator<=(const SymInt& a, scalar_t b); \
+  C10_API bool operator>(const SymInt& a, scalar_t b);  \
+  C10_API bool operator>=(const SymInt& a, scalar_t b); \
+  C10_API bool operator==(scalar_t a, const SymInt& b); \
+  C10_API bool operator!=(scalar_t a, const SymInt& b); \
+  C10_API bool operator<(scalar_t a, const SymInt& b);  \
+  C10_API bool operator<=(scalar_t a, const SymInt& b); \
+  C10_API bool operator>(scalar_t a, const SymInt& b);  \
+  C10_API bool operator>=(scalar_t a, const SymInt& b);
+
+DECLARE_SYMINT_OP_INTONLY(int64_t, SymInt)
+DECLARE_SYMINT_OP_INTONLY(int32_t, SymInt)
+DECLARE_SYMINT_OP_INTONLY(uint64_t, SymInt)
+DECLARE_SYMINT_OP_INTONLY(uint32_t, SymInt)
+DECLARE_SYMINT_OP(int64_t, SymInt)
+DECLARE_SYMINT_OP(int32_t, SymInt) // make sure constants work
+DECLARE_SYMINT_OP(uint64_t, SymInt)
+DECLARE_SYMINT_OP(uint32_t, SymInt)
+DECLARE_SYMINT_OP(double, SymFloat)
+DECLARE_SYMINT_OP(float, SymFloat) // just for completeness
+
+// On OSX size_t is different than uint64_t so we have to
+// define it separately
+#if defined(__APPLE__)
+DECLARE_SYMINT_OP_INTONLY(size_t, SymInt)
+DECLARE_SYMINT_OP(size_t, SymInt)
+#endif
+
+#undef DECLARE_SYMINT_OP
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);
