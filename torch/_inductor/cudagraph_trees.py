@@ -159,6 +159,13 @@ def enable_history_recording():
             torch.cuda.memory._record_memory_history(None)
 
 
+def get_history_recording():
+    # TODO - remove, prevents cleanup
+    if not config.triton.cudagraph_trees_history_recording:
+        return contextlib.nullcontext()
+    return enable_history_recording()
+
+
 class TreeManagerContainer:
     """
     Manages the lifetime of the tree manager. Like `PrivatePool` in cuda caching allocator,
@@ -535,7 +542,7 @@ class CUDAWarmupNode:
             self.device_index
         ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
             self.device_index, self.cuda_graphs_pool, self.stream
-        ), enable_history_recording():
+        ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
 
         # sync up stream used in `_use_cuda_memory_pool_manager` - TODO - wait stream instead ?
@@ -978,7 +985,7 @@ class CUDAGraphNode:
             self.device
         ), clear_cublas_manager(), torch.cuda.graph(
             self.graph, stream=self.stream, pool=self.cuda_graphs_pool
-        ), enable_history_recording():
+        ), get_history_recording():
             static_outputs = model(inputs)
 
         # running model should reclaim memory

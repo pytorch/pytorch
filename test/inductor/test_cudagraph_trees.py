@@ -730,6 +730,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 0)
 
         @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+        @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
@@ -760,7 +761,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             finally:
                 torch._C._cuda_clearCublasWorkspaces()
                 torch._inductor.cudagraph_trees.clear_cublas_manager = prev
-                torch._inductor.cudagraph_trees.get_container(self.device_idx).tree_manager = None
+                torch._inductor.cudagraph_trees.get_container(
+                    self.device_idx
+                ).tree_manager = None
 
         def test_peristed_output_livenes(self):
             @torch.compile
