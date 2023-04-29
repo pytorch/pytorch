@@ -949,6 +949,9 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         test_report_path = get_report_path(pytest=True)
         pytest_args.extend(["--junit-xml", test_report_path])
 
+    if options.pytest_k_expr:
+        pytest_args.extend(["-k", options.pytest_k_expr])
+
     pytest_args.extend(rerun_options)
     return pytest_args
 
@@ -1047,6 +1050,12 @@ def parse_args():
         help="If true, use `pytest` to execute the tests. E.g., this runs "
         "TestTorch with pytest in verbose and coverage mode: "
         "python run_test.py -vci torch -pt",
+    )
+    parser.add_argument(
+        "-k",
+        "--pytest-k-expr",
+        default="",
+        help="Pass to pytest as its -k expr argument",
     )
     parser.add_argument(
         "-c",
