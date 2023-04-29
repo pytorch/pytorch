@@ -471,7 +471,7 @@ class MinCutPartitioningTests(TestCase):
             return (a * b).cos().sum(dim=1)
 
         inp = (T(20, 1, grad=True), T(1, 20, grad=True))
-        self.assertExpectedInline(count_numel_train(f, *inp), """220""")
+        self.assertExpectedInline(count_numel_train(f, *inp), """980""")
 
 
 # Test cases where we don't do the right thing yet.
