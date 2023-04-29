@@ -370,12 +370,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[((input_x, input_y),)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
-        "while running Expand node. Name:'_0x55b501ebaf10_n2' "
-        "Status Message: invalid expand shape"
-        "https://github.com/pytorch/pytorch/issues/99360"
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -448,9 +442,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             Squeeze(), (d3, d4), additional_test_inputs=[((d1, d3),)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "https://github.com/pytorch/pytorch/issues/99360"
-    )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -581,9 +572,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "Shapes are assumed static by default by 'dynamo.export'."
-    )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -619,13 +607,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
-    )
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "onnxruntime::ReshapeHelper::ReshapeHelper(const onnxruntime::TensorShape&, "
-        "onnxruntime::TensorShapeVector&, bool) size != 0 && "
-        "(input_shape.Size() % size) == 0 was false. The input tensor cannot be "
-        "reshaped to the requested shape. Input shape:{1,4}, requested shape:{-1,3}\n"
-        "fx graph captures static graph."
     )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
