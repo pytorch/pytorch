@@ -177,6 +177,7 @@ class HashStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+
 class PrefixStoreTest(TestCase):
     def setUp(self):
         # delete is false as FileStore will automatically clean up the file
@@ -190,6 +191,7 @@ class PrefixStoreTest(TestCase):
             with self.subTest(f"Testing getting underlying_store for {type(store)}"):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
+
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -321,6 +323,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
+
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -496,15 +499,16 @@ class RendezvousTCPTest(TestCase):
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
+
 class TestMultiThreadedWait(MultiThreadedTestCase):
     # TODO: Use less hacky means of instantiating stores.
     # Note, stores accumulate values per test.
     stores = [
-            dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
-            dist.HashStore(),
-            dist.PrefixStore("prefix", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
-            create_tcp_store(),
-            dist.PrefixStore("prefix", create_tcp_store())
+        dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
+        dist.HashStore(),
+        dist.PrefixStore("pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
+        create_tcp_store(),
+        dist.PrefixStore("pre", create_tcp_store())
     ]
 
     @property
@@ -525,6 +529,7 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
             self.assertEqual(b"value1", store.get("key1"))
         if dist.get_rank() == 1:
             store.set("key1", "value1")
+
 
 instantiate_parametrized_tests(TestMultiThreadedWait)
 
