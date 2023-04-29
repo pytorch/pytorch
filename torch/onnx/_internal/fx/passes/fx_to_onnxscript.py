@@ -12,9 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # type: ignore[attr-defined]
-    graph_building,
-)
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -31,6 +29,9 @@ from torch.utils import _pytree
 def _fx_node_to_onnx_message_formatter(
     fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> str:
+    # TODO(bowbao): refactor signature to avoid checking length.
+    # NOTE: First argument is always `diagnostic_context`.
+    #     Second argument is expected to be `node`.
     assert len(args) > 1
     node = args[1]
     assert isinstance(node, torch.fx.Node)

@@ -30,7 +30,11 @@ from torch.distributed.fsdp._runtime_utils import (
     _get_orig_buffer_dtypes,
     _lazy_init,
 )
-from torch.distributed.fsdp.api import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp.api import (
+    FullStateDictConfig,
+    ShardingStrategy,
+    StateDictType,
+)
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
@@ -645,6 +649,10 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -669,6 +677,14 @@ def _pre_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what postprocessing will
     be done.
     """
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
@@ -696,6 +712,10 @@ def _pre_load_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
     be done.
     """
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
@@ -717,6 +737,10 @@ def _post_load_state_dict_hook(
     module: nn.Module,
     *args: Any,
 ) -> None:
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
