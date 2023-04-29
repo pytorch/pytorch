@@ -13222,18 +13222,13 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
 `1` appears `n2` times, `2` appears `n3` times, etc.
 
-.. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
+.. function:: repeat_interleave(repeats, *) -> Tensor
    :noindex:
 
 Repeats 0 t[0] times, 1 t[1] times, 2 t[2] times, etc.
 
 Args:
     repeats (Tensor): The number of repetitions for each element.
-
-Keyword args:
-    output_size (int, optional): Total output size for the given axis
-        ( e.g. sum of repeats). If given, it will avoid stream synchronization
-        needed to calculate output shape of the tensor.
 
 Returns:
     Tensor: Repeated tensor of size `sum(repeats)`.
