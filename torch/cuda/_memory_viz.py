@@ -1017,7 +1017,7 @@ def segment_plot(data: Any, device=None):
 
     events: Any = result['events']
     for event in fold_free(trace):
-        for k in events.keys():
+        for k in events:
             # stack frames not recorded on event
             # happens for snapshot even when
             # frames are recorded for other things.
@@ -1037,7 +1037,7 @@ def segment_plot(data: Any, device=None):
     for seg in data['segments']:
         if seg['device'] != device:
             continue
-        for k in segments.keys():
+        for k in segments:
             sk = segment_names.get(k, k)
             segments[k].append(preproc.get(k, lambda x: x)(seg[sk]))
         addr = seg['address']

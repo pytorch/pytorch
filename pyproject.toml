@@ -53,7 +53,6 @@ ignore = [
     "SIM115",
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
-    "SIM118",
 ]
 line-length = 120
 select = [

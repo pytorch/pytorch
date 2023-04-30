@@ -525,7 +525,7 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-@unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
+@unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ, 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""

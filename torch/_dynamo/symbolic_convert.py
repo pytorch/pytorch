@@ -2025,7 +2025,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         reads = livevars_analysis(self.instructions, inst)
         argnames = tuple(
             k
-            for k in self.symbolic_locals.keys()
+            for k in self.symbolic_locals
             if k in reads and k not in self.cell_and_freevars()
         )
 

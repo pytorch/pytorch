@@ -1563,7 +1563,7 @@ class CppVecKernelChecker(CppVecKernel):
     def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
         load_type = V.graph.get_dtype(name)
         if load_type == torch.bool:
-            return all(user.target in ("where", "masked") for user in users.keys())
+            return all(user.target in ("where", "masked") for user in users)
         elif load_type == torch.uint8:
             """
             If the load value is torch.uint8, then we only support the loaded
@@ -1571,15 +1571,14 @@ class CppVecKernelChecker(CppVecKernel):
             """
             if not all(
                 user.target == "to_dtype" and user.args[-1] == torch.bool
-                for user in users.keys()
+                for user in users
             ):
                 return False
 
-            for to_dtype_node in users.keys():
+            for to_dtype_node in users:
                 assert to_dtype_node.target == "to_dtype"
                 if not all(
-                    user.target in ("where", "masked")
-                    for user in to_dtype_node.users.keys()
+                    user.target in ("where", "masked") for user in to_dtype_node.users
                 ):
                     return False
             return True

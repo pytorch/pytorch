@@ -822,7 +822,7 @@ class Reduction(Loops):
             }
 
             assert (
-                reduction_type in rtypes_to_inits.keys()
+                reduction_type in rtypes_to_inits
             ), f"{reduction_type} not supported for zero-dimension tensors!"
 
             def const_fn(index):
@@ -2194,7 +2194,7 @@ class ComputedBuffer(Buffer):
             reads = self.get_read_writes().reads
             reads_bufs = [
                 V.graph.name_to_buffer[r.name]
-                if r.name in V.graph.name_to_buffer.keys()
+                if r.name in V.graph.name_to_buffer
                 else None
                 for r in reads
             ]
@@ -2246,9 +2246,9 @@ class ComputedBuffer(Buffer):
         index_formulas = [*body.indexing_exprs.values()]
         reads_bufs = [
             V.graph.name_to_buffer[reads_name]
-            if reads_name in V.graph.name_to_buffer.keys()
+            if reads_name in V.graph.name_to_buffer
             else None
-            for reads_name in body.reads_name2expr.keys()
+            for reads_name in body.reads_name2expr
         ]
         memory_addrs = [
             *body.reads_name2expr.values(),

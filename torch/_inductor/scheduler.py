@@ -711,7 +711,7 @@ class Scheduler:
                     list1 = name_to_users[node1_name]
                     list2 = name_to_users[node2_name]
                     combined = list1 + list2
-                    for key in name_to_users.keys():
+                    for key in name_to_users:
                         if name_to_users[key] is list1 or name_to_users[key] is list2:
                             name_to_users[key] = combined
                 elif node1_name in name_to_users:
