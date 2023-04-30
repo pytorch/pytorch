@@ -1911,7 +1911,10 @@ class TritonScheduling:
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        if V.graph.wrapper_code.supports_intermediate_hooks and config.generate_intermediate_hooks:
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+        ):
             # Not every node in the schedule will actually be live on output;
             # we can't check dead buffers.
             live_outs = kernel.args.live_output_buffers()
