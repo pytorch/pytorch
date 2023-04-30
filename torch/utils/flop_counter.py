@@ -355,7 +355,7 @@ class FlopCounterMode(TorchDispatchMode):
                 ])
             return values
 
-        for mod in self.flop_counts.keys():
+        for mod in self.flop_counts:
             if mod == 'Global':
                 continue
             mod_depth = mod.count(".") + 1

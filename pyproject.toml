@@ -48,13 +48,10 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108",
-    "SIM109",
-    "SIM110",
     "SIM114", # Combine `if` branches using logical `or` operator
     "SIM115",
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
-    "SIM118",
 ]
 line-length = 120
 select = [

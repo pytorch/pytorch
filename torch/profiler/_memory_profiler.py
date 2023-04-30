@@ -673,7 +673,7 @@ class MemoryProfile:
 
         events: List[Tuple[int, Action, TensorAndID]] = [
             (-1, Action.PREEXISTING, (key, version))
-            for key, version in snapshot.keys()
+            for key, version in snapshot
             if (key, True) not in allocation_times and version == 0
         ]
 
@@ -896,7 +896,7 @@ class MemoryProfile:
         parameter_keys = {key.id for key, _ in candidate_parameters}
         parameter_keys &= self._any_version_depends_on_gradient()
 
-        for key, _ in snapshot.keys():
+        for key, _ in snapshot:
             if key.id in parameter_keys:
                 self._categories.set_by_id(key, Category.PARAMETER)
 

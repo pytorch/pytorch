@@ -415,11 +415,7 @@ def has_valid_upgraders(schema, version_map):
 
     # let's make sure this existing schema is part of possible
     # schemas
-    for old_schema in possible_schemas:
-        if old_schema == schema:
-            return True
-
-    return False
+    return any(old_schema == schema for old_schema in possible_schemas)
 
 def dont_parse(schema_line):
     for item in dont_parse_list:

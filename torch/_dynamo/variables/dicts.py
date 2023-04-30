@@ -42,7 +42,7 @@ class ConstDictVariable(VariableTracker):
                 ]
             )
         # instructions to build the dict keys and values
-        for key in self.items.keys():
+        for key in self.items:
             if istensor(key):
                 codegen.append_output(
                     codegen.create_load_global(global_key_name(key), True, add=True)
@@ -107,7 +107,7 @@ class ConstDictVariable(VariableTracker):
                         k,
                         **options,
                     )
-                    for k in val.keys()
+                    for k in val
                 ],
                 **options,
             )
@@ -202,7 +202,7 @@ class ConstDictVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
         val = self.items
-        result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val.keys()]
+        result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val]
         return result
 
     @classmethod

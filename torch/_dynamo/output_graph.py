@@ -636,7 +636,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if v not in val_to_names:
                 val_to_names[v] = list()
             val_to_names[v].append(k)
-        for v in val_to_names.keys():
+        for v in val_to_names:
             restore_vars.extend(val_to_names[v])
             stack_values.extend([v] * len(val_to_names[v]))
 

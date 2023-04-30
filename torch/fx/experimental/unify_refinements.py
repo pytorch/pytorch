@@ -58,7 +58,7 @@ def substitute_solution_one_type(mapping, t):
     Apply the most general unifier to a type
     """
     if isinstance(t, Var):
-        if t in mapping.keys():
+        if t in mapping:
             return mapping[t]
         else:
             return t
@@ -66,7 +66,7 @@ def substitute_solution_one_type(mapping, t):
     elif isinstance(t, TensorType):
         new_type = []
         for typ in t.__args__:
-            if typ in mapping.keys():
+            if typ in mapping:
                 new_type.append(mapping[typ])
             else:
                 new_type.append(typ)
@@ -99,7 +99,7 @@ def substitute_all_types(graph, mapping):
         flag = False
         for k in mapping:
             old_mapping_val = mapping[k]
-            if mapping[k] in mapping.keys():
+            if mapping[k] in mapping:
                 new_key = mapping[k]
                 mapping[k] = mapping[new_key]
             if old_mapping_val != mapping[k]:
@@ -114,7 +114,4 @@ def check_for_type_equality(g1, g2):
     We do not use graph equality but instead type
     equality.
     """
-    for n, m in zip(g1.nodes, g2.nodes):
-        if n.type != m.type:
-            return False
-    return True
+    return all(n.type == m.type for n, m in zip(g1.nodes, g2.nodes))

@@ -79,7 +79,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp()
 
         # remove any lingering environment variables
-        for env in os.environ.keys():
+        for env in os.environ:
             if env.startswith("PET_"):
                 del os.environ[env]
 
