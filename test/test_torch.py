@@ -123,7 +123,7 @@ class TestTorchDeviceType(TestCase):
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
-        for i in range(dim):
+        for _i in range(dim):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
@@ -156,7 +156,7 @@ class TestTorchDeviceType(TestCase):
 
         element_size = torch._utils._element_size(dtype)
 
-        for i in range(10):
+        for _i in range(10):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
@@ -1662,7 +1662,7 @@ else:
             else:
                 self.fail(f"'{call_type}' is not a valid call type")
 
-        for call_type in ['function', 'method', 'out']:
+        for _call_type in ['function', 'method', 'out']:
             self.check_nondeterministic_alert(
                 lambda: test_func('function'),
                 'kthvalue CUDA',
@@ -2083,7 +2083,7 @@ else:
             if num_observations > 0:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
-                for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
+                for correction, _fw, _aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
 
     @skipIfNoSciPy
@@ -2406,7 +2406,7 @@ else:
         # Test to detect issues in cdist gradient calculation
         # When the distances are 0
         sizex = (1, 27, 32)
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+        for _p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
@@ -4967,7 +4967,7 @@ else:
         prob_dist = torch.rand(10000, 1000, device=device, dtype=dtype)
         n_sample = 1
 
-        for i in range(trials):
+        for _i in range(trials):
             gen.manual_seed(seed)
             samples_1 = torch.multinomial(prob_dist, n_sample, True, generator=gen)
 

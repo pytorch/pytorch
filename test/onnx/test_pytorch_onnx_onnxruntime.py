@@ -5759,7 +5759,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class NestedLoopsModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                for i in range(5):
+                for _i in range(5):
                     a = 0
                     while a < 4:
                         a += 1
@@ -5798,7 +5798,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class LoopModel(torch.nn.Module):
             def forward(self, x):
                 res = torch.zeros_like(x[0])
-                for i in range(x.size(0)):
+                for _i in range(x.size(0)):
                     res += x[0].transpose(0, 1)
                 return res
 
@@ -6403,7 +6403,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 a = torch.ones(
                     12,
                 )
-                for i in range(10):
+                for _i in range(10):
                     a.add_(
                         torch.ones(
                             12,
@@ -6432,7 +6432,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 b_ref = b  # not used in loop, should not be altered.
                 for i in range(10):
                     if i == 3:
-                        for j in range(5):
+                        for _j in range(5):
                             a += _bias
                             _bias.add_(
                                 torch.ones(
@@ -6477,7 +6477,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 for i in range(10):
                     if i == 3:
-                        for j in range(5):
+                        for _j in range(5):
                             self._bias += torch.arange(
                                 12,
                             )
@@ -6504,7 +6504,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 for i in range(10):
                     if i == 3:
-                        for j in range(5):
+                        for _j in range(5):
                             self._bias.copy_(
                                 torch.arange(
                                     12,
@@ -8093,7 +8093,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class SequanceLoopModel(torch.nn.Module):
             def forward(self, x):
                 outputs = []
-                for i in range(3):
+                for _i in range(3):
                     outputs += [x]
                 return torch.stack(outputs).transpose(0, 1)
 
@@ -9260,9 +9260,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 a = (input1, input2)
                 b = a
                 c = (input1, input2, input3)
-                for i in range(5):
+                for _i in range(5):
                     d = a[0]
-                    for j in range(2):
+                    for _j in range(2):
                         e, f = a
                         a = (d, f)
                         f = c[2]
@@ -9286,7 +9286,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class TupleModule(torch.nn.Module):
             def forward(self, input1: Tensor, input2: Tensor) -> Tuple[Tensor, Tensor]:
                 a = (input1, input2)
-                for x in range(5):
+                for _x in range(5):
                     c, d = a
                     a = (c, d)
                 return a
@@ -9304,7 +9304,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]:
                 a = input1
                 b = input2
-                for x in range(5):
+                for _x in range(5):
                     c, d = a
                     e, f = b
                     if c.shape[0] == e.shape[0]:
@@ -10906,7 +10906,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.conv.weight = torch.arange(10)
                 for i in range(10):
                     if i == 3:
-                        for j in range(10):
+                        for _j in range(10):
                             w = self.conv.weight
                             self.conv.weight = torch.arange(10) + w
 
@@ -10968,7 +10968,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def set_cell_anchors(self, anchors):
                 self.conv.weight = torch.randn(3, 10)
                 for i in range(self.conv.weight.size(0)):
-                    for j in range(10):
+                    for _j in range(10):
                         self.conv.bias = torch.randn(3, 10, 3)
                         self.conv.weight = anchors * i
                         self.boxes.append(torch.ones(3, 3))
@@ -11939,7 +11939,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.loop_count = loop_count
 
             def forward(self, x):
-                for i in range(self.loop_count):
+                for _i in range(self.loop_count):
                     x.index_add_(self.dim, self.index, self.updates)
                 return x
 

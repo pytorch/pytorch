@@ -219,7 +219,7 @@ def _get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     if target is None:
         target = inputs
     inp_indices = [i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad]
-    for i, (inp, inp_idx) in enumerate(zip(_iter_tensors(target, True), inp_indices)):
+    for _i, (inp, inp_idx) in enumerate(zip(_iter_tensors(target, True), inp_indices)):
         jacobians += [get_numerical_jacobian_wrt_specific_input(fn, inp_idx, inputs, outputs, eps,
                                                                 input=inp, is_forward_ad=is_forward_ad)]
     return jacobians
@@ -414,7 +414,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
     with fwAD.dual_level():
         fw_grads = []
         dual_inputs = []
-        for i, inp in enumerate(inputs):
+        for _i, inp in enumerate(inputs):
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
@@ -528,7 +528,7 @@ def _get_numerical_jvp_wrt_specific_input(fn, input_idx, inputs, u, eps, is_forw
 def _get_numerical_vJu(fn, inputs, inp_indices, func_out, all_u, all_v, eps, is_forward_ad):
     # Note that all_v can also be None, in that case, this function only computes Ju.
     reduced_jacobians: List[List[torch.Tensor]] = []
-    for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
+    for _i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
         all_Ju = _get_numerical_jvp_wrt_specific_input(fn, inp_idx, inputs, u, eps, is_forward_ad)
         # Filter out the Ju for non floating point outputs
         filtered_Ju = []
@@ -1050,7 +1050,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
                 'Please look at "Notes about undefined output gradients" in '
                 '"tools/autograd/derivatives.yaml"')) from e
 
-        for gi, i in zip(grads_input, diff_input_list):
+        for gi, _i in zip(grads_input, diff_input_list):
             if (gi is not None) and (not gi.eq(0).all()):
                 warn_bc_breaking()
                 raise GradcheckError((

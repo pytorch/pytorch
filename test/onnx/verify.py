@@ -530,7 +530,7 @@ def verify(
         run_helper(torch_out, args, remained_onnx_input_idx)
 
         if isinstance(test_args, int):
-            for i in range(test_args):
+            for _i in range(test_args):
                 run(randomize_args(args), remained_onnx_input_idx)
         else:
             for test_arg in test_args:

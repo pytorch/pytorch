@@ -582,7 +582,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         for idx in range(num_gpus):
             gpu_idx = local_device_ids[idx]
             output_ts.append([])
-            for rank in range(self.world_size):
+            for _rank in range(self.world_size):
                 output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
 
         expected = [[torch.tensor([rank]) for rank in range(self.world_size)]]
@@ -652,7 +652,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         for idx in range(num_gpus):
             gpu_idx = local_device_ids[idx]
             output_ts.append([])
-            for rank in range(self.world_size):
+            for _rank in range(self.world_size):
                 output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
 
         with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
@@ -1910,7 +1910,7 @@ class DistributedDataParallelTest(
                                     ),
                                     named_msg,
                                 )
-                                for j, ((param_name, p), p_ddp) in enumerate(
+                                for _j, ((param_name, p), p_ddp) in enumerate(
                                     zip(
                                         m_child.named_parameters(),
                                         m_ddp_child.parameters(),
@@ -2324,7 +2324,7 @@ class DistributedDataParallelTest(
                 process_group=process_group,
             )
 
-            for i in range(3):
+            for _i in range(3):
                 m.zero_grad(set_to_none=try_set_to_none)
                 m(1).sum().backward()
 

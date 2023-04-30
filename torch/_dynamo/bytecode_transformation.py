@@ -791,7 +791,7 @@ def fix_extended_args(instructions: List[Instruction]):
             if output and output[-1].opcode == dis.EXTENDED_ARG:
                 output.pop()
 
-    for i, inst in enumerate(instructions):
+    for _i, inst in enumerate(instructions):
         if inst.opcode == dis.EXTENDED_ARG:
             # Leave this instruction alone for now so we never shrink code
             inst.arg = 0

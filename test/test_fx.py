@@ -2061,7 +2061,7 @@ class TestFX(JitTestCase):
 
         g = torch.fx.Graph()
         x = g.placeholder('x')
-        for i in range(depth):
+        for _i in range(depth):
             x = g.call_function(torch.relu, (x,))
         g.output(x)
 
@@ -3473,7 +3473,7 @@ class TestFX(JitTestCase):
 
         def f_sum_dict(x):
             out = 0
-            for k, v in x.items():
+            for _k, v in x.items():
                 out += v
             return out
 
@@ -4217,7 +4217,7 @@ class TestFunctionalTracing(JitTestCase):
                 try:
                     sig = inspect.signature(fn)
                     has_tensor_arg = False
-                    for arg, param in sig.parameters.items():
+                    for _arg, param in sig.parameters.items():
                         if isinstance(param.annotation, type) and issubclass(param.annotation, torch.Tensor):
                             has_tensor_arg = True
                     if not has_tensor_arg:

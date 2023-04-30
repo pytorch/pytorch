@@ -1063,7 +1063,7 @@ class precisionOverride:
 
     def __init__(self, d):
         assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
-        for dtype, prec in d.items():
+        for dtype, _prec in d.items():
             assert isinstance(dtype, torch.dtype), "precisionOverride given unknown dtype {0}".format(dtype)
 
         self.d = d

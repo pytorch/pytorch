@@ -66,7 +66,7 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
     ]:
         ops = supported_symmetric_quantized_operators()
-        for op_string, pattern_list in ops.items():
+        for _op_string, pattern_list in ops.items():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
             )

@@ -413,7 +413,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     writer = InputWriter(save_dir)
     wargs = []
-    for i, arg in enumerate(args):
+    for _i, arg in enumerate(args):
         if isinstance(arg, (int, torch.SymInt)):
             wargs.append(writer.symint(arg))
         elif isinstance(arg, torch.Tensor):

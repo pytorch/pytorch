@@ -2279,7 +2279,7 @@ class TestFrozenOptimizations(JitTestCase):
         use_tracing = [True, False]
         bn_running_stats = [True, False]
 
-        for modules, tracing, track_stats in product(module_pairs, use_tracing, bn_running_stats):
+        for modules, tracing, _track_stats in product(module_pairs, use_tracing, bn_running_stats):
             class LinearBN(torch.nn.Module):
                 def __init__(self, in_features, out_features):
                     super().__init__()

@@ -105,7 +105,7 @@ class RNNBase(torch.nn.Module):
 
         _all_weight_values = []
         for layer in range(num_layers):
-            for direction in range(num_directions):
+            for _direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
                 w_ih = torch.randn(gate_size, layer_input_size).to(torch.float)

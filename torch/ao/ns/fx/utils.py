@@ -389,8 +389,8 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
 
     # Check in the first result to find any model with fqn entries defined.
     model_name_with_fqns = None
-    for layer_name, result_type_to_results in results.items():
-        for result_type, model_name_to_results in result_type_to_results.items():
+    for _layer_name, result_type_to_results in results.items():
+        for _result_type, model_name_to_results in result_type_to_results.items():
             for model_name, model_results in model_name_to_results.items():
                 if len(model_results) > 0:
                     if model_results[0]["fqn"] is not None:
@@ -400,8 +400,8 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
         break
 
     if model_name_with_fqns:
-        for layer_name, result_type_to_results in results.items():
-            for result_type, model_name_to_results in result_type_to_results.items():
+        for _layer_name, result_type_to_results in results.items():
+            for _result_type, model_name_to_results in result_type_to_results.items():
                 ref_model_results = model_name_to_results[model_name_with_fqns]
                 for model_name, model_results in model_name_to_results.items():
                     if model_name == model_name_with_fqns:

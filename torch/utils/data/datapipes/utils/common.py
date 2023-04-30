@@ -320,7 +320,7 @@ class StreamWrapper:
         else:
             # Traverse only simple structures
             if isinstance(v, dict):
-                for kk, vv in v.items():
+                for _kk, vv in v.items():
                     cls.close_streams(vv, depth=depth + 1)
             elif isinstance(v, (list, tuple)):
                 for vv in v:

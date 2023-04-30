@@ -499,7 +499,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     def init_fn(script_module):
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name, (attr_type, is_param) in concrete_type.get_attributes().items():
+        for name, (_attr_type, _is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
             cpp_module.setattr(name, orig_value)

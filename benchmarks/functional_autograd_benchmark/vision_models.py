@@ -94,7 +94,7 @@ def get_detr(device: torch.device) -> GetterReturnType:
 
     inputs = torch.rand(N, 3, 800, 1200, device=device)
     labels = []
-    for idx in range(N):
+    for _idx in range(N):
         targets = {}
         n_targets: int = int(torch.randint(5, 10, size=tuple()).item())
         label = torch.randint(5, 10, size=(n_targets,), device=device)

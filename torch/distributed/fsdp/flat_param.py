@@ -855,7 +855,7 @@ class FlatParamHandle:
         sharded_flat_param_numel = unsharded_end_idx - unsharded_start_idx + 1
         # `unsharded_param_start_idx` and `unsharded_param_end_idx` are indices
         # into the unsharded flat parameter (inclusive) of the given parameter
-        for i, (
+        for _i, (
             (unsharded_param_start_idx, unsharded_param_end_idx),
             is_padding,
         ) in enumerate(zip(flat_param_offsets, self.flat_param._is_padding_mask)):
@@ -1866,7 +1866,7 @@ class FlatParamHandle:
                 numel_in_shard = shard_param_info.numel_in_shard
                 param.data = flat_param[offset : offset + numel_in_shard]
         assert self.flat_param._shared_params is not None
-        for i, (
+        for _i, (
             param,
             (param_name, module, _, prim_param_name, prim_module, _),
         ) in enumerate(
@@ -1930,7 +1930,7 @@ class FlatParamHandle:
                 else:
                     param.grad = None
         assert flat_param._shared_params is not None
-        for i, (param, (_, _, _, prim_param_name, prim_module, _)) in enumerate(
+        for _i, (param, (_, _, _, prim_param_name, prim_module, _)) in enumerate(
             zip(flat_param._shared_params, flat_param._shared_param_infos)
         ):
             in_sharded_flat_param = hasattr(prim_module, prim_param_name)

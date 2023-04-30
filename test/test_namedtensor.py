@@ -996,7 +996,7 @@ class TestNamedTensor(TestCase):
 
     def test_cummax_cummin(self):
         def test_ops(op):
-            for device in get_all_device_types():
+            for _device in get_all_device_types():
                 names = ('N', 'D')
                 tensor = torch.rand(2, 3, names=names)
                 result = op(tensor, 0)
@@ -1006,14 +1006,14 @@ class TestNamedTensor(TestCase):
         test_ops(torch.cummin)
 
     def test_logcumsumexp(self):
-        for device in get_all_device_types():
+        for _device in get_all_device_types():
             names = ('N', 'D')
             tensor = torch.rand(2, 3, names=names)
             result = torch.logcumsumexp(tensor, 'D')
             self.assertEqual(result.names, names)
 
     def test_bitwise_not(self):
-        for device in get_all_device_types():
+        for _device in get_all_device_types():
             names = ('N', 'D')
             tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
             result = torch.empty(0, dtype=torch.bool)
@@ -1023,7 +1023,7 @@ class TestNamedTensor(TestCase):
             self.assertEqual(tensor.bitwise_not_().names, names)
 
     def test_logical_not(self):
-        for device in get_all_device_types():
+        for _device in get_all_device_types():
             names = ('N', 'D')
             tensor = torch.zeros(2, 3, names=names, dtype=torch.bool)
             result = torch.empty(0, dtype=torch.bool)
@@ -1033,7 +1033,7 @@ class TestNamedTensor(TestCase):
             self.assertEqual(tensor.logical_not_().names, names)
 
     def test_bernoulli(self):
-        for device in get_all_device_types():
+        for _device in get_all_device_types():
             names = ('N', 'D')
             tensor = torch.rand(2, 3, names=names)
             result = torch.empty(0)
