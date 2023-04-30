@@ -13225,7 +13225,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 .. function:: repeat_interleave(repeats, *) -> Tensor
    :noindex:
 
-Repeats 0 t[0] times, 1 t[1] times, 2 t[2] times, etc.
+Repeats 0 repeats[0] times, 1 repeats[1] times, 2 repeats[2] times, etc.
 
 Args:
     repeats (Tensor): The number of repetitions for each element.
@@ -13236,7 +13236,7 @@ Returns:
 Example::
 
     >>> torch.repeat_interleave(torch.tensor([1, 2, 3]))
-    tensor([1, 2, 2, 3, 3, 3])
+    tensor([0, 1, 1, 2, 2, 2])
 
 """.format(
         **common_args
