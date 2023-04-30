@@ -141,7 +141,6 @@ class BaseSchedulerNode:
                     used_names.add(layout.view.data.get_name())
         return used_names
 
-
     def prune_deps(self):
         self.unmet_dependencies = {
             dep
@@ -532,8 +531,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def used_or_aliased_buffer_names(self) -> Set[str]:
-        return functools.reduce(set.union, [x.used_or_aliased_buffer_names() for x in self.snodes])
-
+        return functools.reduce(
+            set.union, [x.used_or_aliased_buffer_names() for x in self.snodes]
+        )
 
     def get_nodes(self) -> List[BaseSchedulerNode]:
         return self.snodes

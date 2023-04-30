@@ -1818,7 +1818,7 @@ class CommonTemplate:
         def fn(x, y):
             x = 2 * x
             y = 2 * y
-            c = torch.cat([x, y], dim = -1)
+            c = torch.cat([x, y], dim=-1)
             d = 1 + c
             m = torch.mm(d, d)
             return m[:, :2] + x
