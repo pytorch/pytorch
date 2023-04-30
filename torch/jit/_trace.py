@@ -372,7 +372,7 @@ def _check_trace(
             torch._C._jit_pass_erase_shape_information(mod_canonicalized)
             mod_str = str(mod_canonicalized)
             mod_str = re.sub(r"___torch_mangle_[0-9]+\.", "", mod_str)
-            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod_func.graph)
+            check_canonicalized = torch._C._jit_pass_canonicalize(check_mod_func.graph)  # noqa: B023
             torch._C._jit_pass_inline(check_canonicalized)
             torch._C._jit_pass_erase_shape_information(check_canonicalized)
             check_str = str(check_canonicalized)
@@ -473,9 +473,9 @@ def _check_trace(
         has_warned = [False]
 
         def maybe_warn_nondeterministic():
-            if has_warned[0]:
+            if has_warned[0]:  # noqa: B023
                 return
-            has_warned[0] = True
+            has_warned[0] = True  # noqa: B023
             nondeterm_ops = [
                 op for op in traced_func.graph.nodes() if op.isNondeterministic()
             ]

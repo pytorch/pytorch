@@ -189,29 +189,29 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
             # If input is a get_attr node, copy it to current component's graph.
             # Returns the get_attr node in current component's graph.
             if x.op == "get_attr":
-                if x not in comp.getattr_maps:
-                    comp.getattr_maps[x] = comp.graph.get_attr(
+                if x not in comp.getattr_maps:  # noqa: B023
+                    comp.getattr_maps[x] = comp.graph.get_attr(  # noqa: B023
                         x.target, type_expr=x.type
                     )
-                return comp.getattr_maps[x]
+                return comp.getattr_maps[x]  # noqa: B023
 
             # If input is not a placeholder, it should have been put into a component
             # already. If it's the current component then we return the corresponding
             # node in the component.
-            if x.op != "placeholder" and node_to_component[x] == comp:
+            if x.op != "placeholder" and node_to_component[x] == comp:  # noqa: B023
                 return node_remapping[x]
 
             # If input is a placeholder or it's in other components, we want to make it
             # as a placeholder in current component's graph.
-            if x not in comp.orig_inputs:
-                comp.orig_inputs.append(x)
-                comp.input_placeholders.append(
-                    comp.graph.placeholder(x.name, type_expr=x.type)
+            if x not in comp.orig_inputs:  # noqa: B023
+                comp.orig_inputs.append(x)  # noqa: B023
+                comp.input_placeholders.append(  # noqa: B023
+                    comp.graph.placeholder(x.name, type_expr=x.type)  # noqa: B023
                 )
                 used_in_main[x] = None
 
-            return comp.input_placeholders[
-                next(i for i, y in enumerate(comp.orig_inputs) if x is y)
+            return comp.input_placeholders[  # noqa: B023
+                next(i for i, y in enumerate(comp.orig_inputs) if x is y)  # noqa: B023
             ]
 
         n = comp.graph.node_copy(node, remap_func)

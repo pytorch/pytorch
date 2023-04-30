@@ -1689,7 +1689,7 @@ class Layout(IRNode):
         dtype: torch.dtype,
         size: List[Expr],
         stride: List[Expr],
-        offset: Expr = Integer(0),
+        offset: Expr = Integer(0),  # noqa: B008
     ):
         assert stride is None or len(size) == len(
             stride
@@ -1799,7 +1799,7 @@ class FixedLayout(Layout):
         dtype: torch.dtype,
         size: List[Expr],
         stride: List[Expr] = None,
-        offset: Expr = Integer(0),
+        offset: Expr = Integer(0),  # noqa: B008
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)

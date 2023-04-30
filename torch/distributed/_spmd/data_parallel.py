@@ -785,10 +785,10 @@ def partitioner(graph: GraphModule) -> GraphModule:
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
                         return _redistribute_with_local_tensor(
                             local_tensor,
-                            input_full_shape,
-                            out_spec.mesh,
-                            input_arg_spec.placements,
-                            desired_spec.placements,
+                            input_full_shape,  # noqa: B023
+                            out_spec.mesh,  # noqa: B023
+                            input_arg_spec.placements,  # noqa: B023
+                            desired_spec.placements,  # noqa: B023
                         )
 
                     reshard_gm = make_fx(reshard_fn)(input_arg_tensor)

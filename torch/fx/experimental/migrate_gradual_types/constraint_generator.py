@@ -1262,7 +1262,7 @@ class ConstraintGenerator:
             if isinstance(t, torch.Tensor):
                 if len(t.shape) > 0:
                     res = []
-                    for t in t.shape:
+                    for t in t.shape:  # noqa: B020
                         res.append(t)
                     attr_type = TensorType(res)
                     output, counter = gen_tvar(counter)

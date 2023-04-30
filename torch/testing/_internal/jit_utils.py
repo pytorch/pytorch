@@ -740,7 +740,7 @@ def attrs_with_prefix(module, prefix):
 def warmup_backward(f, *args):
     profiling_count = 3
     results = []
-    for i in range(profiling_count):
+    for _i in range(profiling_count):
         if len(args) > 0:
             r = torch.autograd.grad(f, *args)
             results.append(r)
@@ -870,7 +870,7 @@ def get_traced_sample_variant_pairs(device, dtype, op):
         return outputs
 
     for sample in samples:
-        for func_type, variant in variants.items():
+        for _func_type, variant in variants.items():
             if variant is None:
                 continue
 

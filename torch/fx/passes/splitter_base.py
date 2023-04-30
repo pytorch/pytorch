@@ -573,7 +573,7 @@ class _SplitterBase:
                     if not is_node_output_tensor(node):
                         reports += f"Output {node.name} is not a tensor, this might cause problems during lowering!\n"
                     else:
-                        total_output_bytes += get_size_of_node(submod, node)[0]
+                        total_output_bytes += get_size_of_node(submod, node)[0]  # noqa: B023
 
                 map_arg(output_node.args, get_bytes)
                 qps = self.PCIe_BW / max(total_input_bytes, total_output_bytes)
@@ -865,7 +865,7 @@ class _SplitterBase:
     def generate_split_results(self) -> SplitResult:
         split_module = self()
         submodule_names = []
-        for name, mod in split_module.named_children():
+        for name, _mod in split_module.named_children():
             submodule_names.append(name)
         submodule_inputs = generate_inputs_for_submodules(split_module, self.sample_input, submodule_names)
         return SplitResult(split_module, submodule_inputs, self.non_acc_submodule_name)

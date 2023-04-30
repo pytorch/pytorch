@@ -481,12 +481,12 @@ def reinplace(gm, *sample_args):
             # Tree-mapping because some ops can return lists of tensors.
             def _add_to_map(x):
                 if isinstance(x, FakeTensor):
-                    storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
+                    storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)  # noqa: B023
             tree_map(_add_to_map, n.meta['fake_result'])
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
-    for idx, node in enumerate(gm.graph.nodes):
+    for _idx, node in enumerate(gm.graph.nodes):
         if node.op == 'call_function':
 
             # Today, the re-inplace pass on directly acts on:
@@ -615,8 +615,8 @@ def reinplace(gm, *sample_args):
                     args = node_to_update.args
 
                     def replace_arg(a):
-                        if a == old:
-                            return new
+                        if a == old:  # noqa: B023
+                            return new  # noqa: B023
                         return a
 
                     # First, replace usages of "b" with "a"

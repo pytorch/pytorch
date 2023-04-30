@@ -88,7 +88,7 @@ class WeakIdKeyDictionary(MutableMapping):
     def __init__(self, dict=None):
         self.data = {}
 
-        def remove(k, selfref=ref(self)):
+        def remove(k, selfref=ref(self)):  # noqa: B008
             self = selfref()
             if self is not None:
                 if self._iterating:

@@ -2543,7 +2543,7 @@ def _empty_permuted_meta(
             0 <= l < dim,
             lambda: (
                 f"Dimension out of range (expected to be between 0 and {dim - 1}, but got "
-                f"{l} at index {p}).  NB: negative dims "
+                f"{l} at index {p}).  NB: negative dims "  # noqa: B023
                 "not currently supported; file an issue if you want it."
             ),
         )

@@ -108,7 +108,7 @@ class VonMises(Distribution):
         return log_prob
 
     @torch.no_grad()
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         """
         The sampling algorithm for the von Mises distribution is based on the following paper:
         Best, D. J., and Nicholas I. Fisher.

@@ -1009,7 +1009,7 @@ class FSDPTest(MultiProcessTestCase):
         ref_init_fn: Optional[Callable] = None,
         num_iters: int = 2,
         save_model: bool = True,
-        cpu_offload: CPUOffload = CPUOffload(),
+        cpu_offload: CPUOffload = CPUOffload(),  # noqa: B008
         backward_prefetch: Optional[BackwardPrefetch] = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         mixed_precision: Optional[MixedPrecision] = None,

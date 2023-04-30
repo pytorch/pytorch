@@ -372,11 +372,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         for i, s in enumerate(arg.fake_tensor.size()):
             bind_symint(
-                s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)
+                s, lambda src: TensorPropertySource(src, TensorProperty.SIZE, i)  # noqa: B023
             )
         for i, s in enumerate(arg.fake_tensor.stride()):
             bind_symint(
-                s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)
+                s, lambda src: TensorPropertySource(src, TensorProperty.STRIDE, i)  # noqa: B023
             )
         bind_symint(
             arg.fake_tensor.storage_offset(),
@@ -548,7 +548,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     def register_leaf_name(leaf_name):
                         assert self.param_name_to_source is not None
                         new_source = ParamBufferSource(source, leaf_name)
-                        new_name = f"{name}.{leaf_name}"
+                        new_name = f"{name}.{leaf_name}"  # noqa: B023
                         self.param_name_to_source[new_name] = new_source
 
                     # annoying, but there are cases when we do not have parameters

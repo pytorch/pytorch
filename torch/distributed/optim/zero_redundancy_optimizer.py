@@ -71,7 +71,7 @@ def _broadcast_object(
     obj: Any,
     src_rank: int,
     group: object = dist.group.WORLD,
-    device: torch.device = torch.device("cpu"),
+    device: torch.device = torch.device("cpu"),  # noqa: B008
 ) -> Any:
     r"""
     Broadcasts an object to the given group, sending the object if called from

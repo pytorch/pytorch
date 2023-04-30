@@ -157,7 +157,7 @@ class BasicEvaluation:
             index = index_of_first_match(
                 cuda_kernel_events,
                 lambda x: x.linked_correlation_id(
-                ) == cuda_launch_event.linked_correlation_id(),
+                ) == cuda_launch_event.linked_correlation_id(),  # noqa: B023
                 start=last_mapped_kernel)
             kernel_mapping[cuda_launch_event] = index
             last_mapped_kernel = index if index is not None else last_mapped_kernel

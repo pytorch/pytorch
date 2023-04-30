@@ -55,7 +55,7 @@ class _FSDPDeviceHandle:
                 self.__backend = getattr(torch, device.type)
                 self.__device = device
             except AttributeError:
-                raise AttributeError(
+                raise AttributeError(  # noqa: B904
                     f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
                 )
         else:
@@ -77,7 +77,7 @@ class _FSDPDeviceHandle:
         try:
             return getattr(self.__backend, __name)
         except AttributeError:
-            raise AttributeError(
+            raise AttributeError(  # noqa: B904
                 f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
             )
 

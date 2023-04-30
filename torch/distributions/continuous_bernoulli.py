@@ -140,13 +140,13 @@ class ContinuousBernoulli(ExponentialFamily):
     def param_shape(self):
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)

@@ -444,7 +444,7 @@ class DeviceTypeTestBase(TestCase):
             parametrize_fn = compose_parametrize_fns(dtype_parametrize_fn, parametrize_fn)
 
         # Instantiate the parametrized tests.
-        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):
+        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):  # noqa: B020
             test_suffix = '' if test_suffix == '' else '_' + test_suffix
             device_suffix = '_' + cls.device_type
 
@@ -1063,7 +1063,7 @@ class precisionOverride:
 
     def __init__(self, d):
         assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
-        for dtype, prec in d.items():
+        for dtype, _prec in d.items():
             assert isinstance(dtype, torch.dtype), "precisionOverride given unknown dtype {0}".format(dtype)
 
         self.d = d

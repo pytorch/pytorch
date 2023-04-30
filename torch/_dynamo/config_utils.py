@@ -73,7 +73,7 @@ class ConfigModule(ModuleType):
             return self._config[name]
         except KeyError:
             # make hasattr() work properly
-            raise AttributeError(f"{self.__name__}.{name} does not exist")
+            raise AttributeError(f"{self.__name__}.{name} does not exist")  # noqa: B904
 
     def __delattr__(self, name):
         # must support delete because unittest.mock.patch deletes

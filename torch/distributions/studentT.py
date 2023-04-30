@@ -64,7 +64,7 @@ class StudentT(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
         # parameters seems to help.

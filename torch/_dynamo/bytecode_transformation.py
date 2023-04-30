@@ -791,7 +791,7 @@ def fix_extended_args(instructions: List[Instruction]):
             if output and output[-1].opcode == dis.EXTENDED_ARG:
                 output.pop()
 
-    for i, inst in enumerate(instructions):
+    for _i, inst in enumerate(instructions):
         if inst.opcode == dis.EXTENDED_ARG:
             # Leave this instruction alone for now so we never shrink code
             inst.arg = 0
@@ -918,7 +918,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
 
         def should_compute_arg():
             # argval is prioritized over arg
-            return instructions[i].argval is not _NotProvided
+            return instructions[i].argval is not _NotProvided  # noqa: B023
 
         if instructions[i].opname == "LOAD_GLOBAL":
             # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global

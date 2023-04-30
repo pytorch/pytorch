@@ -47,7 +47,7 @@ def balance_by_time(
     sample: Union[List[Any], Tensor],
     *,
     timeout: float = 1.0,
-    device: Device = torch.device("cuda"),
+    device: Device = torch.device("cuda"),  # noqa: B008
 ) -> List[int]:
     """Naive automatic balancing by elapsed time per layer.
     ::
@@ -91,7 +91,7 @@ def balance_by_size(
     *,
     chunks: int = 1,
     param_scale: float = 2.0,
-    device: Device = torch.device("cuda"),
+    device: Device = torch.device("cuda"),  # noqa: B008
 ) -> List[int]:
     """Naive automatic balancing by CUDA memory usage per layer.
 

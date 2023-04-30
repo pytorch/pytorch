@@ -414,8 +414,8 @@ class CodeGen:
                 user_to_last_uses.setdefault(user, []).append(n)
 
         for node in reversed(nodes):
-            map_arg(node.args, lambda n: register_last_uses(n, node))
-            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+            map_arg(node.args, lambda n: register_last_uses(n, node))  # noqa: B023
+            map_arg(node.kwargs, lambda n: register_last_uses(n, node))  # noqa: B023
 
         def delete_unused_values(user : Node):
             """
@@ -1326,8 +1326,8 @@ class Graph:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
-            map_arg(node.args, lambda arg: check_arg(arg, node))
-            map_arg(node.kwargs, lambda arg: check_arg(arg, node))
+            map_arg(node.args, lambda arg: check_arg(arg, node))  # noqa: B023
+            map_arg(node.kwargs, lambda arg: check_arg(arg, node))  # noqa: B023
             seen_values.add(node)
 
             if node.name in seen_names:

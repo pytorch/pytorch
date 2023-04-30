@@ -544,7 +544,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [
@@ -725,9 +725,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     return float("inf")
                 elif "illegal memory access" in msg:
                     msg += "\n\nEither error in template or triton bug.\n"
-                raise ErrorFromChoice(msg, choice, benchmark_fn.debug_str())
+                raise ErrorFromChoice(msg, choice, benchmark_fn.debug_str())  # noqa: B904
             except AssertionError as e:
-                raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
+                raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")  # noqa: B904
             return timing
 
         if config.autotune_in_subproc:

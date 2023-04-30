@@ -36,7 +36,7 @@ def _generate_input_args_string(obj):
     for param_name, _ in signature.parameters.items():
         input_param_names.add(param_name)
     result = []
-    for name, obj in inspect.getmembers(obj):
+    for name, obj in inspect.getmembers(obj):  # noqa: B020
         if name in input_param_names:
             result.append((name, _simplify_obj_name(obj)))
     return ', '.join([f'{name}={value}' for name, value in result])

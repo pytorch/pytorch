@@ -276,7 +276,7 @@ class _WrappedCall:
             if "eval_with_key" in topmost_framesummary.filename:
                 print(_WrappedCall._generate_error_message(topmost_framesummary),
                       file=sys.stderr)
-                raise e.with_traceback(None)
+                raise e.with_traceback(None)  # noqa: B904
             else:
                 raise e
 

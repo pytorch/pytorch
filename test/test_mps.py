@@ -844,7 +844,7 @@ class MpsMemoryLeakCheck():
 
         discrepancy_detected = True
         # Query memory multiple items to ensure leak was not transient
-        for n in range(3):
+        for _n in range(3):
             caching_allocator_mem_allocated = torch.mps.current_allocated_memory()
             driver_mem_allocated = torch.mps.driver_allocated_memory()
 
@@ -1279,7 +1279,7 @@ class TestMPS(TestCaseMPS):
         # Test to detect issues in cdist gradient calculation
         # When the distances are 0
         sizex = (1, 27, 32)
-        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+        for _p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()

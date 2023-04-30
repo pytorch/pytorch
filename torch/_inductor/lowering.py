@@ -270,7 +270,7 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for a, b in itertools.zip_longest(
+    for a, b in itertools.zip_longest(  # noqa: B020
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
         if b == 1:
@@ -2755,7 +2755,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds_precomp):
+        for idx, (low, _high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)

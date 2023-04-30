@@ -87,7 +87,7 @@ class NegativeBinomial(Distribution):
                                          rate=torch.exp(-self.logits),
                                          validate_args=False)
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         with torch.no_grad():
             rate = self._gamma.sample(sample_shape=sample_shape)
             return torch.poisson(rate)

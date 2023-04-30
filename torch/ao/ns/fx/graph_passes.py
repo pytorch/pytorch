@@ -424,7 +424,7 @@ def _can_insert_copy_of_subgraph_a(
                     return False
             cur_idx += 1
 
-        for kwarg_name, kwarg_val in norm_kwargs.items():
+        for _kwarg_name, kwarg_val in norm_kwargs.items():
             # stitch the inputs from base graph
             if cur_idx == 0:
                 pass
@@ -780,7 +780,7 @@ def create_a_shadows_b(
                         # is added
                         prev_node_c_list = [env_c[arg.name] for arg in prev_node_b]
 
-                        for arg_idx, arg in enumerate(prev_node_b):
+                        for arg_idx, _arg in enumerate(prev_node_b):
                             prev_node_c = prev_node_c_list[arg_idx]
                             env_c[prev_node_c.name] = _insert_logger_after_node(
                                 prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',

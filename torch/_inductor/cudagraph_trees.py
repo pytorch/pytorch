@@ -1099,7 +1099,7 @@ class CUDAGraphNode:
 
             # one reference in our array, and calling sys.getrefcount bumps the refcount by one
             def check_refcount(i):
-                return self_ref().get_output_refcount(i) == 2
+                return self_ref().get_output_refcount(i) == 2  # noqa: B023
 
             check = functools.partial(check_refcount, i=i)
 

@@ -2337,7 +2337,7 @@ class UnaryUfuncInfo(OpInfo):
         self,
         name,  # the string name of the function
         *,
-        dtypes=floating_types(),
+        dtypes=floating_types(),  # noqa: B008
         domain=(None, None),  # the [low, high) domain of the function
         handles_complex_extremal_values=True,  # whether the op correctly handles extremal values (like nan/inf)
         handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
@@ -2484,7 +2484,7 @@ class SpectralFuncInfo(OpInfo):
         name,  # the string name of the function
         *,
         ref=None,  # Reference implementation (probably in np.fft namespace)
-        dtypes=floating_and_complex_types(),
+        dtypes=floating_and_complex_types(),  # noqa: B008
         ndimensional: SpectralFuncType,
         sample_inputs_func=sample_inputs_spectral_ops,
         decorators=None,
@@ -2522,7 +2522,7 @@ class ShapeFuncInfo(OpInfo):
         name,  # the string name of the function
         *,
         ref,  # a reference function
-        dtypes=floating_types(),
+        dtypes=floating_types(),  # noqa: B008
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         sample_inputs_func=None,
@@ -2601,8 +2601,8 @@ class ForeachFuncInfo(OpInfo):
     def __init__(
         self,
         name,
-        dtypes=floating_and_complex_types(),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+        dtypes=floating_and_complex_types(),  # noqa: B008
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half),  # noqa: B008
         dtypesIfROCM=None,
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,

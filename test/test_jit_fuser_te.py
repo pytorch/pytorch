@@ -50,7 +50,7 @@ def strip_profiling_nodes(nodes):
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
 def warmup_forward(f, *args, profiling_count=2):
-    for i in range(profiling_count):
+    for _i in range(profiling_count):
         results = f(*args)
 
     return results
@@ -2088,7 +2088,7 @@ class TestTEFuser(JitTestCase):
         x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         script = torch.jit.script(fn)
-        for i in range(11):
+        for _i in range(11):
             y = fn(x)
             g0 = torch.rand_like(y)
             y.backward(g0)
@@ -2292,7 +2292,7 @@ class TestTEFuser(JitTestCase):
 
                     for i, func in enumerate(funcs):
                         num_args = i + 1
-                        for j, gen in enumerate(gen_tensor):
+                        for _j, gen in enumerate(gen_tensor):
                             inps = (gen(n), gen(n), gen(n))
                             func_s = torch.jit.trace(func, inps, check_trace=False)
                             torch._C._jit_pass_erase_shape_information(func_s.graph)
@@ -2300,7 +2300,7 @@ class TestTEFuser(JitTestCase):
                                 x, y, z = gen(n), gen(n), gen(n)
                                 func_s(x, y, z)
 
-                            for incr in range(3):
+                            for _incr in range(3):
                                 func_s(*[gen(n + 1) for _ in range(3)])
 
                             g = torch.jit.last_executed_optimized_graph()
@@ -2460,7 +2460,7 @@ class TestTEFuser(JitTestCase):
 
             f_traced = torch.jit.trace(f, (x, y))
 
-            for i in range(4):
+            for _i in range(4):
                 # make sure this doesn't error out
                 res = f_traced(x, y)
 
@@ -2479,7 +2479,7 @@ class TestTEFuser(JitTestCase):
         ref = fn(x)
 
         script_fn = torch.jit.script(fn)
-        for i in range(4):
+        for _i in range(4):
             res = script_fn(x)
 
         self.assertEqual(ref, res)

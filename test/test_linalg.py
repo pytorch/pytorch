@@ -1280,7 +1280,7 @@ class TestLinalg(TestCase):
             ((4, 3), (0, 1.0), TypeError, r"argument 'dim' must be tuple of ints"),
             ((4, 3), (None, ), TypeError, r"argument 'dim' must be tuple of ints"),
         ]
-        for input_size, dim_tuple, error, error_msg in test_cases:
+        for input_size, dim_tuple, error, _error_msg in test_cases:
             input = torch.randn(input_size, device=device)
             # vector_norm should accept a tuple or a list for dim arg
             for dim in [dim_tuple, list(dim_tuple)]:
@@ -5290,7 +5290,7 @@ class TestLinalg(TestCase):
         elapsed_ortho_general = 0
         elapsed_scipy = 0
         elapsed_general_scipy = 0
-        for i in range(repeat):
+        for _i in range(repeat):
             start = time.time()
             torch.lobpcg(A1, X=X1, niter=niter, method='ortho', tol=tol)
             end = time.time()
@@ -6376,7 +6376,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
             num_matrices = tensors_batch.size(0)
             tensors_list = []
-            for i in range(num_matrices):
+            for _i in range(num_matrices):
                 tensors_list.append(torch.randn(n[-2], n[-1], dtype=dtype, device=device))
 
             for i in range(num_matrices):
