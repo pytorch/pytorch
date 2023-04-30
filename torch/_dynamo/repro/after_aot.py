@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 import uuid
 from importlib import import_module
@@ -394,7 +395,9 @@ class InputWriter:
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(gm, args, *, stable_output=False, save_dir=None):
+def generate_compiler_repro_string(
+    gm, args, *, stable_output=False, save_dir=None, patch_code=None
+):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -407,7 +410,7 @@ from math import inf
 
 isolate_fails_code_str = None
 
-{TEST_REPLACEABLE_COMMENT}
+{TEST_REPLACEABLE_COMMENT if patch_code is None else patch_code}
 {extra_imports}
 
         """
@@ -443,14 +446,27 @@ isolate_fails_code_str = None
 
 
 def save_graph_repro(
-    fd, gm, args, compiler_name, *, stable_output=False, save_dir=None, minify=False
+    fd,
+    gm,
+    args,
+    compiler_name,
+    *,
+    stable_output=False,
+    save_dir=None,
+    minify=False,
+    minifier_query=False,
+    patch_code=None,
 ):
     # TODO: not sure why we need this import
     if "inductor" in compiler_name:
         fd.write("import torch._inductor.overrides\n")
     fd.write(
         generate_compiler_repro_string(
-            gm, args, stable_output=stable_output, save_dir=save_dir
+            gm,
+            args,
+            stable_output=stable_output,
+            save_dir=save_dir,
+            patch_code=patch_code,
         )
     )
     accuracy = "_accuracy" in compiler_name
@@ -462,7 +478,7 @@ def save_graph_repro(
     fd.write(
         f"    run_repro(mod, load_args, accuracy={accuracy!r}, minify={minify!r}, "
         f"save_dir={save_dir!r}, patch_code=isolate_fails_code_str, "
-        f"tracing_mode={tracing_mode!r}"
+        f"tracing_mode={tracing_mode!r}, minifier_query={minifier_query!r}"
         ")\n"
     )
 
@@ -505,7 +521,13 @@ def dump_to_minify(gm, args, compiler_name: str):
 
 
 def isolate_fails(
-    fail_fn, fx_g, args, compiler_name: str, env=None, patch_code=None, save_dir=None
+    fx_g,
+    args,
+    compiler_name: str,
+    env=None,
+    patch_code=None,
+    save_dir=None,
+    accuracy=False,
 ):
     if env is None:
         env = {}
@@ -514,26 +536,14 @@ def isolate_fails(
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
-        repro_code = generate_compiler_repro_string(fx_g, args, save_dir=save_dir)
-        if patch_code is not None:
-            repro_code = repro_code.replace(TEST_REPLACEABLE_COMMENT, patch_code)
-        fd.write(repro_code)
-        fd.write(
-            textwrap.dedent(
-                f"""
-                from torch._dynamo.repro.after_aot import {fail_fn}
-                """
-            )
-        )
-        fd.write(
-            textwrap.dedent(
-                f"""
-                if {fail_fn}(mod, args):
-                    exit(1)
-                else:
-                    exit(0)
-                """
-            )
+        save_graph_repro(
+            fd,
+            fx_g,
+            args,
+            compiler_name,
+            save_dir=save_dir,
+            patch_code=patch_code,
+            minifier_query=True,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -654,6 +664,13 @@ def repro_main(options, mod, load_args):
     compiler_name = "inductor_accuracy" if options.accuracy else "inductor"
     torch._inductor.config.generate_intermediate_hooks = True
 
+    if options.minifier_query:
+        fail_fn = inductor_accuracy_fails if options.accuracy else inductor_fails
+        if fail_fn(mod, args):
+            sys.exit(1)
+        else:
+            sys.exit(0)
+
     if options.minify:
         from functorch.compile import minifier
 
@@ -664,11 +681,11 @@ def repro_main(options, mod, load_args):
         if options.isolate:
             module_fails = functools.partial(
                 isolate_fails,
-                "inductor_accuracy_fails" if options.accuracy else "inductor_fails",
                 env=env_variables,
                 compiler_name=compiler_name,
                 patch_code=options.patch_code,
                 save_dir=options.save_dir,
+                accuracy=options.accuracy,
             )
         else:
             module_fails = (
@@ -841,6 +858,7 @@ def run_repro(
     *,
     accuracy=False,
     minify=False,
+    minifier_query=False,
     save_dir=None,
     patch_code=None,
     tracing_mode=None,
@@ -851,6 +869,10 @@ def run_repro(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
             k,
         )
+
+    assert not (
+        minify and minifier_query
+    ), "these are mutually exclusive, report bug to PyTorch"
 
     parser = argparse.ArgumentParser(description="torch.compile repro script")
 
@@ -863,6 +885,12 @@ def run_repro(
     )
     group.add_argument(
         "--analyze", action="store_true", help="run the analyzer on the repro"
+    )
+    group.add_argument(
+        "--minifier-query",
+        action="store_true",
+        default=minifier_query,
+        help="run the repro in the context of minification, inverting exit code meaning",
     )
 
     accuracy_group = parser.add_mutually_exclusive_group()
