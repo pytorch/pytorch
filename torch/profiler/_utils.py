@@ -96,8 +96,7 @@ class BasicEvaluation:
         self.profile = prof
         self.metrics: Dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
-        self.event_keys = sorted((e for e in self.metrics),
-                                 key=lambda x: x.event.start_time_ns)
+        self.event_keys = sorted(self.metrics, key=lambda x: x.event.start_time_ns)
         self.events = [e.event for e in self.event_keys]
         self.cuda_events: List[_KinetoEvent] = []
         self.queue_depth_list = self.compute_queue_depth()
