@@ -231,9 +231,7 @@ class InputAdapter:
         self._input_adapt_steps.append(step)
 
     @_beartype.beartype
-    def apply(
-        self, *model_args, **model_kwargs
-    ) -> Sequence[Union[int, float, bool, torch.Tensor]]:
+    def apply(self, *model_args, **model_kwargs) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -286,9 +284,7 @@ class OutputAdapter:
         self._output_adapt_steps.append(step)
 
     @_beartype.beartype
-    def apply(
-        self, model_outputs: Any
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    def apply(self, model_outputs: Any) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -329,7 +325,7 @@ class ExportOutput:
     @_beartype.beartype
     def adapt_torch_inputs_to_onnx(
         self, *model_args, **model_kwargs
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    ) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -386,9 +382,7 @@ class ExportOutput:
         return self._input_adapter.apply(*model_args, **model_kwargs)
 
     @_beartype.beartype
-    def adapt_torch_outputs_to_onnx(
-        self, model_outputs: Any
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    def adapt_torch_outputs_to_onnx(self, model_outputs: Any) -> Sequence[torch.Tensor]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Due to design differences, input/output format between PyTorch model and exported

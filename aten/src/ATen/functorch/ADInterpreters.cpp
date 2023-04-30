@@ -28,7 +28,7 @@ static void checkForInvalidMutationOnCaptures(
       "as inputs.");
 }
 
-static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
+Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   if (!tensor.defined()) {
     return tensor;
   }

@@ -7,6 +7,7 @@
 #if HAS_DEMANGLE
 
 #include <cxxabi.h>
+#include <execinfo.h>
 
 namespace c10 {
 
