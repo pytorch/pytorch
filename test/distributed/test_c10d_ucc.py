@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import contextlib
 import copy
 import logging
 import math
@@ -152,9 +151,10 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        with contextlib.suppress(OSError):
+        try:
             os.remove(self.file_name)
-
+        except OSError:
+            pass
 
     @requires_ucc()
     def test_empty_tensors(self):
@@ -974,9 +974,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     def tearDown(self):
         super(CommTest, self).tearDown()
-        with contextlib.suppress(OSError):
+        try:
             os.remove(self.file_name)
-
+        except OSError:
+            pass
 
     @requires_ucc()
     @skip_if_lt_x_gpu(2)

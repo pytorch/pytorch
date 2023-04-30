@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import contextlib
 import torch
 import os
 import torch.cuda
@@ -61,9 +60,10 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 
         def tearDown(self):
             super().tearDown()
-            with contextlib.suppress(OSError):
+            try:
                 os.remove(self.file_name)
-
+            except OSError:
+                pass
 
         @property
         def op_timeout_sec(self):
