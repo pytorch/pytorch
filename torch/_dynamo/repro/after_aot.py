@@ -453,8 +453,7 @@ def save_graph_repro(
     *,
     stable_output=False,
     save_dir=None,
-    minify=False,
-    minifier_query=False,
+    command="run",
     patch_code=None,
 ):
     # TODO: not sure why we need this import
@@ -476,9 +475,9 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    run_repro(mod, load_args, accuracy={accuracy!r}, minify={minify!r}, "
+        f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
         f"save_dir={save_dir!r}, patch_code=isolate_fails_code_str, "
-        f"tracing_mode={tracing_mode!r}, minifier_query={minifier_query!r}"
+        f"tracing_mode={tracing_mode!r}"
         ")\n"
     )
 
@@ -516,7 +515,7 @@ def dump_to_minify(gm, args, compiler_name: str):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro(out, gm, args, compiler_name, save_dir=subdir, minify=True)
+    save_graph_repro(out, gm, args, compiler_name, save_dir=subdir, command="minify")
     return helper_for_dump_minify(out.getvalue())
 
 
@@ -543,7 +542,7 @@ def isolate_fails(
             compiler_name,
             save_dir=save_dir,
             patch_code=patch_code,
-            minifier_query=True,
+            command="minifier-query",
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -629,9 +628,7 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def repro_main(options, mod, load_args):
-    from torch._inductor.compile_fx import compile_fx_inner
-
+def repro_common(options, mod, load_args):
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters()) and not any(mod.named_buffers())
 
@@ -661,194 +658,209 @@ def repro_main(options, mod, load_args):
     # TODO: speed this up
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
-    compiler_name = "inductor_accuracy" if options.accuracy else "inductor"
     torch._inductor.config.generate_intermediate_hooks = True
 
-    if options.minifier_query:
-        fail_fn = inductor_accuracy_fails if options.accuracy else inductor_fails
-        if fail_fn(mod, args):
-            sys.exit(1)
-        else:
-            sys.exit(0)
+    return mod, args
 
-    if options.minify:
-        from functorch.compile import minifier
 
-        favored_device = 1 if torch.cuda.device_count() >= 2 else 0
-        env_variables = {"CUDA_VISIBLE_DEVICES": str(favored_device)}
+def repro_minifier_query(options, mod, load_args):
+    mod, args = repro_common(options, mod, load_args)
+    fail_fn = inductor_accuracy_fails if options.accuracy else inductor_fails
+    if fail_fn(mod, args):
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
-        module_fails: Any
-        if options.isolate:
-            module_fails = functools.partial(
-                isolate_fails,
-                env=env_variables,
-                compiler_name=compiler_name,
-                patch_code=options.patch_code,
-                save_dir=options.save_dir,
-                accuracy=options.accuracy,
-            )
-        else:
-            module_fails = (
-                inductor_accuracy_fails if options.accuracy else inductor_fails
-            )
 
-        minifier(
-            mod,
-            args,
-            module_fails=module_fails,
-            dump_state=functools.partial(
-                dump_compiler_graph_state, compiler_name=compiler_name
-            ),
+def repro_minify(options, mod, load_args):
+    from functorch.compile import minifier
+
+    mod, args = repro_common(options, mod, load_args)
+    compiler_name = "inductor_accuracy" if options.accuracy else "inductor"
+
+    favored_device = 1 if torch.cuda.device_count() >= 2 else 0
+    env_variables = {"CUDA_VISIBLE_DEVICES": str(favored_device)}
+
+    module_fails: Any
+    if options.isolate:
+        module_fails = functools.partial(
+            isolate_fails,
+            env=env_variables,
+            compiler_name=compiler_name,
+            patch_code=options.patch_code,
+            save_dir=options.save_dir,
+            accuracy=options.accuracy,
         )
+    else:
+        module_fails = inductor_accuracy_fails if options.accuracy else inductor_fails
 
-    elif options.analyze:
-        # TODO: The logic for cloning inputs/models here is intentionally
-        # modeled off of run_fwd_maybe_bwd, but arguably it is better not to
-        # clone inputs (as you are doubling your effective GPU memory usage).
-        # It is certainly faster though!  It probably makes sense to let the
-        # user specify the offload strategy.
-        from torch._inductor.hooks import intermediate_hook
+    minifier(
+        mod,
+        args,
+        module_fails=module_fails,
+        dump_state=functools.partial(
+            dump_compiler_graph_state, compiler_name=compiler_name
+        ),
+    )
 
-        with tqdm(desc="Compiling"):
-            compiled = compile_fx_inner(mod, args)
-        total = counters["inductor"]["intermediate_hooks"]
 
-        known_names = set()
+def repro_analyze(options, mod, load_args):
+    from torch._inductor.compile_fx import compile_fx_inner
+    from torch._inductor.hooks import intermediate_hook
 
-        def save_hook(name, val):
-            known_names.add(name)
-            if not options.skip_saving_inductor_intermediates:
-                writer.write_tensor(os.path.join("inductor", name), val)
-            pbar.update(1)
+    mod, args = repro_common(options, mod, load_args)
 
-        writer = torch.utils._content_store.ContentStoreWriter(
-            options.save_dir, stable_hash=options.stable_hash
-        )
-        reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
+    # TODO: The logic for cloning inputs/models here is intentionally
+    # modeled off of run_fwd_maybe_bwd, but arguably it is better not to
+    # clone inputs (as you are doubling your effective GPU memory usage).
+    # It is certainly faster though!  It probably makes sense to let the
+    # user specify the offload strategy.
 
+    with tqdm(desc="Compiling"):
+        compiled = compile_fx_inner(mod, args)
+    total = counters["inductor"]["intermediate_hooks"]
+
+    known_names = set()
+
+    def save_hook(name, val):
+        known_names.add(name)
+        if not options.skip_saving_inductor_intermediates:
+            writer.write_tensor(os.path.join("inductor", name), val)
+        pbar.update(1)
+
+    writer = torch.utils._content_store.ContentStoreWriter(
+        options.save_dir, stable_hash=options.stable_hash
+    )
+    reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
+
+    new_args = clone_inputs(args)
+    with intermediate_hook(save_hook), tqdm(
+        desc="Saving inductor intermediates", total=total
+    ) as pbar:
+        compiled(new_args)
+        assert not new_args
+
+    def compare_tuples(tuple1, tuple2):
+        diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
+        diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
+
+        if not diff_values:
+            return None
+        else:
+            return " and ".join(f"{a} != {b}" for a, b in diff_values)
+
+    def check_hook(name, val):
+        meta = writer.compute_tensor_metadata(val)
+        meta2 = reader.read_tensor_metadata(os.path.join("inductor", name))
+        reason = compare_tuples(meta, meta2)
+        if reason is not None:
+            pbar.write(f"NONDETERMINISTIC INDUCTOR at {name} ({reason})")
+        pbar.update(1)
+
+    if not options.skip_check_deterministic:
         new_args = clone_inputs(args)
-        with intermediate_hook(save_hook), tqdm(
-            desc="Saving inductor intermediates", total=total
+        with intermediate_hook(check_hook), tqdm(
+            desc="Checking inductor determinism", total=total
         ) as pbar:
             compiled(new_args)
             assert not new_args
 
-        def compare_tuples(tuple1, tuple2):
-            diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
-            diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
+    class WriterInterp(fx.Interpreter):
+        def __init__(self, mod, subdir):
+            super().__init__(mod)
+            self.subdir = subdir
 
-            if not diff_values:
-                return None
-            else:
-                return " and ".join(f"{a} != {b}" for a, b in diff_values)
+        def run_node(self, n):
+            r = super().run_node(n)
+            name = n.name
+            if name in known_names:
+                pbar.update(1)
+                writer.write_tensor(os.path.join(self.subdir, name), r)
+            return r
 
-        def check_hook(name, val):
-            meta = writer.compute_tensor_metadata(val)
-            meta2 = reader.read_tensor_metadata(os.path.join("inductor", name))
-            reason = compare_tuples(meta, meta2)
-            if reason is not None:
-                pbar.write(f"NONDETERMINISTIC INDUCTOR at {name} ({reason})")
-            pbar.update(1)
+    # NB: the module cast doesn't actually do anything, since there are no
+    # parameters/buffers on the module
+    if not options.skip_saving_float64_intermediates:
+        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
+            WriterInterp(new_mod, "float64").boxed_run(new_args)
+        assert not new_args
 
-        if not options.skip_check_deterministic:
-            new_args = clone_inputs(args)
-            with intermediate_hook(check_hook), tqdm(
-                desc="Checking inductor determinism", total=total
-            ) as pbar:
-                compiled(new_args)
-                assert not new_args
+    class ExactReaderInterp(fx.Interpreter):
+        def run_node(self, n):
+            r = super().run_node(n)
+            name = n.name
+            if name in known_names:
+                meta = writer.compute_tensor_metadata(r)
+                meta2 = reader.read_tensor_metadata(os.path.join("float64", name))
+                reason = compare_tuples(meta, meta2)
+                if reason is not None:
+                    pbar.write(f"NONDETERMINISTIC FLOAT64 at {name} ({reason})")
+                pbar.update(1)
+            return r
 
-        class WriterInterp(fx.Interpreter):
-            def __init__(self, mod, subdir):
-                super().__init__(mod)
-                self.subdir = subdir
+    # TODO: check eager determinism
 
-            def run_node(self, n):
-                r = super().run_node(n)
-                name = n.name
-                if name in known_names:
-                    pbar.update(1)
-                    writer.write_tensor(os.path.join(self.subdir, name), r)
-                return r
-
-        # NB: the module cast doesn't actually do anything, since there are no
-        # parameters/buffers on the module
-        if not options.skip_saving_float64_intermediates:
-            new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
-            with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
-                WriterInterp(new_mod, "float64").boxed_run(new_args)
+    if not options.skip_check_deterministic:
+        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        with tqdm(desc="Checking float64 determinism", total=total) as pbar:
+            ExactReaderInterp(new_mod).boxed_run(new_args)
             assert not new_args
 
-        class ExactReaderInterp(fx.Interpreter):
-            def run_node(self, n):
-                r = super().run_node(n)
-                name = n.name
-                if name in known_names:
-                    meta = writer.compute_tensor_metadata(r)
-                    meta2 = reader.read_tensor_metadata(os.path.join("float64", name))
-                    reason = compare_tuples(meta, meta2)
-                    if reason is not None:
-                        pbar.write(f"NONDETERMINISTIC FLOAT64 at {name} ({reason})")
-                    pbar.update(1)
-                return r
+    # Now that we've saved everything, interp through the eager graph
+    # and do comparisons
+    class ReaderInterp(fx.Interpreter):
+        def run_node(self, n):
+            r = super().run_node(n)
+            name = n.name
+            if name in known_names:
+                inductor = reader.read_tensor(os.path.join("inductor", name))
+                float64 = reader.read_tensor(os.path.join("float64", name))
+                logged = False
 
-        # TODO: check eager determinism
+                def log_error(msg, *args):
+                    nonlocal logged
+                    logged = True
+                    pbar.write(f"DIVERGED at {name}: {msg % args}")
 
-        if not options.skip_check_deterministic:
-            new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
-            with tqdm(desc="Checking float64 determinism", total=total) as pbar:
-                ExactReaderInterp(new_mod).boxed_run(new_args)
-                assert not new_args
+                if not same(
+                    r,
+                    inductor,
+                    float64,
+                    tol=torch._dynamo.config.repro_tolerance,
+                    equal_nan=True,
+                    log_error=log_error,
+                ):
+                    assert logged
+                pbar.update(1)
+            return r
 
-        # Now that we've saved everything, interp through the eager graph
-        # and do comparisons
-        class ReaderInterp(fx.Interpreter):
-            def run_node(self, n):
-                r = super().run_node(n)
-                name = n.name
-                if name in known_names:
-                    inductor = reader.read_tensor(os.path.join("inductor", name))
-                    float64 = reader.read_tensor(os.path.join("float64", name))
-                    logged = False
+    with tqdm(desc="Checking divergence", total=total) as pbar:
+        ReaderInterp(mod).boxed_run(args)
+    assert not args
 
-                    def log_error(msg, *args):
-                        nonlocal logged
-                        logged = True
-                        pbar.write(f"DIVERGED at {name}: {msg % args}")
 
-                    if not same(
-                        r,
-                        inductor,
-                        float64,
-                        tol=torch._dynamo.config.repro_tolerance,
-                        equal_nan=True,
-                        log_error=log_error,
-                    ):
-                        assert logged
-                    pbar.update(1)
-                return r
+def repro_run(options, mod, load_args):
+    from torch._inductor.compile_fx import compile_fx_inner
 
-        with tqdm(desc="Checking divergence", total=total) as pbar:
-            ReaderInterp(mod).boxed_run(args)
-        assert not args
+    mod, args = repro_common(options, mod, load_args)
 
+    from torch.cuda import synchronize
+
+    compiled = compile_fx_inner(mod, args)
+
+    if options.accuracy:
+        if not same_two_models(mod, compiled, args, only_fwd=True):
+            raise AccuracyError("Bad accuracy detected")
     else:
-        from torch.cuda import synchronize
-
-        compiled = compile_fx_inner(mod, args)
-
-        if options.accuracy:
-            if not same_two_models(mod, compiled, args, only_fwd=True):
-                raise AccuracyError("Bad accuracy detected")
-        else:
-            need_sync = False
-            for arg in args:
-                if isinstance(arg, torch.Tensor) and arg.is_cuda:
-                    need_sync = True
-                    break
-            ref = compiled(args)
-            if need_sync:
-                synchronize()  # ensure segfaults are surfaced
+        need_sync = False
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.is_cuda:
+                need_sync = True
+                break
+        ref = compiled(args)
+        if need_sync:
+            synchronize()  # ensure segfaults are surfaced
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -856,9 +868,8 @@ def run_repro(
     mod,
     load_args,
     *,
+    command="run",
     accuracy=False,
-    minify=False,
-    minifier_query=False,
     save_dir=None,
     patch_code=None,
     tracing_mode=None,
@@ -870,27 +881,16 @@ def run_repro(
             k,
         )
 
-    assert not (
-        minify and minifier_query
-    ), "these are mutually exclusive, report bug to PyTorch"
-
-    parser = argparse.ArgumentParser(description="torch.compile repro script")
-
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--minify",
-        action="store_true",
-        default=minify,
-        help="run the minifier on the repro",
-    )
-    group.add_argument(
-        "--analyze", action="store_true", help="run the analyzer on the repro"
-    )
-    group.add_argument(
-        "--minifier-query",
-        action="store_true",
-        default=minifier_query,
-        help="run the repro in the context of minification, inverting exit code meaning",
+    parser = argparse.ArgumentParser(
+        description=(
+            "torch.compile repro script with defaults:\n\n"
+            f"  {command=}\n"
+            f"  {accuracy=}\n"
+            f"  {tracing_mode=}\n"
+            f"  {save_dir=}\n"
+            f"  {patch_code=}\n"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
 
     accuracy_group = parser.add_mutually_exclusive_group()
@@ -908,20 +908,6 @@ def run_repro(
         help="do not test accuracy",
     )
 
-    isolate_group = parser.add_mutually_exclusive_group()
-    isolate_group.add_argument(
-        "--isolate",
-        action="store_true",
-        default=True,
-        help="run all --minify in separate processes to avoid interference",
-    )
-    isolate_group.add_argument(
-        "--no-isolate",
-        dest="isolate",
-        action="store_false",
-        help="speed up --minify by running all compilation in same process",
-    )
-
     parser.add_argument(
         "--save-dir",
         type=str,
@@ -932,31 +918,70 @@ def run_repro(
         "--patch-code", type=str, default=patch_code, help="patch code for testing"
     )
     parser.add_argument(
-        "--skip-saving-inductor-intermediates",
-        action="store_true",
-        help="skip saving inductor intermediates on --analyze",
-    )
-    parser.add_argument(
-        "--skip-saving-float64-intermediates",
-        action="store_true",
-        help="skip saving float64 intermediates on --analyze",
-    )
-    parser.add_argument(
-        "--skip-check-deterministic",
-        action="store_true",
-        help="skip checking that the network is deterministic on --analyze",
-    )
-    parser.add_argument(
-        "--stable-hash",
-        action="store_true",
-        help="use SHA-1 checksum instead of fast (but possibly unsound) hash",
-    )
-    parser.add_argument(
         "--tracing-mode",
         type=str,
         default=tracing_mode,
         help="how to trace the repro module into a GraphModule with metadata",
     )
 
-    options = parser.parse_args()
-    repro_main(options, mod, load_args)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    parser_minify = subparsers.add_parser(
+        "minify", help="run the minifier on the repro"
+    )
+
+    isolate_group = parser_minify.add_mutually_exclusive_group()
+    isolate_group.add_argument(
+        "--isolate",
+        action="store_true",
+        default=True,
+        help="run in separate processes to avoid interference",
+    )
+    isolate_group.add_argument(
+        "--no-isolate",
+        dest="isolate",
+        action="store_false",
+        help="speed up by running all compilation in same process",
+    )
+
+    parser_analyze = subparsers.add_parser(
+        "analyze", help="run the accuracy analyzer on the repro"
+    )
+    parser_analyze.add_argument(
+        "--skip-saving-inductor-intermediates",
+        action="store_true",
+        help="skip saving inductor intermediates on --analyze",
+    )
+    parser_analyze.add_argument(
+        "--skip-saving-float64-intermediates",
+        action="store_true",
+        help="skip saving float64 intermediates",
+    )
+    parser_analyze.add_argument(
+        "--skip-check-deterministic",
+        action="store_true",
+        help="skip checking that the network is deterministic",
+    )
+    parser_analyze.add_argument(
+        "--stable-hash",
+        action="store_true",
+        help="use SHA-1 checksum instead of fast (but possibly unsound) hash",
+    )
+
+    parser_minifier_query = subparsers.add_parser(
+        "minifier-query",
+        help="run the repro in the context of minification, inverting exit code meaning",
+    )
+
+    args = None
+    if len(sys.argv) <= 1 or sys.argv[1] not in ("-h", "--help"):
+        args = [command, *sys.argv[1:]]
+
+    options = parser.parse_args(args)
+    COMMAND_FNS = {
+        "minify": repro_minify,
+        "analyze": repro_analyze,
+        "minifier-query": repro_minifier_query,
+        "run": repro_run,
+    }
+    COMMAND_FNS[options.command](options, mod, load_args)
