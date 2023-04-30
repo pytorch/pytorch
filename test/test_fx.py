@@ -1862,7 +1862,7 @@ class TestFX(JitTestCase):
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
-        env_key_names = {n.name for n in interp.env.keys()}
+        env_key_names = {n.name for n in interp.env}
         self.assertEqual(env_key_names, {'output'})
 
     def test_interpreter_default_args(self):
@@ -3048,11 +3048,11 @@ class TestFX(JitTestCase):
 
         def parameter_exists(gm: GraphModule, path: str) -> bool:
             return (any(path == name for name, _ in gm.named_parameters())
-                    and any(path == name for name in gm.state_dict().keys()))
+                    and any(path == name for name in gm.state_dict()))
 
         def buffer_exists(gm: GraphModule, path: str) -> bool:
             return (any(path == name for name, _ in gm.named_buffers())
-                    and any(path == name for name in gm.state_dict().keys()))
+                    and any(path == name for name in gm.state_dict()))
 
         # Test that we added the "dropout" submodule
         self.assertTrue(module_exists(a, "net_b.net_c.dropout"))
@@ -3975,7 +3975,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         check_symbols_have_bc_designation(torch.fx, ['torch', 'fx'])
         check_symbols_have_bc_designation(torch.fx.passes, ['torch', 'fx', 'passes'])
 
-        non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects.keys()]
+        non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects]
         # Only want objects in torch.fx
         non_back_compat_strs = [
             s for s in non_back_compat_strs if s.startswith('torch.fx') and not s.startswith('torch.fx.experimental')]
@@ -4259,13 +4259,13 @@ class TestFunctionalTracing(JitTestCase):
         def no(*args, **kwargs):
             return False
 
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
             setattr(torch.nn.functional, name, no)
 
     @classmethod
     def tearDownClass(cls):
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
 TestFunctionalTracing.generate_tests()

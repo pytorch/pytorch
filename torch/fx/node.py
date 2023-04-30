@@ -394,14 +394,14 @@ class Node:
         self._args = new_args
         self._kwargs = new_kwargs
 
-        for old_use in self._input_nodes.keys():
+        for old_use in self._input_nodes:
             old_use.users.pop(self)
 
         self._input_nodes = {}
         map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
         map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
 
-        for new_use in self._input_nodes.keys():
+        for new_use in self._input_nodes:
             new_use.users.setdefault(self)
 
     def __repr__(self) -> str:

@@ -257,7 +257,7 @@ def update_bn(loader, model, device=None):
 
     was_training = model.training
     model.train()
-    for module in momenta.keys():
+    for module in momenta:
         module.momentum = None
         module.num_batches_tracked *= 0
 
@@ -269,7 +269,7 @@ def update_bn(loader, model, device=None):
 
         model(input)
 
-    for bn_module in momenta.keys():
+    for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
     model.train(was_training)
 

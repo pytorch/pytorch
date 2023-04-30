@@ -3284,7 +3284,7 @@ def aot_module_simplified(
         # We now know this came from dynamo, and (1) we care about guards,
         # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-        for name in params.keys():
+        for name in params:
             assert name in mod._param_name_to_source, f"{name} not found."
             source = mod._param_name_to_source[name]
             assert source not in seen_sources, source

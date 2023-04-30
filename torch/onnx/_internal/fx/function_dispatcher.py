@@ -239,7 +239,7 @@ def _create_op_overload_to_exporter_key_table() -> (
     # https://github.com/pytorch/pytorch/issues/99681
     # This is a workaround to make sure we register ONNX symbolic functions for these.
     onnx_supported_aten_lookup_table = [
-        k.split("::")[1] for k in _ATENLIB_FUNCTIONS.keys() if k.startswith("aten::")
+        k.split("::")[1] for k in _ATENLIB_FUNCTIONS if k.startswith("aten::")
     ]
 
     for op_namespace in (torch.ops.aten, torch.ops.prims):

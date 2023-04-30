@@ -1214,7 +1214,7 @@ def _new_process_group_helper(
 
         # register only a single backend when all get_device_backend_map values are the same
         if len(set(backend_config.get_device_backend_map().values())) == 1:
-            for device in backend_config.get_device_backend_map().keys():
+            for device in backend_config.get_device_backend_map():
                 pg._register_backend(torch.device(device), backend_type, backend_class)
 
             # break out of outer loop to not create any more backends
@@ -1285,7 +1285,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        if pg in _world.pg_coalesce_state.keys():
+        if pg in _world.pg_coalesce_state:
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
                 "ProcessGroup is destroyed. They will be cleaned."
@@ -1883,7 +1883,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     if group is None:
         group = _get_default_group()
 
-    if group in _world.pg_coalesce_state.keys():
+    if group in _world.pg_coalesce_state:
         # We are in coalescing context, do not issue single operation, just append a collective representation
         coll = _CollOp(all_reduce, tensor, None, op, None)
         _world.pg_coalesce_state[group].append(coll)

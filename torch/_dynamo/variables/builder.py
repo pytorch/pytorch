@@ -316,7 +316,7 @@ class VariableBuilder:
                 ConstantVariable.is_literal(k)
                 or self.tensor_can_be_dict_key(k)
                 or isinstance(k, enum.Enum)
-                for k in value.keys()
+                for k in value
             )
         ):
             if not value and self.get_source().is_nn_module():
@@ -332,7 +332,7 @@ class VariableBuilder:
                 guards = self.make_guards(GuardBuilder.DICT_KEYS)
 
             # store key variables in global location for reconstruction
-            for key in value.keys():
+            for key in value:
                 if self.tensor_can_be_dict_key(key):
                     self.tx.store_dict_key(global_key_name(key), key)
 
@@ -346,7 +346,7 @@ class VariableBuilder:
                 k: VariableBuilder(
                     self.tx, GetItemSource(self.get_source(), index_source(k))
                 )(value[k]).add_guards(guards)
-                for k in value.keys()
+                for k in value
             }
 
             if istype(value, collections.defaultdict):
@@ -573,7 +573,7 @@ class VariableBuilder:
                     self.tx.f_locals[self.source.base.base.base.base.local_name],
                     torch.optim.Optimizer,
                 )
-                if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
+                if self.source.base.base.base.base.local_name in self.tx.f_locals
                 else True
             )
         )

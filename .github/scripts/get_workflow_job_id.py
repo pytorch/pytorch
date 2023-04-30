@@ -87,7 +87,7 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
     assert type(jobs) is list
-    while "next" in links.keys():
+    while "next" in links:
         response, links = fetch_url(
             links["next"]["url"], headers=headers, reader=parse_json_and_links
         )

@@ -155,7 +155,7 @@ def _broadcast_state_dict(rank, state_dict):
     dist.broadcast_object_list(olist)
     state_dict = olist[0]
     # Ensure that the state is on CUDA
-    for param_name in state_dict.keys():
+    for param_name in state_dict:
         state_dict[param_name] = state_dict[param_name].cuda()
     return state_dict
 

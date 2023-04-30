@@ -671,7 +671,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         def fn3(inputs):
             total = torch.zeros(1)
-            for k in inputs.keys():
+            for k in inputs:
                 total += inputs[k]
             return total
 

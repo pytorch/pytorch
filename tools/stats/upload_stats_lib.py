@@ -29,7 +29,7 @@ def _get_artifact_urls(prefix: str, workflow_run_id: int) -> Dict[Path, str]:
         f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
     )
     artifacts = response.json()["artifacts"]
-    while "next" in response.links.keys():
+    while "next" in response.links:
         response = requests.get(
             response.links["next"]["url"], headers=_get_request_headers()
         )
