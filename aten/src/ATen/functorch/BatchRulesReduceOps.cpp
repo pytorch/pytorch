@@ -410,6 +410,8 @@ Tensor bucketize_decomp_Tensor(
     const Tensor& boundaries,
     bool out_int32,
     bool right) {
+  // checking logical rank
+  TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
   return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
 }
 
@@ -418,6 +420,8 @@ Tensor bucketize_decomp_Scalar(
     const Tensor& boundaries,
     bool out_int32,
     bool right) {
+  // checking logical rank
+  TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
   return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
 }
 
