@@ -31,59 +31,160 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestMixedPrecision(FSDPTest):
     """Tests ``fully_shard`` with mixed precision."""
 
+    EXPECTED_CAST_DTYPES = {
+        # (cast_root_forward_inputs_submodule, cast_forward_inputs_submodule, use_root_no_params)
+        (True, True, True): (
+            "cast_root_cast_child_no_root_params",
+            torch.float16,
+            torch.float16,
+            torch.float16,
+        ),
+        (True, True, False): (
+            "cast_root_cast_child_root_params",
+            torch.float32,
+            torch.float32,
+            torch.float16,
+        ),
+        (True, False, True): (
+            "cast_root_no_cast_child_no_root_params",
+            torch.float16,
+            torch.float16,
+            torch.float16,
+        ),
+        (True, False, False): (
+            "cast_root_no_cast_child_root_params",
+            torch.float32,
+            torch.float32,
+            torch.float16,
+        ),
+        (False, True, True): (
+            "no_cast_root_cast_child_no_root_params",
+            torch.float32,
+            torch.float16,
+            torch.float16,
+        ),
+        (False, True, False): (
+            "no_cast_root_cast_child_root_params",
+            torch.float32,
+            torch.float32,
+            torch.float16,
+        ),
+        (False, False, True): (
+            "no_cast_root_no_cast_child_no_root_params",
+            torch.float32,
+            torch.float32,
+            None,
+        ),
+        # (False, False, True): ('no_cast_root_no_cast_child_no_root_params',
+        #                        torch.float32, torch.float32, torch.float32),  # expected result after eval mode fix
+        (False, False, False): (
+            "no_cast_root_no_cast_child_root_params",
+            torch.float32,
+            torch.float32,
+            torch.float32,
+        ),
+    }
+
     @property
     def world_size(self):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_float16_on_one_submodule(self):
+    def test_float16_cast_forward(self):
         self.run_subtests(
             {
                 "cast_root_forward_inputs_submodule": [True, False],
                 "cast_forward_inputs_submodule": [True, False],
+                "use_root_no_params": [True, False],
             },
-            self._test_float16_on_one_submodule,
+            self._test_float16_cast_forward,
         )
 
-    def _test_float16_on_one_submodule(
+    def _test_float16_cast_forward(
         self,
         cast_root_forward_inputs_submodule: bool,
         cast_forward_inputs_submodule: bool,
+        use_root_no_params: bool,
     ):
-        forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        float16 = MixedPrecision(
-            param_dtype=torch.float16,
-            cast_root_forward_inputs=cast_root_forward_inputs_submodule,
-            cast_forward_inputs=cast_forward_inputs_submodule,
-        )
+        self.cast_root_forward_inputs_submodule = cast_root_forward_inputs_submodule
+        self.cast_forward_inputs_submodule = cast_forward_inputs_submodule
+        x, fsdp = self._input_and_model_init(use_root_no_params=use_root_no_params)
+        # self._validate_eval(x, fsdp)
+        self._backward_or_validate_error(x, fsdp)
+        self._assert_expected_dtypes(use_root_no_params)
 
-        model = SaveForwardInputsModel(
-            forward_inputs=forward_inputs,
-            cast_forward_inputs=False,
-        ).cuda()
-        c1, c2 = model.c1, model.c2
-        x = torch.zeros(2, 100, device="cuda")
-
-        # float16 on one submodule and float32 on everything else
-        model.c2 = fully_shard(model.c2, mixed_precision=float16)
-        fsdp = fully_shard(model)
-
+    def _backward_or_validate_error(
+        self, input: Dict[nn.Module, torch.Tensor], fsdp_model: nn.Module
+    ):
         # cast_root_forward_inputs_submodule or cast_forward_inputs_submodule should be True
-        if not cast_root_forward_inputs_submodule and not cast_forward_inputs_submodule:
+        if (
+            not self.cast_root_forward_inputs_submodule
+            and not self.cast_forward_inputs_submodule
+        ):
             with self.assertRaisesRegex(
                 RuntimeError,
                 "mat1 and mat2 must have the same dtype",
             ):
-                fsdp(x).sum().backward()
+                fsdp_model(input).sum().backward()
         else:
-            fsdp(x).sum().backward()
+            fsdp_model(input).sum().backward()
 
-        self.assertEqual(forward_inputs[model].dtype, torch.float32)
-        self.assertEqual(forward_inputs[c1].dtype, torch.float32)
-        if cast_root_forward_inputs_submodule or cast_forward_inputs_submodule:
-            self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+    def _input_and_model_init(self, use_root_no_params: bool):
+        self.forward_inputs: Dict[nn.Module, torch.Tensor] = {}
+        float16 = MixedPrecision(
+            param_dtype=torch.float16,
+            cast_root_forward_inputs=self.cast_root_forward_inputs_submodule,
+            cast_forward_inputs=self.cast_forward_inputs_submodule,
+        )
+
+        self.model = SaveForwardInputsModel(
+            forward_inputs=self.forward_inputs,
+            cast_forward_inputs=False,
+        ).cuda()
+        self.c1, self.c2 = self.model.c1, self.model.c2
+        x = torch.zeros(2, 100, device="cuda")
+
+        # float16 on at least one submodule
+        self.model.c2 = fully_shard(self.model.c2, mixed_precision=float16)
+
+        # if not `use_root_no_params`, one float32 module will be left for root
+        if use_root_no_params:
+            # use float16 and wrap all submodules, leaving root without direct parameters
+            self.model.c1 = fully_shard(self.model.c1, mixed_precision=float16)
+            fsdp = fully_shard(self.model, mixed_precision=float16)
         else:
-            self.assertEqual(forward_inputs[c2].dtype, torch.float32)
+            fsdp = fully_shard(self.model)
+        return x, fsdp
+
+    def _validate_eval(
+        self, input: Dict[nn.Module, torch.Tensor], fsdp_model: nn.Module
+    ):
+        # validate eval mode always forces full precision
+        fsdp_model.eval()
+        _ = fsdp_model(input)
+        self.assertEqual(self.forward_inputs[self.c1].dtype, torch.float32)
+        self.assertEqual(self.forward_inputs[self.c2].dtype, torch.float32)
+        fsdp_model.train()
+
+    def _assert_expected_dtypes(self, use_root_no_params):
+        result_key = (
+            self.cast_root_forward_inputs_submodule,
+            self.cast_forward_inputs_submodule,
+            use_root_no_params,
+        )
+        subtest_fail_msg = f"Subtest `{TestMixedPrecision.EXPECTED_CAST_DTYPES[result_key][0]}` failed."
+        self.assertEqual(
+            self.forward_inputs[self.model].dtype,
+            TestMixedPrecision.EXPECTED_CAST_DTYPES[result_key][1],
+            msg=subtest_fail_msg,
+        )
+        for i, mod in enumerate((self.c1, self.c2), start=2):
+            if self.forward_inputs.get(mod, None) is not None:
+                self.assertEqual(
+                    self.forward_inputs[mod].dtype,
+                    TestMixedPrecision.EXPECTED_CAST_DTYPES[result_key][i],
+                    msg=subtest_fail_msg,
+                )
 
 
 if __name__ == "__main__":
