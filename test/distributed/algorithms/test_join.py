@@ -158,12 +158,14 @@ class TestJoin(MultiProcessTestCase):
         return dist.group.WORLD
 
     def tearDown(self):
-        with contextlib.suppress(AssertionError):
+        try:
             dist.destroy_process_group()
-
-        with contextlib.suppress(OSError):
+        except AssertionError:
+            pass
+        try:
             os.remove(self.file_name)
-
+        except OSError:
+            pass
 
     def dist_init(self, rank, world_size, backend=BACKEND):
         store = dist.FileStore(self.file_name, world_size)

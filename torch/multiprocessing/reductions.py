@@ -8,7 +8,7 @@ from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
 from typing import Union
 
-try:  # noqa: SIM105
+try:
     # Early load resource_sharer to prevent a partially initialized instance
     # from being inherited in a forked child process. The reduce_storage method
     # requires this module indirectly through DupFd(). The built-in mp.Queue

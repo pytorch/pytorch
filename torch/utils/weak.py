@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import weakref
 from weakref import ref
 from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
@@ -95,9 +94,10 @@ class WeakIdKeyDictionary(MutableMapping):
                 if self._iterating:
                     self._pending_removals.append(k)
                 else:
-                    with contextlib.suppress(KeyError):
+                    try:
                         del self.data[k]
-
+                    except KeyError:
+                        pass
         self._remove = remove
         # A list of dead weakrefs (keys to be removed)
         self._pending_removals = []
@@ -119,9 +119,10 @@ class WeakIdKeyDictionary(MutableMapping):
             except IndexError:
                 return
 
-            with contextlib.suppress(KeyError):
+            try:
                 del d[key]
-
+            except KeyError:
+                pass
 
     def _scrub_removals(self):
         d = self.data
