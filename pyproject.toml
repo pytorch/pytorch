@@ -48,7 +48,6 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108",
-    "SIM109",
     "SIM110",
     "SIM114", # Combine `if` branches using logical `or` operator
     "SIM115",
