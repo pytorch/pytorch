@@ -1,5 +1,5 @@
 import math
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
@@ -339,24 +339,6 @@ def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
     )
 
 
-def checkInputsSolver(
-    A: Tensor,
-    B: Tensor,
-    left: bool,
-    f_name: str,
-):
-    squareCheckInputs(A, f_name)
-    checkIsMatrix(B, f_name)
-    check(
-        A.size(-2) == B.size(-2) if left else A.size(-1) == B.size(-1),
-        lambda: (
-            f"{f_name}: Incompatible shapes of A and B for the equation "
-            f"{'AX = B' if left else 'XA = B'}"
-            f" ({A.size(-2)}x{A.size(-1)} and {B.size(-2)}x{B.size(-1)})"
-        ),
-    )
-
-
 def checkUplo(uplo: str):
     uplo_uppercase = uplo.upper()
     assert (
@@ -408,58 +390,6 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
     return L, infos
 
 
-# parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
-def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
-    if mode == "reduced":
-        compute_q = True
-        reduced = True
-    elif mode == "complete":
-        compute_q = True
-        reduced = False
-    elif mode == "r":
-        compute_q = False
-        reduced = True  # this is actually irrelevant in this mode
-    else:
-        check(
-            False,
-            lambda: (
-                f"qr received unrecognized mode '{mode}' "
-                f"but expected one of 'reduced' (default), 'r', or 'complete'"
-            ),
-        )
-    return compute_q, reduced
-
-
-@register_meta(aten.linalg_qr.default)
-def linalg_qr_meta(
-    A: Tensor,
-    mode: str = "reduced",
-):
-    checkIsMatrix(A, "linalg.qr")
-    checkFloatingOrComplex(A, "linalg.qr")
-
-    compute_q, reduced_mode = _parse_qr_mode(mode)
-
-    m = A.shape[-2]
-    n = A.shape[-1]
-    k = min(m, n)
-
-    if compute_q:
-        Q_shape = list(A.shape)
-        Q_shape[-1] = k if reduced_mode else m
-        Q = A.new_empty(Q_shape)
-        Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
-    else:
-        Q = A.new_empty([0])
-
-    # For readability
-    R_shape = list(A.shape)
-    R_shape[-2] = k if reduced_mode or not compute_q else m
-    R = A.new_empty(R_shape)
-    R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
-    return Q, R
-
-
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 # NOTE: matching defaults in aten/src/ATen/native/native_functions.yaml
 @register_meta(aten._linalg_svd.default)
@@ -498,19 +428,6 @@ def _linalg_svd_meta(
     # S is always real, even when A is complex.
     S = A.new_empty(batch_dims + [k], dtype=toRealValueType(A.dtype))
     return U, S, V
-
-
-@register_meta(aten.linalg_solve_triangular.default)
-def linalg_solve_triangular_meta(
-    A: Tensor,
-    B: Tensor,
-    *,
-    upper: bool,
-    left: bool = True,
-    unitriangular: bool = False,
-) -> Tensor:
-    checkInputsSolver(A, B, left, "linalg.solve_triangular")
-    return torch.empty_like(B)
 
 
 # From aten/src/ATen/native/LinearAlgebra.cpp
@@ -1712,7 +1629,7 @@ def meta_embedding_bag(
             max_indices = indices.new_empty(0)
     else:
         fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
-        if mode == MODE_MEAN or mode == MODE_MAX or not fast_path_sum:
+        if mode in (MODE_MEAN, MODE_MAX) or not fast_path_sum:
             offset2bag = offsets.new_empty(indices.size(0))
         else:
             offset2bag = offsets.new_empty(0)
