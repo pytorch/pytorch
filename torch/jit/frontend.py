@@ -1,3 +1,4 @@
+import contextlib
 import torch
 import sys
 import ast
@@ -174,10 +175,9 @@ def get_class_assigns(ctx, cls_ast):
 
     def maybe_build_assign(builder, entry):
         nonlocal assigns
-        try:
+        with contextlib.suppress(NotSupportedError):
             assigns.append(builder(ctx, entry))
-        except NotSupportedError:
-            pass
+
     for entry in cls_ast.body:
         if isinstance(entry, ast.Assign):
             maybe_build_assign(StmtBuilder.build_Assign, entry)

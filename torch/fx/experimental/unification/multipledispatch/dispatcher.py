@@ -1,3 +1,4 @@
+import contextlib
 from warnings import warn
 import inspect
 from .conflict import ordering, ambiguities, super_signature, AmbiguityWarning
@@ -230,10 +231,9 @@ class Dispatcher:
         self.funcs[tuple(new_signature)] = func
         self._cache.clear()
 
-        try:
+        with contextlib.suppress(AttributeError):
             del self._ordering
-        except AttributeError:
-            pass
+
 
     @property
     def ordering(self):

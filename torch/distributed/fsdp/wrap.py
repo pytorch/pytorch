@@ -349,11 +349,8 @@ def _recursive_wrap(
     for _, child in module.named_modules():
         if child in ignored_modules:
             continue
-        try:
+        with contextlib.suppress(TypeError):
             assert not isinstance(child, cast(type, wrapper_cls))
-        except TypeError:
-            # wrapper_cls is a function as opposed to a class type, just bypass above check.
-            pass
 
     # We count all params, assuming none of them are already wrapped.
     nonwrapped_numel = sum(

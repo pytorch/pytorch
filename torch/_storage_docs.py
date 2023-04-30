@@ -1,5 +1,7 @@
 """Adds docstrings to Storage functions"""
 
+import contextlib
+
 import torch._C
 from torch._C import _add_docstr as add_docstr
 
@@ -12,10 +14,8 @@ storage_classes = [
 def add_docstr_all(method, docstr):
     for cls_name in storage_classes:
         cls = getattr(torch._C, cls_name)
-        try:
+        with contextlib.suppress(AttributeError):
             add_docstr(getattr(cls, method), docstr)
-        except AttributeError:
-            pass
 
 
 add_docstr_all(

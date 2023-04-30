@@ -6,14 +6,14 @@ import ast
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.predictor import mobile_exporter
 from caffe2.python import workspace, brew
+import contextlib
 
 
 def parse_kwarg(kwarg_str):
     key, value = kwarg_str.split('=')
-    try:
+    with contextlib.suppress(ValueError):
         value = ast.literal_eval(value)
-    except ValueError:
-        pass
+
     return key, value
 
 

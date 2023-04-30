@@ -157,7 +157,7 @@ def initialize_metrics(cfg: Optional[MetricsConfig] = None):
     pass
 
 
-try:
+try:  # noqa: SIM105
     from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F401 F403
 except ModuleNotFoundError:
     pass

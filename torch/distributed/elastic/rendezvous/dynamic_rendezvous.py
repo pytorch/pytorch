@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import contextlib
 import inspect
 import logging
 import os
@@ -466,10 +467,9 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
             except KeyError:
                 pass
 
-            try:
+            with contextlib.suppress(KeyError):
                 state.wait_list.remove(dead_node)
-            except KeyError:
-                pass
+
 
         if participant_removed:
             # Common epilogue shared with the _remove_from_participants()
@@ -680,10 +680,9 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
 
         state = self._state
 
-        try:
+        with contextlib.suppress(KeyError):
             state.wait_list.remove(self._node)
-        except KeyError:
-            pass
+
 
         # The ranks of the participants will be set once the rendezvous is
         # complete.

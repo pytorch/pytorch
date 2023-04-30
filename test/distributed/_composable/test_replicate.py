@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import os
 from copy import deepcopy
 
@@ -33,10 +34,8 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
 
     def _check_state_dict_parity(self, sd_1, sd_2):
         for k1, k2 in zip(sd_1.keys(), sd_2.keys()):
@@ -83,10 +82,8 @@ class ReplicateTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
 
     def _compare_module(self, mod, replicate_mod):
         dist.init_process_group(

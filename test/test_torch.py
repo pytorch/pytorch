@@ -8301,10 +8301,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     def test_multinomial_invalid_probs(self):
         def _spawn_method(self, method, arg):
-            try:
+            with contextlib.suppress(RuntimeError):
                 mp.set_start_method('spawn')
-            except RuntimeError:
-                pass
+
             with mp.Pool(1) as pool:
                 out: list = pool.map(method, [arg])
                 self.assertTrue(out[0])

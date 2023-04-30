@@ -2342,11 +2342,10 @@ class ComputedBuffer(Buffer):
             # consider both layout(strides) and reordering(reordering_reindex)
             if reordering_reindex is not None:
                 for i in range(len(memory_addrs)):
-                    try:
+                    with contextlib.suppress(AssertionError):
                         strides[i] = reordering_reindex[i](strides[i])
                     # if len(order) != len(strides), do not reorder
-                    except AssertionError:
-                        pass
+
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:

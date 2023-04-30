@@ -12,7 +12,7 @@ from torch._C import FileCheck
 import torch._dynamo
 from torch._dynamo.backends.distributed import DDPOptimizer
 import torch._dynamo.test_case
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
@@ -491,10 +491,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         res = None
-        try:
+        with suppress(Exception):
             res = opt_fn()[0]
-        except Exception:
-            pass
+
         self.assertEqual(res, 1)
 
     @patch.object(config, "optimize_ddp", False)

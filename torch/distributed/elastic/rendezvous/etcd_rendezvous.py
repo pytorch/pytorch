@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import contextlib
 import json
 import logging
 import sys
@@ -241,12 +242,11 @@ class EtcdRendezvous:
         self.create_path_if_not_exists(self.get_path("/rdzv"))
 
         # Create a rendezvous version counter, if doesn't exist
-        try:
+        with contextlib.suppress(etcd.EtcdAlreadyExist):
             self.client.write(
                 key=self.get_path("/rdzv/version_counter"), value="0", prevExist=False
             )
-        except etcd.EtcdAlreadyExist:
-            pass
+
 
     def __del__(self):
         # TODO: look into using weakref here instead.
@@ -845,12 +845,11 @@ class EtcdRendezvous:
         overall_timeout = max(self._rendezvous_deadline - time.time(), 0.0) + 1.0
         timeout = overall_timeout if timeout is None else min(timeout, overall_timeout)
 
-        try:
+        with contextlib.suppress(etcd.EtcdEventIndexCleared, etcd.EtcdWatchTimedOut):
             self.client.watch(
                 self.get_path("/rdzv/active_version"), index=etcd_index, timeout=timeout
             )
-        except (etcd.EtcdEventIndexCleared, etcd.EtcdWatchTimedOut):
-            pass
+
 
         if time.time() > self._rendezvous_deadline:
             raise RendezvousTimeoutError()
@@ -867,12 +866,11 @@ class EtcdRendezvous:
         )
 
     def create_path_if_not_exists(self, full_path, ttl=None):
-        try:
+        with contextlib.suppress(etcd.EtcdAlreadyExist):
             self.client.write(
                 key=full_path, value=None, dir=True, prevExist=False, ttl=ttl
             )
-        except etcd.EtcdAlreadyExist:
-            pass
+
 
     def setup_lease_renewal(self, full_path, ttl):
         # NOTE: For ephemeral key TTL renewal (~lease) to work correctly,
@@ -957,10 +955,9 @@ class EtcdRendezvous:
 
             # The 'extra_data' node doesn't exist, or they key isn't published yet.
             # Wait for interesting events on the extra_data node and retry.
-            try:
+            with contextlib.suppress(etcd.EtcdEventIndexCleared, etcd.EtcdWatchTimedOut):
                 self.client.watch(node, index=root.etcd_index + 1)
-            except (etcd.EtcdEventIndexCleared, etcd.EtcdWatchTimedOut):
-                pass
+
 
     def setup_kv_store(self, rdzv_version):
         store_path = self.get_path(f"/rdzv/v_{rdzv_version}/kv")

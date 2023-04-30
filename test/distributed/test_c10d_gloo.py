@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle,
     TestCase,
 )
+import contextlib
 
 
 def simple_reduce_tests(rank, world_size):
@@ -2272,10 +2273,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def _test_broadcast_coalesced(self, process_group, device, root_rank):
         half = torch.float16
@@ -2494,10 +2494,9 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     def tearDown(self):
         super(LargeCommTest, self).tearDown()
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     @property
     def device(self):

@@ -13,7 +13,7 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 from typing import NamedTuple
 from unittest.mock import MagicMock
@@ -44,11 +44,9 @@ try:
 except ImportError:
     from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
-try:
+with suppress(ImportError):
     import torch_xla.core.xla_model as xm
-except ImportError:
-    # ignore the error if torch_xla is not installed
-    pass
+
 
 log = logging.getLogger(__name__)
 
@@ -829,10 +827,9 @@ def baselines(models, model_iter_fn, example_inputs, args):
     for rep in range(args.repeat):
         for idx, (name, model) in enumerate(models):
             if model is not None:
-                try:
+                with suppress(Exception):
                     timings[rep, idx] = timed(model, model_iter_fn, example_inputs)
-                except Exception:
-                    pass
+
     pvalue = [
         ttest_ind(timings[:, 0], timings[:, i]).pvalue
         for i in range(1, timings.shape[1])

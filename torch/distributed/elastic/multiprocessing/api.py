@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
@@ -524,12 +524,9 @@ class MultiprocessContext(PContext):
         for proc in self._pc.processes:
             if proc.is_alive():
                 log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
-                try:
+                with suppress(ProcessLookupError):
                     os.kill(proc.pid, death_sig)
-                except ProcessLookupError:
-                    # If the process exited because of some reason,
-                    # `ProcessLookupError` will be raised, it is safe to ignore it.
-                    pass
+
         end = time.monotonic() + timeout
         for proc in self._pc.processes:
             time_to_wait = end - time.monotonic()
@@ -542,12 +539,9 @@ class MultiprocessContext(PContext):
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     proc.pid, death_sig, _get_kill_signal()
                 )
-                try:
+                with suppress(ProcessLookupError):
                     os.kill(proc.pid, _get_kill_signal())
-                except ProcessLookupError:
-                    # If the process exited because of some reason,
-                    # `ProcessLookupError` will be raised, it is safe to ignore it.
-                    pass
+
             proc.join()
 
 
@@ -709,12 +703,9 @@ class SubprocessContext(PContext):
             time_to_wait = end - time.monotonic()
             if time_to_wait <= 0:
                 break
-            try:
+            with suppress(subprocess.TimeoutExpired):
                 handler.proc.wait(time_to_wait)
-            except subprocess.TimeoutExpired:
-                # Ignore the timeout expired exception, since
-                # the child process will be forcefully terminated via SIGKILL
-                pass
+
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
                 log.warning(

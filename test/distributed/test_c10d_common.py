@@ -7,7 +7,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -304,10 +304,9 @@ class CommonDistributedDataParallelTest:
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test
-        try:
+        with suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     @property
     def world_size(self):
@@ -1425,16 +1424,14 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def test_debug_level(self):
-        try:
+        with suppress(KeyError):
             del os.environ["TORCH_DISTRIBUTED_DEBUG"]
-        except KeyError:
-            pass
+
 
         dist.set_debug_level_from_env()
         # Default should be off
@@ -1544,10 +1541,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
@@ -1700,10 +1696,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def test_init_process_group_optional_backend(self):
         with tempfile.NamedTemporaryFile() as f:
@@ -1834,10 +1829,9 @@ class CompilerTest(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def _get_process_group(self):
         raise NotImplementedError("To be implemented by subclass")

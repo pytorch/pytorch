@@ -15,6 +15,7 @@ NOTE:
 """
 
 import argparse
+import contextlib
 import itertools as it
 import multiprocessing
 import multiprocessing.dummy
@@ -421,7 +422,6 @@ if __name__ == "__main__":
         main(args)
 
     if args.DETAIL_context == "subprocess":
-        try:
+        # Handle ctrl-c gracefully.
+        with contextlib.suppress(KeyboardInterrupt):
             subprocess_main(args)
-        except KeyboardInterrupt:
-            pass  # Handle ctrl-c gracefully.

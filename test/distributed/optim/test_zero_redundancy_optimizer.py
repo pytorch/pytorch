@@ -9,7 +9,7 @@ import copy
 import os
 import sys
 import unittest
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from typing import Any, cast, List
 
 import numpy as np
@@ -79,14 +79,12 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         return 1
 
     def tearDown(self):
-        try:
+        with suppress(AssertionError):
             torch.distributed.destroy_process_group()
-        except AssertionError:
-            pass
-        try:
+
+        with suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def dist_init(self, rank, world_size=-1, backend=BACKEND):
         if world_size < 1:

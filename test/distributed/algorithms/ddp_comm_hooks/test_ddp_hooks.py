@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import os
 import sys
 
@@ -66,10 +67,9 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         self._spawn_processes()
 
     def tearDown(self):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     def _get_process_group_nccl(self):
         store = dist.FileStore(self.file_name, self.world_size)

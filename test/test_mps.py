@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import contextlib
 import platform
 import sys
 import math
@@ -6276,10 +6277,9 @@ class TestNLLLoss(TestCaseMPS):
 
         helper((2, 4, 4), (16, 16), False)
 
-        try:
+        with contextlib.suppress(Exception):
             helper((2, 2, 3, 3), (7, 7), False)
-        except Exception as e:
-            pass
+
 
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now

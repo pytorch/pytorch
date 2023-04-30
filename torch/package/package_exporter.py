@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import importlib.machinery
 import io
 import linecache
@@ -453,10 +454,9 @@ class PackageExporter:
         if spec is not None:
             loader = getattr(spec, "loader", None)
             if loader is not None and isinstance(loader, SourceFileLoader):
-                try:
+                with contextlib.suppress(ImportError):
                     filename = loader.get_filename(module.__name__)
-                except ImportError:
-                    pass
+
         if filename is None:
             filename = getattr(module, "__file__", None)
         if isinstance(filename, str) and filename.endswith(".py"):

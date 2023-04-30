@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import contextlib
 import os
 import sys
 import tempfile
@@ -92,10 +93,9 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
 
     def tearDown(self):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file.name)
-        except OSError:
-            pass
+
 
     def _test_base(self, net, inp, check_allclose=True):
         store = c10d.FileStore(self.file.name, self.world_size)

@@ -38,7 +38,7 @@ from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
 from quantization.core.test_backend_config import TestBackendConfig  # noqa: F401
 from quantization.core.test_utils import TestUtils  # noqa: F401
-try:
+try:  # noqa: SIM105
     # This test has extra data dependencies, so in some environments, e.g. Meta internal
     # Buck, it has its own test runner.
     from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
@@ -64,6 +64,7 @@ from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  #
 # 6. Equalization and Bias Correction
 from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F401
 from quantization.eager.test_bias_correction_eager import TestBiasCorrectionEager  # noqa: F401
+import contextlib
 
 
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
@@ -107,16 +108,14 @@ except ImportError:
     pass
 
 # Equalization for FX mode
-try:
+with contextlib.suppress(ImportError):
     from quantization.fx.test_equalize_fx import TestEqualizeFx  # noqa: F401
-except ImportError:
-    pass
+
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
-try:
+with contextlib.suppress(ImportError):
     from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
-except ImportError:
-    pass
+
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
@@ -132,10 +131,10 @@ from quantization.jit.test_deprecated_jit_quant import TestDeprecatedJitQuantize
 from quantization.ao_migration.test_quantization import TestAOMigrationQuantization  # noqa: F401
 from quantization.ao_migration.test_ao_migration import TestAOMigrationNNQuantized  # noqa: F401
 from quantization.ao_migration.test_ao_migration import TestAOMigrationNNIntrinsic  # noqa: F401
-try:
+import contextlib
+with contextlib.suppress(ImportError):
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
-except ImportError:
-    pass
+
 
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401

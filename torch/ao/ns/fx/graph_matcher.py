@@ -1,3 +1,4 @@
+import contextlib
 import collections
 import enum
 
@@ -393,14 +394,12 @@ def get_matching_subgraph_pairs(
     while True:
         # fetch the next subgraphs from a and b
         cur_subgraph_a, cur_subgraph_b = None, None
-        try:
+        with contextlib.suppress(StopIteration):
             cur_subgraph_a = next(graph_a_iterator)
-        except StopIteration:
-            pass
-        try:
+
+        with contextlib.suppress(StopIteration):
             cur_subgraph_b = next(graph_b_iterator)
-        except StopIteration:
-            pass
+
 
         # look up types of a and b for useful error messages
         type_start_a, type_start_b = None, None

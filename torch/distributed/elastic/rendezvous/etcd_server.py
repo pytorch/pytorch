@@ -16,7 +16,7 @@ import tempfile
 import time
 from typing import Optional, TextIO, Union
 
-try:
+try:  # noqa: SIM105
     import etcd  # type: ignore[import]
 except ModuleNotFoundError:
     pass

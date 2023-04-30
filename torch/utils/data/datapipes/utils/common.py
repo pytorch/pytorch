@@ -1,3 +1,4 @@
+import contextlib
 import fnmatch
 import functools
 import inspect
@@ -342,10 +343,9 @@ class StreamWrapper:
             self.parent_stream.child_counter -= 1
             if not self.parent_stream.child_counter and self.parent_stream.close_on_last_child:
                 self.parent_stream.close()
-        try:
+        with contextlib.suppress(AttributeError):
             self.file_obj.close(*args, **kwargs)
-        except AttributeError:
-            pass
+
         self.closed = True
 
     def autoclose(self):

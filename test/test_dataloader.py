@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
                                                   IS_MACOS)
+import contextlib
 
 
 try:
@@ -2653,10 +2654,9 @@ class TestIndividualWorkerQueue(TestCase):
     def test_ind_worker_queue(self):
         max_num_workers = None
         if hasattr(os, 'sched_getaffinity'):
-            try:
+            with contextlib.suppress(Exception):
                 max_num_workers = len(os.sched_getaffinity(0))
-            except Exception:
-                pass
+
         if max_num_workers is None:
             cpu_count = os.cpu_count()
             if cpu_count is not None:

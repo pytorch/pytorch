@@ -1,3 +1,4 @@
+import contextlib
 import os
 import tempfile
 import unittest
@@ -121,10 +122,8 @@ class TestParseNativeYaml(unittest.TestCase):
     def tearDown(self) -> None:
         import shutil
 
-        try:
+        with contextlib.suppress(OSError):
             shutil.rmtree(self.temp_dir)
-        except OSError:
-            pass
 
 
 class TestGenFunctionsDeclarations(unittest.TestCase):

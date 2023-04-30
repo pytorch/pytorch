@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import os
 import sys
 import tempfile
@@ -108,10 +109,9 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        try:
+        with contextlib.suppress(OSError):
             os.remove(self.file_name)
-        except OSError:
-            pass
+
 
     @property
     def op_timeout_sec(self):

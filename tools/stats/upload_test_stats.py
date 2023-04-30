@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -88,14 +89,11 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     # The XML format encodes all values as strings. Convert to ints/floats if
     # possible to make aggregation possible in Rockset.
     for k, v in ret.items():
-        try:
+        with contextlib.suppress(ValueError):
             ret[k] = int(v)
-        except ValueError:
-            pass
-        try:
+
+        with contextlib.suppress(ValueError):
             ret[k] = float(v)
-        except ValueError:
-            pass
 
     # Convert inner and outer text into special dict elements.
     # e.g.

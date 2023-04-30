@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import weakref
 
@@ -44,10 +45,9 @@ def ensure_patched(cls):
 
         @functools.wraps(original_setattr)
         def custom_setattr(self, key, value):
-            try:
+            with contextlib.suppress(KeyError):
                 MutationTracker.db[self].on_mutation(key)
-            except KeyError:
-                pass
+
             return original_setattr(self, key, value)
 
         cls.__setattr__ = custom_setattr

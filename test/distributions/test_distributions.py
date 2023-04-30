@@ -28,6 +28,7 @@ change. This file contains two types of randomized tests:
    across different versions of scipy (namely, they yield invalid results in 1.7+)
 """
 
+import contextlib
 import math
 import numbers
 import unittest
@@ -933,12 +934,11 @@ class TestDistributions(DistributionsTestCase):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                try:
+                with contextlib.suppress(NotImplementedError):
                     self.assertTrue(type(dist.sample()) is type(dist.enumerate_support()),
                                     msg=('{} example {}/{}, return type mismatch between ' +
                                          'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
-                except NotImplementedError:
-                    pass
+
 
     def test_lazy_property_grad(self):
         x = torch.randn(1, requires_grad=True)
@@ -979,15 +979,13 @@ class TestDistributions(DistributionsTestCase):
                 d = Dist(**param)
                 event_dim = len(d.event_shape)
                 self.assertEqual(d.support.event_dim, event_dim)
-                try:
+                with contextlib.suppress(NotImplementedError):
                     self.assertEqual(Dist.support.event_dim, event_dim)
-                except NotImplementedError:
-                    pass
+
                 is_discrete = d.support.is_discrete
-                try:
+                with contextlib.suppress(NotImplementedError):
                     self.assertEqual(Dist.support.is_discrete, is_discrete)
-                except NotImplementedError:
-                    pass
+
 
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
@@ -2944,14 +2942,12 @@ class TestDistributions(DistributionsTestCase):
                         self.assertEqual(indep_dist.mean.shape, base_dist.mean.shape)
                     except NotImplementedError:
                         pass
-                    try:
+                    with contextlib.suppress(NotImplementedError):
                         self.assertEqual(indep_dist.variance.shape, base_dist.variance.shape)
-                    except NotImplementedError:
-                        pass
-                    try:
+
+                    with contextlib.suppress(NotImplementedError):
                         self.assertEqual(indep_dist.entropy().shape, indep_log_prob_shape)
-                    except NotImplementedError:
-                        pass
+
 
     def test_independent_expand(self):
         for Dist, params in EXAMPLES:
@@ -4620,10 +4616,9 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             dist.log_prob(Dist(**param).sample())
             message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
             self.assertNotIn('probs', dist.__dict__, msg=message)
-            try:
+            with contextlib.suppress(NotImplementedError):
                 dist.enumerate_support()
-            except NotImplementedError:
-                pass
+
             self.assertNotIn('probs', dist.__dict__, msg=message)
             batch_shape, event_shape = dist.batch_shape, dist.event_shape
             self.assertNotIn('probs', dist.__dict__, msg=message)
@@ -4637,10 +4632,9 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
             dist.sample()
             message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
             self.assertNotIn('logits', dist.__dict__, msg=message)
-            try:
+            with contextlib.suppress(NotImplementedError):
                 dist.enumerate_support()
-            except NotImplementedError:
-                pass
+
             self.assertNotIn('logits', dist.__dict__, msg=message)
             batch_shape, event_shape = dist.batch_shape, dist.event_shape
             self.assertNotIn('logits', dist.__dict__, msg=message)
@@ -4958,10 +4952,9 @@ class TestValidation(DistributionsTestCase):
                 d_val = Dist(validate_args=True, **param)
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
                     # samples with incorrect shape must throw ValueError only
-                    try:
+                    with contextlib.suppress(ValueError):
                         log_prob = d_val.log_prob(v)
-                    except ValueError:
-                        pass
+
                     # get sample of correct shape
                     val = torch.full(d_val.batch_shape + d_val.event_shape, v)
                     # check samples with incorrect support
@@ -4969,10 +4962,9 @@ class TestValidation(DistributionsTestCase):
                         log_prob = d_val.log_prob(val)
                     except ValueError as e:
                         if e.args and 'must be within the support' in e.args[0]:
-                            try:
+                            with contextlib.suppress(RuntimeError):
                                 log_prob = d_nonval.log_prob(val)
-                            except RuntimeError:
-                                pass
+
 
                 # check correct samples are ok
                 valid_value = d_val.sample()

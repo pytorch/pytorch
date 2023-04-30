@@ -4,6 +4,7 @@
 import torch
 import numpy as np
 
+import contextlib
 import unittest
 import itertools
 import warnings
@@ -1432,12 +1433,9 @@ class TestLinalg(TestCase):
         a = torch.eye(3, dtype=dtype, device=device)
         a[-1, -1] = 0  # make 'a' singular
         for p in norm_types:
-            try:
+            with contextlib.suppress(np.linalg.LinAlgError):
                 run_test_case(a, p)
-            except np.linalg.LinAlgError:
-                # Numpy may fail to converge for some BLAS backends (although this is very rare)
-                # See the discussion in https://github.com/pytorch/pytorch/issues/67675
-                pass
+
 
         # test for 0x0 matrices. NumPy doesn't work for such input, we return 0
         input_sizes = [(0, 0), (2, 5, 0, 0)]

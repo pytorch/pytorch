@@ -1,3 +1,4 @@
+import contextlib
 import copyreg
 import enum
 import functools
@@ -793,10 +794,8 @@ class Tensor(torch._C._TensorBase):
                 Tensor.split, (self,), self, split_size, dim=dim
             )
         if isinstance(split_size, Tensor):
-            try:
+            with contextlib.suppress(ValueError):
                 split_size = int(split_size)
-            except ValueError:
-                pass
 
         if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
