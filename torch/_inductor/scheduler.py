@@ -137,6 +137,8 @@ class BaseSchedulerNode:
             used_names.add(dep.name)
             if V.graph.name_to_buffer.get(dep.name):
                 layout = V.graph.name_to_buffer[dep.name].get_layout()
+                # needed to avoid deallocating aliased buffer
+                # if there are still uses of aliases ahead
                 if isinstance(layout, ir.AliasedLayout):
                     used_names.add(layout.view.data.get_name())
         return used_names
