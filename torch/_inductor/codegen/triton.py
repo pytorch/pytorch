@@ -1041,7 +1041,8 @@ class TritonKernel(Kernel):
         # For example when you do x[y, y] for x = randn(3, 8)
         var_size = collections.defaultdict(set)
         for ind, size in indirect_size.items():
-            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
+            if ind in indirect_name:
+                var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
 
         indirect_vars = [
             s for s in original_index.free_symbols if s.name.startswith("tmp")

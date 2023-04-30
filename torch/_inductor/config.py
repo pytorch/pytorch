@@ -24,8 +24,8 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = True
 
-# enable loop reordering based on input orders
-pick_loop_orders = True
+# maximum number of candidate loop orderings to explore, 1 to disable
+loop_ordering_search_limit = 64
 
 # generate inplace computations
 inplace_buffers = True
@@ -88,6 +88,7 @@ aggressive_fusion = False
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
+
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8

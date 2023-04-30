@@ -10,6 +10,7 @@ import sympy
 from .codegen.common import index_prevent_reordering
 from .utils import (
     get_dtype_size,
+    sympy_product,
     sympy_str,
     sympy_subs,
     sympy_symbol,
@@ -27,6 +28,9 @@ class MemoryDep(typing.NamedTuple):
     index: sympy.Expr  # type: ignore[assignment]
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
+
+    def __repr__(self):
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
 
     @property
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
@@ -55,6 +59,35 @@ class MemoryDep(typing.NamedTuple):
     def is_contiguous(self) -> bool:
         return isinstance(self.index, (sympy.Symbol, sympy.Integer))
 
+    def is_indirect(self) -> bool:
+        return any(v not in self.var_names for v in self.index.free_symbols)
+
+    def generalize_for_scheduling(self):
+        if self.is_indirect():
+            return StarDep(
+                self.name,
+            )
+        elif len(self.index.free_symbols) == 0:
+            return MemoryDep(
+                self.name,
+                self.index,
+                (),
+                (),
+            )
+        else:
+            vars = set(self.index.free_symbols)
+            a = sympy.Symbol("a")
+            return MemoryDep(
+                self.name,
+                a,
+                (a,),
+                (
+                    sympy_product(
+                        s for v, s in zip(self.var_names, self.size) if v in vars
+                    ),
+                ),
+            )
+
 
 class StarDep(typing.NamedTuple):
     # depends on the entire buffer
@@ -68,10 +101,16 @@ class StarDep(typing.NamedTuple):
     def numbytes_hint(self):
         return V.graph.sizevars.size_hint(
             V.graph.get_numel(self.name)
-        ) * get_dtype_size(buf.get_dtype())
+        ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
         return False
+
+    def is_indirect(self) -> bool:
+        return False
+
+    def generalize_for_scheduling(self):
+        return self
 
 
 # Used for tracking mutation ordering
@@ -149,6 +188,15 @@ class ReadWrites:
             op_counts=self.op_counts,
         )
 
+    def generalize_for_scheduling(self):
+        return ReadWrites(
+            {dep.generalize_for_scheduling() for dep in self.reads},
+            {dep.generalize_for_scheduling() for dep in self.writes},
+            self.index_exprs,
+            self.range_vars,
+            self.var_ranges,
+        )
+
 
 class _RecordLoadStoreInner(V.MockHandler):
     def __init__(self, var_ranges: VarRanges, normalize: bool):
@@ -162,9 +210,8 @@ class _RecordLoadStoreInner(V.MockHandler):
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
-        sizes = list(self._var_ranges.values())
-        sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
+            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
             var_names = tuple(
                 k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
             )
@@ -174,7 +221,14 @@ class _RecordLoadStoreInner(V.MockHandler):
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
-        index_vars = list(self._var_ranges.keys())
+        free_symbols = index.free_symbols
+        var_ranges = {
+            k: V.graph.sizevars.simplify(v)
+            for k, v in self._var_ranges.items()
+            # if k in free_symbols
+        }
+        index_vars = [*var_ranges.keys()]
+        sizes = [*var_ranges.values()]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -185,7 +239,6 @@ class _RecordLoadStoreInner(V.MockHandler):
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
         new_vars, add_var = var_builder(canonicalization_prefix())
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
-
         index = sympy_subs(sympy.expand(index), replacement)
 
         new_vars = [*new_vars.keys()]
@@ -196,7 +249,6 @@ class _RecordLoadStoreInner(V.MockHandler):
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-
         return index, tuple(new_vars), tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
@@ -273,7 +325,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
         args.append(reindex(list(map(add_var, new_size))))
-    return new_sizes, args, var_ranges
+    return args, var_ranges
 
 
 def extract_read_writes(
@@ -282,7 +334,7 @@ def extract_read_writes(
     normalize: bool = False,
     prefix: str = "d",
 ):
-    _, args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
+    args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):  # type: ignore[call-arg]
         fn(*args)

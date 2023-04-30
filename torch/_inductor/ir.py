@@ -33,7 +33,6 @@ from torch._prims_common import (
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
-from .codegen.common import index_prevent_reordering
 from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import (
@@ -664,7 +663,7 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
+        (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
@@ -2189,7 +2188,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
+            (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -2225,140 +2224,28 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
-    def simplify_and_reorder(self):
+    def get_sizes_and_body(self):
         """
-        This is a main place where we do loop transformations in a
-        backend-agnostic way.
-
-        Here we:
-            1) Remove any 1 dimensions
-            2) Fuse contiguous dimensions together
-            3) Reorder dimensions based on stride orders
+        Construct the normalized LoopBody to pass to the scheduler.
         """
-        _, args, var_ranges = dependencies.index_vars_squeeze(
+        args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
+
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
             body = LoopBody(
                 self.get_store_function(),
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
             )
-        index_formulas = [*body.indexing_exprs.values()]
-        reads_bufs = [
-            V.graph.name_to_buffer[reads_name]
-            if reads_name in V.graph.name_to_buffer.keys()
-            else None
-            for reads_name in body.reads_name2expr.keys()
-        ]
-        memory_addrs = [
-            *body.reads_name2expr.values(),
-            *body.writes_name2expr.values(),
-        ]
-        index_vars = []
-        reduce_vars = []
-        index_size = []
-        reduce_size = []
-        for v, s in var_ranges.items():
-            if v in args[0]:
-                assert not reduce_vars
-                index_vars.append(v)
-                index_size.append(s)
-            else:
-                assert v in args[1]
-                reduce_vars.append(v)
-                reduce_size.append(s)
 
-        # the reordering_reindex in reads' simplify_reorder_and_tile
-        reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
-        for i, reads_buf in enumerate(reads_bufs):
-            if isinstance(reads_buf, ComputedBuffer) and hasattr(
-                reads_buf, "iter_reordering_reindex"
-            ):
-                reordering_reindex[i] = reads_buf.iter_reordering_reindex
-
-        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
-            sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, support_vars, sizes, memory_addrs, reordering_reindex
-            )
-            # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
-            x_vars = reindex0(x_vars)
-            sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
-                x_vars,
-                sizes,
-                index_prevent_reordering(index_formulas, x_vars, sizes),
-            )
-            x_vars = prune(x_vars)
-            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
-            # x_vars = prune(x_vars)
-            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
-            reindex = fuse_reindexing(reindex1, reindex2)
-            return sizes, reindex, reindex1
-
-        support_vars = index_vars + reduce_vars
-        iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, support_vars, index_size, reordering_reindex
+        return (
+            (
+                [var_ranges[v] for v in args[0] if v != 0],
+                [var_ranges[v] for v in args[1] if v != 0],
+            ),
+            body,
         )
-        reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, support_vars, reduce_size
-        )
-
-        # remember the reordering if not have loop collapse.
-        if len(iter_ranges) == len(index_vars):
-            self.iter_reordering_reindex = iter_reordering_reindex
-        # retrace the loop body with simplification and reordering applied
-        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="z"
-        )
-        body = LoopBody(
-            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
-        )
-        return (iter_ranges, reduce_ranges), body
-
-    @staticmethod
-    def _apply_loop_reordering(
-        index_vars,
-        support_vars,
-        sizes,
-        memory_addrs,
-        reordering_reindex=None,
-        priority_idx=None,
-    ):
-        """
-        Shuffle the order of loops around to hopefully improve performance.
-        """
-        from .scheduler import pick_loop_order
-
-        if priority_idx is None:
-            priority_idx = []
-
-        try:
-            strides = [
-                V.graph.sizevars.stride_hints(expr, index_vars, support_vars)
-                for expr in memory_addrs
-            ]
-            assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
-                index_vars
-            )
-            # consider both layout(strides) and reordering(reordering_reindex)
-            if reordering_reindex is not None:
-                for i in range(len(memory_addrs)):
-                    try:
-                        strides[i] = reordering_reindex[i](strides[i])
-                    # if len(order) != len(strides), do not reorder
-                    except AssertionError:
-                        pass
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
-        except Exception:
-            if config.debug:
-                log.warning(
-                    "Did not simplify complex index:\n%s\n%s",
-                    dict(zip(index_vars, sizes)),
-                    memory_addrs,
-                )
-            order = list(range(len(sizes)))
-        sizes = [sizes[i] for i in order]
-        return sizes, same_reorder(order), inverse_reorder(order)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()
@@ -2419,7 +2306,7 @@ class TemplateBuffer(Buffer):
     def should_allocate(self):
         return True
 
-    def simplify_and_reorder(self):
+    def get_sizes_and_body(self):
         return (
             (
                 self.get_size(),
