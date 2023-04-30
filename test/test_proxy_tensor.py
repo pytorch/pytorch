@@ -1439,8 +1439,6 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...

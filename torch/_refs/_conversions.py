@@ -72,35 +72,59 @@ long = _make_conversion_method("long", torch.long)
 short = _make_conversion_method("short", torch.short)
 
 
+def _complex_check_floating(a: TensorLikeType, b: TensorLikeType):
+    allowed_dtypes = (torch.float32, torch.float64, torch.float16)
+    check(
+        a.dtype in allowed_dtypes and b.dtype in allowed_dtypes,
+        lambda: (
+            f"Expected both inputs to be Half, Float or Double tensors but got "
+            f"{a.dtype} and {b.dtype}"
+        ),
+    )
+
+
+def _complex_check_dtype(a: TensorLikeType, b: TensorLikeType):
+    check(
+        a.dtype == b.dtype,
+        lambda: (
+            f"Expected object of scalar type {a.dtype} but got "
+            f"scalar type {b.dtype} for second argument"
+        ),
+    )
+
+
+def _complex_polar_common(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    _complex_check_floating(a, b)
+    _complex_check_dtype(a, b)
+    result_dtype = utils.corresponding_complex_dtype(a.dtype)  # type: ignore[arg-type]
+    common_shape = _broadcast_shapes(a.shape, b.shape)
+    result = a.new_empty(
+        common_shape,
+        dtype=result_dtype,
+        layout=a.layout,
+        device=a.device,
+        # pin_memory=a.is_pinned(),  # NYI
+    )
+    return result
+
+
 @register_decomposition(torch._ops.ops.aten.complex)
-# Note: complex has type promotion tests disabled due to different semantics.
+# Note: has type promotion tests disabled due to different semantics.
 # exact_dtype is for compat with complex_check_dtype from core.
 @out_wrapper(exact_dtype=True)
 def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
-    allowed_dtypes = (torch.float32, torch.float64, torch.float16)
-    check(
-        real.dtype in allowed_dtypes and imag.dtype in allowed_dtypes,
-        lambda: (
-            f"Expected both inputs to be Half, Float or Double tensors but got "
-            f"{real.dtype} and {imag.dtype}"
-        ),
-    )
-    check(
-        real.dtype == imag.dtype,
-        lambda: (
-            f"Expected object of scalar type {real.dtype} but got "
-            f"scalar type {imag.dtype} for second argument"
-        ),
-    )
-    result_dtype = utils.corresponding_complex_dtype(real.dtype)  # type: ignore[arg-type]
-    common_shape = _broadcast_shapes(real.shape, imag.shape)
-    result = real.new_empty(
-        common_shape,
-        dtype=result_dtype,
-        layout=real.layout,
-        device=real.device,
-        # pin_memory=real.is_pinned(),  # NYI
-    )
+    result = _complex_polar_common(real, imag)
     result.real = real
     result.imag = imag
+    return result
+
+
+@register_decomposition(torch._ops.ops.aten.polar)
+# Note: has type promotion tests disabled due to different semantics.
+# exact_dtype is for compat with complex_check_dtype from core.
+@out_wrapper(exact_dtype=True)
+def polar(abs: TensorLikeType, angle: TensorLikeType) -> TensorLikeType:
+    result = _complex_polar_common(abs, angle)
+    result.real = abs * torch.cos(angle)
+    result.imag = abs * torch.sin(angle)
     return result
