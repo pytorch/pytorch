@@ -1088,10 +1088,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertEqual(cnt.frame_count, 5)
-        else:
-            self.assertEqual(cnt.frame_count, 6)
+        # TODO: There is some bug here where corrects ends up with
+        # a Tensor in element 0.  We graph break on that (reflected here)
+        # but really we shouldn't have gotten a Tensor at all, as
+        # the operation is between an int and an item() result
+        self.assertEqual(cnt.frame_count, ifunspec(6, 5))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -3109,6 +3110,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt)(fn)
         opt_fn(inp1, inp2, inp3, inp4, c)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_torch_variable_type(self):
+        # from torchvision
+        def check_type(obj, types_or_checks):
+            for type_or_check in types_or_checks:
+                if (
+                    isinstance(obj, type_or_check)
+                    if isinstance(type_or_check, type)
+                    else type_or_check(obj)
+                ):
+                    return True
+            return False
+
+        opt_check_type = torch._dynamo.optimize("eager")(check_type)
+        ref = check_type(torch.randn(4), [torch.Tensor])
+        res = opt_check_type(torch.randn(4), [torch.Tensor])
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":
