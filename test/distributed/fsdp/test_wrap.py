@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import contextlib
 import functools
 import os
 import tempfile
@@ -569,8 +568,10 @@ class TestAutoWrap(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
-        with contextlib.suppress(FileNotFoundError):
+        try:
             os.remove(file_name)
+        except FileNotFoundError:
+            pass
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])

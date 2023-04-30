@@ -1,5 +1,4 @@
 import argparse
-import contextlib
 import datetime
 import itertools as it
 import multiprocessing
@@ -216,8 +215,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.DETAIL_in_subprocess:
-        # Handle ctrl-c gracefully.
-        with contextlib.suppress(KeyboardInterrupt):
+        try:
             _subprocess_main(
                 args.DETAIL_seed,
                 args.DETAIL_num_threads,
@@ -225,6 +223,8 @@ if __name__ == "__main__":
                 args.DETAIL_result_file,
                 args.DETAIL_env,
             )
+        except KeyboardInterrupt:
+            pass  # Handle ctrl-c gracefully.
     elif args.DETAIL_in_compare:
         _compare_main()
     else:
