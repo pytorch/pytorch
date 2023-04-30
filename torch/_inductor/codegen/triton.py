@@ -1655,51 +1655,16 @@ class TritonScheduling:
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
 
-        if node1.is_reduction() and node2.is_reduction():
+        if node1.is_reduction() == node2.is_reduction():
             return numel1 == numel2 and rnumel1 == rnumel2
-
-        if not node1.is_reduction() and not node2.is_reduction():
-            if not (numel1 == numel2 and rnumel1 == rnumel2):
-                return False
-
-            if node1.is_template():
-                return True  # skip checks for compatible tiling
-
-            # check for a bad combined tiling
-            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
-            tiling3 = self.select_tiling(
-                node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
-            )
-            if config.triton.tiling_prevents_pointwise_fusion:
-                if len(tiling1) > 2:
-                    if len(tiling2) > 2:
-                        return tiling1 == tiling2 == tiling3
-                    else:
-                        return tiling1 == tiling3
-                elif len(tiling2) > 2:
-                    return tiling2 == tiling3
-
-            return True
 
         if not node1.is_reduction() and node2.is_reduction():
             assert rnumel1 == 1 and rnumel2 != 1
             if numel1 == numel2 * rnumel2:
-                if not all(
+                return all(
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
-                ):
-                    return False
-                if (
-                    config.triton.tiling_prevents_reduction_fusion
-                    and not node1.is_template()
-                ):
-                    return self.select_tiling(node1.get_nodes(), numel1) in (
-                        (numel1, 1),
-                        (numel2, rnumel2, 1),
-                    )
-                return True
-
+                )
             return numel1 == numel2
 
         assert node1.is_reduction() and not node2.is_reduction()
