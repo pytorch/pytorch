@@ -266,7 +266,10 @@ class ForLoopIndexingPattern(Pattern):
         def same_ops(list1, list2):
             if len(list1) != len(list2):
                 return False
-            return all(op1.name == op2.name for op1, op2 in zip(list1, list2))
+            for op1, op2 in zip(list1, list2):
+                if op1.name != op2.name:
+                    return False
+            return True
 
         # Record the ops between two aten::select
         next_select_idx = index_of_first_match(
@@ -368,7 +371,10 @@ class OptimizerSingleTensorPattern(Pattern):
         self.url = ""
 
     def match(self, event: _ProfilerEvent):
-        return any(event.name.endswith(f"_single_tensor_{optimizer}") for optimizer in self.optimizers_with_foreach)
+        for optimizer in self.optimizers_with_foreach:
+            if event.name.endswith(f"_single_tensor_{optimizer}"):
+                return True
+        return False
 
 
 class SynchronizedDataLoaderPattern(Pattern):

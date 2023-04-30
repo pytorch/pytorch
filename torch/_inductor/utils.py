@@ -415,7 +415,10 @@ def has_incompatible_cudagraph_ops(gm):
                 "aten.scatter_reduce.two_out",
             }
         )
-    return any(str(node.target) in forbidden_set for node in gm.graph.nodes)
+    for node in gm.graph.nodes:
+        if str(node.target) in forbidden_set:
+            return True
+    return False
 
 
 instance_descriptor = collections.namedtuple(

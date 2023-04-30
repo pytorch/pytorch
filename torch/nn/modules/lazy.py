@@ -232,7 +232,10 @@ class LazyModuleMixin:
         # custom modules __setstate__ to add it
         params = self._parameters.values()
         buffers = self._buffers.values()
-        return any(is_lazy(param) for param in itertools.chain(params, buffers))
+        for param in itertools.chain(params, buffers):
+            if is_lazy(param):
+                return True
+        return False
 
     def _infer_parameters(self: _LazyProtocol, module, input):
         r"""Infers the size and initializes the parameters according to the
