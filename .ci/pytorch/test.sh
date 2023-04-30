@@ -550,7 +550,7 @@ test_libtorch() {
       python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
     else
       # CUDA tests have already been skipped when CUDA is not available
-      python test/run_test.py --cpp --verbose -i cpp/test_jit
+      python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
     fi
 
     # Run Lazy Tensor cpp tests
