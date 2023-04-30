@@ -75,10 +75,8 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
 
 def may_get_constant_buffer_dtype(constant_buffer):
     assert isinstance(
-        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
-    if isinstance(constant_buffer, sympy.core.numbers.Integer):
-        return torch.int64
+        constant_buffer, sympy.Symbol
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol"
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
@@ -563,31 +561,6 @@ class GraphLowering(torch.fx.Interpreter):
                 # reads, but they converge to a user.
                 result.realize_hint()
 
-        # This is not complete, but it doesn't have to be: origin_node
-        # tracking is best effort.  The logic here critically relies on direct
-        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
-        # to get views to work.  Feel free to add any extra cases as needed.
-        #
-        # Note: we can't YOLO tree_map over this result, because if there are
-        # buffers or a view involved, we might not be able to validly assign
-        # the origin_node here.
-        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
-            if isinstance(result.data.data, ir.Loops):
-                result.data.data.origin_node = n
-            elif isinstance(result.data.data, ir.Buffer):
-                result.data.data.origin_node = n
-                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
-                    result.data.data.data, ir.Loops
-                ):
-                    result.data.data.data.origin_node = n
-                # Not really multi-output, can straightforwardly recurse in
-                elif (
-                    isinstance(result.data.data, ir.MultiOutput)
-                    and not result.data.data.indices
-                ):
-                    if isinstance(result.data.data.inputs[0], ir.Buffer):
-                        result.data.data.inputs[0].origin_node = n
-
         return result
 
     def check_cpp_codegen_disabled(self):
@@ -603,7 +576,7 @@ class GraphLowering(torch.fx.Interpreter):
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
-            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
+            elif isinstance(value, sympy.Symbol):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):

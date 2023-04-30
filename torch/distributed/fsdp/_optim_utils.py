@@ -366,11 +366,7 @@ def _shard_orig_param_state(
     intra_param_start_idx = shard_param_info.intra_param_start_idx
     intra_param_end_idx = shard_param_info.intra_param_end_idx
     for state_name, value in optim_state.items():
-        if (
-            torch.is_tensor(value)
-            and value.dim() > 0
-            and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
-        ):
+        if torch.is_tensor(value) and value.dim() > 0:
             value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
         new_optim_state[state_name] = value
     return new_optim_state

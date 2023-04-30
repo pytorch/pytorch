@@ -174,7 +174,7 @@ class TorchVariable(VariableTracker):
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
             return type(self.value)
-        if isinstance(self.value, type):
+        if type(self.value) is type:
             return type
         return super().python_type()
 
@@ -1033,24 +1033,10 @@ class TorchHigherOrderOperator(VariableTracker):
             true_tracked_fakes = true_cmp.output.tracked_fakes
             false_tracked_fakes = false_cmp.output.tracked_fakes
             tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
-            true_tensor_weakref_to_sizes_strides = (
-                true_cmp.output.tensor_weakref_to_sizes_strides
-            )
-            false_tensor_weakref_to_sizes_strides = (
-                false_cmp.output.tensor_weakref_to_sizes_strides
-            )
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
             tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
-
-            # Add tracking
-            tx.output.tensor_weakref_to_sizes_strides.update(
-                true_tensor_weakref_to_sizes_strides
-            )
-            tx.output.tensor_weakref_to_sizes_strides.update(
-                false_tensor_weakref_to_sizes_strides
-            )
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)
@@ -1109,16 +1095,9 @@ class TorchHigherOrderOperator(VariableTracker):
             parent_tracked_fakes = parent_cmp.output.tracked_fakes
             body_tracked_fakes = body_cmp.output.tracked_fakes
             tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
-            body_tensor_weakref_to_sizes_strides = (
-                body_cmp.output.tensor_weakref_to_sizes_strides
-            )
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
-            # Add tracking
-            tx.output.tensor_weakref_to_sizes_strides.update(
-                body_tensor_weakref_to_sizes_strides
-            )
 
             body_name = add_subgraph(
                 "body", torch.fx.GraphModule(body_nn_modules, body_graph)

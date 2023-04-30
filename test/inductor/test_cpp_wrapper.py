@@ -15,10 +15,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
     try:
-        from . import test_cpu_repro, test_mkldnn_pattern_matcher, test_torchinductor
+        from . import test_cpu_repro, test_torchinductor
     except ImportError:
         import test_cpu_repro
-        import test_mkldnn_pattern_matcher
         import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
@@ -46,7 +45,7 @@ class TestCudaWrapper(TorchTestCase):
     device = "cuda"
 
 
-def make_test_case(name, device, tests, condition=True):
+def make_test_case(name, device, tests):
     test_name = f"{name}_{device}" if device else name
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
@@ -63,12 +62,9 @@ def make_test_case(name, device, tests, condition=True):
             tests.tearDownClass()
 
     fn.__name__ = test_name
-    if condition:
-        setattr(
-            CppWrapperTemplate if device != "cuda" else CudaWrapperTemplate,
-            test_name,
-            fn,
-        )
+    setattr(
+        CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate, test_name, fn
+    )
 
 
 if RUN_CPU:
@@ -77,7 +73,6 @@ if RUN_CPU:
         name: str
         device: str = "cpu"
         tests: TorchTestCase = test_torchinductor.CpuTests()
-        condition: bool = True
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
@@ -90,12 +85,6 @@ if RUN_CPU:
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
-        BaseTest(
-            "test_linear_binary",
-            "",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
-        ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
@@ -108,7 +97,7 @@ if RUN_CPU:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
     ]:
-        make_test_case(item.name, item.device, item.tests, item.condition)
+        make_test_case(item.name, item.device, item.tests)
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
 
