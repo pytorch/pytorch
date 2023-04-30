@@ -93,7 +93,7 @@ def find_graph_variable(args):
                  'nlayers': int,
                  'out_features': int,
                  'batch': str2bool}
-    for arg in var_types.keys():
+    for arg in var_types:
         if ',' in args[arg]:
             if args.get('x_axis_name'):
                 raise ValueError("Only 1 x axis graph variable allowed")

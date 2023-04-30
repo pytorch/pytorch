@@ -106,7 +106,7 @@ class ConstantVariable(VariableTracker):
                 and args[0].is_python_constant()
             )
 
-        if isinstance(self.value, str) and name in str.__dict__.keys():
+        if isinstance(self.value, str) and name in str.__dict__:
             assert not kwargs
             method = getattr(self.value, name)
             return ConstantVariable(method(*const_args, **const_kwargs), **options)

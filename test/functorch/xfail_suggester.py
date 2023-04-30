@@ -56,10 +56,7 @@ def belongs_to_base(test, base):
     if not test.startswith(base):
         return False
     candidates = [try_base for try_base in base_names if len(try_base) > len(base)]
-    for candidate in candidates:
-        if test.startswith(candidate):
-            return False
-    return True
+    return all(not test.startswith(candidate) for candidate in candidates)
 
 
 def parse_namespace(base):
@@ -71,7 +68,7 @@ def parse_namespace(base):
         'sparse_': 'sparse',
         'special_': 'special',
     }
-    for heading in mappings.keys():
+    for heading in mappings:
         if base.startswith(heading):
             return mappings[heading], base[len(heading):]
     return None, base
@@ -103,10 +100,7 @@ def parse_base(base):
 
 
 def any_starts_with(strs, thing):
-    for s in strs:
-        if s.startswith(thing):
-            return True
-    return False
+    return any(s.startswith(thing) for s in strs)
 
 
 def get_suggested_xfails(base, tests):

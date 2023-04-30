@@ -64,8 +64,8 @@ class MetricsLogger:
             }
         """
         processed_metrics = {}
-        for metric_type in self.metrics.keys():
-            for metric_key in self.metrics[metric_type].keys():
+        for metric_type in self.metrics:
+            for metric_key in self.metrics[metric_type]:
                 metric = self.metrics[metric_type][metric_key]
                 if isinstance(metric, CUDAMetric):
                     metric.synchronize()

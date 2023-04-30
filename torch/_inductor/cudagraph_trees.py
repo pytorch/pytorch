@@ -1157,10 +1157,10 @@ class CUDAGraphNode:
     @staticmethod
     def _check_liveness(indices: List[PathOutputIndex], output_refs: List[List[bool]]):
         "Check that all of the indices specified are dead references"
-        for depth, output_index in indices:
-            if output_refs[depth][output_index]() is not None:
-                return False
-        return True
+        return all(
+            output_refs[depth][output_index]() is None
+            for depth, output_index in indices
+        )
 
     def add_child(self, function_id: FunctionID, node: CUDAGraphNode):
         "Adds node as a a child of self"

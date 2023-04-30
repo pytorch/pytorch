@@ -210,7 +210,7 @@ def merge(measurements):
         return None
 
     states = [m.__getstate__() for m in measurements]
-    for k in states[0].keys():
+    for k in states[0]:
         if k in ("number_per_run", "times", "metadata"):
             continue
 

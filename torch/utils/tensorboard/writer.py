@@ -425,7 +425,7 @@ class SummaryWriter:
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
             assert self.all_writers is not None
-            if fw_tag in self.all_writers.keys():
+            if fw_tag in self.all_writers:
                 fw = self.all_writers[fw_tag]
             else:
                 fw = FileWriter(

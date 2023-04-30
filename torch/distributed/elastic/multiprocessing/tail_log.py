@@ -100,7 +100,7 @@ class TailLog:
         self._dst = dst
         self._log_files = log_files
         self._finished_events: Dict[int, Event] = {
-            local_rank: Event() for local_rank in log_files.keys()
+            local_rank: Event() for local_rank in log_files
         }
         self._futs: List[Future] = []
         self._interval_sec = interval_sec

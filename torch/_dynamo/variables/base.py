@@ -91,7 +91,7 @@ class VariableTracker(metaclass=HasPostInit):
         if isinstance(value, VariableTracker):
             if not skip_fn(value):
                 updated_dict = dict(value.__dict__)
-                for key in updated_dict.keys():
+                for key in updated_dict:
                     if key not in value._nonvar_fields:
                         updated_dict[key] = cls.apply(
                             fn, updated_dict[key], cache, skip_fn

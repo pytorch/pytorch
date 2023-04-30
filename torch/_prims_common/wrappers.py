@@ -67,10 +67,7 @@ def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
 
 def _annotation_has_type(*, typ, annotation):
     if hasattr(annotation, "__args__"):
-        for a in annotation.__args__:
-            if _annotation_has_type(typ=typ, annotation=a):
-                return True
-        return False
+        return any(_annotation_has_type(typ=typ, annotation=a) for a in annotation.__args__)
 
     return typ is annotation
 
@@ -111,7 +108,7 @@ class elementwise_type_promotion_wrapper:
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             )
 
             flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
@@ -123,7 +120,7 @@ class elementwise_type_promotion_wrapper:
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             }
             bound.arguments.update(promoted_args)
 

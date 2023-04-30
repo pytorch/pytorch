@@ -284,10 +284,7 @@ def runDefaultTestWithSeed(seed):
     jit_o = traced_model(seed_tensor, *tensor_list)  # possible profiling run
     jit_o = traced_model(seed_tensor, *tensor_list)
     validate_o = zip(o, jit_o)
-    for oo, jit_oo in validate_o:
-        if not oo.allclose(jit_oo, atol=1e-5, equal_nan=True):
-            return False
-    return True
+    return all(oo.allclose(jit_oo, atol=1e-05, equal_nan=True) for oo, jit_oo in validate_o)
 
 
 def runTest(seed, args):

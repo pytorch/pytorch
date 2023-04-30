@@ -1153,7 +1153,7 @@ class AbstractCommTest:
                 self.assertEqual(rank_to_seq_num[0], rank_to_seq_num[2])
                 expected_same = {
                     rank_to_seq_num[i]
-                    for i in rank_to_seq_num.keys()
+                    for i in rank_to_seq_num
                     if i not in [0, 2]
                 }
                 self.assertEqual(len(expected_same), 1)
@@ -1453,7 +1453,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
-        for mode in mapping.keys():
+        for mode in mapping:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
             dist.set_debug_level_from_env()
             set_debug_mode = dist.get_debug_level()

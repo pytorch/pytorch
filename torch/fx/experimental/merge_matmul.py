@@ -62,11 +62,7 @@ def may_depend_on(a: Node, b: Node, search_depth: int = 6):
         return True
 
     # Recursively check all inputs of a.
-    for inp in a.all_input_nodes:
-        if may_depend_on(inp, b, search_depth - 1):
-            return True
-
-    return False
+    return any(may_depend_on(inp, b, search_depth - 1) for inp in a.all_input_nodes)
 
 
 def are_nodes_independent(nodes: List[Node]):
@@ -80,11 +76,7 @@ def are_nodes_independent(nodes: List[Node]):
         True if any pair in nodes has a data dependency.
     """
     # For each pair in nodes:
-    for i, j in itertools.combinations(nodes, 2):
-        if may_depend_on(i, j) or may_depend_on(j, i):
-            return False
-
-    return True
+    return all(not (may_depend_on(i, j) or may_depend_on(j, i)) for i, j in itertools.combinations(nodes, 2))
 
 
 def merge_matmul(in_mod: torch.nn.Module):

@@ -729,7 +729,7 @@ class GraphLowering(torch.fx.Interpreter):
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs.keys()
+            name in self.graph_inputs
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
         )
