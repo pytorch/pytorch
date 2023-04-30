@@ -307,7 +307,7 @@ def setup_log_file():
         log_file_handler = logging.FileHandler(config.log_file_name)
         for logger in logging.get_loggers():
             logger.addHandler(log_file_handler)
-            exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+            exitstack.callback(lambda: logger.removeHandler(log_file_handler))  # noqa: B023
         return exitstack
 
     return exitstack

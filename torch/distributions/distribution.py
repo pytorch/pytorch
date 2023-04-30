@@ -35,8 +35,8 @@ class Distribution:
 
     def __init__(
         self,
-        batch_shape: torch.Size = torch.Size(),
-        event_shape: torch.Size = torch.Size(),
+        batch_shape: torch.Size = torch.Size(),  # noqa: B008
+        event_shape: torch.Size = torch.Size(),  # noqa: B008
         validate_args: Optional[bool] = None,
     ):
         self._batch_shape = batch_shape
@@ -149,7 +149,7 @@ class Distribution:
         """
         return self.variance.sqrt()
 
-    def sample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:
+    def sample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:  # noqa: B008
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
@@ -157,7 +157,7 @@ class Distribution:
         with torch.no_grad():
             return self.rsample(sample_shape)
 
-    def rsample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:  # noqa: B008
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
@@ -245,7 +245,7 @@ class Distribution:
         """
         return torch.exp(self.entropy())
 
-    def _extended_shape(self, sample_shape: _size = torch.Size()) -> Tuple[int, ...]:
+    def _extended_shape(self, sample_shape: _size = torch.Size()) -> Tuple[int, ...]:  # noqa: B008
         """
         Returns the size of the sample returned by the distribution, given
         a `sample_shape`. Note, that the batch and event shapes of a distribution

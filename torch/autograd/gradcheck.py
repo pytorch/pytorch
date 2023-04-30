@@ -856,8 +856,8 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
 
         def jvp(tangent: torch.Tensor):
             with fwAD.dual_level():
-                dual = fwAD.make_dual(current_input.detach(), tangent)
-                inputs_with_dual = tuple(dual if idx == input_idx else (inp.detach() if is_tensor_like(inp) else inp)
+                dual = fwAD.make_dual(current_input.detach(), tangent)  # noqa: B023
+                inputs_with_dual = tuple(dual if idx == input_idx else (inp.detach() if is_tensor_like(inp) else inp)  # noqa: B023
                                          for idx, inp in enumerate(inputs))
                 dual_outputs = _as_tuple(func(*inputs_with_dual))
                 ret = []
@@ -994,7 +994,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 tensor_indices.add(i)
             dual_inputs.append(inp)
 
-        for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
+        for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):  # noqa: B007
             fw_grad.copy_(u.view_as(fw_grad))
 
         for idx, inp in enumerate(inputs):

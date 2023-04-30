@@ -264,7 +264,7 @@ def instantiate_parametrized_tests(generic_cls):
         def instantiate_test_helper(cls, name, test, param_kwargs):
             @wraps(test)
             def instantiated_test(self, param_kwargs=param_kwargs):
-                test(self, **param_kwargs)
+                test(self, **param_kwargs)  # noqa: B023
 
             assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
             setattr(generic_cls, name, instantiated_test)
@@ -4317,22 +4317,22 @@ class TestGradients(TestCase):
                 # Puts inputs back into sample properly
                 positional_args = []
                 input_idx = 0
-                inp, input_idx = _input_recomposition_helper(inputs, sample.input, input_idx)
+                inp, input_idx = _input_recomposition_helper(inputs, sample.input, input_idx)  # noqa: B023
                 positional_args.append(inp)
 
-                for x in sample.args:
+                for x in sample.args:  # noqa: B023
                     inp, input_idx = _input_recomposition_helper(inputs, x, input_idx)
                     positional_args.append(inp)
 
                 # Recreates kwargs
                 kwargs = {}
-                for k, v in sample.kwargs.items():
+                for k, v in sample.kwargs.items():  # noqa: B023
                     inp, input_idx = _input_recomposition_helper(inputs, v, input_idx)
                     kwargs[k] = inp
 
                 output = op.gradcheck_wrapper(variant, *positional_args, **kwargs)
-                if sample.output_process_fn_grad is not None:
-                    return sample.output_process_fn_grad(output)
+                if sample.output_process_fn_grad is not None:  # noqa: B023
+                    return sample.output_process_fn_grad(output)  # noqa: B023
                 return output
 
             if check == 'gradcheck':
@@ -4395,16 +4395,16 @@ def make_lazy_class(cls):
         name = f"__{basename}__"
 
         def inner_wrapper(name):
-            use_operator = basename not in ("bool", "int")
+            use_operator = basename not in ("bool", "int")  # noqa: B023
 
             def wrapped(self, *args, **kwargs):
                 if self._cb is not None:
                     self._value = self._cb()
                     self._cb = None
                 if not use_operator:
-                    return getattr(self._value, name)(*args, **kwargs)
+                    return getattr(self._value, name)(*args, **kwargs)  # noqa: B023
                 else:
-                    return getattr(operator, name)(self._value, *args, **kwargs)
+                    return getattr(operator, name)(self._value, *args, **kwargs)  # noqa: B023
             return wrapped
 
         setattr(cls, name, inner_wrapper(name))

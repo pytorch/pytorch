@@ -78,7 +78,7 @@ class _TensorLoader(ABC):
     def add(self, size: int, obj: object):
         pass
 
-    def start_loading(self):
+    def start_loading(self):  # noqa: B027
         pass
 
     @abstractmethod

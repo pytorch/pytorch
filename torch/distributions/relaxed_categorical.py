@@ -66,7 +66,7 @@ class ExpRelaxedCategorical(Distribution):
     def probs(self):
         return self._categorical.probs
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         uniforms = clamp_probs(torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device))
         gumbels = -((-(uniforms.log())).log())

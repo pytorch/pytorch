@@ -294,8 +294,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                 suffix = '_reverse' if direction == 1 else ''
 
                 def get_weight_bias(ihhh):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
+                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)  # noqa: B023
+                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)  # noqa: B023
 
                     weight = getattr(other, weight_name)
                     bias = getattr(other, bias_name)

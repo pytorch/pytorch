@@ -2718,9 +2718,9 @@ def constant_pad_nd(
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
         check(
             new_dim > 0,
-            lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
-            f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
-            f"which is invalid. Check dimension {l_diff + i} of your input.",
+            lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "  # noqa: B023
+            f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "  # noqa: B023
+            f"which is invalid. Check dimension {l_diff + i} of your input.",  # noqa: B023
         )
         new_shape.append(new_dim)
 
@@ -2793,7 +2793,7 @@ def expand(a: Tensor, *shape) -> Tensor:
         requested_length = shape[offset_idx]
         check(
             requested_length == x or x == 1 or requested_length == -1,
-            lambda: f"expand: attempting to expand a dimension of length {x}!",
+            lambda: f"expand: attempting to expand a dimension of length {x}!",  # noqa: B023
         )
 
         shape_[offset_idx] = requested_length if requested_length != -1 else x
@@ -4635,7 +4635,7 @@ def meshgrid(
         assert isinstance(t, TensorLike)  # mypy
         check(
             t.ndim == 0 or t.ndim == 1,
-            lambda: f"torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: {t}",
+            lambda: f"torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: {t}",  # noqa: B023
         )
         result_shape.append(t.numel())
 

@@ -422,8 +422,8 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
                 def new_fwd(*user_args):
                     # If the module's training-or-eval state matches what we graphed,
                     # run the graph, otherwise run the original forward method
-                    if func.training == graph_training_state:
-                        return graphed(*user_args)
+                    if func.training == graph_training_state:  # noqa: B023
+                        return graphed(*user_args)  # noqa: B023
                     else:
                         return orig_fwd(*user_args)
                 return new_fwd

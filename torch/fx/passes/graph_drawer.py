@@ -307,9 +307,9 @@ if HAS_PYDOT:
 
                 def get_module_params_or_buffers():
                     for pname, ptensor in chain(
-                        leaf_module.named_parameters(), leaf_module.named_buffers()
+                        leaf_module.named_parameters(), leaf_module.named_buffers()  # noqa: B023
                     ):
-                        pname1 = node.name + "." + pname
+                        pname1 = node.name + "." + pname  # noqa: B023
                         label1 = (
                             pname1 + "|op_code=get_" + "parameter"
                             if isinstance(ptensor, torch.nn.Parameter)
@@ -321,7 +321,7 @@ if HAS_PYDOT:
                             **_WEIGHT_TEMPLATE,
                         )
                         dot_graph.add_node(dot_w_node)
-                        dot_graph.add_edge(pydot.Edge(pname1, node.name))
+                        dot_graph.add_edge(pydot.Edge(pname1, node.name))  # noqa: B023
 
                 if node.op == "call_module":
                     leaf_module = self._get_leaf_node(graph_module, node)

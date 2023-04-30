@@ -144,7 +144,7 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
                 old_emit = handler.emit
 
                 def new_emit(record):
-                    old_emit(record)
+                    old_emit(record)  # noqa: B023
                     emit_post_hook(record)
 
                 exit_stack.enter_context(

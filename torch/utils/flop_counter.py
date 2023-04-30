@@ -370,7 +370,7 @@ class FlopCounterMode(TorchDispatchMode):
         # if there are any FLOPs in there that aren't already fully contained by
         # a module.
         if 'Global' in self.flop_counts and not is_global_subsumed:
-            for idx, value in enumerate(values):
+            for idx, value in enumerate(values):  # noqa: B007
                 values[idx][0] = " " + values[idx][0]
 
             values = process_mod('Global', 0) + values

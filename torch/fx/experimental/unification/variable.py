@@ -45,7 +45,7 @@ def vars():
 def isvar(v):
     return True
 
-isvar
+isvar  # noqa: B018
 
 
 @dispatch(object)  # type: ignore[no-redef]

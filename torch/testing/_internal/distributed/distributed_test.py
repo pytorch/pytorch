@@ -2370,7 +2370,7 @@ class DistributedTest:
                     op,
                     group_id,
                     secondary_op_call=lambda: dist.reduce(
-                        tensors[1], src, op, group_id
+                        tensors[1], src, op, group_id  # noqa: B023
                     ),
                     tensor_shapes=[tensors[0].shape],
                 )
@@ -6284,7 +6284,7 @@ class DistributedTest:
                 dim=1,
             ).cuda(rank)
 
-            for i in range(100):
+            for i in range(100):  # noqa: B007
                 y = model(input_var[rank].cuda(rank))
                 y.mean().backward()
 

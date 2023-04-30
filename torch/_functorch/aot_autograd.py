@@ -1041,7 +1041,7 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        for i, arg in enumerate(args_maybe_cloned):
+        for i, arg in enumerate(args_maybe_cloned):  # noqa: B007
             if not isinstance(arg, Tensor):
                 continue
             torch._sync(arg)
@@ -1954,7 +1954,7 @@ def aot_wrapper_dedupe(
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
-    for i, t in enumerate(flat_args):
+    for i, t in enumerate(flat_args):  # noqa: B007
         if t in seen_args:
             keep_arg_mask.append(False)
             add_dupe_map.append(seen_args[t])
@@ -3175,7 +3175,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
-        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
+        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs  # noqa: B026
     )
 
     class AOTModule(nn.Module):

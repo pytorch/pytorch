@@ -23,7 +23,7 @@ __all__ = [
 class FuseHandler(ABC):
     """ Base handler class for the fusion patterns
     """
-    def __init__(self, node: Node):
+    def __init__(self, node: Node):  # noqa: B027
         pass
 
     @abstractmethod

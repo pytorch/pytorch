@@ -480,7 +480,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         jacobian_input_output = []
         for jac, output_i in zip(outputs_before_split, outputs):
             jacobian_output_i_output = []
-            for jac, input_j in zip(jac.split(input_numels, dim=0), inputs):
+            for jac, input_j in zip(jac.split(input_numels, dim=0), inputs):  # noqa: B020
                 # We need to transpose the Jacobian because in forward AD, the
                 # batch dimension represents that of the inputs
                 jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0) \
@@ -661,7 +661,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
             jacobian_input_output = []
             for jac, input_i in zip(jacobians_of_flat_output, inputs):
                 jacobian_input_i_output = []
-                for jac, output_j in zip(jac.split(output_numels, dim=0), outputs):
+                for jac, output_j in zip(jac.split(output_numels, dim=0), outputs):  # noqa: B020
                     jacobian_input_i_output_j = jac.view(output_j.shape + input_i.shape)
                     jacobian_input_i_output.append(jacobian_input_i_output_j)
                 jacobian_input_output.append(jacobian_input_i_output)

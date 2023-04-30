@@ -167,7 +167,7 @@ class DebugInterpreter(fx.Interpreter):
             for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
                 if not isinstance(rv, torch.Tensor):
                     continue
-                check(nv, rv, lambda: f"output {i} where {self.symbol_mapping}")
+                check(nv, rv, lambda: f"output {i} where {self.symbol_mapping}")  # noqa: B023
         return r
 
 

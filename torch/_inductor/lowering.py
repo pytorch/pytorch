@@ -270,7 +270,7 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for a, b in itertools.zip_longest(
+    for a, b in itertools.zip_longest(  # noqa: B020
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
         if b == 1:

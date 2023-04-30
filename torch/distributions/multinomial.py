@@ -95,7 +95,7 @@ class Multinomial(Distribution):
     def param_shape(self):
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         sample_shape = torch.Size(sample_shape)
         samples = self._categorical.sample(torch.Size((self.total_count,)) + sample_shape)
         # samples.shape is (total_count, sample_shape, batch_shape), need to change it to

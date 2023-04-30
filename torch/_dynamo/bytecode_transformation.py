@@ -918,7 +918,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
 
         def should_compute_arg():
             # argval is prioritized over arg
-            return instructions[i].argval is not _NotProvided
+            return instructions[i].argval is not _NotProvided  # noqa: B023
 
         if instructions[i].opname == "LOAD_GLOBAL":
             # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global

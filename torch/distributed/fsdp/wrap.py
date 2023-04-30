@@ -39,7 +39,7 @@ class _FSDPPolicy(ABC):
 
     # The motivation for this abstract base class is to hide the interface
     # expected by `_recursive_wrap()` from users (i.e. the `recurse` argument).
-    def __init__(self):
+    def __init__(self):  # noqa: B027
         ...
 
     @property
@@ -177,7 +177,7 @@ def size_based_auto_wrap_policy(
     recurse: bool,
     nonwrapped_numel: int,
     # Additional custom arguments
-    min_num_params: int = int(1e8),
+    min_num_params: int = int(1e8),  # noqa: B008
     force_leaf_modules: Optional[Set[Type[nn.Module]]] = None,
     exclude_wrap_modules: Optional[Set[Type[nn.Module]]] = None,
 ) -> bool:

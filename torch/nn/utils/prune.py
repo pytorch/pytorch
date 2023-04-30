@@ -17,7 +17,7 @@ class BasePruningMethod(ABC):
     """
     _tensor_name: str
 
-    def __init__(self):
+    def __init__(self):  # noqa: B027
         pass
 
     def __call__(self, module, inputs):

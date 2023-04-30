@@ -1050,7 +1050,7 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         check(
             grad_out.size(i) > 0,
             lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
-                      size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
+                      size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",  # noqa: B023
         )
     check(
         ndim == 3 or ndim == 4,
@@ -1128,8 +1128,8 @@ def meta_index_Tensor(self, indices):
                 for j in range(index.ndim):
                     check(
                         index.shape[j] == self.shape[k + j],
-                        lambda: f"The shape of the mask {index.shape} at index {i} "
-                        f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",
+                        lambda: f"The shape of the mask {index.shape} at index {i} "  # noqa: B023
+                        f"does not match the shape of the indexed tensor {self.shape} at index {k + j}",  # noqa: B023
                         IndexError,
                     )
                     result.append(nonzero.select(1, j))
@@ -1440,7 +1440,7 @@ def meta__fused_adam_(
     for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         check(
             isinstance(l, List),
-            lambda: f"exponent must be a tensor list but got {type(l)}",
+            lambda: f"exponent must be a tensor list but got {type(l)}",  # noqa: B023
         )
 
 
@@ -1466,7 +1466,7 @@ def meta__fused_adam(
     for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         check(
             isinstance(l, List),
-            lambda: f"exponent must be a tensor list but got {type(l)}",
+            lambda: f"exponent must be a tensor list but got {type(l)}",  # noqa: B023
         )
 
     def empty_like_list(tensor_list):
@@ -2227,7 +2227,7 @@ def gather_shape_check(self, dim, index):
         if i != dim:
             check(
                 ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
-                lambda: f"Size does not match at dimension {i} expected index {index.shape}"
+                lambda: f"Size does not match at dimension {i} expected index {index.shape}"  # noqa: B023
                 + f" to be smaller than self {self.shape} apart from dimension {dim}",
             )
 
@@ -2708,8 +2708,8 @@ def upsample_nearest2d_backward(
             grad_output.size(i) == full_output_size[i],
             lambda: (
                 f"Expected grad_output to have the same shape as output;"
-                f" output.size({i}) = {full_output_size[i]}"
-                f" but got grad_output.size({i}) = {grad_output.size(i)}"
+                f" output.size({i}) = {full_output_size[i]}"  # noqa: B023
+                f" but got grad_output.size({i}) = {grad_output.size(i)}"  # noqa: B023
             ),
         )
 

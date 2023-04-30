@@ -572,7 +572,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise RuntimeError(
+                raise RuntimeError(  # noqa: B904
                     "Timed out initializing process group in store based barrier on "
                     "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
                         rank, store_key, world_size, worker_count, timeout

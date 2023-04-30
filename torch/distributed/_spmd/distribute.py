@@ -581,7 +581,7 @@ def _convert_output(
                         getattr(traced_dispatch, dtn.target),
                     )
                 with gm.graph.inserting_before(node):
-                    value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
+                    value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])  # noqa: B023
     if has_partial:
         gm.graph.erase_node(node)
         return gm.graph.output(new_args)
@@ -648,7 +648,7 @@ def _rebuild_graph(
                     new_node = value_remap[output]
                     node.replace_all_uses_with(new_node)
                 else:
-                    value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])
+                    value_remap[dtn] = gm.graph.node_copy(dtn, lambda n: value_remap[n])  # noqa: B023
                     if all(
                         isinstance(n.target, torch._ops.OpOverload)
                         and n.target._schema.name.startswith(
@@ -692,11 +692,11 @@ def _get_last_consumer_to_nodes(
 
     for node in reversed(graph.nodes):
         fx.node.map_arg(
-            node.args, lambda arg_node: _register_final_consumer(arg_node, node)
+            node.args, lambda arg_node: _register_final_consumer(arg_node, node)  # noqa: B023
         )
         fx.node.map_arg(
             node.kwargs,
-            lambda kwarg_node: _register_final_consumer(kwarg_node, node),
+            lambda kwarg_node: _register_final_consumer(kwarg_node, node),  # noqa: B023
         )
 
     return last_consumer_to_nodes

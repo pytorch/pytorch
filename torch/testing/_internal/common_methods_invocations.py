@@ -404,7 +404,7 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     biases = [None, channels, None]
     is_training = [True, False, False]
 
-    for weight, bias, training in zip(weights, biases, is_training):
+    for weight, bias, training in zip(weights, biases, is_training):  # noqa: B007
         yield SampleInput(
             make_arg(input_shape),
             args=(
@@ -4624,7 +4624,7 @@ def sample_inputs_put(op_info, device, dtype, requires_grad, **kwargs):
     tgt_gen = (make_arg(size) for size in tgt_sizes)
     idx = make_idx((0,), high=1)
     src = make_arg((0,))
-    for tgt, acc in product(tgt, (True, False)):
+    for tgt, acc in product(tgt, (True, False)):  # noqa: B020
         yield SampleInput(input=tgt.clone().requires_grad_(requires_grad),
                           args=(idx.clone(),
                                 src.clone().requires_grad_(requires_grad),
@@ -7772,7 +7772,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
-    for qkv_shapes, is_causal, dropout_p in product(
+    for qkv_shapes, is_causal, dropout_p in product(  # noqa: B020
             qkv_shapes, [True, False], [0.0, 0.5]):
         shape_q, shape_kv = qkv_shapes
         samples.append(SampleInput(
@@ -20272,13 +20272,13 @@ reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswit
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
 
 # TODO: review porting these to make_tensor
-def index_variable(shape, max_indices, device=torch.device('cpu')):
+def index_variable(shape, max_indices, device=torch.device('cpu')):  # noqa: B008
     if not isinstance(shape, tuple):
         shape = (shape,)
     index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
     return index
 
-def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):
+def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):  # noqa: B008
     assert len(shape) == 2
     assert index_dim < 2
     batch_dim = 1 - index_dim

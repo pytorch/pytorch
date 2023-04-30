@@ -92,8 +92,8 @@ class Interpreter:
                     self.user_to_last_uses.setdefault(user, []).append(n)
 
             for node in reversed(self.module.graph.nodes):
-                map_arg(node.args, lambda n: register_last_uses(n, node))
-                map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+                map_arg(node.args, lambda n: register_last_uses(n, node))  # noqa: B023
+                map_arg(node.kwargs, lambda n: register_last_uses(n, node))  # noqa: B023
 
     @compatibility(is_backward_compatible=True)
     def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing : bool = True) -> Any:

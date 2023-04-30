@@ -205,7 +205,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=torch.finfo(torch.float32).eps,  # noqa: B008
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super().__init__(dtype=dtype)
@@ -454,7 +454,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=torch.finfo(torch.float32).eps,  # noqa: B008
     ) -> None:
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
@@ -571,7 +571,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=torch.finfo(torch.float32).eps,  # noqa: B008
         **kwargs
     ) -> None:
         if not is_per_tensor(qscheme):
@@ -647,7 +647,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=torch.finfo(torch.float32).eps,  # noqa: B008
     ) -> None:
         if not is_per_channel(qscheme):
             raise NotImplementedError(
@@ -838,7 +838,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=torch.finfo(torch.float32).eps,  # noqa: B008
         **kwargs
     ) -> None:
         if not is_per_channel(qscheme):
@@ -925,7 +925,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        eps=torch.finfo(torch.float32).eps,
+        eps=torch.finfo(torch.float32).eps,  # noqa: B008
     ) -> None:
         if not is_per_tensor(qscheme):
             raise NotImplementedError(

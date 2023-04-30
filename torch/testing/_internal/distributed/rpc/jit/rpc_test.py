@@ -491,8 +491,8 @@ def python_function():
 def two_args_two_kwargs(
     first_arg,
     second_arg,
-    first_kwarg=torch.tensor([3, 3]),
-    second_kwarg=torch.tensor([4, 4]),
+    first_kwarg=torch.tensor([3, 3]),  # noqa: B008
+    second_kwarg=torch.tensor([4, 4]),  # noqa: B008
 ):
     return first_arg + second_arg + first_kwarg + second_kwarg
 
@@ -502,7 +502,7 @@ def assorted_types_args_kwargs(
     tensor_arg: Tensor,  # noqa: E999
     str_arg: str,
     int_arg: int,
-    tensor_kwarg: Tensor = torch.tensor([2, 2]),
+    tensor_kwarg: Tensor = torch.tensor([2, 2]),  # noqa: B008
     str_kwarg: str = "str_kwarg",
     int_kwarg: int = 2,
 ):

@@ -31,7 +31,7 @@ def register_overlapped(optim_cls):
     return decorator
 
 
-class OverlappedOptimizer(ABC):
+class OverlappedOptimizer(ABC):  # noqa: B024
     def __init__(self, optim_cls: Type) -> None:
         """
         OverlappedOptimizer is a base class that child classes can implement to

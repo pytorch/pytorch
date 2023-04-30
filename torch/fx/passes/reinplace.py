@@ -481,7 +481,7 @@ def reinplace(gm, *sample_args):
             # Tree-mapping because some ops can return lists of tensors.
             def _add_to_map(x):
                 if isinstance(x, FakeTensor):
-                    storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
+                    storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)  # noqa: B023
             tree_map(_add_to_map, n.meta['fake_result'])
 
     # inplace-ify functional ops, subject to the constraints written below.
@@ -615,8 +615,8 @@ def reinplace(gm, *sample_args):
                     args = node_to_update.args
 
                     def replace_arg(a):
-                        if a == old:
-                            return new
+                        if a == old:  # noqa: B023
+                            return new  # noqa: B023
                         return a
 
                     # First, replace usages of "b" with "a"

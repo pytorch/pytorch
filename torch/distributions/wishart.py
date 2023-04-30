@@ -199,7 +199,7 @@ class Wishart(ExponentialFamily):
         diag_V = V.diagonal(dim1=-2, dim2=-1)
         return self.df.view(self._batch_shape + (1, 1)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
-    def _bartlett_sampling(self, sample_shape=torch.Size()):
+    def _bartlett_sampling(self, sample_shape=torch.Size()):  # noqa: B008
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
@@ -216,7 +216,7 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
+    def rsample(self, sample_shape=torch.Size(), max_try_correction=None):  # noqa: B008
         r"""
         .. warning::
             In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.

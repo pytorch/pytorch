@@ -45,7 +45,7 @@ def export_as_test_case(
     try:
         import onnx
     except ImportError:
-        raise ImportError(
+        raise ImportError(  # noqa: B904
             "Export test case to ONNX format failed: Please install ONNX."
         )
 
@@ -100,7 +100,7 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
         import onnx
         from onnx import numpy_helper
     except ImportError:
-        raise ImportError(
+        raise ImportError(  # noqa: B904
             "Load test case from ONNX format failed: Please install ONNX."
         )
 
@@ -136,7 +136,7 @@ def export_data(data, value_info_proto, f: str) -> None:
     try:
         from onnx import numpy_helper
     except ImportError:
-        raise ImportError("Export data to ONNX format failed: Please install ONNX.")
+        raise ImportError("Export data to ONNX format failed: Please install ONNX.")  # noqa: B904
 
     with open(f, "wb") as opened_file:
         if value_info_proto.type.HasField("map_type"):
@@ -295,7 +295,7 @@ def _convert_tensor_to_numpy(input: Any) -> Any:
     try:
         import numpy as np
     except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
+        raise ImportError(f"{__name__} needs numpy, but it's not installed.")  # noqa: B904
 
     if isinstance(input, torch.Tensor):
         return input.detach().cpu().numpy()

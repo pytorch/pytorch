@@ -55,7 +55,7 @@ class Exponential(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         return self.rate.new(shape).exponential_() / self.rate
 

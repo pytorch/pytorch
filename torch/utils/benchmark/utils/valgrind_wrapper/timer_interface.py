@@ -268,7 +268,7 @@ class CallgrindStats:
             )
 
             for before, after in transforms:
-                stats = stats.transform(lambda fn: re.sub(before, after, fn))
+                stats = stats.transform(lambda fn: re.sub(before, after, fn))  # noqa: B023
 
             return stats
 

@@ -1953,7 +1953,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
             # Validate order remote events show up in profiling output.
             def convert_remote_to_local(event_name):
-                remote_op_key = rpc_profiling_key + REMOTE_OP_STR
+                remote_op_key = rpc_profiling_key + REMOTE_OP_STR  # noqa: B023
                 return event_name[
                     event_name.find(remote_op_key)
                     + len(remote_op_key) :
@@ -2097,7 +2097,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             REMOTE_OP_STR = "#remote_op: "
 
             def convert_remote_to_local(event_name):
-                remote_op_key = REMOTE_OP_STR
+                remote_op_key = REMOTE_OP_STR  # noqa: B023
                 return event_name[
                     event_name.find(remote_op_key) + len(remote_op_key) :
                 ]

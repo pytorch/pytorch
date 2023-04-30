@@ -1299,7 +1299,7 @@ class DistributedDataParallel(Module, Joinable):
             )
             yield from ps
 
-        for m in m.modules() if recurse else [m]:
+        for m in m.modules() if recurse else [m]:  # noqa: B020
             yield from model_parameters(m)
 
     def _check_default_group(self):

@@ -308,8 +308,8 @@ class RNNBase(torch.nn.Module):
                 suffix = '_reverse' if direction == 1 else ''
 
                 def retrieve_weight_bias(ihhh):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
+                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)  # noqa: B023
+                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)  # noqa: B023
                     weight = getattr(mod, weight_name)
                     bias = getattr(mod, bias_name)
                     return weight, bias

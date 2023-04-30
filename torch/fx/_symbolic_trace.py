@@ -510,7 +510,7 @@ class Tracer(TracerBase):
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(
-                                    self, node, n, attr_val
+                                    self, node, n, attr_val  # noqa: B023
                                 )
                             )
                         val_proxy = self.create_proxy("get_attr", n, (), {}, **kwargs)  # type: ignore[arg-type]

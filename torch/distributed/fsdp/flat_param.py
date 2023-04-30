@@ -1785,7 +1785,7 @@ class FlatParamHandle:
                 param.grad.data = view
             else:
                 param.grad = view
-        for i, (
+        for i, (  # noqa: B007
             param_name,
             module,
             module_name,
@@ -2072,7 +2072,7 @@ class FlatParamHandle:
                     )
         # TODO: If we want to handle shared parameters, we need to re-generate
         # the shared parameter data structures in case sharedness changed.
-        for i, (
+        for i, (  # noqa: B007
             param_name,
             module,
             _,

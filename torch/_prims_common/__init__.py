@@ -796,7 +796,7 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         elif d >= 0:
             newsize *= d
         else:
-            check(False, lambda: f"invalid shape dimension {d}")
+            check(False, lambda: f"invalid shape dimension {d}")  # noqa: B023
     check(
         numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
@@ -1769,7 +1769,7 @@ def clone_preserve_strides(x):
 
 class CUDARngStateHelper:
     @staticmethod
-    def get_torch_state_as_tuple(fake_mode=nullcontext()):
+    def get_torch_state_as_tuple(fake_mode=nullcontext()):  # noqa: B008
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA not available")
 
