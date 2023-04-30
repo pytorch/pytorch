@@ -161,7 +161,10 @@ def test_checkpoint_eval(setup_rpc):
             return False
         if grad_fn.__class__.__name__ == name:
             return True
-        return any(find_grad_fn(next_grad_fn, name) for next_grad_fn, _ in grad_fn.next_functions)
+        for next_grad_fn, _ in grad_fn.next_functions:
+            if find_grad_fn(next_grad_fn, name):
+                return True
+        return False
 
     model.train()
     train_output = model(input)

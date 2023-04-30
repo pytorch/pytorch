@@ -2594,7 +2594,10 @@ def forward(self, x):
         )
 
         def has_aten_op(gm, op):
-            return any(node.target == op for node in gm.graph.nodes)
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
 
         self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
 

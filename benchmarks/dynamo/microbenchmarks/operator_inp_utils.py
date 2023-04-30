@@ -112,15 +112,18 @@ def serialize_torch_args(e):
 
 
 def contains_tensor(elems):
-    return any(isinstance(elem, torch.Tensor) for elem in tree_flatten(elems)[0])
+    for elem in tree_flatten(elems)[0]:
+        if isinstance(elem, torch.Tensor):
+            return True
+    return False
 
 
 def skip_args(elems):
-    return any(
+    for i in tree_flatten(elems)[0]:
         # only shows up in constructors and ops like that
-        isinstance(i, (torch.memory_format, torch.storage.UntypedStorage))
-        for i in tree_flatten(elems)[0]
-    )
+        if isinstance(i, (torch.memory_format, torch.storage.UntypedStorage)):
+            return True
+    return False
 
 
 def contains_tensor_types(type):

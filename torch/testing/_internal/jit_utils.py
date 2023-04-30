@@ -187,7 +187,10 @@ class JitTestCase(JitCommonTestCase):
         se = str(e)
         allowed = ("Could not export Python function",
                    "closures are not exportable")
-        return any(a in se for a in allowed)
+        for a in allowed:
+            if a in se:
+                return True
+        return False
 
     def _compared_saved_loaded(self, m):
         def extract_files(buffer):
