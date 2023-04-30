@@ -399,12 +399,16 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
-def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False, *, require_fp64=False):
+def backend_accuracy_fails(
+    gm, example_inputs, compiler_fn, only_fwd=False, *, require_fp64=False
+):
     try:
         compiled_gm = compiler_fn(
             copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
         )
-        return not same_two_models(gm, compiled_gm, example_inputs, only_fwd, require_fp64=require_fp64)
+        return not same_two_models(
+            gm, compiled_gm, example_inputs, only_fwd, require_fp64=require_fp64
+        )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
