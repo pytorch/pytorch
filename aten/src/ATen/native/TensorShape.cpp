@@ -1370,11 +1370,20 @@ Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt lengt
 
 // This overload exists purely for XLA, because they wanted to pass in "symbolic"
 // start via Tensor.
-Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
+Tensor narrow_tensor_symint(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, const Tensor& start, SymInt length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
   int64_t st = start.item<int64_t>();
-  return at::narrow_symint(self, dim, c10::SymInt(st), std::move(length));
+  grad_input.narrow_symint(dim, c10::SymInt(st), std::move(length)).copy_(grad);
+  return grad_input;
+}
+
+Tensor narrow_backward_symint(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, SymInt start, SymInt length) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
+  int64_t st = start.item<int64_t>();
+  grad_input.narrow_symint(dim, c10::SymInt(st), std::move(length)).copy_(grad);
+  return grad_input;
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>

@@ -195,6 +195,8 @@ supported:
   - slice_backward
   - new_empty_strided
   - narrow_copy
+  - narrow.Tensor
+  - narrow_backward
   - pixel_shuffle
   - pixel_unshuffle
   - select_backward
@@ -205,6 +207,8 @@ symint:
   - empty.memory_format
   - expand_copy
   - narrow_copy
+  - narrow.Tensor
+  - narrow_backward
   - view_copy
   - as_strided_copy
   - as_strided_scatter

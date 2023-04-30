@@ -507,6 +507,22 @@ std::tuple<Tensor, optional<int64_t>> narrow_copy_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> narrow_backward_batch_rule(
+    const Tensor& grad_input, optional<int64_t> grad_input_bdim,
+    c10::SymIntArrayRef input_sizes, int64_t dim, c10::SymInt start, c10::SymInt length)
+{
+  auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
+  auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
+  dim = maybe_wrap_dim(dim, logical_rank + 1) + 1;
+  c10::SymDimVector input_sizes_(input_sizes.size() + 1);
+  input_sizes_[0] = grad_input_.sym_size(0);
+  std::copy(input_sizes.begin(), input_sizes.end(), input_sizes_.begin() + 1);
+  dim = maybe_wrap_dim(dim, logical_rank) + 1;
+
+  auto result = self_.narrow_backward_symint(dim, std::move(start), std::move(length));
+  return std::make_tuple(std::move(result), 0);
+}
+
 std::tuple<std::vector<Tensor>, optional<int64_t>> unsafe_split_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -595,6 +611,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("t_", native::t_);  // CompositeExplicitAutograd, should not go in BatchRulesDecompositions.cpp
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
+  VMAP_SUPPORT(narrow_backward, narrow_backward_batch_rule);
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
 }
 

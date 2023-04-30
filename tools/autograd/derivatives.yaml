@@ -3011,3 +3011,9 @@
 
 - name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
+
+- name: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
+  self: narrow_tensor_symint(grad, self.sym_sizes(), dim, start, length)
+
+- name: narrow_backward(Tensor grad_output, SymInt[] input_sizes, int dim, Tensor start, SymInt length) -> Tensor
+  self: narrow_backward_symint(grad, self.sym_sizes(), dim, start, length)

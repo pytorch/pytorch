@@ -3515,7 +3515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
-        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3686,7 +3685,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd_lowrank', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
-        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
