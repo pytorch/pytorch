@@ -1012,7 +1012,7 @@ class CoverageTest(DTensorTestBase):
                 self.fc = nn.Linear(10, 10)
 
             def forward(self, x):
-                return torch.cat([self.fc(x) for _ in range(2)], dim=1)
+                return torch.cat([self.fc(x) for _ in range(100)], dim=1)
 
         self._test_op_with_train_step(Model)
 
