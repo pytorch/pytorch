@@ -734,7 +734,7 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(
+    return isinstance(v, (enum.Enum, type)) or istype(
         v,
         (
             types.CodeType,
@@ -749,7 +749,7 @@ def is_safe_constant(v):
             torch.device,
             torch.dtype,
         ),
-    ) or isinstance(v, enum.Enum)
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -1359,6 +1359,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifdynstaticdefault(count1, count2):
+    if torch._dynamo.config.assume_static_by_default:
         return count1
     else:
         return count2
