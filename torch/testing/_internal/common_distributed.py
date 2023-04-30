@@ -11,7 +11,7 @@ import time
 import traceback
 import types
 import unittest
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
@@ -1247,9 +1247,10 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     def tearDown(self):
         super().tearDown()
-        with suppress(OSError):
+        try:
             os.remove(self.file_name)
-
+        except OSError:
+            pass
 
     @property
     def world_size(self) -> int:

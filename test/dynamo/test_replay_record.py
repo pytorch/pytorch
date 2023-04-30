@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import logging
 import re
 import shutil
@@ -50,9 +49,10 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
     def check_replay(self, fn, *args, exp_exc_name=None):
         fn_opt = torch._dynamo.optimize("eager")(fn)
         with self.assertLogs(logger="torch._dynamo", level=logging.ERROR) as log_orig:
-            with contextlib.suppress(Exception):
+            try:
                 fn_opt(*args)
-        # we'll check the logs for the raised exception
+            except Exception:
+                pass  # we'll check the logs for the raised exception
 
         with self.assertLogs(
             logger="torch._dynamo", level=logging.ERROR

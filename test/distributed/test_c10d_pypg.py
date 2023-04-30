@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import contextlib
 import os
 
 import torch
@@ -101,9 +100,10 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
 
     def tearDown(self):
         super().tearDown()
-        with contextlib.suppress(OSError):
+        try:
             os.remove(self.file_name)
-
+        except OSError:
+            pass
 
     def _get_process_group(self):
         return LonelyRankProcessGroup(self.rank, self.world_size, self.use_wrapper)

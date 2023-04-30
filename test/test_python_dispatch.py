@@ -22,7 +22,6 @@ from typing import Optional, Tuple, Union, List, Callable
 from torch import Tensor
 import itertools
 
-import contextlib
 import logging
 import sys
 import torch._dynamo
@@ -1539,9 +1538,10 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 return A(torch.zeros(()))
 
         with AMode():
-            with contextlib.suppress(RuntimeError):
+            try:
                 torch.randn(())
-
+            except RuntimeError:
+                pass
             self.assertTrue(isinstance(torch.zeros(()), A))
 
     def test_with_mode_created_separately(self):
