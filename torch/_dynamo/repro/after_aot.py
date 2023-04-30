@@ -32,6 +32,8 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
 from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -214,10 +216,24 @@ def _storage_offset_or_default(storage_offset: Optional[int]) -> int:
     return storage_offset if storage_offset is not None else 0
 
 
+class NopInputReader:
+    def __init__(self):
+        self.total = 0
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        self.total += 1
+
+    def tensor(self, *args, **kwargs):
+        pass
+
+    def symint(self, *args, **kwargs):
+        pass
+
+
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
-    def __init__(self, save_dir=None, total=None):
+    def __init__(self, save_dir=None, *, pbar=None):
         # If None, we will generate random data instead.  It's important
         # to natively support this use case as it will allow people to
         # share repros without including the real data, if the problem
@@ -225,16 +241,12 @@ class InputReader:
         if save_dir is None:
             log.warning("no save_dir specified, will generate random data")
         self.store = ContentStoreReader(save_dir) if save_dir is not None else None
-        self.total = total
-        self.pbar = tqdm(desc="Loading inputs", total=total)
-
-    def _update(self):
-        self.pbar.update(1)
-        if self.pbar.n >= self.total:
-            self.pbar.close()
+        self.args = []
+        self.pbar = pbar
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
-        self._update()
+        if self.pbar is not None:
+            self.pbar.update(1)
         device = _device_or_default(device)
         dtype_hint = _dtype_or_default(dtype_hint)
         if self.store is not None and storage_hash is not None:
@@ -264,18 +276,18 @@ class InputReader:
         dtype=None,
         **metadata,
     ):
-        self._update()
         stride = _stride_or_default(stride, shape=shape)
         storage_offset = _storage_offset_or_default(storage_offset)
         dtype = _dtype_or_default(dtype)
         t = torch.tensor([], dtype=dtype, device=storage.device)
         t.set_(storage, storage_offset, shape, stride)
         torch._utils.set_tensor_metadata(t, metadata)
-        return t
+        self.args.append(t)
+        return t  # for BC
 
     def symint(self, val):
-        self._update()
-        return val
+        self.args.append(val)
+        return val  # for BC
 
 
 # Here is our writer strategy:
@@ -294,8 +306,6 @@ class InputWriter:
     def __init__(self, save_dir, *, stable_hash=False):
         self._lines = []
         # TODO: consider ensuring tensor and storage counters line up?
-        self.tensor_counter = itertools.count()
-        self.symint_counter = itertools.count()
         self.storage_counter = itertools.count()
         self.save_dir = save_dir
         self.store = (
@@ -307,10 +317,12 @@ class InputWriter:
 
     def lines(self):
         r = [
-            "import torch._dynamo.repro.after_aot",
-            f"reader = torch._dynamo.repro.after_aot.InputReader(save_dir={self.save_dir!r}, total={len(self._lines)})",
+            "def load_args(reader):",
         ]
-        r.extend(self._lines)
+        r.extend(f"    {l}" for l in self._lines)
+        # In case we need to change the internal format of load_args
+        # in an FC-breaking way
+        r.append("load_args._version = 0")
         return r
 
     # Storages are untyped, but we need to initialize them with data if
@@ -346,7 +358,7 @@ class InputWriter:
         self.seen_storages[ws] = v
         return v
 
-    def tensor(self, t) -> str:
+    def tensor(self, name, t) -> None:
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
@@ -365,20 +377,16 @@ class InputWriter:
             maybe_tensor_metadata = ", " + ", ".join(
                 f"{k}={v!r}" for k, v in tensor_metadata.items()
             )
-        v = f"t{next(self.tensor_counter)}"
         self._lines.append(
-            f"{v} = reader.tensor({storage}, {tuple(t.shape)}"
-            f"{maybe_stride}{maybe_storage_offset}{maybe_dtype}{maybe_tensor_metadata})"
+            f"reader.tensor({storage}, {tuple(t.shape)}"
+            f"{maybe_stride}{maybe_storage_offset}{maybe_dtype}{maybe_tensor_metadata})  # {name}"
         )
-        return v
 
     # TODO: this doesn't actually symint atm
-    def symint(self, val) -> str:
+    def symint(self, name, val) -> None:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
-        v = f"s{next(self.symint_counter)}"
-        self._lines.append(f"{v} = reader.symint({val!r})")
-        return v
+        self._lines.append(f"reader.symint({val!r})  # {name}")
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -394,7 +402,6 @@ from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
 from math import inf
-from torch.fx.experimental.proxy_tensor import make_fx
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -420,24 +427,18 @@ isolate_fails_code_str = None
         return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
 
     writer = InputWriter(save_dir)
-    wargs = []
-    for i, arg in enumerate(args):
+    for placeholder, arg in zip(fx_placeholder_targets(gm), args):
         if isinstance(arg, (int, torch.SymInt)):
-            wargs.append(writer.symint(arg))
+            writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
-            wargs.append(writer.tensor(arg))
+            writer.tensor(placeholder, arg)
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
     model_str += "\n".join(writer.lines()) + "\n"
-    model_str += f"args = [{', '.join(wargs)}]\n"
 
-    # TODO: fake may be better for performance here
-    tracing_mode = "real"
-    if config.dynamic_shapes:
-        tracing_mode = "symbolic"
-    model_str += f"mod = make_fx(Repro(), tracing_mode={repr(tracing_mode)})(*args)\n"
+    model_str += "mod = Repro()\n"
     return model_str
 
 
@@ -453,11 +454,16 @@ def save_graph_repro(
         )
     )
     accuracy = "_accuracy" in compiler_name
+    tracing_mode = "real"
+    if config.dynamic_shapes:
+        tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    run_repro(mod, args, accuracy={accuracy!r}, minify={minify!r}, "
-        f"save_dir={save_dir!r}, patch_code=isolate_fails_code_str)\n"
+        f"    run_repro(mod, load_args, accuracy={accuracy!r}, minify={minify!r}, "
+        f"save_dir={save_dir!r}, patch_code=isolate_fails_code_str, "
+        f"tracing_mode={tracing_mode!r}"
+        ")\n"
     )
 
 
@@ -613,11 +619,37 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def repro_main(options, mod, args):
+def repro_main(options, mod, load_args):
     from torch._inductor.compile_fx import compile_fx_inner
 
     # Invariant for graphs we generate with the repro script
     assert not any(mod.named_parameters()) and not any(mod.named_buffers())
+
+    if not hasattr(load_args, "_version"):
+        log.warning(
+            "load_args does not have a _version attribute, please file a bug to PyTorch "
+            "and describe how you generate this repro script"
+        )
+    else:
+        if load_args._version > 0:
+            log.warning(
+                "load_args is version %s, but this version of PyTorch only supports "
+                "version 0.  We will try to run it anyway but there may be an incompatibility; "
+                "if so, try upgrading your version of PyTorch.",
+                load_args._version,
+            )
+
+    nop_reader = NopInputReader()
+    load_args(nop_reader)
+
+    with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
+        input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
+        load_args(input_reader)
+        args = input_reader.args
+
+    # Turn mod into a GraphModule the slow way
+    # TODO: speed this up
+    mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
     compiler_name = "inductor_accuracy" if options.accuracy else "inductor"
     torch._inductor.config.generate_intermediate_hooks = True
@@ -804,8 +836,22 @@ def repro_main(options, mod, args):
 
 # TODO: lazily load the inputs or something, rather than cloning them
 def run_repro(
-    mod, args, *, accuracy=False, minify=False, save_dir=None, patch_code=None
+    mod,
+    load_args,
+    *,
+    accuracy=False,
+    minify=False,
+    save_dir=None,
+    patch_code=None,
+    tracing_mode=None,
+    **kwargs,
 ):
+    for k in kwargs:
+        log.warning(
+            "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
+            k,
+        )
+
     parser = argparse.ArgumentParser(description="torch.compile repro script")
 
     group = parser.add_mutually_exclusive_group()
@@ -877,6 +923,12 @@ def run_repro(
         action="store_true",
         help="use SHA-1 checksum instead of fast (but possibly unsound) hash",
     )
+    parser.add_argument(
+        "--tracing-mode",
+        type=str,
+        default=tracing_mode,
+        help="how to trace the repro module into a GraphModule with metadata",
+    )
 
     options = parser.parse_args()
-    repro_main(options, mod, args)
+    repro_main(options, mod, load_args)
