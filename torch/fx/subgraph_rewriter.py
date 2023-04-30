@@ -307,13 +307,13 @@ def _replace_pattern(
 
         def get_replacement_nodes(curr_node: Node):
             nonlocal replacement_nodes
-            if curr_node in match.placeholder_nodes:
+            if curr_node in match.placeholder_nodes:  # noqa: B023
                 return
             for arg in curr_node.args:
                 if isinstance(arg, Node):
-                    if arg not in val_map.values():
+                    if arg not in val_map.values():  # noqa: B023
                         get_replacement_nodes(arg)
-            replacement_nodes.append(curr_node)
+            replacement_nodes.append(curr_node)  # noqa: B023
 
         for ret_node in copied_returning_nodes:
             get_replacement_nodes(ret_node)

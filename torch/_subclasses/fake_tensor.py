@@ -1319,7 +1319,7 @@ class FakeTensorMode(TorchDispatchMode):
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.allow_fallback_kernels:
-                raise UnsupportedOperatorException(func)
+                raise UnsupportedOperatorException(func)  # noqa: B904
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)

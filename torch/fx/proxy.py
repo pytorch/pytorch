@@ -247,7 +247,7 @@ class TracerBase:
                 def no_node(arg):
                     if isinstance(arg, Node):
                         raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                           f"Node. Got key: {k}")
+                                           f"Node. Got key: {k}")  # noqa: B023
                 map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)
@@ -518,7 +518,7 @@ for method in magic_methods:
     def _scope(method):
         def impl(*args, **kwargs):
             tracer = args[0].tracer
-            target = getattr(operator, method)
+            target = getattr(operator, method)  # noqa: B023
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
         as_magic = f'__{method.strip("_")}__'

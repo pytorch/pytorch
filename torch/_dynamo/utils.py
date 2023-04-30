@@ -134,7 +134,7 @@ def increment_op_count(cnt):
 def print_time_report():
     total = 0
     total_by_key = {}
-    for frame, timings in frame_phase_timing.items():
+    for _frame, timings in frame_phase_timing.items():
         for key, timing in timings.items():
             total += timing
             if key not in total_by_key:
@@ -307,7 +307,7 @@ def setup_log_file():
         log_file_handler = logging.FileHandler(config.log_file_name)
         for logger in logging.get_loggers():
             logger.addHandler(log_file_handler)
-            exitstack.callback(lambda: logger.removeHandler(log_file_handler))
+            exitstack.callback(lambda: logger.removeHandler(log_file_handler))  # noqa: B023
         return exitstack
 
     return exitstack

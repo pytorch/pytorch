@@ -51,10 +51,10 @@ def sparse_adam(params: List[Tensor],
 
 
         def make_sparse(values):
-            constructor = grad.new
-            if grad_indices.dim() == 0 or values.dim() == 0:
-                return constructor().resize_as_(grad)
-            return constructor(grad_indices, values, size)
+            constructor = grad.new  # noqa: B023
+            if grad_indices.dim() == 0 or values.dim() == 0:  # noqa: B023
+                return constructor().resize_as_(grad)  # noqa: B023
+            return constructor(grad_indices, values, size)  # noqa: B023
 
         # Decay the first and second moment running average coefficient
         #      old <- b * old + (1 - b) * new

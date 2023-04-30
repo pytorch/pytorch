@@ -58,7 +58,7 @@ class Laplace(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         finfo = torch.finfo(self.loc.dtype)
         if torch._C._get_tracing_state():

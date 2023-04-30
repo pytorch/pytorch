@@ -175,7 +175,7 @@ class ModuleInfo:
                  module_inputs_func,  # Function to generate module inputs
                  skips=(),  # Indicates which tests to skip
                  decorators=None,  # Additional decorators to apply to generated tests
-                 dtypes=floating_types(),  # dtypes this function is expected to work with
+                 dtypes=floating_types(),  # dtypes this function is expected to work with  # noqa: B008
                  supports_gradgrad=True,  # whether the op supports second order gradients
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  module_memformat_affects_out=False,  # whether converting module to channels last will generate

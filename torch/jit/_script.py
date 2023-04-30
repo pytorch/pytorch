@@ -471,7 +471,7 @@ if _enabled:
 
     for method_name in _magic_methods:
         def method_template(self, *args, **kwargs):
-            return self.forward_magic_method(method_name, *args, **kwargs)
+            return self.forward_magic_method(method_name, *args, **kwargs)  # noqa: B023
 
         setattr(RecursiveScriptClass, method_name, method_template)
 
@@ -994,7 +994,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
         else:
             new_obj_dict[name] = sub_module
 
-    for k, v in new_obj_dict.items():
+    for k, v in new_obj_dict.items():  # noqa: B007
         obj.__dict__[name] = v
 
     return obj

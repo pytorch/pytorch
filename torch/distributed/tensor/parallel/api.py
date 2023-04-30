@@ -222,7 +222,7 @@ def _colwise_parallelize_linear_fn(
 def _parallelize_linear(
     module: nn.Module,
     device_mesh: DeviceMesh,
-    parallel_style: ParallelStyle = ColwiseParallel(),
+    parallel_style: ParallelStyle = ColwiseParallel(),  # noqa: B008
     tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
@@ -292,7 +292,7 @@ def _parallelize_linear(
 def _parallelize_multihead_attn(
     module: nn.Module,
     device_mesh: DeviceMesh,
-    parallel_style: ParallelStyle = PairwiseParallel(),
+    parallel_style: ParallelStyle = PairwiseParallel(),  # noqa: B008
     tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """
@@ -366,7 +366,7 @@ def _parallelize_multihead_attn(
 def _parallelize_mlp(
     module: nn.Module,
     device_mesh: DeviceMesh,
-    parallel_style: ParallelStyle = PairwiseParallel(),
+    parallel_style: ParallelStyle = PairwiseParallel(),  # noqa: B008
     tp_mesh_dim: int = 0,
 ) -> nn.Module:
     """

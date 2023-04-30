@@ -89,10 +89,10 @@ class Independent(Distribution):
     def variance(self):
         return self.base_dist.variance
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         return self.base_dist.sample(sample_shape)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         return self.base_dist.rsample(sample_shape)
 
     def log_prob(self, value):

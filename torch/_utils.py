@@ -682,7 +682,7 @@ def _get_all_device_indices():
 
 def _get_devices_properties(device_ids):
     # all device properties
-    return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
+    return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]  # noqa: B023
 
 
 def get_current_device_index() -> int:

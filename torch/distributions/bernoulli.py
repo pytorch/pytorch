@@ -92,7 +92,7 @@ class Bernoulli(ExponentialFamily):
     def param_shape(self):
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
             return torch.bernoulli(self.probs.expand(shape))

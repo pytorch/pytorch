@@ -702,12 +702,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from . import ConstantVariable
 
         def normalize_args(
-            weight=ConstantVariable(None),
-            size_average=ConstantVariable(None),
-            ignore_index=ConstantVariable(-100),
-            reduce=ConstantVariable(None),
-            reduction=ConstantVariable("mean"),
-            label_smoothing=ConstantVariable(0.0),
+            weight=ConstantVariable(None),  # noqa: B008
+            size_average=ConstantVariable(None),  # noqa: B008
+            ignore_index=ConstantVariable(-100),  # noqa: B008
+            reduce=ConstantVariable(None),  # noqa: B008
+            reduction=ConstantVariable("mean"),  # noqa: B008
+            label_smoothing=ConstantVariable(0.0),  # noqa: B008
         ):
             return (
                 weight,
@@ -1013,7 +1013,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         args[ix], operands, graph_checkpoint, checkpoint
                     )
                 except ArgsMismatchError as e:
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))  # noqa: B904
 
             (
                 true_r,

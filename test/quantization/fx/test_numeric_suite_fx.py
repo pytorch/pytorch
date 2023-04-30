@@ -1826,7 +1826,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results, 'fp32', 'int8', compute_cosine_similarity,
             'cosine_similarity_int8_vs_fp32')
 
-        for layer_name, layer_results in results.items():
+        for _layer_name, layer_results in results.items():
             assert 'sqnr_int8_vs_fp32' in \
                 layer_results['weight']['int8'][0]
             assert 'l2_error_int8_vs_fp32' in \
@@ -2246,7 +2246,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             msp(*example_input)
 
         def _check_logger_count(model, exp_count_stats, exp_count_comparisons):
-            for name, mod in model.named_modules():
+            for _name, mod in model.named_modules():
                 if isinstance(mod, OutputLogger):
                     self.assertTrue(
                         len(mod.stats) == exp_count_stats,

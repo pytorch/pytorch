@@ -666,7 +666,7 @@ class PackageExporter:
             memo: DefaultDict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
-            for opcode, arg, pos in pickletools.genops(data_value):
+            for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"
@@ -1002,7 +1002,7 @@ class PackageExporter:
 
     def _validate_dependency_graph(self):
         # 1. Check the graph for any errors inserted during dependency analysis.
-        for module_name, attrs in self.dependency_graph.nodes.items():
+        for _module_name, attrs in self.dependency_graph.nodes.items():
             if "error" in attrs:
                 raise PackagingError(self.dependency_graph, debug=self.debug)
 

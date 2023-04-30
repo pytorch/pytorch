@@ -6408,7 +6408,7 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
 
     if other_dim_rank != self_dim_rank:
         delta = self_dim_rank - other_dim_rank
-        for i in range(delta):
+        for _i in range(delta):
             other = symbolic_helper._unsqueeze_helper(
                 g, other, [symbolic_helper._get_tensor_rank(other)]
             )
@@ -6435,10 +6435,10 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
     )
     other = expand_as(g, other, new_shape)
 
-    for i in range(dim):
+    for _i in range(dim):
         index = symbolic_helper._unsqueeze_helper(g, index, [0])
 
-    for i in range(self_dim_rank - dim - 1):
+    for _i in range(self_dim_rank - dim - 1):
         index = symbolic_helper._unsqueeze_helper(
             g, index, [symbolic_helper._get_tensor_rank(index)]
         )

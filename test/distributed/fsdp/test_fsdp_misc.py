@@ -211,7 +211,7 @@ class TestFSDPMisc(FSDPTest):
         )
         x = torch.randn(10, 10, device="cuda")
         y = torch.randn(10, 10, device="cuda")
-        for i in range(4):
+        for _i in range(4):
             if use_second_layer:
                 a, b = fsdp(x, y)
             else:

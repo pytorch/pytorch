@@ -16,22 +16,22 @@ __all__ = ["reify", "unify"]
 def _reify(t, s):
     return map(partial(reify, s=s), t)
     # return (reify(arg, s) for arg in t)
-_reify
+_reify  # noqa: B018
 
 @dispatch(tuple, dict)  # type: ignore[no-redef]
 def _reify(t, s):
     return tuple(reify(iter(t), s))
-_reify
+_reify  # noqa: B018
 
 @dispatch(list, dict)  # type: ignore[no-redef]
 def _reify(t, s):
     return list(reify(iter(t), s))
-_reify
+_reify  # noqa: B018
 
 @dispatch(dict, dict)  # type: ignore[no-redef]
 def _reify(d, s):
     return {k: reify(v, s) for k, v in d.items()}
-_reify
+_reify  # noqa: B018
 
 @dispatch(object, dict)  # type: ignore[no-redef]
 def _reify(o, s):
@@ -111,7 +111,7 @@ def unify(u, v, s):  # no check at the moment
     if isvar(v):
         return assoc(s, v, u)
     return _unify(u, v, s)
-unify
+unify  # noqa: B018
 
 @dispatch(object, object)  # type: ignore[no-redef]
 def unify(u, v):

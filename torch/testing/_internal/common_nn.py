@@ -3906,7 +3906,7 @@ reductions = ['none', 'mean', 'sum']
 for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
-        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),  # noqa: B023
         input_size=(3, ),
         target_size=(3, ),
         reference_fn=single_batch_reference_criterion_fn,
@@ -3918,7 +3918,7 @@ for name, reduction in product(regression_criterion_no_batch, reductions):
 for reduction in reductions:
     regression_test_info = dict(
         fullname=f"KLDivLoss_no_batch_dim_{reduction}",
-        constructor=lambda: nn.KLDivLoss(reduction=reduction),
+        constructor=lambda: nn.KLDivLoss(reduction=reduction),  # noqa: B023
         input_fn=lambda: torch.rand((3,)).log(),
         target_fn=lambda: torch.rand((3,)),
         reference_fn=single_batch_reference_criterion_fn,
@@ -3959,7 +3959,7 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
                                                       reductions):
     classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
-        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),  # noqa: B023
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
         reference_fn=single_batch_reference_criterion_fn,

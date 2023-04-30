@@ -96,7 +96,7 @@ def vector_norm(
             check(
                 shape[d] != 0,
                 lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
-                f"dimension {d} because this dimension is empty and the "
+                f"dimension {d} because this dimension is empty and the "  # noqa: B023
                 "operation does not have an identity",
             )
     check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")

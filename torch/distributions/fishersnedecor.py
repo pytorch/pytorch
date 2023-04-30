@@ -67,7 +67,7 @@ class FisherSnedecor(Distribution):
         df2[df2 <= 4] = nan
         return 2 * df2.pow(2) * (self.df1 + df2 - 2) / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
 
-    def rsample(self, sample_shape=torch.Size(())):
+    def rsample(self, sample_shape=torch.Size(())):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         #   X1 ~ Gamma(df1 / 2, 1 / df1), X2 ~ Gamma(df2 / 2, 1 / df2)
         #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)

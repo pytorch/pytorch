@@ -44,14 +44,14 @@ def _writeback_to_local_shard(
     for handle in handles:
 
         def _get_shard(flat_param_or_grad: torch.Tensor) -> torch.Tensor:
-            if handle.uses_sharded_strategy:
+            if handle.uses_sharded_strategy:  # noqa: B023
                 # For sharded strategies, get the *unpadded* shard instead of
                 # the *padded* shard to persist user changes to the padding
                 # (though FSDP does not explicitly support this)
                 shard, _ = FlatParamHandle._get_unpadded_shard(
                     flat_param_or_grad,
-                    handle.rank,
-                    handle.world_size,
+                    handle.rank,  # noqa: B023
+                    handle.world_size,  # noqa: B023
                 )
                 return shard
             # For `NO_SHARD`, the `flat_param` or its gradient may be modified,

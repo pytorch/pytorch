@@ -206,10 +206,10 @@ def split_module(
         node._fx_partition = partition_name
 
         torch.fx.graph.map_arg(
-            node.args, lambda def_node: record_cross_partition_use(def_node, node)
+            node.args, lambda def_node: record_cross_partition_use(def_node, node)  # noqa: B023
         )
         torch.fx.graph.map_arg(
-            node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)
+            node.kwargs, lambda def_node: record_cross_partition_use(def_node, node)  # noqa: B023
         )  # noqa: B950
 
     original_partition_order = list(partitions.keys())
@@ -249,9 +249,9 @@ def split_module(
 
             # swap out old graph nodes in kw/args with references to new nodes in this submodule
             environment = partition.environment
-            gathered_args = torch.fx.graph.map_arg(node.args, lambda n: environment[n])
+            gathered_args = torch.fx.graph.map_arg(node.args, lambda n: environment[n])  # noqa: B023
             gathered_kwargs = torch.fx.graph.map_arg(
-                node.kwargs, lambda n: environment[n]
+                node.kwargs, lambda n: environment[n]  # noqa: B023
             )
 
             if node.op not in ["call_module", "get_attr"]:

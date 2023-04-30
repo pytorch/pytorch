@@ -77,7 +77,7 @@ class LogitRelaxedBernoulli(Distribution):
     def param_shape(self):
         return self._param.size()
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
         uniforms = clamp_probs(torch.rand(shape, dtype=probs.dtype, device=probs.device))

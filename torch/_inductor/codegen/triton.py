@@ -437,8 +437,8 @@ class IterationRanges:
         prefix: str,
         *,
         kernel: "Kernel",
-        divisor=sympy.Integer(1),
-        length=sympy.Integer(1),
+        divisor=sympy.Integer(1),  # noqa: B008
+        length=sympy.Integer(1),  # noqa: B008
     ):
         super().__init__()
         self.name = name
@@ -1757,7 +1757,7 @@ class TritonScheduling:
             current_loop_writes.clear()
             is_current_reductions.clear()
 
-        for index, node in enumerate(nodes):
+        for index, node in enumerate(nodes):  # noqa: B007
             if node in done:
                 continue
             done.add(node)
@@ -2053,7 +2053,7 @@ class TritonScheduling:
         return tilings
 
     @classmethod
-    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.Integer(1)):
+    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.Integer(1)):  # noqa: B008
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.

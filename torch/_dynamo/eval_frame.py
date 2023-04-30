@@ -920,7 +920,7 @@ def export(
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
-                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))  # noqa: B904
 
     new_graph = ChangeInputOutputSignature(
         graph,
@@ -1048,7 +1048,7 @@ def assume_constant_result(fn):
 def optimize_assert(
     backend,
     *,
-    hooks=Hooks(None, None),
+    hooks=Hooks(None, None),  # noqa: B008
     export=False,
     export_constraints=None,
     dynamic=False,

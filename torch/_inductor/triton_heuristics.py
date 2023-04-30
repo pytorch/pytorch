@@ -352,8 +352,8 @@ def _find_names(obj):
     import inspect
 
     frame = inspect.currentframe()
-    for frame in iter(lambda: frame.f_back, None):
-        frame.f_locals
+    for frame in iter(lambda: frame.f_back, None):  # noqa: B020, B023
+        frame.f_locals  # noqa: B018
     obj_names = []
     for referrer in gc.get_referrers(obj):
         if isinstance(referrer, dict):

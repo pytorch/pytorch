@@ -26,7 +26,7 @@ def get_type_a_related_to_b(
     # TODO(future PR): add the rest of modules and ops here
     type_a_related_to_b: Set[Tuple[NSNodeTargetType, NSNodeTargetType]] = set()
 
-    for base_name, s in base_name_to_sets_of_related_ops.items():
+    for _base_name, s in base_name_to_sets_of_related_ops.items():
         s_list = list(s)
         # add every bidirectional pair
         for idx_0 in range(0, len(s_list)):

@@ -128,7 +128,7 @@ class PersistentCache:
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
             return {}
@@ -356,7 +356,7 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self):
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
@@ -708,7 +708,7 @@ class PyCodeCache:
                 try:
                     code = compile(f.read(), path, "exec")
                 except Exception as e:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Failed to import {path}\n{type(e).__name__}: {e}"
                     )
                 mod = types.ModuleType(f"{__name__}.{key}")

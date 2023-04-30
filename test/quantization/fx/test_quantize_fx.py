@@ -1778,7 +1778,7 @@ class TestQuantizeFx(QuantizationTestCase):
                  None),
             ]
             for (ModuleClass, module_constructor_inputs,
-                 inputs, quantized_node, weight_prepack_node) in tests:
+                 inputs, _quantized_node, weight_prepack_node) in tests:
                 for is_reference in [True, False]:
                     node_occurrence = {}
                     if weight_prepack_node:
@@ -4670,13 +4670,13 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare(m, {"": qconfig}, example_inputs=example_inputs)
             # check that there is a duplicated observer instance
             actpp_module_count = 0
-            for name, module in m.named_modules(remove_duplicate=False):
+            for _name, module in m.named_modules(remove_duplicate=False):
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 2)
 
             actpp_module_count = 0
-            for name, module in m.named_modules():
+            for _name, module in m.named_modules():
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 1)
@@ -5569,7 +5569,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         options = itertools.product([M1, M2], [True, False])
-        for M, is_qat in options:
+        for _M, _is_qat in options:
             m = M1().eval()
             example_inputs = (torch.randn(1, 3, 3, 3),)
             m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
@@ -5730,7 +5730,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 m = M().eval()
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
-                for name, mod in m.named_modules():
+                for _name, mod in m.named_modules():
                     if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
@@ -8685,7 +8685,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             )
 
         # check it works in None and static qconfig
-        for qconfig in [None, default_qconfig]:
+        for _qconfig in [None, default_qconfig]:
             qconfig_dict = {"": default_qconfig}
             m = M().eval()
             m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
@@ -9237,7 +9237,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             criterion = nn.CrossEntropyLoss()
             train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
         else:
-            for i in range(10):
+            for _i in range(10):
                 prepared(input_value)
 
         # print('after observation root:', prepared.root)
@@ -9282,7 +9282,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
                 train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
             else:
-                for i in range(10):
+                for _i in range(10):
                     qeager(input_value)
 
             # print('ref after observation:', qeager)
@@ -9446,7 +9446,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @override_qengines
     def test_qat_embeddingbag_linear(self):
-        for device in get_supported_device_types():
+        for _device in get_supported_device_types():
             class EmbeddingBagLinear(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -9487,7 +9487,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @override_qengines
     def test_qat_embedding_linear(self):
-        for device in get_supported_device_types():
+        for _device in get_supported_device_types():
             class EmbeddingLinear(torch.nn.Module):
                 def __init__(self):
                     super().__init__()

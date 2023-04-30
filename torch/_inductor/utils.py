@@ -831,9 +831,9 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             else:
                 kernel_detail_str = ""
 
-            gb_per_s = num_gb / (ms / 1e3)
+            gb_per_s = num_gb / (ms / 1e3)  # noqa: B023
             return create_bandwidth_info_str(
-                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
+                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str  # noqa: B023
             )
 
         bench_result = []
@@ -849,7 +849,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)  # noqa: B023
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"

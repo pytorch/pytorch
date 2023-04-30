@@ -477,7 +477,7 @@ def trace_plot(data, device=None, plot_segments=False):
                   *_frames_fmt(frames, full_filename=True)]
         return w.add_element(size, frames)
 
-    for i, e in enumerate(trace):
+    for _i, e in enumerate(trace):
         if e['action'] == alloc:
             elemid = add_element(e['addr'], e['size'], e.get('frames', []))
             addr_to_alloc[e['addr']] = elemid
@@ -554,7 +554,7 @@ def profile_plot(profile, device=None):
                              category)
 
     kv_to_elem = {}
-    for time, action, (tensor_key, version), size in memory_profile.timeline:
+    for _time, action, (tensor_key, version), size in memory_profile.timeline:
         if tensor_key.device != device:
             continue
         if action == Action.CREATE:

@@ -320,7 +320,7 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
     # Capture backward graphs in reverse order
     per_callable_static_grad_outputs = []
     per_callable_static_grad_inputs = []
-    for static_input_surface, static_outputs, bwd_graph, module_params in \
+    for static_input_surface, static_outputs, bwd_graph, _module_params in \
             zip(reversed(per_callable_static_input_surfaces),
                 reversed(per_callable_static_outputs),
                 reversed(bwd_graphs),
@@ -422,8 +422,8 @@ def make_graphed_callables(callables, sample_args, num_warmup_iters=3, allow_unu
                 def new_fwd(*user_args):
                     # If the module's training-or-eval state matches what we graphed,
                     # run the graph, otherwise run the original forward method
-                    if func.training == graph_training_state:
-                        return graphed(*user_args)
+                    if func.training == graph_training_state:  # noqa: B023
+                        return graphed(*user_args)  # noqa: B023
                     else:
                         return orig_fwd(*user_args)
                 return new_fwd

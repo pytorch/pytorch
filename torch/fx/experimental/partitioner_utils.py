@@ -138,8 +138,8 @@ def get_latency_of_one_partition(
             if node.op in {"placeholder", "get_attr"}:
                 continue
             input_nodes: Dict[Node, None] = {}
-            map_arg(node.args, lambda n: input_nodes.setdefault(n))
-            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+            map_arg(node.args, lambda n: input_nodes.setdefault(n))  # noqa: B023
+            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))  # noqa: B023
             # If a node has no input nodes in this partition,
             # or its input nodes in this partition are placeholders and get_attrs
             # this node is on the top bfs level in this partition
@@ -255,8 +255,8 @@ def get_comm_latency_between(
     # and added to comm_size
     for node in child_partition.nodes:
         input_nodes: Dict[Node, None] = {}
-        map_arg(node.args, lambda n: input_nodes.setdefault(n))
-        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+        map_arg(node.args, lambda n: input_nodes.setdefault(n))  # noqa: B023
+        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))  # noqa: B023
         for n in input_nodes:
             if n in parent_partition.nodes and n not in visited_nodes:
                 size_bytes = getattr(n, "size_bytes", None)

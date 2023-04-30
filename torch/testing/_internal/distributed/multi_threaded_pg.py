@@ -280,59 +280,59 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
-    def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):
+    def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(AllToAll(), self)
         res = coll.join(self._rank, (output_tensor_list, input_tensor_list))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def allreduce(self, tensor_list, opts=AllreduceOptions()):
+    def allreduce(self, tensor_list, opts=AllreduceOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
+    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
+    def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):  # noqa: B008
         tensor_list = list(torch.chunk(output_tensor, self._world_size))
         return self.allgather([tensor_list], [input_tensor], opts)
 
-    def broadcast(self, tensor_list, opts=BroadcastOptions()):
+    def broadcast(self, tensor_list, opts=BroadcastOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
+    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(Scatter(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def gather(self, output_tensors, input_tensors, opts=ScatterOptions()):
+    def gather(self, output_tensors, input_tensors, opts=ScatterOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(Gather(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
+    def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):  # noqa: B008
         coll = ProcessLocalGroup._start_coll(ReduceScatter(opts.reduceOp), self)
         res = coll.join(self._rank, (output_tensor, scatter_list))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):  # noqa: B008
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 

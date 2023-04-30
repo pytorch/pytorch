@@ -1861,7 +1861,7 @@ class TestTracer(JitTestCase):
         module = torch.jit.trace_module(n, inputs)
 
         check_inputs = []
-        for i in range(2):
+        for _i in range(2):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
@@ -2329,7 +2329,7 @@ class TestMixTracingScripting(JitTestCase):
 
             def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
                 output = []
-                for i, j in feature_map.items():
+                for _i, j in feature_map.items():
                     output.append(self.linear(j[0]))
 
                 return torch.stack(output)

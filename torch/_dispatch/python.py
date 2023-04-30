@@ -81,7 +81,7 @@ def check_metadata_matches(n, r, desc):
     for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
         if not isinstance(rv, torch.Tensor):
             continue
-        check_tensor_metadata_matches(nv, rv, lambda: f"{desc()} output {i}")
+        check_tensor_metadata_matches(nv, rv, lambda: f"{desc()} output {i}")  # noqa: B023
 
 class Lit:
     def __init__(self, s):

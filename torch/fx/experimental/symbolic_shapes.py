@@ -1352,7 +1352,7 @@ def _make_user_magic(method, user_type):
         if method in reflectable_magic_methods:
             setattr(user_type, f"__r{method}__", rbinary_magic_impl)
 
-for method, func in magic_methods.items():
+for method, func in magic_methods.items():  # noqa: B007
     if method in bool_magic_methods:
         _make_user_magic(method, SymBool)
     else:
@@ -2265,9 +2265,9 @@ class ShapeEnv:
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
                             record_constraint_violation(c, lambda: (
-                                f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}.  Guard "
-                                f"was allocated at:\n{tb}"
+                                f"Could not validate (strict) constraint {c.render(source)} as "  # noqa: B023
+                                f"we generated a guard on this size variable: {guard_expr}.  Guard "  # noqa: B023
+                                f"was allocated at:\n{tb}"  # noqa: B023
                             ))
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
@@ -2302,8 +2302,8 @@ class ShapeEnv:
                         # vr is superset of c_vr
                         if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
                             record_constraint_violation(c_vr, lambda: (
-                                f"Could not validate constraint {c.render(sources[0])} as "
-                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
+                                f"Could not validate constraint {c.render(sources[0])} as "  # noqa: B023
+                                f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."  # noqa: B023
                                 "This is actually supposed to be impossible to "
                                 "trigger right now as we do not refine ranges; maybe you called "
                                 "constrain_range manually, or we forgot to update this error message? "
@@ -2532,7 +2532,7 @@ class ShapeEnv:
                 expr = new_expr
         return expr
 
-    @lru_cache(256)
+    @lru_cache(256)  # noqa: B019
     def size_hint(self, expr: "sympy.Expr"):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
@@ -2594,7 +2594,7 @@ class ShapeEnv:
         self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
-    @lru_cache(256)
+    @lru_cache(256)  # noqa: B019
     def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
@@ -2668,7 +2668,7 @@ class ShapeEnv:
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
 
-    @lru_cache(256)
+    @lru_cache(256)  # noqa: B019
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None):
         """
         Given an expression, evaluates it, adding guards if necessary

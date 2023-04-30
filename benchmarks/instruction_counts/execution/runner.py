@@ -166,7 +166,7 @@ class Runner:
 
     def _enqueue_new_jobs(self) -> None:
         work_queue: List[WorkOrder] = []
-        for i, work_order in enumerate(self._work_queue):
+        for _i, work_order in enumerate(self._work_queue):
             self._currently_processed = work_order
             cpu_list = self._core_pool.reserve(work_order.timer_args.num_threads)
 

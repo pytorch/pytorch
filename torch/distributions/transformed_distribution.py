@@ -108,7 +108,7 @@ class TransformedDistribution(Distribution):
     def has_rsample(self):
         return self.base_dist.has_rsample
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size()):  # noqa: B008
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from
@@ -121,7 +121,7 @@ class TransformedDistribution(Distribution):
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):  # noqa: B008
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters

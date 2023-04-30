@@ -301,7 +301,7 @@ def _canonicalize_fft_shape_and_dim_args(
         ret_shape = tuple(input_sizes[d] for d in ret_dims)
 
     for n in ret_shape:
-        check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
+        check(n > 0, lambda: f"Invalid number of data points ({n}) specified")  # noqa: B023
 
     return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
 
