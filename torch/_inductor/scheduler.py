@@ -125,6 +125,9 @@ class BaseSchedulerNode:
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
 
+    def op_counts(self):
+        return self.read_writes.op_counts
+
     def used_buffer_names(self) -> Set[str]:
         return {
             dep.name
@@ -522,6 +525,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_aliasing_or_mutation(self):
         return any(x.has_aliasing_or_mutation() for x in self.snodes)
+
+    @cache_on_self
+    def op_counts(self):
+        op_counts = collections.Counter()
+        for node in self.snodes:
+            op_counts.update(node.op_counts())
+        return op_counts
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes

@@ -1240,10 +1240,8 @@ class TritonKernel(Kernel):
                 {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
                 """
                 )
-                idx_dtype = self.index_dtype
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
-                updated = value
                 if reduction_type == "min":
                     updated = f"triton_helpers.minimum({accumulator}, {value})"
                 elif reduction_type == "max":
