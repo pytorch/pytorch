@@ -273,10 +273,7 @@ class BaseSchedulerNode:
         V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
-        for use in self.users:
-            if isinstance(use.node, OutputNode):
-                return False
-        return True
+        return all(not isinstance(use.node, OutputNode) for use in self.users)
 
     def codegen_originating_info(self, buffer, only_once=True):
         if not config.comment_origin:
@@ -1026,10 +1023,10 @@ class Scheduler:
             #   - MemoryDep("foo", x) != MemoryDep("foo", x + 1)
             #   - MemoryDep("foo", x) != StarDep("foo")
             return False
-        for name in remaining_deps:
-            if node1_names & self.name_to_fused_node[name].recursive_predecessors:
-                return False
-        return True
+        return all(
+            not node1_names & self.name_to_fused_node[name].recursive_predecessors
+            for name in remaining_deps
+        )
 
     def score_fusion(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """

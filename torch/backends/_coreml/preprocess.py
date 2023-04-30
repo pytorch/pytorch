@@ -55,10 +55,7 @@ def CompileSpec(inputs,
 
 
 def _check_enumerated_shape(shape):
-    for s in shape:
-        if not isinstance(s, (list, tuple)):
-            return False
-    return True
+    return all(isinstance(s, (list, tuple)) for s in shape)
 
 
 def _convert_to_mil_type(shape, dtype, name: str):

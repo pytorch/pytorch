@@ -97,11 +97,7 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
     if len(a) != len(b):
         return False
 
-    for x, y in zip(a, b):
-        if x != y:
-            return False
-
-    return True
+    return all(x == y for x, y in zip(a, b))
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -1704,10 +1700,7 @@ def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
     # aten/src/ATen/ExpandUtils.h:is_expandable_to
     if len(shape) > len(desired):
         return False
-    for i in range(len(shape)):
-        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
-            return False
-    return True
+    return all(not (shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1) for i in range(len(shape)))
 
 
 def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
