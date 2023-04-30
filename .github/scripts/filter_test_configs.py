@@ -250,9 +250,7 @@ def remove_disabled_jobs(
             )
             return filtered_test_matrix
 
-        if (
-            disabled_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME)
-        ):
+        if disabled_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
             print(
                 f"Issue {disabled_url} created by {author} has disabled all the test jobs for {workflow} / {job_name}"
             )
