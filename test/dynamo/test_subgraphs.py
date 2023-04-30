@@ -630,7 +630,10 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, 2)
+        if config.dynamic_shapes:
+            self._common(fn, 1, 7)
+        else:
+            self._common(fn, 1, 2)
 
 
 if __name__ == "__main__":
