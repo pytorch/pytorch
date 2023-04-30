@@ -5,7 +5,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-import contextlib
+
 import subprocess
 from base64 import b64encode
 from typing import ClassVar, cast
@@ -40,9 +40,10 @@ class EtcdRendezvousBackendTest(TestCase, RendezvousBackendTestMixin):
         self._client = self._server.get_client()
 
         # Make sure we have a clean slate.
-        with contextlib.suppress(EtcdKeyNotFound):
+        try:
             self._client.delete("/dummy_prefix", recursive=True, dir=True)
-
+        except EtcdKeyNotFound:
+            pass
 
         self._backend = EtcdRendezvousBackend(self._client, "dummy_run_id", "/dummy_prefix")
 
