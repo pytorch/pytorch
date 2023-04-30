@@ -30,7 +30,6 @@ ignore = [
     "B007", "B008", "B017",
     "B018", # Useless expression
     "B019", "B020",
-    "B022", # Allow empty context manager
     "B023", "B024", "B026",
     "B028", # No explicit `stacklevel` keyword argument found
     "B027", "B904", "B905",
