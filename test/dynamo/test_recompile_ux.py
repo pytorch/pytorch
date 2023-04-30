@@ -163,7 +163,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         cache_fail_test(
             a,
             a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
-            "tensor 'L['a']' strides mismatch at index 0. expected 20, actual 1",
+            "tensor 'L['a']' stride mismatch at index 0. expected 20, actual 1",
         )
         cache_fail_test(
             a, a[0, :, :], "tensor 'L['a']' rank mismatch. expected 3, actual 2"
