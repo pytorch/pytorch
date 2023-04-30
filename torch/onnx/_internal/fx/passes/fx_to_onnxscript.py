@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -45,7 +45,7 @@ def _onnx_function_diagnose_call_append_symbolic_source_location(
     # TODO(bowbao): Record source location of symbolic.
     # Need this separate step because normally only the source location of
     # class `onnxscript.OnnxFunction.__call__` is recorded.
-    pass
+    ...
 
 
 # TODO(bowbao): Delete this once diagnostics is introduced in onnxscript.
@@ -116,7 +116,11 @@ def _location_from_fx_stack_trace(
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ):
@@ -200,7 +204,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             continue
         if key == "dtype":
             if value is None:
-                filtered["dtype"] = -1
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
             else:
                 filtered["dtype"] = int(
                     _type_utils.JitScalarType.from_dtype(value).onnx_type()
@@ -221,6 +227,7 @@ def _fill_tensor_meta(
         torch.SymInt,
         torch.SymFloat,
         List[fake_tensor.FakeTensor],
+        Tuple[fake_tensor.FakeTensor, ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -295,7 +302,11 @@ def _wrap_fx_args_as_onnxscript_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ) -> Tuple[tuple, dict]:
@@ -320,7 +331,11 @@ def _export_fx_node_to_onnxscript(
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
