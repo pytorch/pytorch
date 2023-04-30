@@ -6,7 +6,7 @@ from torch import Tensor
 import collections
 import copyreg
 from copy import deepcopy
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
 
 __all__ = ['cached', 'ParametrizationList', 'register_parametrization', 'is_parametrized', 'remove_parametrizations',
@@ -133,9 +133,10 @@ class ParametrizationList(ModuleList):
             new = original
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    with suppress(NotImplementedError):
+                    try:
                         new = module.right_inverse(new)
-
+                    except NotImplementedError:
+                        pass
                 # else, or if it throws, we assume that right_inverse is the identity
 
         if not isinstance(new, Tensor) and not isinstance(new, collections.abc.Sequence):
