@@ -568,8 +568,17 @@ test_libtorch() {
     # Wait for background download to finish
     wait
 
-    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
+    if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
+        TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
+        mkdir -p $TEST_REPORTS_DIR
+
+        # TODO: Not quite sure why this test time out only on ASAN
+        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    else
+        # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
+        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
+    fi
+
     python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
 
     if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
