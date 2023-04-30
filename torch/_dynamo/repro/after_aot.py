@@ -882,53 +882,59 @@ def run_repro(
         )
 
     parser = argparse.ArgumentParser(
-        description=(
-            "torch.compile repro script with defaults:\n\n"
-            f"  {command=}\n"
-            f"  {accuracy=}\n"
-            f"  {tracing_mode=}\n"
-            f"  {save_dir=}\n"
-            f"  {patch_code=}\n"
-        ),
+        description=f"""\
+An after_aot repro script, typically triggering a bug in PyTorch Inductor.
+When run with no arguments, this script defaults to running '{command}'.
+Extra flags may be available; to find out more, try '{command} --help'.
+There are also alternate subcommands available, see below.
+
+default settings on this script:
+  {accuracy=}
+  {tracing_mode=}
+  {save_dir=}
+  {patch_code=}
+""",
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    accuracy_group = parser.add_mutually_exclusive_group()
-    accuracy_group.add_argument(
-        "--accuracy",
-        action="store_true",
-        default=accuracy,
-        help="test accuracy when running repro",
-    )
-    accuracy_group.add_argument(
-        "--no-accuracy",
-        dest="accuracy",
-        action="store_false",
-        default=accuracy,
-        help="do not test accuracy",
-    )
+    def common_flags(parser):
+        accuracy_group = parser.add_mutually_exclusive_group()
+        accuracy_group.add_argument(
+            "--accuracy",
+            action="store_true",
+            default=accuracy,
+            help="test accuracy when running repro",
+        )
+        accuracy_group.add_argument(
+            "--no-accuracy",
+            dest="accuracy",
+            action="store_false",
+            default=accuracy,
+            help="do not test accuracy",
+        )
 
-    parser.add_argument(
-        "--save-dir",
-        type=str,
-        default=save_dir,
-        help="directory where saved inputs live",
-    )
-    parser.add_argument(
-        "--patch-code", type=str, default=patch_code, help="patch code for testing"
-    )
-    parser.add_argument(
-        "--tracing-mode",
-        type=str,
-        default=tracing_mode,
-        help="how to trace the repro module into a GraphModule with metadata",
-    )
+        parser.add_argument(
+            "--save-dir",
+            type=str,
+            default=save_dir,
+            help="directory where saved inputs live",
+        )
+        parser.add_argument(
+            "--patch-code", type=str, default=patch_code, help="patch code for testing"
+        )
+        parser.add_argument(
+            "--tracing-mode",
+            type=str,
+            default=tracing_mode,
+            help="how to trace the repro module into a GraphModule with metadata",
+        )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     parser_minify = subparsers.add_parser(
         "minify", help="run the minifier on the repro"
     )
+    common_flags(parser_minify)
 
     isolate_group = parser_minify.add_mutually_exclusive_group()
     isolate_group.add_argument(
@@ -947,6 +953,7 @@ def run_repro(
     parser_analyze = subparsers.add_parser(
         "analyze", help="run the accuracy analyzer on the repro"
     )
+    common_flags(parser_analyze)
     parser_analyze.add_argument(
         "--skip-saving-inductor-intermediates",
         action="store_true",
@@ -972,9 +979,16 @@ def run_repro(
         "minifier-query",
         help="run the repro in the context of minification, inverting exit code meaning",
     )
+    common_flags(parser_minifier_query)
+
+    parser_run = subparsers.add_parser(
+        "run",
+        help="just run the repro",
+    )
+    common_flags(parser_run)
 
     args = None
-    if len(sys.argv) <= 1 or sys.argv[1] not in ("-h", "--help"):
+    if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
     options = parser.parse_args(args)
