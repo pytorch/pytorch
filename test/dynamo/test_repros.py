@@ -877,8 +877,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # repeat_interleave is a dynamic shape operator we do not execute/
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
-        self.assertEqual(cnt.frame_count, ifdyn(2, 4))
-        self.assertEqual(cnt.op_count, ifdyn(9, 10))
+        self.assertEqual(cnt.frame_count, ifdyn(4, 4))
+        self.assertEqual(cnt.op_count, ifdyn(18, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -3110,6 +3110,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt)(fn)
         opt_fn(inp1, inp2, inp3, inp4, c)
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_torch_variable_type(self):
+        # from torchvision
+        def check_type(obj, types_or_checks):
+            for type_or_check in types_or_checks:
+                if (
+                    isinstance(obj, type_or_check)
+                    if isinstance(type_or_check, type)
+                    else type_or_check(obj)
+                ):
+                    return True
+            return False
+
+        opt_check_type = torch._dynamo.optimize("eager")(check_type)
+        ref = check_type(torch.randn(4), [torch.Tensor])
+        res = opt_check_type(torch.randn(4), [torch.Tensor])
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

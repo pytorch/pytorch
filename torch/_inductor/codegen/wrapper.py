@@ -210,6 +210,7 @@ class WrapperCodeGen(CodeGen):
         self.size = "size()"
         self.stride = "stride()"
         self.first_device_guard = True
+        self.supports_intermediate_hooks = True
 
         self.write_header()
         self.write_prefix()
@@ -342,7 +343,11 @@ class WrapperCodeGen(CodeGen):
         self.writeline(
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
-        if config.generate_intermediate_hooks and origin_node is not None:
+        if (
+            self.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+            and origin_node is not None
+        ):
             self.writeline(
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
@@ -740,6 +745,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.stride = "strides()"
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
+        self.supports_intermediate_hooks = False
 
     def seed(self):
         """

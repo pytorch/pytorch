@@ -90,6 +90,7 @@ class TestCase(TorchTestCase):
                     "cpp.min_chunk_size": 1,
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
+                    "generate_intermediate_hooks": True,
                 }
             )
         )
@@ -223,6 +224,7 @@ def check_model(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
+    dynamic=False,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -276,7 +278,9 @@ def check_model(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
+    run = torch._dynamo.optimize(
+        compile_fx_wrapper, nopython=nopython, dynamic=dynamic
+    )(run)
 
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
@@ -385,7 +389,10 @@ def check_model_cuda(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
+    dynamic=None,
 ):
+    if dynamic is None:
+        dynamic = torch._dynamo.config.dynamic_shapes
     kwargs = kwargs or {}
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -407,6 +414,7 @@ def check_model_cuda(
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
         check_gradient=check_gradient,
+        dynamic=dynamic,
     )
 
     if check_lowp:
@@ -4540,6 +4548,13 @@ class CommonTemplate:
 
     @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_1(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
+
+    @config.patch({"lowmem_dropout": True})
+    def test_dropout_trivial_1_lowmem(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
 
