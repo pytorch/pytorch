@@ -148,7 +148,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(layer1_conv_back_flops), """1849688064""")
 
     def test_custom(self):
-        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out: 5})
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out_shape: 5})
         with mode:
             a = T(4, 5)
             a + a
