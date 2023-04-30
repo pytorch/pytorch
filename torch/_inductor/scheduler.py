@@ -721,13 +721,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
             op_counts.update(node.op_counts())
         return op_counts
 
-    @cache_on_self
-    def get_mutations(self):
-        result = []
-        for node in self.snodes:
-            result.extend(node.get_mutations())
-        return result
-
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
     def update_mutated_names(self, renames: Dict[str, str]):
@@ -740,6 +733,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
         raise NotImplementedError
 
     def get_aliases(self):
+        raise NotImplementedError
+
+    def get_mutations(self):
         raise NotImplementedError
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
