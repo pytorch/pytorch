@@ -125,7 +125,7 @@ class TestSDPAPatternRewriter(TestCase):
                 inplace=False,
             ).matmul(value)
 
-        self._check_common(dot_prod_attention, contains=False)
+        self._check_common(dot_prod_attention, contains=False, has_fuse_pattern=False)
 
     def test_sdpa_rewriter_4(self):
         def dot_prod_attention(
@@ -138,7 +138,7 @@ class TestSDPAPatternRewriter(TestCase):
                 inplace=False,
             ).matmul(value)
 
-        self._check_common(dot_prod_attention, contains=False)
+        self._check_common(dot_prod_attention, contains=False, has_fuse_pattern=False)
 
     def test_sdpa_rewriter_5(self):
         def sfdp_pattern_5(query, key, value):
@@ -171,7 +171,7 @@ class TestSDPAPatternRewriter(TestCase):
             attn_weight = torch.dropout(attn_weight, 0.5, True)
             return attn_weight @ value
 
-        self._check_common(sfdp_pattern_6, contains=False)
+        self._check_common(sfdp_pattern_6, contains=False, has_fuse_pattern=False)
 
     def test_pattern_fails_with_tensor_factor(self):
         # https://github.com/pytorch/pytorch/issues/99124
