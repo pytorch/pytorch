@@ -183,7 +183,7 @@ class TestGradAcc(FSDPTest):
         batch_idx = 0
         for config in configs:
             sync_context = (
-                fsdp_model.no_sync() if config.use_no_sync else contextlib.suppress()
+                fsdp_model.no_sync() if config.use_no_sync else contextlib.nullcontext()
             )
             with sync_context:
                 for _ in range(config.num_iters):
