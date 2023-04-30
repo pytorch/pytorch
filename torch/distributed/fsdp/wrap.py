@@ -413,7 +413,7 @@ class _ConfigAutoWrap:
         _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
         assert (
-            "wrapper_cls" in kwargs.keys()
+            "wrapper_cls" in kwargs
         ), "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
         _ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]

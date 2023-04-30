@@ -692,7 +692,7 @@ class AccessByKeys(torch.nn.ModuleDict):
 
     def forward(self, init_features):
         features = [init_features]
-        for k in self.keys():
+        for k in self:
             new_features = self[k](features)
             features.append(new_features)
         return torch.cat(features, 1)
@@ -1783,7 +1783,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 )
 
             def forward(self, x):
-                for activation_name in self.activations.keys():
+                for activation_name in self.activations:
                     x = self.activations[activation_name](x)
                 return x
 

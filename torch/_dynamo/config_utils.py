@@ -130,7 +130,7 @@ class ConfigModule(ModuleType):
         class ConfigPatch(ContextDecorator):
             def __enter__(self):
                 assert not prior
-                for key in changes.keys():
+                for key in changes:
                     # KeyError on invalid entry
                     prior[key] = config._config[key]
                 config._config.update(changes)

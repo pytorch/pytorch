@@ -433,7 +433,7 @@ def _flatten_optim_state_dict(
     local_state_clean_fqns: Dict[str, str] = {}
     if optim is not None:
         local_state_dict = optim.state_dict()["state"]
-        for fqn in local_state_dict.keys():
+        for fqn in local_state_dict:
             clean_fqn = clean_tensor_name(fqn)
             local_state_clean_fqns[clean_fqn] = fqn
 
@@ -1500,9 +1500,7 @@ def _all_gather_optim_state(
     # Convert the gathered, pre-processed state of each rank to the original one.
     gathered_state: Dict[str, Any] = {}
 
-    all_tensor_states = sorted(
-        {n for state in object_list for n in state.tensors.keys()}
-    )
+    all_tensor_states = sorted({n for state in object_list for n in state.tensors})
     empty_ranks: Set[int] = set()
     for name in all_tensor_states:
         numels = []

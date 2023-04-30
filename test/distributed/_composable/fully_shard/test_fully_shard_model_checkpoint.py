@@ -163,14 +163,14 @@ class TestModelCheckpointing(FSDPTest):
         # Check that all keys match
         self.assertEqual(set(composable_sd.keys()), set(local_sd.keys()))
         # Check value shapes
-        for k in composable_sd.keys():
+        for k in composable_sd:
             v1 = composable_sd[k]
             v2 = local_sd[k]
             self.assertEqual(
                 v1.shape, v2.shape, f"Shape mismatch for {k} {v1.shape} vs {v2.shape}"
             )
         # Check actual values
-        for k in composable_sd.keys():
+        for k in composable_sd:
             v1 = composable_sd[k]
             v2 = local_sd[k]
             self.assertEqual(v1, v2, f"Param mismatch for {k}: {v1} vs {v2}")

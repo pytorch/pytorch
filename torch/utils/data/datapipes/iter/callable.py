@@ -140,7 +140,7 @@ def _collate_helper(conversion, item):
     tuple_names: List = []
     tuple_values: List = []
 
-    for name in conversion.keys():
+    for name in conversion:
         if name not in columns_name:
             raise Exception("Conversion keys missmatch")
 

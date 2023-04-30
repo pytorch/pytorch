@@ -186,7 +186,7 @@ def _check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_n
       `config_dict`: dictionary whose keys we want to check
     """
 
-    for k in config_dict.keys():
+    for k in config_dict:
         if k not in allowed_keys:
             raise ValueError(
                 'Expected ' + dict_name + ' to have the following keys: ' +

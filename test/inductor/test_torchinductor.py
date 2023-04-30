@@ -4546,6 +4546,13 @@ class CommonTemplate:
 
         self.common(fn2, [torch.randn(55)])
 
+    @config.patch({"lowmem_dropout": True})
+    def test_dropout_trivial_1_lowmem(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
+
     @config.patch({"triton.cudagraphs": True})
     def test_dropout(self):
         random.seed(1234)

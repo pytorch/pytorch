@@ -125,7 +125,7 @@ def functional_call(
             raise ValueError(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
-        all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
+        all_keys = [k for d in parameter_and_buffer_dicts for k in d]
         repeated_keys = [key for key, n in Counter(all_keys).items() if n > 1]
         if len(repeated_keys) > 0:
             raise ValueError(

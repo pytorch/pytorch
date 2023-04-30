@@ -487,7 +487,7 @@ class SkipFilesVariable(VariableTracker):
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
         elif (
-            self.value in self.fold_through_function_to_wrapper().keys()
+            self.value in self.fold_through_function_to_wrapper()
             and check_constant_args(args, kwargs)
         ):
             value = self.value(

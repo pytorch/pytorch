@@ -107,7 +107,7 @@ def get_public_overridable_ops():
         if not key.startswith('torch.Tensor'):
             continue
         api = key.split('.')[2]
-        if f'torch.{api}' in results.keys():
+        if f'torch.{api}' in results:
             del results[key]
     return results
 

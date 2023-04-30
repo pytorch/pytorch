@@ -103,7 +103,7 @@ def isGreen(commit: str, results: List[Dict[str, Any]]) -> Tuple[bool, str]:
                 else:
                     regex[required_check] = True
 
-    missing_workflows = [x for x in regex.keys() if not regex[x]]
+    missing_workflows = [x for x in regex if not regex[x]]
     if len(missing_workflows) > 0:
         return (False, "missing required workflows: " + ", ".join(missing_workflows))
 

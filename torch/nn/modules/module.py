@@ -1958,7 +1958,7 @@ class Module:
             unexpected_keys.append(extra_state_key)
 
         if strict:
-            for key in state_dict.keys():
+            for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child

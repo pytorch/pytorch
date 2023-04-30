@@ -1714,12 +1714,12 @@ def categorize_checks(
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
         name
-        for name in check_runs.keys()
+        for name in check_runs
         if not required_checks or any(x in name for x in required_checks)
     ]
 
     for checkname in required_checks:
-        if all(checkname not in x for x in check_runs.keys()):
+        if all(checkname not in x for x in check_runs):
             pending_checks.append((checkname, None, None))
 
     for checkname in relevant_checknames:
@@ -1874,8 +1874,7 @@ def merge(
             )
             pending, failing = categorize_checks(
                 checks,
-                required_checks
-                + [x for x in checks.keys() if x not in required_checks],
+                required_checks + [x for x in checks if x not in required_checks],
                 ok_failed_checks_threshold=3 if ignore_flaky_failures else 0,
             )
             # HACK until GitHub will be better about surfacing those

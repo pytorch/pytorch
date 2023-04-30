@@ -1425,9 +1425,7 @@ def dispatch_lambda_exprs(
                 raise RuntimeError(
                     f"{f.func}: unrecognized type '{str(a.type)}' for tensor options field '{a.name}'"
                 )
-        if not all(
-            (a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS.keys())
-        ):
+        if not all((a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS)):
             raise RuntimeError(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
             )
