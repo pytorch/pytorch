@@ -12,7 +12,7 @@ from torch.distributed._tensor.api import (
     Shard,
 )
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
-from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
+from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import normalize_dim, prod, register_prop_rule
 
 
@@ -165,8 +165,10 @@ def replicate_tensor_dim(
     placements: Sequence[Placement], dim: int
 ) -> Sequence[Placement]:
     """Force the given tensor dimension to be replicated"""
+    # Not using p.is_shard() to avoid mypy complain about Placement not having
+    # attribute dim.
     return tuple(
-        Replicate() if p.is_partial() or p.is_shard() and p.dim == dim else p
+        Replicate() if p.is_partial() or isinstance(p, Shard) and p.dim == dim else p
         for p in placements
     )
 
@@ -176,7 +178,7 @@ def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
     return (dim < spec.ndim) and spec.dim_map[dim] >= 0
 
 
-def is_tensor_dim_partial(spec: DTensorSpec) -> bool:
+def is_tensor_partial(spec: DTensorSpec) -> bool:
     return any(p.is_partial() for p in spec.placements)
 
 
@@ -468,13 +470,14 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
 
 @register_prop_rule(aten.cat.default)
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
+    # torch.cat requires all tensors must either have the same shape (except
+    # in the concatenating dimension) or be "empty". "Empty" here strictly means
+    # tensor.shape is torch.Size([0]). When tensor.ndim > 1, it will be treated
+    # as a non-empty tensor and the shape must match on non-cat dimensions.
     def is_empty(spec: DTensorSpec) -> bool:
-        return prod(spec.tensor_meta.shape) == 0 and spec.ndim <= 1
+        return list(spec.shape) == [0]
 
-    # the first arg is a list of input tensors' specs
-    # torch.cat requires All tensors must either have the same shape (except
-    # in the concatenating dimension) or be empty. Even empty tensors must
-    # have the same dimension or have only one dimension.
+    # the first arg is a list of input tensor specs
     tensor_list_specs = cast(List[DTensorSpec], op_schema.args_schema[0])
     assert len(tensor_list_specs) > 0, "torch.cat expects a non-empty list of tensors"
     non_empty_specs = [spec for spec in tensor_list_specs if not is_empty(spec)]
@@ -507,10 +510,10 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
 
     # Make sure all tensors are replciated on cat dimension
     need_reshard = False
-    tensor_list_specs_after = []
+    tensor_list_specs_after: List[DTensorSpec] = []
     for spec in tensor_list_specs:
         if not is_empty(spec) and (
-            is_tensor_dim_sharded(spec, dim=dim) or is_tensor_dim_partial(spec)
+            is_tensor_dim_sharded(spec, dim=dim) or is_tensor_partial(spec)
         ):
             need_reshard = True
             tensor_list_specs_after.append(
@@ -526,21 +529,24 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
     tensor_list_specs = tensor_list_specs_after
 
     # align non-cat dimensions placements based on reshard cost
-    mesh = tensor_list_specs[0].mesh
-    ndim = tensor_list_specs[0].ndim
     non_empty_specs = [spec for spec in tensor_list_specs if not is_empty(spec)]
-    new_placements = []
+    mesh = non_empty_specs[0].mesh
+    ndim = non_empty_specs[0].ndim
+    new_placements: List[Placement] = []
     for mesh_dim in range(mesh.ndim):
+        # compute the minimum cost of resharding on this mesh_dim
         if any(
             spec.placements[mesh_dim] != non_empty_specs[0].placements[mesh_dim]
             for spec in non_empty_specs
         ):
+            # only reshard if there is a mismatch
             need_reshard = True
             reshard_cost = []
             for shard_dim in range(ndim):
-                cost = 0
+                # compute the cost of resharding on this shard_dim
+                cost: float = 0.0
                 for spec in non_empty_specs:
-                    global_shape = spec.tensor_meta.shape
+                    global_shape = spec.shape
                     if global_shape[shard_dim] < mesh.size(mesh_dim):
                         # found one tensor where the shard_dim is smaller than
                         # mesh_dim. In this case, we cannot shard on this shard_dim,
@@ -560,6 +566,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
             best_dim = reshard_cost.index(min(reshard_cost))
             new_placements.append(Shard(best_dim))
         else:
+            # no mismatch, keep the original placement
             new_placements.append(non_empty_specs[0].placements[mesh_dim])
 
     if need_reshard:
@@ -576,7 +583,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
                     )
                 )
 
-        out = OutputSharding(
+        return OutputSharding(
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
@@ -591,14 +598,12 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
         )
     else:
         # at this point, the cat dim is not sharded,
-        out = OutputSharding(
+        return OutputSharding(
             output_spec=DTensorSpec(
                 mesh=non_empty_specs[0].mesh,
                 placements=non_empty_specs[0].placements,
             ),
         )
-
-    return out
 
 
 def _update_schema_suggestion_for_cat(

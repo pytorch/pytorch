@@ -903,7 +903,6 @@ class SimpleElasticAgent(ElasticAgent):
                 else:
                     self._stop_workers(self._worker_group)
                     self._worker_group.state = WorkerState.FAILED
-                    self._exit_barrier()
                     return run_result
             elif state == WorkerState.HEALTHY:
                 # membership changes do not count as retries
