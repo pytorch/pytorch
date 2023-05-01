@@ -1756,7 +1756,7 @@ def categorize_checks(
 
 
 def merge(
-    pr_num: int,
+    pr: GitHubPR,
     repo: GitRepo,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
@@ -1765,9 +1765,6 @@ def merge(
     stale_pr_days: int = 3,
     ignore_current: bool = False,
 ) -> None:
-    repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-    org, project = repo.gh_owner_and_name()
-    pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()["oid"]
     print(f"Attempting merge of {initial_commit_sha}")
 
@@ -2008,7 +2005,7 @@ def main() -> None:
         return
     try:
         merge(
-            args.pr_num,
+            pr,
             repo,
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
