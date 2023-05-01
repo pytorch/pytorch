@@ -4,7 +4,6 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
-
 from . import external_utils
 
 
@@ -221,6 +220,9 @@ error_on_recompile = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
+
+# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
+numpy_ndarray_as_tensor = False
 
 
 def is_fbcode():
