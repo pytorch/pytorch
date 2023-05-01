@@ -329,11 +329,15 @@ def output_csv(filename, headers, row):
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
                 lines[0] = headers
+            else:
+                headers = lines[0]
     else:
         lines = [headers]
-    lines.append([(f"{x:.4f}" if isinstance(x, float) else x) for x in row])
+    lines.append([(f"{x:.6f}" if isinstance(x, float) else x) for x in row])
     with open(filename, "w") as fd:
-        csv.writer(fd, lineterminator="\n").writerows(lines)
+        writer = csv.writer(fd, lineterminator="\n")
+        for line in lines:
+            writer.writerow(line + ["0"] * (len(headers) - len(line)))
 
 
 class NullContext:
@@ -401,7 +405,7 @@ def print_summary_table(data):
                 pass_rate = (data[col] == "pass").mean()
                 print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
             else:
-                cdata = data[col].clip(1)
+                cdata = data[col]
                 print(
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
@@ -591,7 +595,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
-    is_correct = True
 
     import contextlib
 
@@ -660,7 +663,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
         p.export_chrome_trace(name)
-    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -676,6 +678,26 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
+    msg = f"{speedup:.3f}x"
+    if args.baseline:
+        headers.extend(
+            [
+                "baseline",
+                "speedup_vs_baseline",
+            ]
+        )
+        df = pd.read_csv(args.baseline)
+        try:
+            baseline_speedup = df[df["name"] == current_name]["speedup"].item()
+            row.extend([baseline_speedup, speedup / baseline_speedup])
+            msg = f"{baseline_speedup:.3f}x -> {speedup:.3f}x [{speedup / baseline_speedup:.3f}x]"
+        except (KeyError, ZeroDivisionError):
+            row.extend(
+                [
+                    0.0,
+                    0.0,
+                ]
+            )
     if "compilation_latency" in kwargs:
         headers += [
             "compilation_latency",
@@ -705,7 +727,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_headers + headers,
         first_fields + data,
     )
-    return format_speedup(speedup, pvalue, is_correct=is_correct)
+    return msg
 
 
 def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
@@ -1487,11 +1509,12 @@ class BenchmarkRunner:
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
-            print(
-                f"memory: eager: {eager_peak_mem:.2f} GB, "
-                f"dynamo: {dynamo_peak_mem:.2f} GB, "
-                f"ratio: {compression_ratio:.2f}"
-            )
+            if self.args.print_memory:
+                print(
+                    f"memory: eager: {eager_peak_mem:.2f} GB, "
+                    f"dynamo: {dynamo_peak_mem:.2f} GB, "
+                    f"ratio: {compression_ratio:.2f}"
+                )
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1796,6 +1819,10 @@ def parse_args(args=None):
         help="Overrides the directory to place output files.",
     )
     parser.add_argument(
+        "--baseline",
+        help="Compare with a prior --output",
+    )
+    parser.add_argument(
         "--part",
         default=None,
         help="Specify the part of the model to run.",
@@ -1827,6 +1854,11 @@ def parse_args(args=None):
         "--stats",
         action="store_true",
         help="print graph counter stats",
+    )
+    parser.add_argument(
+        "--print-memory",
+        action="store_true",
+        help="print extra memory statistics",
     )
     parser.add_argument(
         "--cold-start-latency",
@@ -2006,7 +2038,6 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
-
     return parser.parse_args(args)
 
 
@@ -2014,6 +2045,8 @@ def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args()
+    if args.baseline:
+        args.baseline = os.path.abspath(args.baseline)
 
     if should_diff_branch(args):
         import git
