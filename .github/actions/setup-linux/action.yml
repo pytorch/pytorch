@@ -47,6 +47,8 @@ runs:
         max_attempts: 3
         retry_wait_seconds: 30
         command: |
+          whoami
+          id
           id -nG
           ls -l /var/run/docker.sock
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
