@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torchgen.utils import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
 import sys

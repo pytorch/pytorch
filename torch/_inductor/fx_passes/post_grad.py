@@ -15,11 +15,13 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    init_once_fakemode,
     KeywordArg,
     ListOf,
     Match,
     MULTIPLE,
     PatternMatcherPass,
+    stable_topological_sort,
 )
 from ..virtualized import V
 
@@ -56,10 +58,11 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
     gm.graph.lint()
 
 
-@functools.lru_cache(None)
+@init_once_fakemode
 def lazy_init():
     if torch._C.has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
@@ -229,7 +232,7 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.maybe_guard_leq(size, first.get_size()[dim]):
+    if V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [
