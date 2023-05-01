@@ -924,8 +924,8 @@ reflectable_magic_methods = {
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
     'pow': lambda a, b: Pow(a, b),
-    'and': lambda a, b: a & b,
-    'or': lambda a, b: a | b,
+    'and': lambda a, b: sympy.And(a, b),
+    'or': lambda a, b: sympy.Or(a, b),
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
