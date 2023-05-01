@@ -2225,6 +2225,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 100)
 
+    # See https://github.com/pytorch/pytorch/issues/100224
+    def test_dupe_slicing(self):
+        def f(x):
+            x[x > 0] *= 0.5
+            return x
+
+        x = torch.randn(1, 3, 2, 2)
+        x2 = x.clone()
+        opt_f = torch._dynamo.optimize("aot_eager")(f)
+        out_ref = f(x)
+        out_test = opt_f(x2)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x, x2)
+
     def test_avoid_dupe_specialization(self):
         def f(x, y):
             return (x + y) * 1
