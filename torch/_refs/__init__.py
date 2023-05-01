@@ -3327,7 +3327,7 @@ def roll(
         assert len_dims > 1
         tail_shifts = shifts[1:]
         tail_dims = dims[1:]
-        first_dim_rolled = torch.roll(a, shifts[0], dims[0])
+        first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
@@ -3450,9 +3450,12 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
         lambda: "Dimension specified as 0 but tensor has no dimensions",
         IndexError,
     )
-    return tuple(
-        torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
-    )
+    if t.shape[dim] == 0:
+        return tuple()
+    else:
+        return tuple(
+            torch.squeeze(s, dim) for s in torch.tensor_split(t, t.shape[dim], dim)
+        )
 
 
 @out_wrapper()
@@ -4338,7 +4341,7 @@ def empty_like(
     )
 
 
-@register_decomposition(aten.arange)
+@register_decomposition([aten.arange.start_step, aten.arange.start_out])
 @out_wrapper()
 def arange(
     start: NumberType = 0,

@@ -37,6 +37,14 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
+try:
+    import torch_np
+
+    HAS_NUMPY_TORCH_INTEROP = True
+except ModuleNotFoundError:
+    torch_np = None
+    HAS_NUMPY_TORCH_INTEROP = False
+
 import importlib
 
 import torch
@@ -526,6 +534,8 @@ def clone_input(x):
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
 
     with torch.no_grad():
@@ -555,6 +565,8 @@ def clone_input(x):
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return result
 
 
@@ -722,7 +734,7 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(
+    return isinstance(v, (enum.Enum, type)) or istype(
         v,
         (
             types.CodeType,
@@ -737,7 +749,7 @@ def is_safe_constant(v):
             torch.device,
             torch.dtype,
         ),
-    ) or isinstance(v, enum.Enum)
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -792,11 +804,12 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value):
+def enum_repr(value, local):
     enum_name = str(value)
 
     name, val = enum_name.split(".")
-    local_name = f'L["{name}"].{val}'
+    scope = "L" if local else "G"
+    local_name = f'{scope}["{name}"].{val}'
     return local_name
 
 
@@ -808,11 +821,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys):
+def dict_const_keys_repr(const_keys, *, local):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -862,6 +875,7 @@ def same(
     equal_nan=False,
     exact_dtype=True,
     relax_numpy_equality=False,
+    log_error=log.error,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -878,6 +892,7 @@ def same(
                 equal_nan,
                 exact_dtype,
                 relax_numpy_equality,
+                log_error=log_error,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -886,7 +901,7 @@ def same(
         assert set(ref.keys()) == set(
             res.keys()
         ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        for k in ref.keys():
+        for k in sorted(ref.keys()):
             if not (
                 same(
                     ref[k],
@@ -897,9 +912,10 @@ def same(
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
                     relax_numpy_equality=relax_numpy_equality,
+                    log_error=log_error,
                 )
             ):
-                log.error("Accuracy failed for key name %s", k)
+                log_error("Accuracy failed for key name %s", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -913,7 +929,7 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             if ref.dtype != res.dtype:
-                log.error("dtype mismatch %s, %s", ref.dtype, res.dtype)
+                log_error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
@@ -925,7 +941,7 @@ def same(
                     equal_nan=equal_nan,
                 )
                 if not r:
-                    log.error("Accuracy failed: uint8 tensor did not match")
+                    log_error("Accuracy failed: uint8 tensor did not match")
                 return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
@@ -965,7 +981,7 @@ def same(
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
-                    log.error(
+                    log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
                         res_error,
                         ref_error,
@@ -974,17 +990,17 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
-            log.error("Accuracy failed: allclose not within tol=%s", tol)
+            log_error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
         r = ref == res
         if not r:
-            log.error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
+            log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error(
+            log_error(
                 "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
             )
         return r
@@ -995,7 +1011,7 @@ def same(
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): %s != %s", ref, res)
+            log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1023,6 +1039,7 @@ def same(
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
                 relax_numpy_equality=relax_numpy_equality,
+                log_error=log_error,
             )
             for key in ref.__dict__.keys()
         )
@@ -1193,6 +1210,10 @@ def get_fake_value(node, tx):
     kwargs = tree_map(fake_wrapper, kwargs)
 
     nnmodule = None
+    if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
+        # If the first argument is nn.Module, should copy to fake mode.
+        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
 
@@ -1525,3 +1546,15 @@ def nnmodule_has_hooks(
             ]
         )
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+
+def to_numpy_helper(___tmp_0):
+    def convert(obj):
+        if isinstance(obj, torch_np.ndarray):
+            return obj.tensor.numpy()
+        else:
+            return obj
+
+    if isinstance(___tmp_0, tuple):
+        return tuple([convert(obj) for obj in ___tmp_0])
+    return convert(___tmp_0)

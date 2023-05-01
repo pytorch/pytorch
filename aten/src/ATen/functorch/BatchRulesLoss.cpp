@@ -12,7 +12,7 @@
 namespace at { namespace functorch {
 // Flattens out all dims except the batch dim, and also moves batch dim
 // (if it exists) to front.
-at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
+static at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
   if (bdim.has_value()) {
     auto result = moveBatchDimToFront(tensor, bdim);
     if (result.dim() > 1) {
@@ -49,7 +49,7 @@ loss_batch_rule_helper(const at::Tensor& self, optional<int64_t> self_bdim, cons
   TORCH_INTERNAL_ASSERT(false);
 };
 
-std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor,optional<int64_t>>
 mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
           optional<int64_t> target_bdim, int64_t reduction) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
@@ -58,7 +58,16 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
                                 });
 };
 
-std::tuple<at::Tensor,optional<int64_t>>
+static std::tuple<at::Tensor,optional<int64_t>>
+huber_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction, double delta) {
+  return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
+                                reduction, [delta](const at::Tensor& self, const at::Tensor& target, int64_t reduction) {
+                                  return at::huber_loss(self, target, reduction, delta);
+                                });
+};
+
+static std::tuple<at::Tensor,optional<int64_t>>
 smooth_l1_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
           optional<int64_t> target_bdim, int64_t reduction, double beta) {
   return loss_batch_rule_helper(self, self_bdim, target, target_bdim,
@@ -76,7 +85,7 @@ static Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reductio
   return unreduced;
 }
 
-Tensor binary_cross_entropy_plumbing(
+static Tensor binary_cross_entropy_plumbing(
     const Tensor& self, const Tensor& target,
     const optional<Tensor>& weight, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -116,7 +125,7 @@ Tensor binary_cross_entropy_plumbing(
   return apply_loss_reduction(result, reduction);
 }
 
-Tensor binary_cross_entropy_backward_plumbing(
+static Tensor binary_cross_entropy_backward_plumbing(
     const Tensor& grad, const Tensor& input, const Tensor& target,
     const c10::optional<Tensor>& weight_opt, int64_t reduction) {
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -170,7 +179,7 @@ Tensor binary_cross_entropy_backward_plumbing(
   return grad_input;
 }
 
-std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
+static std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
     const Tensor & self,
     const Tensor & target,
     const c10::optional<Tensor> & weight,
@@ -254,7 +263,7 @@ std::tuple<Tensor, Tensor> nll_loss_forward_decomposition(
   return std::make_tuple(result, total_weight);
 }
 
-at::Tensor nll_loss_backward_decomposition(
+static at::Tensor nll_loss_backward_decomposition(
     const at::Tensor & grad_output, const at::Tensor & self,
     const at::Tensor & target, const c10::optional<at::Tensor> & weight,
     int64_t reduction, int64_t ignore_index, const at::Tensor & total_weight) {
@@ -303,8 +312,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("nll_loss_backward", nll_loss_backward_decomposition);
   m.impl("nll_loss2d_backward", nll_loss_backward_decomposition);
   VMAP_SUPPORT(mse_loss, mse_loss_batch_rule);
-  // mse_loss_backwards uses a decomposition for its batch rule
+  // mse_loss_backward uses a decomposition for its batch rule
+  VMAP_SUPPORT(huber_loss, huber_loss_batch_rule);
+  // huber_loss_backward uses a decomposition for its batch rule
   VMAP_SUPPORT(smooth_l1_loss, smooth_l1_loss_batch_rule);
+  // smooth_l1_loss_backward uses a decomposition for its batch rule
   m.impl("binary_cross_entropy", binary_cross_entropy_plumbing);
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
