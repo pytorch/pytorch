@@ -1923,11 +1923,21 @@ class TestSDPA(NNTestCase):
         g = torch.cuda.CUDAGraph()
         # Create real output
         with torch.cuda.graph(g):
+            tmp = torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
             output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
                 query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         g.replay()
+        out_first = output_tuple[0].clone()
+        dbug_mask_first = output_tuple[-1].clone()
+        g.replay()
         out = output_tuple[0]
         dbug_mask = output_tuple[-1]
+        if not is_dropout:
+            self.assertEqual(out_first, out, atol=0, rtol=0)
+        else:
+            # replays produce different results
+            self.assertNotEqual(out_first, out)
+
 
         query_padding_mask = torch.ones(
             1, seq_len_q, device="cuda", dtype=torch.bool)
