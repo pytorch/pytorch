@@ -558,6 +558,17 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
     if group in _world.pg_object_coll_device:
         # Previously searched and cached; just return
         return _world.pg_object_coll_device[group]
+    if not isinstance(group, ProcessGroup):
+        # Provide backward compatibility to cases where `group` passed in is
+        # actually a Backend (like `ProcessGroupGloo`) rather than a
+        # `ProcessGroup` in PT 2.0 sense
+        warnings.warn(
+            f"You are using a Backend {type(group)} as a ProcessGroup. "
+            "This usage is deprecated since PyTorch 2.0. Please use a public API "
+            "of PyTorch Distributed instead."
+        )
+        # Most users create Gloo with private API for object collectives
+        return torch.device("cpu")
     """
     ``group._device_types`` is a property pybind that returns the devices
     ("cpu", "cuda", etc) supported by ``group``. Can be multiple if the
