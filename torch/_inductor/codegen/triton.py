@@ -699,10 +699,9 @@ class TritonKernel(Kernel):
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
         last_numel = self.numels[-1]
-        if dynamo_config.dynamic_shapes:
-            if not isinstance(last_numel, (int, sympy.Integer)):
-                # Not static
-                return False
+        if not isinstance(last_numel, (int, sympy.Integer)):
+            # Not static
+            return False
         hint = V.graph.sizevars.size_hint(last_numel)
         if hint > threshold:
             return False
@@ -1569,24 +1568,16 @@ class TritonKernel(Kernel):
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                postfix = (
-                    "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
-                )
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    code.writeline(
-                        f"{tree.prefix}numel = {int(simplified_tree_numel)} {postfix}"
-                    )
+                    code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.prefix == "r" and self.persistent_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if dynamo_config.dynamic_shapes:
-                    if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                        val = int(simplified_tree_numel)
-                    else:
-                        continue
-                else:
+                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     val = int(simplified_tree_numel)
+                else:
+                    continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
