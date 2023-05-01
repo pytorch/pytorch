@@ -365,6 +365,8 @@ FACTORY_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
 # without DTensor inputs.
 FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
     aten.scalar_tensor.default: default_factory_op_rule,
+    aten.arange.start: default_factory_op_rule,
+    aten.zeros.default: default_factory_op_rule,
 }
 
 

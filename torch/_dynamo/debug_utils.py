@@ -266,6 +266,18 @@ class AccuracyError(Exception):
     pass
 
 
+def clone_inputs_retaining_gradness(example_inputs):
+    """
+    This clone inputs is different from utils clone_input. In case of minifier,
+    all the tensors are leaf tensors while creating a new graph. So, we set the
+    requires_grad field w/o checking the leafness of the tensor.
+    """
+    cloned_inputs = clone_inputs(example_inputs)
+    for idx in range(len(example_inputs)):
+        cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+    return cloned_inputs
+
+
 def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
@@ -275,13 +287,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
-    new_args = clone_inputs(args)
-    # Set the requires_grad field explicitly because clone_inputs only sets
-    # requires_grad for leaf tensors.
-    for narg, arg in zip(new_args, args):
-        if isinstance(arg, torch.Tensor):
-            narg.requires_grad_(arg.requires_grad)
-    args = new_args
+    args = clone_inputs_retaining_gradness(args)
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
@@ -330,7 +336,7 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
 
     try:
         fp64_model, fp64_examples = cast_to_fp64(
-            copy.deepcopy(gm), clone_inputs(example_inputs)
+            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
     except Exception:
@@ -393,7 +399,9 @@ def cast_to_fp64(model, inputs):
 
 def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
     try:
-        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+        compiled_gm = compiler_fn(
+            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+        )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
