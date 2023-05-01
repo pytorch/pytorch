@@ -314,6 +314,29 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
 
+    def test_append(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_multi_set(self):
+        store = self._create_store()
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_get(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
+
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
@@ -330,7 +353,6 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     @property
     def num_keys_total(self):
         return 6
-
 
 class MyPythonStore(dist.Store):
     def __init__(self):
