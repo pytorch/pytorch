@@ -121,8 +121,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def __iter__(self) -> Iterator[T_co]:
         if not self._enabled:
-            for x in self.datapipe:
-                yield x
+            yield from self.datapipe
         else:
             for x in self.datapipe:
                 if len(self._buffer) == self.buffer_size:

@@ -68,21 +68,7 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
-
-SKIP = {
-    # Unusual training setup
-    "levit_128",
-}
-
-SKIP_TRAIN = {
-    # segfault: Internal Triton PTX codegen error
-    "eca_halonext26ts",
-}
-
-MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
-    "cait_m36_384": 4,
-}
+REQUIRE_HIGHER_TOLERANCE = set("sebotnet33ts_256")
 
 SCALED_COMPUTE_LOSS = {
     "ese_vovnet19b_dw",
@@ -251,13 +237,6 @@ class TimmRunnner(BenchmarkRunner):
             )
         batch_size = batch_size or recorded_batch_size
 
-        # Control the memory footprint for few models
-        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
-            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
-
-        # example_inputs = torch.randn(
-        #     (batch_size,) + input_size, device=device, dtype=data_dtype
-        # )
         torch.manual_seed(1337)
         input_tensor = torch.randint(
             256, size=(batch_size,) + input_size, device=device

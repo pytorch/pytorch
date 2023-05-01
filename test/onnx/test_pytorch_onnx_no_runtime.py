@@ -1241,6 +1241,30 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
                     double_type_count += 1
         self.assertNotEqual(double_type_count, 0)
 
+    @pytorch_test_common.skipIfNoCuda
+    def test_aten_device_with_index(self):
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
+        model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
+        model = torch.compile(model, backend="onnxrt")
+        model = model.eval()
+        device = "cuda:0"
+        model = model.to(device)
+        ids = tokenizer.batch_encode_plus(["This is a test"], return_tensors="pt").to(
+            device
+        )
+
+        with torch.no_grad():
+            _ = model(
+                **{
+                    "input_ids": ids["input_ids"],
+                    "attention_mask": ids["attention_mask"],
+                    "decoder_input_ids": ids["input_ids"],
+                    "decoder_attention_mask": ids["attention_mask"],
+                }
+            )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

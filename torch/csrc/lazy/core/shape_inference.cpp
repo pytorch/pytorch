@@ -451,25 +451,24 @@ std::vector<Shape> compute_shape_expand(
       padded_self.end(), self.sizes().begin(), self.sizes().end());
   std::vector<int64_t> target_size(_sizes.size());
   for (const auto idx : c10::irange(_sizes.size())) {
-    if (_sizes[idx].is_symbolic()) {
-      c10::SymNode symbolicIntNode = _sizes[idx].toSymNodeImpl();
-      auto* lazySymNode =
-          dynamic_cast<torch::lazy::SymNodeImpl*>(symbolicIntNode.get());
+    if (auto ma = _sizes[idx].maybe_as_int()) {
+      target_size[idx] = *ma;
+      if (*ma == -1) {
+        // -1 can't be specified for non-existing dimensions
+        TORCH_CHECK(idx >= num_new_dimensions);
+        target_size[idx] = padded_self[idx];
+      } else {
+        target_size[idx] = *ma;
+      }
+    } else {
+      auto* lazySymNode = dynamic_cast<torch::lazy::SymNodeImpl*>(
+          _sizes[idx].toSymNodeImplUnowned());
       TORCH_INTERNAL_ASSERT(lazySymNode);
       auto size_node = lazySymNode->node_;
       auto static_value =
           std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
               ->getStaticValue();
       target_size[idx] = static_value;
-    } else {
-      target_size[idx] = _sizes[idx].as_int_unchecked();
-      if (_sizes[idx].as_int_unchecked() == -1) {
-        // -1 can't be specified for non-existing dimensions
-        TORCH_CHECK(idx >= num_new_dimensions);
-        target_size[idx] = padded_self[idx];
-      } else {
-        target_size[idx] = _sizes[idx].as_int_unchecked();
-      }
     }
   }
   return {Shape(self.scalar_type(), target_size)};

@@ -108,6 +108,11 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
+    if torch.distributed.is_available():
+        from torch.distributed import _functional_collectives
+
+        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
+
     # extract all dtypes from torch
     dtypes = [
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
@@ -253,6 +258,9 @@ def is_allowed(obj):
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
+    if id(obj) in _disallowed_function_ids:
+        return False
+
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),

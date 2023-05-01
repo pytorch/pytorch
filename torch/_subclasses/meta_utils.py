@@ -1,12 +1,15 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, Optional
+from typing import ContextManager, List, Optional
 
 import torch
 from torch._guards import Source
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
+
+DimList = List
 
 
 def safe_is_leaf(t):
@@ -160,13 +163,21 @@ class MetaConverter:
     # as part of this process, we will maintain this invariant!  (Even though
     # other users of this may not need it this property to be upheld.)
     def meta_tensor(
-        self, t, shape_env=None, callback=lambda t: t(), source: Optional[Source] = None
+        self,
+        t,
+        shape_env=None,
+        callback=lambda t: t(),
+        source: Optional[Source] = None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
 
             # TODO: make a dedicated UnknownSource for this?
-            source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+            source = ConstantSource(
+                f"__meta_utils_unknown_tensor{len(self.tensor_memo)}"
+            )
 
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
@@ -206,11 +217,17 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        make_symbolic = shape_env is not None
-
         def sym_sizes_strides_storage_offset(t):
-            if make_symbolic:
-                return shape_env.create_symbolic_sizes_strides_storage_offset(t, source)
+            if shape_env is not None:
+                return shape_env.create_symbolic_sizes_strides_storage_offset(
+                    t,
+                    source,
+                    dynamic_dims=dynamic_dims,
+                    constraint_dims=constraint_dims,
+                )
+            else:
+                assert dynamic_dims is None
+                assert constraint_dims is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -222,6 +239,9 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
+                    # TODO: Delete this assert, and just attempt making the
+                    # sparse tensor anyway; even if there is a shape_env, this
+                    # tensor might be all static
                     assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
@@ -272,8 +292,16 @@ class MetaConverter:
 
                     from torch._dynamo.source import AttrSource
 
+                    if shape_env:
+                        base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
+                    else:
+                        base_dynamic_dims = None
                     base = self.meta_tensor(
-                        t._base, shape_env, callback, source=AttrSource(source, "_base")
+                        t._base,
+                        shape_env,
+                        callback,
+                        source=AttrSource(source, "_base"),
+                        dynamic_dims=base_dynamic_dims,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -434,6 +462,8 @@ class MetaConverter:
                         shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
+                        dynamic_dims=dynamic_dims,
+                        constraint_dims=constraint_dims,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -451,6 +481,8 @@ class MetaConverter:
         callback=lambda t: t(),
         ignore_subclass=False,
         source=None,
+        dynamic_dims=None,
+        constraint_dims=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -470,10 +502,6 @@ class MetaConverter:
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
-                    # these are supported in meta conversion but the fallbacks
-                    # don't work
-                    t.is_neg(),
-                    t.is_conj(),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
@@ -499,11 +527,17 @@ class MetaConverter:
                     ctx = torch._C.DisableTorchFunctionSubclass()
                 with ctx:
                     r = self.meta_tensor(
-                        t, shape_env=shape_env, callback=callback, source=source
+                        t,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=source,
+                        dynamic_dims=dynamic_dims,
+                        constraint_dims=constraint_dims,
                     )
-                # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
+                    # NB: Cannot directly use Parameter constructor
+                    # because that would force a detach, not desirable
+                    r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause

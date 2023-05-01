@@ -40,6 +40,10 @@ C10_DIAGNOSTIC_POP()
 #include <ATen/ops/empty.h>
 #endif
 
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
+
 namespace at { namespace native {
 
 namespace {
@@ -62,6 +66,22 @@ uint8_t getAlignment(const Tensor &t) {
 }
 
 cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const at::MemoryFormat memory_format, const bool _virtual) {
+#if defined(__linux__) && !defined(FBCODE_CAFFE2) && CUDNN_MAJOR == 8 && CUDNN_MINOR > 5
+  // Workaround for cudnn error handling deficiency, that results in a crash on Ubuntu-22+
+  // if `libnvrtc.so` is not found on the system, which strictly speaking is not necessary
+  // for usecases below
+  // See https://github.com/pytorch/pytorch/issues/97041
+  static C10_UNUSED auto cudnn_cnn_infer_handler = [] {
+    void *handle = dlopen("libcudnn_cnn_infer.so.8", RTLD_LAZY);
+    char *err = dlerror();
+    if (!handle) {
+      TORCH_WARN("Attempt to open cnn_infer failed: handle=", handle, " error: ", err);
+    } else if (err) {
+      TORCH_WARN("Applied workaround for CuDNN issue, install nvrtc.so");
+    }
+    return handle;
+  }();
+#endif
   auto sizes = t.sizes();
   auto strides = t.strides();
   bool channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
@@ -153,8 +173,9 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   return &(it->second);
 }
 
-void emplace(const KeyType& key, T& results) {
+void update(const KeyType& key, T& results) {
   std::lock_guard<std::mutex> guard(mutex);
+  engine_cache.erase(key);
   engine_cache.emplace(key, std::move(results));
 }
 
@@ -325,7 +346,7 @@ auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tenso
 
 int64_t get_available_workspace() {
   int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   size_t max_block_size = 0;
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
   return static_cast<int64_t>(max_block_size);
@@ -548,7 +569,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
   for (auto & plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan);
-      benchmark_cache.emplace(key, plan);
+      benchmark_cache.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -562,7 +583,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
   for (auto & plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.emplace(key, plan);
+      benchmark_cache_fused.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -583,7 +604,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
         continue;
       }
       run_conv_plan(handle, x, y, w, plan);
-      benchmark_cache.emplace(key, plan);
+      benchmark_cache.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -604,7 +625,7 @@ bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::str
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.emplace(key, plan);
+      benchmark_cache_fused.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
