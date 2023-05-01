@@ -37,6 +37,14 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   engine_.reset_state(seed);
 }
 
+void MPSGeneratorImpl::set_offset(uint64_t offset) {
+  engine_.set_offset(offset);
+}
+
+uint64_t MPSGeneratorImpl::get_offset() const {
+  return engine_.get_offset();
+}
+
 uint64_t MPSGeneratorImpl::current_seed() const {
   return data_.seed;
 }

@@ -4,7 +4,6 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
-
 from . import external_utils
 
 
@@ -109,6 +108,10 @@ print_graph_breaks = False
 
 # Show a warning for every specialization
 print_specializations = False
+
+# Simplify guards, summarizing static and dynamic constraints on dimensions.
+# NOTE: This only has an effect when dynamic_shapes=True.
+summarize_dim_constraints = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -217,6 +220,9 @@ error_on_recompile = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
+
+# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
+numpy_ndarray_as_tensor = False
 
 
 def is_fbcode():

@@ -183,10 +183,12 @@ class ExprPrinter(Printer):
         base = self._print(base)
         # NB: Remember this is sizevar computation!  You don't typically
         # expect to have to do floating point computation including exponents
-        # in sizevar compute.  Instead of adding support for sqrt/floating
+        # in sizevar compute.  Instead of adding support for floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
-        assert exp.is_integer
+        if exp == 0.5:
+            return f"math.sqrt({base})"
+        assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
@@ -522,6 +524,19 @@ class KernelArgs:
             name, self.inplace_buffers
         )
 
+    # Includes inplace buffers, excludes removed buffers.  Essentially,
+    # after you do a call into this kernel, which buffers actually contain
+    # updated data?  Modeled off of python_argdefs.
+    def live_output_buffers(self):
+        live_outs = set()
+        for inplaced in unique(self.inplace_buffers.values()):
+            live_outs.add(inplaced.other_names[-1])
+        for outer, inner in self.output_buffers.items():
+            if outer in self.inplace_buffers or inner == "REMOVED":
+                continue
+            live_outs.add(outer)
+        return live_outs
+
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
@@ -601,20 +616,26 @@ class CSE:
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable],
         write=True,
+        assignment=True,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
+        assert write or assignment
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
         if cache_key not in self.cache:
-            var = self.newvar()
+            var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
+                if assignment:
+                    line = f"{self.prefix}{var} = {expr}{self.suffix}"
+                else:
+                    line = f"{expr}{self.suffix}"
+                buffer.writeline(line)
 
         return self.cache[cache_key]
 
@@ -721,7 +742,7 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var):
+            def indirect_indexing(index_var, size):
                 return sympy_symbol(str(index_var))
 
             @staticmethod
@@ -801,3 +822,8 @@ class OptimizationContext:
     dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
+
+    # Load uint8 value as float32
+    is_load_uint8_as_float: bool = False
+    # Store float32 value as uint8
+    is_store_float_as_uint8: bool = False

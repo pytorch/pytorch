@@ -14,13 +14,13 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, sparse_csr_unary_ufuncs, BinaryUfuncInfo, ReductionOpInfo)
+    (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and
 )
-
+from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
 if TEST_SCIPY:
@@ -466,75 +466,64 @@ class TestSparseCompressed(TestCase):
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @all_sparse_compressed_layouts()
     @ops(_sparse_compressed_ops)
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_consistency(self, layout, device, dtype, op):
+        """Checks that the op on a strided and on a sparse tensors will
+        produce the same results.
+        """
         if not op.supports_sparse_layout(layout):
-            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+            self.skipTest(f"{op.name} does not support input with {layout} layout")
 
         # FIXME: remove in followup once integer support is landed for segment_reduce
         if (layout == torch.sparse_csr and not dtype.is_floating_point
                 and op.name in ('masked.mean', 'masked.amax', 'masked.amin')):
-            self.skipTest(f"{op.name} does not support input with {layout} layout")
-
-        if isinstance(op, BinaryUfuncInfo):
-            self.skipTest("test does not support binary operations")
+            self.skipTest(f"{op.name} does not support input with {layout} layout and {dtype} dtype")
 
         require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
-        if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
-            self.skipTest(f"{op.name} does not support input with {layout} layout")
 
-        all_samples_are_valid = False
-        if op.name == 'sum':
-            if (
-                    layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-                    and dtype in {torch.bool, torch.uint8}):
-                self.skipTest('Requires fix to gh-98495. Skipping!')
-            all_samples_are_valid = True
-            samples = [type(sample)(sample.input.to_dense(), sample.args, sample.kwargs)
-                       for sample in op.sample_inputs_sparse(layout, device, dtype)]
-        else:
-            samples = list(op.sample_inputs(device, dtype))
+        samples = []
+        for sample in op.sample_inputs(device, dtype):
+            if sample.input.ndim < 2:
+                continue
+            dense_dim = sample.input.ndim - 2
+            blocksize = (tuple(map(self._smallest_divisor, sample.input.shape[:2]))
+                         if layout in {torch.sparse_bsr, torch.sparse_bsc} else None)
+
+            def _to_sparse(x):
+                if isinstance(x, torch.Tensor):
+                    if blocksize is None:
+                        if x.ndim != sample.input.ndim:
+                            return x
+                    elif x.ndim != sample.input.ndim + 2 or x.shape[-3] % blocksize[0] or x.shape[-2] % blocksize[1]:
+                        return x
+                    return x.clone().to_sparse(layout=layout, blocksize=blocksize, dense_dim=dense_dim)
+                return x
+
+            sparse_sample = sample.transform(_to_sparse)
+            # Some strided samples (with inf, nan elements) appear to share
+            # storage, so we must clone:
+            sample = sample.transform(lambda x: (x.clone() if isinstance(x, torch.Tensor) else x))
+
+            if validate_sample_input_sparse(op, sparse_sample, check_validate=False) is not sparse_sample:
+                # that is, the validation returns the sparse sample
+                # wrapped within ErrorInput instance
+                continue
+            samples.append((sample, sparse_sample))
 
         # Fail early to prevent silent success with this test
-        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
-        if not any(ndims_equals_2d):
-            raise ValueError("Expected at least one 2D tensor in samples.")
+        if len(samples) == 0:
+            raise ValueError("Expected at least one 2 or higher D tensor in samples.")
 
-        count = 0
-        for sample in samples:
-            if not all_samples_are_valid:
-                assert torch.is_tensor(sample.input)
-                # Sparse CSR/CSC only supports 2D tensors as inputs
-                if sample.input.ndim != 2:
-                    continue
-                if isinstance(op, ReductionOpInfo):
-                    # Reductions on sparse compressed require keepdim=True
-                    if not sample.kwargs.get('keepdim'):
-                        continue
-                    # Reductions on sparse compressed tensors require explicit mask
-                    if require_mask and sample.kwargs.get('mask') is None:
-                        continue
-            expected = op(sample.input, **sample.kwargs)
+        for sample, sparse_sample in samples:
+            expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
-            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                # Use smallest non-trivial blocksize for the given input shape:
-                blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
-            else:
-                blocksize = None
-            sparse = sample.input.to_sparse(layout=layout, blocksize=blocksize)
-
-            assert torch.is_tensor(sparse)
-            output = op(sparse, **sample.kwargs)
+            output = op(sparse_sample.input, *sparse_sample.args, **sparse_sample.kwargs)
             assert torch.is_tensor(output)
             strided_output = output.to_dense()
-            if require_mask:
-                output_mask = torch.masked._output_mask(op.op, sample.input, **sample.kwargs)
+            if require_mask and sample.kwargs.get('mask') is not None:
+                output_mask = torch.masked._output_mask(op.op, sample.input, *sample.args, **sample.kwargs)
                 expected.masked_fill_(~output_mask, 0)
             self.assertEqual(strided_output, expected)
-            count += 1
-
-        # Better fail late to prevent silent success with this test
-        if not count:
-            raise ValueError("Expected at least one sample with keepdim and/or explicit mask for reductions.")
 
     @skipMeta
     @all_sparse_compressed_layouts()
