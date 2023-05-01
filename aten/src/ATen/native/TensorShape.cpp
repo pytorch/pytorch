@@ -2550,7 +2550,7 @@ std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) {
 
 std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with ", self.dim(), " dimensions!")
-  TORCH_CHECK(split_size != 0 && self.sizes()[2] % split_size == 0,
+  TORCH_CHECK(split_size != 0 && self.sym_sizes()[2] % split_size == 0,
     "torch.dsplit attempted to split along dimension ", 2,", but the size of the dimension ", self.sizes()[2], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 2);
 }
