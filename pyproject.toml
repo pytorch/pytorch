@@ -30,7 +30,6 @@ ignore = [
     "B007", "B008", "B017",
     "B018", # Useless expression
     "B019", "B020",
-    "B022", # Allow empty context manager
     "B023", "B024", "B026",
     "B028", # No explicit `stacklevel` keyword argument found
     "B027", "B904", "B905",
@@ -49,7 +48,6 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108",
-    "SIM109",
     "SIM110",
     "SIM114", # Combine `if` branches using logical `or` operator
     "SIM115",
