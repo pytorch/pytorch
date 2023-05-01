@@ -132,7 +132,7 @@ def elu_backward(
         return torch.where(
             self_or_result <= 0,
             grad_output * negiptcoef * (self_or_result + negcoef),
-            self_or_result * poscoef,
+            grad_output * poscoef,
         )
     else:
         return torch.where(
