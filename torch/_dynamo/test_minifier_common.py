@@ -79,6 +79,8 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             capture_output=True,
             cwd=repro_dir,
         )
+        print("minifier stdout:", launch_proc.stdout.decode("utf-8"))
+        print("minifier stderr:", launch_proc.stderr.decode("utf-8"))
 
         return launch_proc, launch_code
 
