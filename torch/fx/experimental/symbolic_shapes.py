@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import re
 import sys
 import textwrap
 import threading
@@ -16,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 
@@ -1665,7 +1666,7 @@ class DimConstraints:
             symbol, val = solution.args
             assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
             # because this is univariate, the solution is a specialization
-            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} = {val}")
+            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
             # add this as a substitution to simplify other constraints
             self._substitutions[s] = val
 
@@ -1702,25 +1703,37 @@ class DimConstraints:
         for s, congruences in reduced_congruences.items():
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
-                if not (s in self._substitutions) or not sympy.checksol(congruence, {s: self._substitutions[s]}):
+                if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
                     self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
 
-    def prettify_results(self):
+    def prettify_results(self, original_signature: inspect.Signature):
+        # Note: Model inputs are wrapped as LocalSource in dynamo.
+        # LocalSource.name() wraps the name with L[""]. We use regular
+        # expression to do the replacement to avoid traversing up
+        # the source hierarchy manually.
+        def unwrap_local_source(source_name):
+            return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
+
         buf = ""
+        indent = 4 * " "
         if self._static_results:
+            sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
             buf += "\nNOTE: Specializations will happen by default with `assume_static_by_default=True`."
-            for result in self._static_results:
-                buf += f"\n\t{result}"
-            buf += "\n"
+            buf += f"\n```\ndef specializations{str(original_signature)}:"
+            buf += f"\n{indent}return (" + f" and\n{indent}".join(sorted_static_results) + ")"
+            buf += "\n```\n"
         if self._dynamic_results:
+            sorted_dynamic_results = sorted(self._dynamic_results)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
-            buf += "\n```\nconstraints=["
-            for result in self._dynamic_results:
-                buf += f"\n\t{result},"
-            buf += "\n]\n```"
+            buf += f"\n```\ndef specify_constraints{str(original_signature)}:"
+            buf += f"\n{indent}return ["
+            for result in sorted_dynamic_results:
+                buf += f"\n{indent*2}{unwrap_local_source(result)},"
+            buf += f"\n{indent}]\n```\n"
         return buf
+
 
 
 TLS = threading.local()
@@ -1800,6 +1813,7 @@ class ShapeEnv:
         self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
         self.log.info("create_env")
         self.frozen = False
+        self.dim_constraints: Optional[DimConstraints] = None
 
     def freeze(self):
         self.frozen = True
@@ -2143,11 +2157,12 @@ class ShapeEnv:
 
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(list)
-        dynamic_sources = []
-        constraint_violations : List[Tuple[Constraint, Callable[[], str]]] = []
+        constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
 
-        def record_constraint_violation(constraint, msg):
-            constraint_violations.append((constraint, lambda: msg))
+        def record_constraint_violation(warn_only, msg, hint=None):
+            constraint_violations.append(
+                (warn_only, lambda: f"{msg} {hint()}" if hint else msg)
+            )
 
         def is_dim(src):
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
@@ -2177,10 +2192,10 @@ class ShapeEnv:
                     if constraint is not None:
                         # TODO: Maybe non-strict constraint shouldn't error
                         # here?  Check what happens in practice
-                        def hint():
+                        def hint(s):
                             if s.free_symbols:
                                 return (
-                                    "Perhaps you meant to specify a constraint on {s.free_symbols}?" +
+                                    f"Perhaps you meant to specify a constraint on {s.free_symbols}?" +
                                     "; ".join(
                                         f"{s0} bound by " + ", ".join(str(source0) for source0 in symbol_to_source[s0])
                                         for s0 in s.free_symbols
@@ -2189,23 +2204,29 @@ class ShapeEnv:
                             else:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
-                        record_constraint_violation(constraint, (
+                        msg = (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
-                            f"{s}.  {hint()}"
-                        ))
+                            f"{s}."
+                        )
+                        record_constraint_violation(
+                            constraint.warn_only,
+                            msg,
+                            hint=functools.partial(hint, s),
+                        )
 
                 input_guards.append((source, s))
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 if constraint is not None:
-                    record_constraint_violation(constraint, (
+                    msg = (
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
                         # TODO: fold this into TORCH_LOGS
                         "about why it is constant, set torch._dynamo.config.print_specializations = True"
-                    ))
+                    )
+                    record_constraint_violation(constraint.warn_only, msg)
 
         for t, source, constraint in zip(placeholders, sources, constraint_inputs):
             if isinstance(source, str):
@@ -2230,7 +2251,7 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
-        dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
+        self.dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
 
         if not _simplified:
             for source, expr in input_guards:
@@ -2251,7 +2272,7 @@ class ShapeEnv:
                         continue
 
                 if is_dim(source):
-                    dim_constraints.add_equality(source, expr)
+                    self.dim_constraints.add_equality(source, expr)
 
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
@@ -2263,13 +2284,11 @@ class ShapeEnv:
                     and equalities_inputs and
                     not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
                 ):
-                    constraints = symbol_to_constraints[expr]
-                    constraint = constraints[0]
                     msg = (
                         f"The specified set of equalities {equalities_inputs.render()} "
                         f"is not sufficient; please also specify {source_ref(source)} == {sexpr}."
                     )
-                    record_constraint_violation(constraint, msg)
+                    record_constraint_violation(equalities_inputs.warn_only, msg)
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -2284,7 +2303,7 @@ class ShapeEnv:
             g = self.simplify(g)
             try:
                 if any(is_dim(source) for s in g.free_symbols for source in symbol_to_source[s]):
-                    dim_constraints.add(g)
+                    self.dim_constraints.add(g)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
                 # A non-relational constraint on a single sizevar can violate
@@ -2295,11 +2314,12 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            record_constraint_violation(c, (
+                            msg = (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "
                                 f"was allocated at:\n{tb}"
-                            ))
+                            )
+                            record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
                             # didn't constrain it to one value  (we don't
@@ -2336,14 +2356,14 @@ class ShapeEnv:
                                 f"Could not validate constraint {c.render(sources[0])} as "
                                 f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
                             )
-                            record_constraint_violation(c, msg)
+                            record_constraint_violation(c.warn_only, msg)
 
                 assert sources
                 assert symbol.is_integer
                 bounds = []
                 if r.lower != -sympy.oo:
                     if any(is_dim(source) for source in sources):
-                        dim_constraints.add(sympy.Ge(symbol, r.lower))
+                        self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                     bounds.append(str(r.lower))
                 bounds.append(source_ref(sources[0]))
                 # NB: This looks like an off-by-one error but it's not: the
@@ -2355,20 +2375,16 @@ class ShapeEnv:
                 # the 64-bit limit.
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                     if any(is_dim(source) for source in sources):
-                        dim_constraints.add(sympy.Le(symbol, r.upper))
+                        self.dim_constraints.add(sympy.Le(symbol, r.upper))
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
 
-        if torch._dynamo.config.dynamic_shapes and torch._dynamo.config.summarize_dim_constraints:
-            dim_constraints.solve()
-            log.warning("Summary of dimension constraints:%s", dim_constraints.prettify_results())
-
         if constraint_violations:
             warn_msgs = []
             error_msgs = []
-            for constraint, msg in constraint_violations:
-                if constraint.warn_only:
+            for warn_only, msg in constraint_violations:
+                if warn_only:
                     msg = f"  {len(warn_msgs) + 1}. {msg()}"
                     warn_msgs.append(msg)
                 else:
@@ -2378,7 +2394,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(f"Constraints violated!\n{err}")
             elif len(warn_msgs) > 0:
-                log.warning("%s Warning only constraints violated", len(warn_msgs))
+                log.debug("%s Warning only constraints violated", len(warn_msgs))
 
         return exprs
 
@@ -2655,7 +2671,7 @@ class ShapeEnv:
         if not expr.has(sympy.Mod):
             try:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
-                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:

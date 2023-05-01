@@ -9,7 +9,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value, get_real_value
+from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 from torch.utils import _pytree as pytree
@@ -311,6 +311,32 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif self.value is torch.from_numpy:
+            if not config.numpy_ndarray_as_tensor:
+                unimplemented(
+                    "torch.from_numpy(). Turn on config.numpy_ndarray_as_tensor to support "
+                    "torch.from_numpy()."
+                )
+            assert len(args) == 1, f"Got arguments {args}"
+            assert not kwargs
+            t = args[0]
+            from .tensor import NumpyNdarrayVariable
+
+            if isinstance(t, NumpyNdarrayVariable):
+                # TODO: mark the tensor as non-resizable
+                return wrap_fx_proxy_cls(
+                    target_cls=TensorVariable,
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch_np._helpers.ndarrays_to_tensors,
+                        *proxy_args_kwargs(args, {}),
+                    ),
+                    example_value=None,
+                    **options,
+                )
+            else:
+                unimplemented(f"torch.from_numpy(<{type(t)}>)")
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
@@ -472,16 +498,10 @@ class TorchVariable(VariableTracker):
                 tx, [args[0], result], {}
             )
         else:
-            any_symints_or_symfloats = any(
-                [isinstance(x, SymNodeVariable) for x in args]
-            )
+            any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
-                [
-                    isinstance(
-                        x, (variables.ConstantVariable, variables.SymNodeVariable)
-                    )
-                    for x in args
-                ]
+                isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
+                for x in args
             )
             bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
@@ -571,7 +591,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
             fn_ = self.value
-            if any([isinstance(x, SymNodeVariable) for x in args]):
+            if any(isinstance(x, SymNodeVariable) for x in args):
                 if self.value == math.sqrt:
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
@@ -844,6 +864,14 @@ class TorchHigherOrderOperator(VariableTracker):
                     for var in f.closure.items
                     if isinstance(var, ClosureVariable) and var.name != "self"
                 ]
+                scope = {**tx.symbolic_locals, **tx.symbolic_globals}
+                closure_vars = [
+                    name
+                    for name in closure_vars
+                    if not isinstance(
+                        scope[name], (UserFunctionVariable, NestedUserFunctionVariable)
+                    )
+                ]
                 if closure_vars:
                     code = f.get_code()
                     raise torch._dynamo.exc.UserError(
@@ -852,6 +880,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         f"at {code.co_filename}:{code.co_firstlineno} because "
                         f"it closes over variables {closure_vars}. Please rewrite "
                         f"'{code.co_name}' to take {closure_vars} as additional args.",
+                        ref_case_id=26,
                     )
 
             # Setup the subgraph we're going to capture into
@@ -1004,10 +1033,24 @@ class TorchHigherOrderOperator(VariableTracker):
             true_tracked_fakes = true_cmp.output.tracked_fakes
             false_tracked_fakes = false_cmp.output.tracked_fakes
             tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
+            true_tensor_weakref_to_sizes_strides = (
+                true_cmp.output.tensor_weakref_to_sizes_strides
+            )
+            false_tensor_weakref_to_sizes_strides = (
+                false_cmp.output.tensor_weakref_to_sizes_strides
+            )
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
             tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
+
+            # Add tracking
+            tx.output.tensor_weakref_to_sizes_strides.update(
+                true_tensor_weakref_to_sizes_strides
+            )
+            tx.output.tensor_weakref_to_sizes_strides.update(
+                false_tensor_weakref_to_sizes_strides
+            )
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)
@@ -1066,9 +1109,16 @@ class TorchHigherOrderOperator(VariableTracker):
             parent_tracked_fakes = parent_cmp.output.tracked_fakes
             body_tracked_fakes = body_cmp.output.tracked_fakes
             tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
+            body_tensor_weakref_to_sizes_strides = (
+                body_cmp.output.tensor_weakref_to_sizes_strides
+            )
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+            # Add tracking
+            tx.output.tensor_weakref_to_sizes_strides.update(
+                body_tensor_weakref_to_sizes_strides
+            )
 
             body_name = add_subgraph(
                 "body", torch.fx.GraphModule(body_nn_modules, body_graph)

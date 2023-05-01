@@ -26,6 +26,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
+from torch.utils.weak import WeakIdKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -87,6 +88,7 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
+    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -207,6 +209,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
+        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -316,6 +319,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
+            dict(self.tensor_weakref_to_sizes_strides),
         )
         self.timestamp += 1
         return state
@@ -330,6 +334,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
+            self.tensor_weakref_to_sizes_strides,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
@@ -676,6 +681,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
+            codegen = PyCodegen(tx)
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
@@ -706,7 +712,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
+            codegen = pass2
 
+        if config.numpy_ndarray_as_tensor:
+            from .variables.tensor import NumpyNdarrayVariable
+
+            self.add_output_instructions(
+                NumpyNdarrayVariable.reconstruct_ndarray_before_return(codegen, self)
+            )
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
@@ -760,7 +773,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
-        gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
