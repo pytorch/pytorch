@@ -181,6 +181,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         atol: float = 1e-7,
         opset_version: int = 18,
         has_mutation: bool = False,
+        verbose: bool = False,
         additional_test_inputs: Optional[
             List[
                 Union[
@@ -202,6 +203,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
+            verbose (bool, optional): Whether to save diagnostics as Sarif log and print
+                verbose information. Defaults to False.
             additional_test_inputs: Test the models with another dataset input, which
                 is designed for dynamic axes testing. Defaults to None. It's a list of
                 different input sets in tuples. Inside tuple, the first element is a tuple
@@ -239,6 +242,15 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+
+        if verbose:
+            export_output.diagnostic_context.dump(
+                f"test_report_{self._testMethodName}"
+                f"_op_level_debug_{self.op_level_debug}"
+                f"_dynamic_axes_{self.dynamic_shapes}"
+                ".sarif",
+                compress=False,
+            )
 
         _compare_pytorch_onnx_with_ort(
             export_output,

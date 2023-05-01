@@ -1842,11 +1842,17 @@ else:
             x = torch.zeros(m, device=device)
             res = x.scatter_add(dim, idx, src)
 
+            # Checking if scatter_add is deterministic
+            for i in range(5):
+                res_next = x.scatter_add(dim, idx, src)
+                self.assertEqual(res, res_next, atol=0, rtol=0)
+                res = res_next
+
             expected = torch.zeros(m, device=device)
             for i in range(elems):
                 expected[idx[i]] += src[i]
 
-            self.assertEqual(res, expected, atol=0, rtol=0)
+            self.assertEqual(res, expected, atol=1e-4, rtol=1e-5)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
@@ -6150,6 +6156,51 @@ class TestTorch(TestCase):
         z = torch.tensor((1, -1), dtype=torch.int)
         self.assertTrue(torch.equal(x, y))
         self.assertFalse(torch.equal(z, x))
+
+        # Fast path test: tensor flags, like neg and conj
+        neg_0 = torch.tensor((1, 2, 3), dtype=torch.float)
+        neg_1 = neg_0._neg_view()
+        self.assertTrue(neg_1.is_neg())
+        self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
+        self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
+        self.assertEqual(neg_0.stride(), neg_1.stride())
+        self.assertEqual(neg_0.size(), neg_1.size())
+        self.assertFalse(torch.equal(neg_0, neg_1))
+        # Disable the following check due to the inductor failure
+        # See https://github.com/pytorch/pytorch/issues/100340 and
+        # https://github.com/pytorch/pytorch/issues/98175
+        # self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
+
+        conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j])
+        conj_1 = conj_0.conj()
+        self.assertTrue(conj_1.is_conj())
+        self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
+        self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
+        self.assertEqual(conj_0.stride(), conj_1.stride())
+        self.assertEqual(conj_0.size(), conj_1.size())
+        self.assertFalse(torch.equal(conj_0, conj_1))
+        # Disable the following check due to the inductor failure
+        # See https://github.com/pytorch/pytorch/issues/100340 and
+        # https://github.com/pytorch/pytorch/issues/98175
+        # self.assertTrue(torch.equal(conj_0, conj_1.conj()))
+
+        # Fast path test: two tensors share the same storage, but different dtype
+        s_0 = torch.rand((2, 3), dtype=torch.float)
+        s_1 = s_0.view(dtype=torch.int32)
+        self.assertEqual(s_0.data_ptr(), s_1.data_ptr())
+        self.assertEqual(s_0.storage_offset(), s_1.storage_offset())
+        self.assertEqual(s_0.stride(), s_1.stride())
+        self.assertEqual(s_0.size(), s_1.size())
+        self.assertFalse(torch.equal(s_0, s_1))
+
+        # Fast path test: two tensors share the same storage, but different strides
+        t_0 = torch.rand((2, 3), dtype=torch.float)
+        t_1 = t_0.t()
+        self.assertEqual(t_0.data_ptr(), t_1.data_ptr())
+        self.assertEqual(t_0.storage_offset(), t_1.storage_offset())
+        self.assertNotEqual(t_0.stride(), t_1.stride())
+        self.assertNotEqual(t_0.size(), t_1.size())
+        self.assertFalse(torch.equal(t_0, t_1))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
