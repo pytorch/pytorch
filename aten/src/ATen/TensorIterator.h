@@ -132,6 +132,10 @@ struct TORCH_API OperandInfo {
 
   C10_ALWAYS_INLINE ~OperandInfo() = default;
 
+  /// The data pointer. This may be different from tensor->data_ptr() if the
+  /// iterator is split.
+  void* data = nullptr;
+
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
 
@@ -159,10 +163,6 @@ struct TORCH_API OperandInfo {
   TensorOptions options() const {
     return TensorOptions(target_dtype).device(device);
   }
-
-  /// The data pointer. This may be different from tensor->data_ptr() if the
-  /// iterator is split.
-  void* data = nullptr;
 
   bool is_output = false;
 
@@ -370,6 +370,23 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   T scalar_value(int arg) {
     auto& op = operands_[arg];
     return c10::fetch_and_cast<T>(op.tensor_base().scalar_type(), op.data);
+  }
+
+  /// Return scalar value from original_tensor_base if it is defined. When
+  /// common_dtype is Half, casting scalar input to common_dtype might overflow.
+  /// If the scalar is aleady given in the type of Half, then return scalar
+  /// value from tensor_base.
+  template <typename T>
+  T original_scalar_value(int arg) {
+    auto& original_tensor_base = operands_[arg].original_tensor_base();
+    if (original_tensor_base.defined()) {
+      TORCH_INTERNAL_ASSERT(
+          original_tensor_base.scalar_type() != common_dtype());
+      return c10::fetch_and_cast<T>(
+          original_tensor_base.scalar_type(), original_tensor_base.data_ptr());
+    } else {
+      return scalar_value<T>(arg);
+    }
   }
 
  private:

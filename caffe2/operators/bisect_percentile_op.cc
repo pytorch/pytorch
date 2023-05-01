@@ -15,7 +15,7 @@ OPERATOR_SCHEMA(BisectPercentile)
 
     For each feature, we also need additional information regarding the feature
     value distribution.
-    There are several vectors to keep data to percentile mappping information
+    There are several vectors to keep data to percentile mapping information
     as arguments (context):
     1. feature raw values (R)
     2. feature percentile mapping (P)

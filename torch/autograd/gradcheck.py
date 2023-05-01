@@ -68,8 +68,7 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
             yield x  # type: ignore[misc]
     elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
-            for result in _iter_tensors(elem, only_requiring_grad):
-                yield result
+            yield from _iter_tensors(elem, only_requiring_grad)
 
 
 def _densify(x):
@@ -1450,7 +1449,7 @@ def gradcheck(
     masked: Optional[bool] = None,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
-    gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
+    gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
@@ -1607,7 +1606,7 @@ def gradgradcheck(
     masked: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
-    against analytical gradients w.r.t. tensors in :attr:`inputs` and
+    against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with
     ``requires_grad=True``.
 

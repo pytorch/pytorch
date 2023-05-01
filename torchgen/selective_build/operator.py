@@ -83,7 +83,7 @@ class SelectiveBuildOperator:
         if "debug_info" in op_info:
             di_list = op_info["debug_info"]
             assert isinstance(di_list, list)
-            debug_info = tuple(map(lambda x: str(x), di_list))
+            debug_info = tuple((str(x) for x in di_list))
 
         return SelectiveBuildOperator(
             name=op_name,

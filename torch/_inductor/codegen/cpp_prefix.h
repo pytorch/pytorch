@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -5,6 +7,7 @@
 #include <limits>
 #include <omp.h>
 
+#include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
@@ -20,6 +23,22 @@ template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 
+template <typename scalar_t>
+inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a > b ? a : b;
+}
+
+template <typename scalar_t>
+inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a < b ? a : b;
+}
+
 constexpr float uint32_to_uniform_float(uint32_t value) {
   // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
   constexpr float scale = 4.6566127342e-10;
@@ -33,6 +52,10 @@ float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
 float randn_cpu(uint32_t seed, uint32_t offset) {
   at::Philox4_32 engine(seed, 0, offset);
   return engine.randn(10);
+}
+
+uint32_t randint_cpu(uint32_t seed, uint32_t offset) {
+  return at::Philox4_32(seed, 0, offset)();
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
@@ -73,33 +96,27 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
 // vectorization. The caller needs to make sure the src represents TRUE/FALSE
 // correctly.
 template <typename T>
-void flag_to_float(const T* src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
-  }
-}
-
-template <typename T, std::enable_if_t<std::is_same<T, bool>::value || std::is_same<T, uint8_t>::value, bool> = true>
-void flag_to_float(T src, float* dst, int64_t n) {
-#pragma unroll
-  for (int64_t i = 0; i < n; i++) {
-    uint32_t* dst_u32 = (uint32_t*)dst;
-    dst_u32[i] = src ? 0xFFFFFFFF : 0;
-  }
+inline float flag_to_float_scalar(T src) {
+  float ret;
+  *(uint32_t*)(&ret) = src ? 0xFFFFFFFF : 0;
+  return ret;
 }
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 
+template <typename T>
+inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
+  __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
+  #pragma unroll
+  for (int64_t i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    dst_tmp[i] = flag_to_float_scalar(src[i]);
+  }
+  return at::vec::Vectorized<float>::loadu(dst_tmp);
+}
+
 inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
   at::vec::Vectorized<float> res_vec(0);
   at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
-  return res_vec;
-}
-
-inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16& bf16_buf) {
-  at::vec::Vectorized<float> res_vec(static_cast<float>(bf16_buf));
   return res_vec;
 }
 

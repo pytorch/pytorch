@@ -39,8 +39,17 @@ from gitutils import (
     GitRepo,
     patterns_to_regex,
 )
-from label_utils import gh_add_labels, has_required_labels, LABEL_ERR_MSG
+from label_utils import (
+    gh_add_labels,
+    gh_remove_label,
+    has_required_labels,
+    LABEL_ERR_MSG,
+)
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
+# labels
+MERGE_IN_PROGRESS_LABEL = "merging"
+MERGE_COMPLETE_LABEL = "merged"
 
 
 class JobCheckState(NamedTuple):
@@ -73,10 +82,7 @@ class FlakyRule:
             and self.name in job.get("name", "")
             and job.get("failure_captures") is not None
             and all(
-                [
-                    capture in job.get("failure_captures", [])
-                    for capture in self.captures
-                ]
+                capture in job.get("failure_captures", []) for capture in self.captures
             )
         )
 
@@ -230,6 +236,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -337,6 +344,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -427,7 +435,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
-REMOTE_MAIN_BRANCH = "origin/master"
+REMOTE_MAIN_BRANCH = "origin/main"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -627,7 +635,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
         if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
-                + f"branch {orig_ref} that would be merged into master.  "
+                + f"branch {orig_ref} that would be merged into main.  "
                 + "This usually happens because there is a non ghstack change in the PR.  "
                 + f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
@@ -937,6 +945,7 @@ class GitHubPR:
             author_association=node["authorAssociation"],
             editor_login=editor["login"] if editor else None,
             database_id=node["databaseId"],
+            url=node["url"],
         )
 
     def get_comments(self) -> List[GitHubComment]:
@@ -1031,12 +1040,18 @@ class GitHubPR:
         return msg
 
     def add_numbered_label(self, label_base: str) -> None:
-        labels = self.get_labels()
-        label = label_base
-        for i in range(len(labels) if labels is not None else 0):
-            if label in labels:
-                label = f"{label_base}X{i+2}"
-        gh_add_labels(self.org, self.project, self.pr_num, [label])
+        labels = self.get_labels() if self.labels is not None else []
+        full_label = label_base
+        count = 0
+        for label in labels:
+            if label_base in label:
+                count += 1
+                full_label = f"{label_base}X{count}"
+        gh_add_labels(self.org, self.project, self.pr_num, [full_label])
+
+    def remove_label(self, label: str) -> None:
+        if self.get_labels() is not None and label in self.get_labels():
+            gh_remove_label(self.org, self.project, self.pr_num, label)
 
     def merge_into(
         self,
@@ -1061,9 +1076,9 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
-            self.add_numbered_label("merged")
+            self.add_numbered_label(MERGE_COMPLETE_LABEL)
             for pr in additional_merged_prs:
-                pr.add_numbered_label("merged")
+                pr.add_numbered_label(MERGE_COMPLETE_LABEL)
 
         if comment_id and self.pr_num:
             # When the merge process reaches this part, we can assume that the commit
@@ -1560,7 +1575,7 @@ def get_classifications(
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
             )
-        elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
+        elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id
             )
@@ -1634,7 +1649,12 @@ def try_revert(
     except PostCommentError as e:
         return post_comment(str(e))
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    revert_msg += f" due to {reason}\n" if reason is not None else "\n"
+    revert_msg += f" due to {reason}" if reason is not None else ""
+    revert_msg += (
+        f" ([comment]({pr.get_comment_by_id(comment_id).url}))\n"
+        if comment_id is not None
+        else "\n"
+    )
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
@@ -1695,11 +1715,11 @@ def categorize_checks(
     relevant_checknames = [
         name
         for name in check_runs.keys()
-        if not required_checks or any([x in name for x in required_checks])
+        if not required_checks or any(x in name for x in required_checks)
     ]
 
     for checkname in required_checks:
-        if all([checkname not in x for x in check_runs.keys()]):
+        if all(checkname not in x for x in check_runs.keys()):
             pending_checks.append((checkname, None, None))
 
     for checkname in relevant_checknames:
@@ -1750,6 +1770,9 @@ def merge(
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()["oid"]
     print(f"Attempting merge of {initial_commit_sha}")
+
+    if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
+        gh_add_labels(org, project, pr_num, [MERGE_IN_PROGRESS_LABEL])
 
     explainer = TryMergeExplainer(
         skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project, ignore_current
@@ -1802,8 +1825,9 @@ def merge(
     elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
         raise RuntimeError(
             f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
-            "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
-            "`@pytorchbot rebase`"
+            "Please rebase and try again. You can rebase and merge by leaving the following comment on this PR:\n"
+            "`@pytorchbot merge -r`\n"
+            "Or just rebase by leaving `@pytorchbot rebase` comment"
         )
 
     start_time = time.time()
@@ -1982,7 +2006,6 @@ def main() -> None:
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
-
     try:
         merge(
             args.pr_num,
@@ -2019,6 +2042,8 @@ def main() -> None:
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
+    finally:
+        pr.remove_label(MERGE_IN_PROGRESS_LABEL)
 
 
 if __name__ == "__main__":

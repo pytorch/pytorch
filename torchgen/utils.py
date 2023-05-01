@@ -16,6 +16,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     NoReturn,
     Optional,
     Sequence,
@@ -25,36 +26,7 @@ from typing import (
     Union,
 )
 
-from typing_extensions import Literal  # Python 3.8+
-
 from torchgen.code_template import CodeTemplate
-
-# Safely load fast C Yaml loader/dumper if they are available
-try:
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
-
-try:
-    from yaml import CSafeDumper as Dumper
-except ImportError:
-    from yaml import SafeDumper as Dumper  # type: ignore[misc]
-YamlDumper = Dumper
-
-
-# A custom loader for YAML that errors on duplicate keys.
-# This doesn't happen by default: see https://github.com/yaml/pyyaml/issues/165
-class YamlLoader(Loader):
-    def construct_mapping(self, node, deep=False):  # type: ignore[no-untyped-def]
-        mapping = []
-        for key_node, value_node in node.value:
-            key = self.construct_object(key_node, deep=deep)  # type: ignore[no-untyped-call]
-            assert (
-                key not in mapping
-            ), f"Found a duplicate key in the yaml. key={key}, line={node.start_mark.line}"
-            mapping.append(key)
-        mapping = super().construct_mapping(node, deep=deep)  # type: ignore[no-untyped-call]
-        return mapping
 
 
 # Many of these functions share logic for defining both the definition
@@ -110,8 +82,7 @@ def mapMaybe(func: Callable[[T], Optional[S]], xs: Iterable[T]) -> Iterator[S]:
 # Map over function that returns sequences and cat them all together
 def concatMap(func: Callable[[T], Sequence[S]], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
-        for r in func(x):
-            yield r
+        yield from func(x)
 
 
 # Conveniently add error context to exceptions raised.  Lets us

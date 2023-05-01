@@ -129,7 +129,7 @@ struct FusedAdamMathFunctor {
         if (found_inf_ptr && *found_inf_ptr == 1) {
             return;
         }
-        float *step_count = reinterpret_cast<float*>(tl.state_steps_addresses[tensor_loc]);
+        auto *step_count = reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
 
         scalar_type* args[depth];
         const bool all_aligned{init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
