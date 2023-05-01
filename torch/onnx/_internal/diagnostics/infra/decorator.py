@@ -72,8 +72,8 @@ def modify_diagnostic(
 
 @_beartype.beartype
 def diagnose_call(
-    get_context: Callable[[], Optional[infra.DiagnosticContext]],
     rule: infra.Rule,
+    *,
     level: infra.Level = infra.Level.NONE,
     exception_report_level: infra.Level = infra.Level.WARNING,
     diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
@@ -87,10 +87,29 @@ def diagnose_call(
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            # TODO(bowbao): add switch to disable diagnostics.
-            ctx = get_context()
-            if ctx is None:
-                return fn(*args, **kwargs)
+            common_error_message = "diagnose_call can only be applied to callables"
+            if not callable(fn):
+                raise AssertionError(
+                    f"{common_error_message}. Got {type(fn)} instead of callable."
+                )
+            arg0 = args[0] if len(args) > 0 else None
+            if isinstance(ctx := arg0, infra.DiagnosticContext):
+                pass
+            elif isinstance(
+                ctx := getattr(arg0, "diagnostic_context", None),
+                infra.DiagnosticContext,
+            ):
+                pass
+            else:
+                # NOTE: At decorate time, it can't tell if a callable is function or method.
+                # Technically both are regarded as function at that time.
+                raise AssertionError(
+                    f"{common_error_message}. For {fn}, "
+                    f"If it is a function, a DiagnosticContext instance must be present as "
+                    f"the first argument. "
+                    f"If it is a method, a DiagnosticContext instance must be present as "
+                    f"the attribute 'diagnostic_context' of the 'self' argument."
+                )
 
             diag = diagnostic_type(
                 rule,
@@ -101,6 +120,7 @@ def diagnose_call(
             # pop the decorator frame
             # TODO(bowbao): by default diagnostic doesn't have stack.
             # So need to check before doing this. Make the code cleaner.
+            # Option: do not capture stack by default in diagnostic initialization.
             stack: Optional[infra.Stack] = None
             if len(diag.stacks) > 0:
                 stack = diag.stacks[0]

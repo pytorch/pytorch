@@ -86,11 +86,10 @@ def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
 
 diagnose_call = functools.partial(
     decorator.diagnose_call,
-    diagnostics.export_context,
     diagnostic_type=diagnostics.ExportDiagnostic,
     format_argument=format_argument,
 )
 
 rules = diagnostics.rules
-export_context = diagnostics.export_context
 levels = diagnostics.levels
+DiagnosticContext = infra.DiagnosticContext
