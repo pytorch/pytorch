@@ -1772,14 +1772,19 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape or param.dtype != view.dtype:
-                # NOTE: This is a hack using `.data` to side step the
-                # check that parameter/gradient sizes and dtypes match. Here,
-                # `param` can have the sharded size, and `grad` can have the
-                # unsharded size. Orthogonally, `param` can have the full
-                # precision dtype from `reshard()`, and `grad` can have the
-                # parameter low precision dtype. Both of these mismatches
-                # happen when running in `no_sync()`.
+            if (
+                param.shape != view.shape
+                or param.dtype != view.dtype
+                or param.device != view.device
+            ):
+                # NOTE: This is a hack using `.data` to side step the check
+                # that parameter/gradient sizes/dtypes/devices match. From
+                # calling `reshard()`, `param` has the sharded size, the full
+                # precision dtype, and is on CPU. Thus, one or more of the
+                # following cases can hold when in `no_sync()`:
+                # 1. `view` can have the unsharded size.
+                # 2. `view` can have the parameter low precision dtype.
+                # 3. `view` can be on GPU.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
                 param.grad.data = view
@@ -1802,6 +1807,7 @@ class FlatParamHandle:
             if (
                 param.shape != prim_param.grad.shape
                 or param.dtype != prim_param.grad.dtype
+                or param.device != prim_param.grad.device
             ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
@@ -2047,6 +2053,12 @@ class FlatParamHandle:
                 # For `NO_SHARD` + CPU offloading, `_cpu_grad` is always in
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
+                if not self.uses_sharded_strategy and self._offload_params:
+                    # Explicitly continue to handle the case of `no_sync()`,
+                    # where `param.grad` is a view into the GPU gradient
+                    # referenced by `flat_param.grad`, while `flat_param_grad`
+                    # is `flat_param._cpu_grad`, which is on CPU
+                    continue
                 needs_grad_writeback = (
                     flat_param_grad is None
                     or not _same_storage_as_data_ptr(
