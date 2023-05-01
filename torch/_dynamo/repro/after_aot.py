@@ -862,12 +862,18 @@ def run_repro(
     accuracy=False,
     save_dir=None,
     tracing_mode=None,
+    patch_code=None,
     **kwargs,
 ):
     for k in kwargs:
         log.warning(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
             k,
+        )
+
+    if patch_code is not None:
+        log.warning(
+            "patch_code no longer works on this version of PyTorch, silently ignoring"
         )
 
     parser = argparse.ArgumentParser(
