@@ -408,7 +408,9 @@ class HuggingfaceRunner(BenchmarkRunner):
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
-            log.info("Batch size not specified for {model_name}. Setting batch_size=16")
+            log.info(
+                f"Batch size not specified for {model_name}. Setting batch_size=16"
+            )
 
         if batch_size is None:
             batch_size = batch_size_default
