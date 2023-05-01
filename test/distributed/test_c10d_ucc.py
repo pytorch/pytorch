@@ -1013,7 +1013,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
-    @unittest.skipIf(prePascal)
+    @unittest.skipIf(prePascal, "Fails on M60")
     @skip_if_lt_x_gpu(2)
     @requires_ucc()
     def test_ucc_warn_not_in_group(self):
