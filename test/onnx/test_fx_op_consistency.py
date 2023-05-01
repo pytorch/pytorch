@@ -82,13 +82,24 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "col2im", extra opinfo needed
         "constant_pad_nd",
         "contiguous",
-        "nn.functional.conv1d",
-        # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
-        # "nn.functional.conv3d",  extra opinfo needed
+        # "copy",  copy is not in OPS_DB
+        "cos",
+        "cosh",
+        "cross",
+        "cumsum",
+        # "detach",  detach is not in OP-TEST-DB
+        "div",
+        "dot",
         # "nn.functional.adaptive_avg_pool1d",  other ops needed
         # "nn.functional.adaptive_avg_pool2d",  other ops needed
         # "nn.functional.adaptive_avg_pool3d",  other ops needed
+        "nn.functional.conv1d",
+        # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
+        # "nn.functional.conv3d",  extra opinfo needed
+        # "nn.functional.convolution",  extra opinfo needed
+        "nn.functional.cross_entropy",
         "nn.functional.celu",
+        "nn.functional.dropout",
         "unflatten",
     ]
 )
@@ -128,7 +139,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "add",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8"
+            "Add", "int8, int16, uint8 have type issue."
         ),
     ),
     xfail(
@@ -306,6 +317,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
+        "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
+    ),
+    xfail(
+        "cumsum", dtypes=(torch.int32,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Cumsum", "int32 has type issue.")
+    ),
+    xfail(
         "nn.functional.conv1d",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
@@ -328,6 +347,46 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
             "Conv2d", "float64"
         ),
+    ),
+    skip(
+        "cos", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Cos")
+    ),
+    skip(
+        "cosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Cosh")
+    ),
+    xfail(
+        "cos",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Cos", "float64"),
+    ),
+    xfail(
+        "cosh",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
+            "Cosh", "float64"
+        ),
+    ),
+    xfail(
+        "cross",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
+    ),
+    xfail(
+        "div", variant_name="no_rounding_mode", dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Div", "bool")
+    ),
+    xfail(
+        "div", variant_name="no_rounding_mode", dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Div", "int has type issue.")
+    ),
+    xfail(
+        "dot", dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_does_not_support("MatMul", "uint8, int8, int16")
+    ),
+    xfail(
+        "nn.functional.dropout",
+        reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
     ),
     skip(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
@@ -376,6 +435,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
+    skip(
+        "div",
+        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None,
+        reason="rounding_mode is not yet supported",
+    ),
     xfail(
         "nn.functional.celu",
         matcher=lambda sample: sample.input.dtype != torch.float32,
@@ -390,6 +454,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.conv2d",
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
         reason="String padding is not accepted by aten::conv2d",
+    ),
+    skip(
+        "nn.functional.cross_entropy",
+        matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
+        reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
     ),
     xfail(
         "unflatten",
