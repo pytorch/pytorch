@@ -312,7 +312,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                     self.assertEqual(record.levelno, expected_logger_level)
 
     def test_diagnostic_context_raises_if_diagnostic_is_error(self):
-        with self.assertRaises(infra.DiagnosticError):
+        with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
             self.context.log_and_raise_if_error(
                 infra.Diagnostic(
                     self.rules.rule_without_message_args, infra.Level.ERROR

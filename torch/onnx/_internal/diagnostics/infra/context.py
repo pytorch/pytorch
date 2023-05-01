@@ -178,8 +178,8 @@ class Diagnostic:
         # TODO: print help url to rule at the end.
 
 
-class DiagnosticError(RuntimeError):
-    """Raised when a diagnostic is raised."""
+class RuntimeErrorWithDiagnostic(RuntimeError):
+    """Runtime error with enclosed diagnostic information."""
 
     def __init__(self, diagnostic: Diagnostic):
         super().__init__(diagnostic.message)
@@ -261,7 +261,7 @@ class DiagnosticContext:
     def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
         self.log(diagnostic)
         if diagnostic.level == infra.Level.ERROR:
-            raise DiagnosticError(diagnostic) from diagnostic.source_exception
+            raise RuntimeErrorWithDiagnostic(diagnostic) from diagnostic.source_exception
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(
