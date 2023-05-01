@@ -416,7 +416,12 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
+    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
+    # then we only want it to trace out proxies the first time that we hit an op.
+    # In particular, track_tensor_tree can call detach().
+    with inside_mode(proxy_mode):
+        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 
