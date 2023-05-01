@@ -901,10 +901,7 @@ class VariableBuilder:
                         )
                     )
                 fake_tensor_value = None
-                if isinstance(unspec_var, ConstantVariable):
-                    example_value = unspec_var.value
-                else:
-                    example_value = unspec_var.proxy.node.meta["example_value"]
+                example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 proxy.node.meta["grapharg"] = GraphArg(
