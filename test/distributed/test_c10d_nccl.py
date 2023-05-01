@@ -3014,6 +3014,37 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         dist.reduce_scatter_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return self.rank
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="nccl")
+
+
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
