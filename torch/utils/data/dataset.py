@@ -41,7 +41,10 @@ class Dataset(Generic[T_co]):
     data sample for a given key. Subclasses could also optionally overwrite
     :meth:`__len__`, which is expected to return the size of the dataset by many
     :class:`~torch.utils.data.Sampler` implementations and the default options
-    of :class:`~torch.utils.data.DataLoader`.
+    of :class:`~torch.utils.data.DataLoader`. Subclasses could also
+    optionally overwrite :meth:`__getitems__`, for speedup batched samples
+    loading. This method accepts list of indices of samples of batch and returns
+    list of samples.
 
     .. note::
       :class:`~torch.utils.data.DataLoader` by default constructs a index
@@ -51,6 +54,10 @@ class Dataset(Generic[T_co]):
 
     def __getitem__(self, index) -> T_co:
         raise NotImplementedError
+
+    # def __getitems__(self, indices: List) -> List[T_co]:
+    # Not implemented to prevent false-positives in fetcher check in
+    # torch.utils.data._utils.fetch._MapDatasetFetcher
 
     def __add__(self, other: 'Dataset[T_co]') -> 'ConcatDataset[T_co]':
         return ConcatDataset([self, other])
@@ -290,6 +297,11 @@ class Subset(Dataset[T_co]):
     def __init__(self, dataset: Dataset[T_co], indices: Sequence[int]) -> None:
         self.dataset = dataset
         self.indices = indices
+
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if hasattr(dataset, "__getitems__") and dataset.__getitems__:
+            self.__getitems__ = self.__getitem__
 
     def __getitem__(self, idx):
         if isinstance(idx, list):
