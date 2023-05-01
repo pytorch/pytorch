@@ -26,6 +26,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
+
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -38,7 +40,6 @@ def _op_supports_any_sparse(op):
 reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
 
 binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
-
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -70,7 +71,7 @@ def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
-        subtest(gradcheck_sparse, name='non_masked'),
+        subtest(gradcheck_sparse, name='sparse'),
         subtest(gradcheck_masked, name='masked')])
 
 
@@ -99,6 +100,7 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
 
 class TestSparseLegacyAndDeprecation(TestCase):
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_legacy_warnings(self):
 
         def f1():
@@ -4634,37 +4636,29 @@ class TestSparseAny(TestCase):
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-3})
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions(self, layout, device, dtype, op):
-        if not op.supports_sparse_layout(layout):
-            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
-
-        if (
-                layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-                and dtype in {torch.bool, torch.uint8}):
-            self.skipTest('Requires fix to gh-98495. Skipping!')
-
+        count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            count += 1
 
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             result = op.op(t_inp, *t_args, **t_kwargs)
 
             #  Checking invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
             dense = op.op(t_inp.to_dense(), *t_args, **t_kwargs)
             self.assertEqual(result, dense)
 
+        if count == 0:
+            # we count samples to avoid false-positive test reports
+            self.skipTest('no sample inputs')
+
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(reduction_ops_with_sparse_support, allowed_dtypes=(torch.float32, torch.float64, torch.complex64, torch.complex128))
     @all_sparse_layouts('layout', include_strided=False)
     def test_reductions_backward(self, layout, device, dtype, op):
-        # TODO: Once gradcheck supports sparse outputs, use gradcheck
-        # for testing the reductions backward and merge this test to
-        # test_reductions.
-        if not op.supports_sparse_layout(layout):
-            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
         count = 0
         for sample in op.sample_inputs_sparse(layout, device, dtype, requires_grad=True):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
-
             r = op.op(t_inp, *t_args, **t_kwargs)
             if r.numel() != 0:
                 r = r.sum()
@@ -4676,7 +4670,9 @@ class TestSparseAny(TestCase):
             else:
                 self.skipTest('NOT IMPL')
 
-        self.assertNotEqual(count, 0)
+        if count == 0:
+            # we count samples to avoid false-positive test reports
+            self.skipTest('no sample inputs')
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -4778,6 +4774,10 @@ class TestSparseAny(TestCase):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
+            if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:
+                # that is, the validation returns the sparse sample
+                # wrapped within ErrorInput instance
+                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
 

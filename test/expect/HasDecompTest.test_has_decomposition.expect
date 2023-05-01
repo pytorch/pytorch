@@ -35,6 +35,7 @@ aten::_amp_update_scale
 aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
+aten::_assert_async.msg
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -1160,8 +1161,6 @@ aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::smooth_l1_loss
 aten::smooth_l1_loss.out
-aten::smooth_l1_loss_backward
-aten::smooth_l1_loss_backward.grad_input
 aten::softmax.int_out
 aten::sort
 aten::sort.stable

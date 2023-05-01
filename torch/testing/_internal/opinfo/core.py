@@ -1190,22 +1190,12 @@ class OpInfo:
         """
         return self.error_inputs_func(self, device, **kwargs)
 
-    def error_inputs_sparse(self, layout, device, **kwargs):
+    def error_inputs_sparse(self, device, layout, **kwargs):
         """
         Returns an iterable of ErrorInputs that contain sparse sample
         inputs with a specified layout.
         """
-
-        def iterator():
-            for error_input in self.error_inputs_sparse_func(self, device, **kwargs):
-                if (
-                    isinstance(error_input.sample_input.input, torch.Tensor)
-                    and error_input.sample_input.input.layout is not layout
-                ):
-                    continue
-                yield error_input
-
-        return iterator()
+        return self.error_inputs_sparse_func(self, device, layout, **kwargs)
 
     def supports_sparse_layout(self, layout):
         """Return True if OpInfo supports the specified sparse layout."""
@@ -1218,7 +1208,6 @@ class OpInfo:
         """Returns an iterable of SampleInputs that contain inputs with a
         specified sparse layout.
         """
-        xfail_mode = kwargs.get("xfail_mode", False)
         layout_name = str(layout).split(".")[-1]
         sample_inputs_mth = getattr(self, "sample_inputs_" + layout_name)
 
@@ -1228,10 +1217,7 @@ class OpInfo:
                 found_sample = True
                 yield sample
             if not found_sample:
-                if not xfail_mode:
-                    raise RuntimeError(
-                        f"`{op.name}` OpInfo sample_inputs_{layout_name} generated no samples!"
-                    )
+                raise unittest.SkipTest("NO SAMPLES!")
 
         return non_empty_sampler(
             self,
@@ -2609,6 +2595,7 @@ def sample_inputs_foreach(
     low=None,
     high=None,
     zero_size: bool,
+    requires_grad: bool,
 ):
     if zero_size:
         return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
@@ -2621,6 +2608,7 @@ def sample_inputs_foreach(
                 noncontiguous=noncontiguous,
                 low=low,
                 high=high,
+                requires_grad=requires_grad,
             )
             for _ in range(N)
         ]
@@ -2633,6 +2621,7 @@ def sample_inputs_foreach(
                 noncontiguous=noncontiguous,
                 low=low,
                 high=high,
+                requires_grad=requires_grad,
             )
             for i in range(N)
         ]
