@@ -1,3 +1,5 @@
+from operator import itemgetter
+
 import torch
 import torch.nn as nn
 
@@ -81,7 +83,7 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
 
     # sort the op info base on the total count index
     count_idx = 2
-    op_infos.sort(key=lambda per_op_info: per_op_info[count_idx], reverse=True)
+    op_infos.sort(key=itemgetter(count_idx), reverse=True)
 
     headers = ["Operator", "Schema", "Total Count", "Supported"]
     print(tabulate(op_infos, headers=headers))
