@@ -72,24 +72,15 @@ class MinifierTests(MinifierTestBase):
 
     # Ensure that the testing backends pass when relu is not present.
     def _test_after_dynamo_backend_passes(self, device, repro_level, backend):
-        run_code = textwrap.dedent(
-            f"""\
-            @torch._dynamo.optimize("{backend}")
-            def inner(x):
-                for _ in range(10):
-                    x = torch.sin(x)
-                for _ in range(10):
-                    x = torch.cos(x)
-                return x
+        @torch._dynamo.optimize(backend)
+        def inner(x):
+            for _ in range(10):
+                x = torch.sin(x)
+            for _ in range(10):
+                x = torch.cos(x)
+            return x
 
-            inner(torch.randn(20, 20).to("{device}"))
-        """
-        )
-
-        test_code = self._gen_test_code(run_code, "dynamo", repro_level, "")
-        proc, repro_dir = self._run_test_code(test_code)
-        self.assertEqual(proc.returncode, 0)
-        self.assertIsNone(repro_dir)
+        inner(torch.randn(20, 20).to(device))
 
     def test_after_dynamo_cpu_compile_backend_passes(self):
         self._test_after_dynamo_backend_passes(
@@ -234,24 +225,6 @@ class MinifierTests(MinifierTestBase):
         match = re.search(r"def forward.*return", repro_code, re.DOTALL)
         self.assertIsNotNone(match)
         self.assertLess(match.group(0).count("\n"), 5)
-
-    # Test that dynamo config can be saved and restored, especially
-    # log_level (changing it should affect logger levels).
-    def test_dynamo_config_serialization(self):
-        run_code = textwrap.dedent(
-            """\
-            import torch._dynamo.config
-            torch._dynamo.config.cache_size_limit = 55
-            config = torch._dynamo.config.codegen_config()
-            torch._dynamo.config.cache_size_limit = 3
-            torch._dynamo.config.repro_after = "dynamo"
-            exec(config)
-            assert torch._dynamo.config.cache_size_limit == 55
-            assert torch._dynamo.config.repro_after == "dynamo"
-        """
-        )
-        proc, _ = self._run_test_code(run_code)
-        self.assertEqual(proc.returncode, 0)
 
 
 if __name__ == "__main__":

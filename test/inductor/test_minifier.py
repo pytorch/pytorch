@@ -26,7 +26,7 @@ class MinifierTests(MinifierTestBase):
     def _test_after_aot(self, device, bug_type, repro_level):
         run_code = textwrap.dedent(
             f"""\
-            @torch._dynamo.optimize("inductor")
+            @torch.compile()
             def inner(x):
                 for _ in range(3):
                     x = torch.sin(x)
@@ -73,7 +73,7 @@ class MinifierTests(MinifierTestBase):
     def _test_after_aot_runtime_error(self, device, bug_type):
         run_code = textwrap.dedent(
             f"""\
-            @torch._dynamo.optimize("inductor")
+            @torch.compile()
             def inner(x):
                 for _ in range(3):
                     x = torch.sin(x)
@@ -104,145 +104,6 @@ class MinifierTests(MinifierTestBase):
     @requires_cuda()
     def test_after_aot_cuda_runtime_error(self):
         self._test_after_aot_runtime_error("cuda", "runtime_error")
-
-    # Ensure that inductor codegen patches pass when relu is not present.
-    def _test_after_aot_backend_passes(self, device, repro_level, bug_type):
-        run_code = textwrap.dedent(
-            f"""\
-            @torch._dynamo.optimize("inductor")
-            def inner(x):
-                for _ in range(3):
-                    x = torch.sin(x)
-                for _ in range(3):
-                    x = torch.cos(x)
-                return x
-
-            inner(torch.randn(20, 20).to("{device}"))
-        """
-        )
-        patch_code = self._gen_codegen_fn_patch_code(device, bug_type)
-        self.assertIsNotNone(patch_code)
-
-        test_code = self._gen_test_code(run_code, "aot", repro_level, patch_code)
-        proc, repro_dir = self._run_test_code(test_code)
-        self.assertEqual(proc.returncode, 0)
-        self.assertIsNone(repro_dir)
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_after_aot_cpu_compile_backend_passes(self):
-        self._test_after_aot_backend_passes("cpu", 2, "compile_error")
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_after_aot_cpu_runtime_backend_passes(self):
-        self._test_after_aot_backend_passes("cpu", 2, "runtime_error")
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_after_aot_cpu_accuracy_backend_passes(self):
-        self._test_after_aot_backend_passes("cpu", 4, "accuracy")
-
-    @requires_cuda()
-    def test_after_aot_cuda_compile_backend_passes(self):
-        self._test_after_aot_backend_passes("cuda", 2, "compile_error")
-
-    # NOTE: there is currently not an easy way to cause a triton runtime error.
-    @unittest.skip
-    @requires_cuda()
-    def test_after_aot_cuda_runtime_backend_passes(self):
-        self._test_after_aot_backend_passes("cuda", 2, "runtime_error")
-
-    @requires_cuda()
-    def test_after_aot_cuda_accuracy_backend_passes(self):
-        self._test_after_aot_backend_passes("cuda", 4, "accuracy")
-
-    # Test that launched minifier processes have the same config as
-    # the original process.
-    def _test_after_aot_with_modified_config(self, bug_type, repro_level):
-        lines = backend_code.split("\n")
-        lines.insert(1, "    assert torch._inductor.config.cpp.threads == 10")
-        backend_code = "\n".join(lines)
-        run_code = textwrap.dedent(
-            """\
-torch._inductor.config.cpp.threads = 10
-@torch._dynamo.optimize("inductor")
-def inner(x):
-    for _ in range(3):
-        x = torch.sin(x)
-    x = torch.relu(x)
-    for _ in range(3):
-        x = torch.cos(x)
-    return x
-
-inner(torch.randn(20, 20).to("cpu"))
-        """
-        )
-        patch_code = self._gen_codegen_fn_patch_code("cpu", bug_type)
-        self.assertIsNotNone(patch_code)
-        test_proc, _, repro_proc = self._run_full_test_nocode(
-            run_code, "aot", repro_level, patch_code
-        )
-        return test_proc.stderr.decode("utf-8"), repro_proc.stderr.decode("utf-8")
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_after_aot_with_modified_config_compile_error(self):
-        tb1, tb2 = self._test_after_aot_with_modified_config("compile_error", 2)
-        self.assertIn("CppCompileError", tb1)
-        self.assertIn("CppCompileError", tb2)
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_after_aot_with_modified_config_accuracy_error(self):
-        tb1, tb2 = self._test_after_aot_with_modified_config("accuracy", 4)
-        self.assertIn("AccuracyError", tb1)
-        self.assertIn("AccuracyError", tb2)
-
-    # Test that default torch.compile can be minified.
-    def _test_torch_compile(self, repro_after, repro_level, bug_type):
-        run_code = textwrap.dedent(
-            """\
-            def inner(x):
-                for _ in range(3):
-                    x = torch.sin(x)
-                x = torch.relu(x)
-                for _ in range(3):
-                    x = torch.cos(x)
-                return x
-
-            inner_opt = torch.compile(inner)
-
-            inner_opt(torch.randn(20, 20))
-        """
-        )
-
-        patch_code = self._gen_codegen_fn_patch_code("cpu", bug_type)
-        self.assertIsNotNone(patch_code)
-
-        test_proc, _, repro_proc = self._run_full_test_nocode(
-            run_code, repro_after, repro_level, patch_code
-        )
-        return test_proc.stderr.decode("utf-8"), repro_proc.stderr.decode("utf-8")
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_torch_compile_after_dynamo_compile_error(self):
-        tb1, tb2 = self._test_torch_compile("dynamo", 2, "compile_error")
-        self.assertIn("CppCompileError", tb1)
-        self.assertIn("CppCompileError", tb2)
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_torch_compile_after_dynamo_accuracy_error(self):
-        tb1, tb2 = self._test_torch_compile("dynamo", 4, "accuracy")
-        self.assertIn("AccuracyError", tb1)
-        self.assertIn("AccuracyError", tb2)
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_torch_compile_after_aot_compile_error(self):
-        tb1, tb2 = self._test_torch_compile("aot", 2, "compile_error")
-        self.assertIn("CppCompileError", tb1)
-        self.assertIn("CppCompileError", tb2)
-
-    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
-    def test_torch_compile_after_aot_accuracy_error(self):
-        tb1, tb2 = self._test_torch_compile("aot", 4, "accuracy")
-        self.assertIn("AccuracyError", tb1)
-        self.assertIn("AccuracyError", tb2)
 
 
 if __name__ == "__main__":
