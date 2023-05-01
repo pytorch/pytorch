@@ -3103,6 +3103,27 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return self.new_empty(result_size)
 
 
+@register_meta(torch.ops.aten.t_)
+def t_(self):
+    ndims = self.ndim
+    assert ndims <= 2
+    size = self.size()
+
+    dim0 = size[0]
+    dim1 = size[1]
+
+    if dim0 == dim1:
+        return self
+
+    stride = self.stride()
+
+    stride[dim0], stride[dim1] = stride[dim1], stride[dim0]
+    size[dim0], size[dim1] = size[dim1], size[dim0]
+
+    self.as_strided_(size, stride)
+    return self
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs

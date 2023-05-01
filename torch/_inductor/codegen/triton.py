@@ -15,6 +15,7 @@ import torch
 import torch._logging
 from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
+from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
@@ -1926,6 +1927,7 @@ class TritonScheduling:
                     continue
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
+                    counters["inductor"]["intermediate_hooks"] += 1
                     V.graph.wrapper_code.writeline(
                         f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )

@@ -31,7 +31,7 @@ import torch.library
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
-from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
+from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 
 
@@ -890,7 +890,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(boxes1), boxes1.tensor + 4.0))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(3, 6), 1))
+        self.assertEqual(cnt.op_count, ifdyn(6, 1))
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -981,7 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifunspec(37, ifdyn(20, 4)))
+        self.assertEqual(cnt.op_count, ifunspec(42, ifdyn(38, 4)))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -992,7 +992,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(12, 11))
+        self.assertEqual(cnt.op_count, ifdyn(13, 11))
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -1283,7 +1283,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(x), correct))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(21, 27), 14))
+        self.assertEqual(cnt.op_count, ifdyn(28, 14))
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132

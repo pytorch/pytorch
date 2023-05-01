@@ -46,7 +46,7 @@ def assert_aot_autograd_counter(ok=True):
 def patch_all(ok=True):
     return composed(
         unittest.skipIf(TEST_WITH_ROCM, "ROCm not supported"),
-        torch._dynamo.config.patch(verify_correctness=True),
+        torch._dynamo.config.patch(verify_correctness=True, dynamic_shapes=False),
         assert_aot_autograd_counter(ok),
     )
 
