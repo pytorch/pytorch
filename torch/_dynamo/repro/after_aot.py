@@ -929,7 +929,15 @@ default settings on this script:
             help="how to trace the repro module into a GraphModule with metadata",
         )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command", metavar="{run,minify,analyze}", required=True
+    )
+
+    parser_run = subparsers.add_parser(
+        "run",
+        help="just run the repro",
+    )
+    common_flags(parser_run)
 
     parser_minify = subparsers.add_parser(
         "minify", help="run the minifier on the repro"
@@ -975,17 +983,11 @@ default settings on this script:
         help="use SHA-1 checksum instead of fast (but possibly unsound) hash",
     )
 
+    # Run the repro in the context of minification, inverting exit code meaning
     parser_minifier_query = subparsers.add_parser(
         "minifier-query",
-        help="run the repro in the context of minification, inverting exit code meaning",
     )
     common_flags(parser_minifier_query)
-
-    parser_run = subparsers.add_parser(
-        "run",
-        help="just run the repro",
-    )
-    common_flags(parser_run)
 
     args = None
     if len(sys.argv) <= 1:
