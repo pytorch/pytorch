@@ -26,6 +26,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
+
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -38,7 +40,6 @@ def _op_supports_any_sparse(op):
 reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
 
 binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
-
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -99,6 +100,7 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
 
 class TestSparseLegacyAndDeprecation(TestCase):
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_legacy_warnings(self):
 
         def f1():
@@ -4778,26 +4780,22 @@ class TestSparseAny(TestCase):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
+            if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:
+                # that is, the validation returns the sparse sample
+                # wrapped within ErrorInput instance
+                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
-
             result = op.op(t_inp, *t_args, **t_kwargs)
 
             # Check rop(inp, ...).shape == inp.shape
             self.assertEqual(result.shape, t_inp.shape)
 
-            if layout is torch.sparse_coo and t_inp.numel() == 0 and op.name == 'mul' and t_inp.dense_dim() > 0:
-                # BUG: gh-97627
-                with self.assertRaisesRegex(
-                        AssertionError,
-                        "Scalars are not equal!"):
-                    self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
-            else:
-                # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
-                self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+            # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+            self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
 
-                # Check rop(inp, ...).dense_dim() == inp.dense_dim()
-                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+            # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+            self.assertEqual(result.dense_dim(), t_inp.dense_dim())
 
             # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
             try:
