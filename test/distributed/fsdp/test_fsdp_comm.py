@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from contextlib import suppress
+from contextlib import nullcontext
 from enum import auto, Enum
 from typing import Optional
 from unittest.mock import patch
@@ -76,7 +76,7 @@ class TestCommunication(FSDPTest):
 
     def _run_iter(self, fsdp_model, batch, use_no_sync: bool):
         """Runs an iteration inside or outside the ``no_sync()`` context."""
-        context = fsdp_model.no_sync() if use_no_sync else suppress()
+        context = fsdp_model.no_sync() if use_no_sync else nullcontext()
         with context:
             output = fsdp_model(*batch)
             loss = fsdp_model.module.get_loss(batch, output)
