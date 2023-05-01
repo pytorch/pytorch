@@ -105,7 +105,7 @@ class ResolvedExportOptions(ExportOptions):
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
-    diagnostics_context: infra.DiagnosticContext
+    diagnostic_context: infra.DiagnosticContext
     """The diagnostics context for the export. Responsible for recording diagnostics,
     logging diagnostics, and generating the SARIF log."""
 
@@ -122,7 +122,7 @@ class ResolvedExportOptions(ExportOptions):
             self.logger = options.logger
             self.fx_tracer = options.fx_tracer
             self.decomposition_table = options.decomposition_table
-            self.diagnostics_context = options.diagnostics_context
+            self.diagnostic_context = options.diagnostic_context
         else:
             T = TypeVar("T")
 
@@ -155,7 +155,7 @@ class ResolvedExportOptions(ExportOptions):
             #   - Add a shim and make it noop if onnxscript is not available.
             #   - Try local import and raise.
             # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
-            self.diagnostics_context = infra.DiagnosticContext(
+            self.diagnostic_context = infra.DiagnosticContext(
                 "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
 
@@ -504,8 +504,11 @@ class FXGraphExtractor(abc.ABC):
         import torch.onnx._internal.fx.fx_exporter as fx_exporter
         import torch.onnx._internal.fx.passes as passes
 
+        diagnostic_context = options.diagnostic_context
+
         # Apply decomposition table to the input graph.
         module = passes.Decompose(
+            diagnostic_context,
             fx_module,
             options.decomposition_table,
             enable_dynamic_axes=options.dynamic_shapes,
@@ -514,17 +517,21 @@ class FXGraphExtractor(abc.ABC):
         # ONNX does not support views and mutations.
         # Functionalize to get a semantically equivalent graph without mutations.
         module = passes.Functionalize(
-            module, enable_dynamic_axes=options.dynamic_shapes
+            diagnostic_context, module, enable_dynamic_axes=options.dynamic_shapes
         ).run(*fx_module_args)
         # Input mutations are detected and distilled after `Functionalize` pass.
         # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(module).run(*fx_module_args)
+        module = passes.RemoveInputMutation(diagnostic_context, module).run(
+            *fx_module_args
+        )
 
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
         # The pass added nodes with static shape into original node metadata:
         # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
         if options.op_level_debug:
-            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
+            module = passes.ShapeInferenceWithFakeTensor(
+                diagnostic_context, module
+            ).run(*fx_module_args)
 
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -532,7 +539,9 @@ class FXGraphExtractor(abc.ABC):
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
-            onnxscript_graph = passes.export_fx_to_onnxscript(module, options)
+            onnxscript_graph = passes.export_fx_to_onnxscript(
+                diagnostic_context, module, options
+            )
             # ONNX does not support None inputs. During graph building, all None inputs
             # are removed. Here we register this step to input adapter.
             self.adapt_input(fx_exporter.RemoveNoneInputStep, fx_module_args, {})
@@ -546,7 +555,7 @@ class FXGraphExtractor(abc.ABC):
             onnx_model,
             self.input_adapter,
             self.output_adapter,
-            options.diagnostics_context,
+            options.diagnostic_context,
         )
 
     def adapt_input(
@@ -755,7 +764,9 @@ def dynamo_export(
         ).export()
     except Exception as e:
         sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
-        resolved_export_options.diagnostics_context.dump(sarif_report_path)
+        resolved_export_options.diagnostic_context.dump(sarif_report_path)
+        # TODO(bowbao): A summary as well as suggestion for posting the .sarif log in
+        # the issue to be added.
         message = (
             f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
