@@ -602,17 +602,6 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
             error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
         )
     elif (
-        layout is torch.sparse_csr
-        and dtype is torch.complex32
-        and t_inp.numel() > 0
-        and t_args[0].numel() > 0
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample,
-            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
-        )
-    elif (
         layout is torch.sparse_coo
         and dtype in {torch.bool, torch.float16}
         and t_args[0].ndim > 0
@@ -652,15 +641,6 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
                 "expects sparse inputs with equal dimensionality, number of sparse dimensions,"
                 " and shape of sparse dimensions"
             ),
-        )
-    elif (
-        layout is torch.sparse_csr
-        and t_inp.is_cpu
-        and dtype is torch.float16
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Half'"
         )
     return sample
 
