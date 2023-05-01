@@ -442,8 +442,6 @@ def save_graph_repro(
             sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
             break
 
-    if "inductor" in compiler_name:
-        fd.write("import torch._inductor.overrides\n")
     fd.write(
         generate_compiler_repro_string(
             gm, args, stable_output=stable_output, save_dir=save_dir
