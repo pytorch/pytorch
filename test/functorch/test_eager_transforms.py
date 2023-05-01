@@ -23,7 +23,7 @@ import math
 from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater
+from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -4737,7 +4737,7 @@ def traceable(f):
 class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(IS_WINDOWS or not (SM70OrLater))
+    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
