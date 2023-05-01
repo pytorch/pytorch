@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -139,6 +140,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_eager(self):
         self._check_backend_works("eager")
 
+    @patch("torch._dynamo.config.dynamic_shapes", False)
     def test_torchscript(self):
         self._check_backend_works("ts")
 
@@ -148,14 +150,17 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_eager_decomp_partition(self):
         self._check_backend_works("aot_eager_decomp_partition")
 
+    @patch("torch._dynamo.config.dynamic_shapes", False)
     def test_aot_ts(self):
         self._check_backend_works("aot_ts")
 
+    @patch("torch._dynamo.config.dynamic_shapes", False)
     @requires_cuda()
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
 
     @requires_cuda()
+    @patch("torch._dynamo.config.dynamic_shapes", False)
     def test_aot_ts_nvfuser(self):
         self._check_backend_works("aot_ts_nvfuser")
 

@@ -18,7 +18,12 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
-            torch._dynamo.config.patch("cache_size_limit", cls.cache_limit)
+            torch._dynamo.config.patch("cache_size_limit", cls.cache_limit),
+        )
+        # TODO(voz): Prune tests that do not make sense to run on dynamic_shapes = True
+        # Some of these just don't recompile anymore :)
+        cls._exit_stack.enter_context(
+            torch._dynamo.config.patch("dynamic_shapes", False),
         )
 
     def test_drop_cache_on_skip(self):
@@ -163,7 +168,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         cache_fail_test(
             a,
             a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
-            "tensor 'L['a']' strides mismatch at index 0. expected 20, actual 1",
+            "tensor 'L['a']' stride mismatch at index 0. expected 20, actual 1",
         )
         cache_fail_test(
             a, a[0, :, :], "tensor 'L['a']' rank mismatch. expected 3, actual 2"

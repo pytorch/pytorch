@@ -426,7 +426,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """tensor 'L['a']' stride mismatch at index 0. expected 3, actual 1""",
+            """tensor 'L['a']' stride mismatch at index 1. expected 1, actual 3""",
         )
 
         torch._dynamo.reset()
@@ -665,6 +665,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @patch("torch._functorch.config.debug_assert", True)
+    @patch("torch._dynamo.config.automatic_dynamic_shapes", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         def maybe_dupe_op(x):
             y = x + 1

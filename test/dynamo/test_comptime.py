@@ -41,7 +41,7 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, L_x_ : torch.Tensor):
+def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
     mul = l_x_ * 2;  l_x_ = None""",
         )
@@ -210,6 +210,14 @@ y = TensorVariable()
                 'code': None,
                 'obj_weakref': None
                 'guarded_class': None
+            }
+-
+            shape_env '' SHAPE_ENV
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
             }""",
         )
 
@@ -280,7 +288,7 @@ y = TensorVariable()
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, L_x_ : torch.Tensor):
+def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
     mul = l_x_ * 2;  l_x_ = None
     add = mul + 4;  mul = None""",
