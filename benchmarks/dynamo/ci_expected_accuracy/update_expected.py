@@ -27,7 +27,7 @@ import requests
 
 # Note: the public query url targets this rockset lambda:
 # https://console.rockset.com/lambdas/details/commons.artifacts
-ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/c021973d-8985-4392-b398-7e2a0e90bf7d"
+ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/4ca0033e-0117-41f5-b043-59cde19eff35"
 
 
 def query_job_sha(repo, sha):
@@ -73,37 +73,43 @@ def get_artifacts_urls(results, suites):
 
 
 def normalize_suite_filename(suite_name):
-    assert suite_name.find("inductor_") == 0
     subsuite = suite_name.split("_")[1]
     if "timm" in subsuite:
-        subsuite = f"{subsuite}_models"
+        subsuite = subsuite.replace("timm", "timm_models")
+
     return subsuite
 
 
 def download_artifacts_and_extract_csvs(urls):
     dataframes = {}
-    try:
-        for (suite, shard), url in urls.items():
+    for (suite, shard), url in urls.items():
+        try:
             resp = urlopen(url)
             subsuite = normalize_suite_filename(suite)
             artifact = ZipFile(BytesIO(resp.read()))
             for phase in ("training", "inference"):
                 name = f"test/test-reports/{phase}_{subsuite}.csv"
-                df = pd.read_csv(artifact.open(name))
-                dataframes[(suite, phase, shard)] = df
-    except urllib.error.HTTPError:
-        print(f"Unable to download {url}, perhaps the CI job isn't finished?")
+                try:
+                    df = pd.read_csv(artifact.open(name))
+                    df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
+                    prev_df = dataframes.get((suite, phase), None)
+                    dataframes[(suite, phase)] = (
+                        pd.concat([prev_df, df]) if prev_df is not None else df
+                    )
+                except KeyError:
+                    print(
+                        f"Warning: Unable to find {name} in artifacts file from {url}, continuing"
+                    )
+        except urllib.error.HTTPError:
+            print(f"Unable to download {url}, perhaps the CI job isn't finished?")
+
     return dataframes
 
 
 def write_filtered_csvs(root_path, dataframes):
-    for (suite, phase, shard), df in dataframes.items():
-        suite_fn = normalize_suite_filename(suite)
-        if "timm" in suite:
-            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}{shard - 1}.csv")
-        else:
-            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
-        df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
+    for (suite, phase), df in dataframes.items():
+        out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
+        df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
 
 
 if __name__ == "__main__":
@@ -117,8 +123,11 @@ if __name__ == "__main__":
     repo = "pytorch/pytorch"
     suites = {
         "inductor_huggingface",
+        "inductor_huggingface_dynamic",
         "inductor_timm",
+        "inductor_timm_dynamic",
         "inductor_torchbench",
+        "inductor_torchbench_dynamic",
     }
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"

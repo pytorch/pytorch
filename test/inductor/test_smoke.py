@@ -3,8 +3,8 @@ import logging
 import unittest
 
 import torch
-import torch._dynamo as torchdynamo
-import torch._inductor.config as torchinductor_config
+import torch._logging
+
 from torch.testing._internal.common_utils import IS_LINUX, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -28,16 +28,16 @@ def _test_f(x):
 class SmokeTest(TestCase):
     @unittest.skipIf(not HAS_CUDA, "Triton is not available")
     def test_mlp(self):
-        torchdynamo.config.log_level = logging.INFO
-        torchdynamo.config.verbose = True
-        torchinductor_config.debug = True
+        torch._logging.set_logs(
+            dynamo=logging.DEBUG, inductor=logging.DEBUG, aot=logging.DEBUG
+        )
 
         mlp = torch.compile(MLP().cuda())
         for _ in range(3):
             mlp(torch.randn(1, device="cuda"))
 
-        torchdynamo.config.verbose = False
-        torchinductor_config.debug = False
+        # set back to defaults
+        torch._logging.set_logs()
 
     @unittest.skipIf(not HAS_CUDA, "Triton is not available")
     def test_compile_decorator(self):

@@ -102,10 +102,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
   for (const auto& compact_argument_name : compact_argument_names) {
     for (auto it = inputs_dict.begin(); it != inputs_dict.end(); it++) {
       if (py::cast<std::string>(it->first) == compact_argument_name) {
-        if (THPVariable_Check(it->second.ptr())) {
-          compact_trace_inputs.push_back(
-              toIValue(it->second, tryToInferType(it->second).type()));
-        }
+        compact_trace_inputs.push_back(
+            toIValue(it->second, tryToInferType(it->second).type()));
       }
     }
   }

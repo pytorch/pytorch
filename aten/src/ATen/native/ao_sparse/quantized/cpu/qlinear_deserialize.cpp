@@ -243,7 +243,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 
   w_scales_ = at::empty(
       {output_channels_padded}, at::device(at::kCPU).dtype(at::kFloat));
-  float* w_scales_data_ptr = w_scales_.data_ptr<float>();
+  float* w_scales_data_ptr = w_scales_.mutable_data_ptr<float>();
   std::fill_n(
       w_scales_data_ptr + output_channels_,
       output_channels_padded - output_channels_,

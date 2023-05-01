@@ -1,9 +1,11 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIterator.h>
 #include <ATen/native/Cross.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
+namespace {
 
 static const char* METAL_CROSS = R"CROSS_METAL(
 
@@ -136,8 +138,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -154,10 +155,8 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
         }
       }
 
-      id<MTLFunction> kernelDataOffsetsFunction =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          [[device newComputePipelineStateWithFunction:kernelDataOffsetsFunction error:&error] autorelease];
+          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
       TORCH_CHECK(
@@ -193,13 +192,10 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
-
-      [computeEncoder endEncoding];
-      mpsStream->commit(true);
     }
   });
 }
+} // anonymous namespace
 
 REGISTER_DISPATCH(cross_stub, &cross_mps_impl);
-
 } // namespace at::native

@@ -191,7 +191,7 @@ def redistribute_dtensor(
         shape=input.size(),
         dtype=input.dtype,
         requires_grad=local_tensor.requires_grad,
-        stride=input.stride()
+        stride=input.stride(),
     )
 
 
