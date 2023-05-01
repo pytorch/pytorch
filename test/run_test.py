@@ -385,6 +385,7 @@ if dist.is_available():
             "UCX_TLS": "tcp",
             "UCC_TLS": "nccl,ucp",
             "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
