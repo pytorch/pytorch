@@ -32,7 +32,9 @@ class MemoryDep(typing.NamedTuple):
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
-            return MemoryDep(renames[self.name], self.index, self.size, self.var_names)
+            return MemoryDep(
+                renames[self.name], self.index, var_names=self.var_names, size=self.size
+            )
         return self
 
     def numbytes_hint(self):
@@ -174,6 +176,7 @@ class _RecordLoadStoreInner(V.MockHandler):
         var_ranges = {
             k: V.graph.sizevars.simplify(v)
             for k, v in self._var_ranges.items()
+            # TODO(jansel): explore this further normalization
             # if k in free_symbols
         }
         index_vars = [*var_ranges.keys()]
