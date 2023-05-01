@@ -1070,12 +1070,8 @@ def skip_layout_opt(name):
     """
     if name in [
         # torchbench
-        "Background_Matting",
-        "drq",
         "functorch_maml_omniglot",
-        "pytorch_CycleGAN_and_pix2pix",
         "yolov3",
-        "timm_efficientdet",
 
         # timm
         "cspdarknet53",

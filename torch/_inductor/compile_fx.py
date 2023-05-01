@@ -632,6 +632,8 @@ def compile_fx(
     # Revisit since https://github.com/pytorch/pytorch/pull/99528 may have improve
     # the perf.
     # 
+    # Following models are skipped due to this:
+    # - pytorch_CycleGAN_and_pix2pix
     if any(isinstance(x, torch.nn.modules.instancenorm.InstanceNorm2d) for x in model_.modules()):
         print("DIABLE LAYOUT_OPT BECAUSE INSTANCE_NORM")
         config.layout_opt = False

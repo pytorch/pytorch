@@ -171,6 +171,7 @@ class GraphLowering(torch.fx.Interpreter):
         # Following models are skipped due to this:
         # - pytorch_unet
         # - phlippe_densenet
+        # - Background_Matting
         if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes ):
             print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
             config.layout_opt = False
