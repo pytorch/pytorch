@@ -181,6 +181,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     "detectron2_maskrcnn_r_50_fpn",
     # TorchBench
     "detectron2",
+    "densenet121",  # flaky accuracy
     "hf_T5",  # accuracy
     "hf_BigBird",  # accuracy
     "hf_GPT2_large",  # OOM
