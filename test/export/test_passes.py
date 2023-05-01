@@ -6,6 +6,7 @@ import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import _export
+from torch._export import dynamic_dim
 from torch._export.passes import (
     AddRuntimeAssertionsForConstraintsPass,
     ConstPropPass,
@@ -69,7 +70,9 @@ class TestPasses(TestCase):
             def forward(self, x):
                 return x.cos()
 
-        gm = _export(M(), (torch.zeros(2, 2, 3),))
+        x = torch.zeros(2, 2, 3)
+
+        gm = _export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
 
         new_gm = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertIsNotNone(new_gm)
