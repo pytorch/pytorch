@@ -47,6 +47,8 @@ runs:
         max_attempts: 3
         retry_wait_seconds: 30
         command: |
+          id -nG
+          ls -l /var/run/docker.sock
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
           aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
