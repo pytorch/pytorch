@@ -1,5 +1,5 @@
 from collections import defaultdict, namedtuple
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import math
 import operator
@@ -10,6 +10,7 @@ import torch
 import torch.fx
 from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.graph_module import get_export_meta
+from torch._export.pass_infra.node_metadata import NodeMetadata
 
 
 __all__ = ["AddRuntimeAssertionsForConstraintsPass"]
@@ -22,6 +23,17 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(self) -> None:
         super().__init__()
         self.current_gm = None
+
+    def _create_dummy_node_metadata(self, fake_mode, example_value: Optional[torch.Tensor] = None) -> NodeMetadata:
+        val = example_value if example_value is not None else torch.empty(0)
+        assert isinstance(val, torch.Tensor)
+
+        dummy_meta_dict = {}
+        dummy_meta_dict["val"] = fake_mode.from_tensor(val)
+        dummy_meta_dict["stack_trace"] = ""
+        dummy_meta_dict["nn_module_stack"] = {}
+        dummy_meta_dict["debug_handle"] = ""
+        return NodeMetadata(dummy_meta_dict)
 
     def _process_constraints(self, constraints) -> Dict[int, List[ConstraintSpec]]:
         constraints_id_to_constraint: Dict[int, List[ConstraintSpec]] = defaultdict(
@@ -84,6 +96,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             return arg
 
         constraints = self.constraints[id(current_inp)]
+        current_fake_mode = meta["val"].fake_mode
 
         for constraint in constraints:
             dim = self._fx(
@@ -91,7 +104,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 torch.ops.aten.sym_size,
                 (arg, constraint.constraint_dim),
                 {},
-                meta,
+                self._create_dummy_node_metadata(current_fake_mode),
                 self.interpreter,
             )
             assert_msg = (
@@ -101,33 +114,53 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
 
             if constraint.min_val > 2:
                 ge = self._fx(
-                    "call_function", operator.ge, (dim, constraint.min_val), {}, meta, self.interpreter,
+                    "call_function",
+                    operator.ge,
+                    (dim, constraint.min_val),
+                    {},
+                    self._create_dummy_node_metadata(current_fake_mode),
+                    self.interpreter,
                 )
                 tensor_ge = self._fx(
-                    "call_function", torch.scalar_tensor, (ge,), {}, meta, self.interpreter,
+                    "call_function",
+                    torch.ops.aten.scalar_tensor.default,
+                    (ge,),
+                    {},
+                    self._create_dummy_node_metadata(current_fake_mode, torch.tensor(1)),
+                    self.interpreter,
                 )
                 self._fx(
                     "call_function",
-                    torch._assert_async,
+                    torch.ops.aten._assert_async.msg,
                     (tensor_ge, assert_msg),
                     {},
-                    meta,
+                    self._create_dummy_node_metadata(current_fake_mode),
                     self.interpreter,
                 )
 
             if constraint.max_val < math.inf:
                 le = self._fx(
-                    "call_function", operator.le, (dim, constraint.max_val), {}, meta, self.interpreter,
+                    "call_function",
+                    operator.le,
+                    (dim, constraint.max_val),
+                    {},
+                    self._create_dummy_node_metadata(current_fake_mode),
+                    self.interpreter,
                 )
                 tensor_le = self._fx(
-                    "call_function", torch.scalar_tensor, (le,), {}, meta, self.interpreter
+                    "call_function",
+                    torch.ops.aten.scalar_tensor.default,
+                    (le,),
+                    {},
+                    self._create_dummy_node_metadata(current_fake_mode, torch.tensor(1)),
+                    self.interpreter
                 )
                 self._fx(
                     "call_function",
-                    torch._assert_async,
+                    torch.ops.aten._assert_async.msg,
                     (tensor_le, assert_msg),
                     {},
-                    meta,
+                    self._create_dummy_node_metadata(current_fake_mode),
                     self.interpreter,
                 )
 
