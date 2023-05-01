@@ -591,6 +591,9 @@ def has_same_metadata(t1, t2):
         t1.size() == t2.size()
         and t1.stride() == t2.stride()
         and t1.storage_offset() == t2.storage_offset()
+        and t1.storage_offset() == t2.storage_offset()
+        and t1.is_conj() == t2.is_conj()
+        and t1.is_neg() == t2.is_neg()
     )
 
 
@@ -775,19 +778,27 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Keep track of which outputs alias other outputs
         out_tensor_alias_counts = collections.defaultdict(int)
+        out_storage_to_tensors = collections.defaultdict(set)
         for o in flat_f_outs:
             if isinstance(o, torch.Tensor):
-                out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] += 1
+                curr_storage = StorageWeakRef(o.untyped_storage())
+                out_tensor_alias_counts[curr_storage] += 1
+                out_storage_to_tensors[curr_storage].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
         for o in flat_f_outs:
-            if (
-                isinstance(o, torch.Tensor)
-                and StorageWeakRef(o.untyped_storage()) in inp_storage_refs
-            ):
-                base_idx = inp_storage_refs[StorageWeakRef(o.untyped_storage())]
+            curr_storage = None if not isinstance(o, torch.Tensor) else StorageWeakRef(o.untyped_storage())
+            outs_with_identical_metadata_that_require_grad = [] if not isinstance(o, torch.Tensor) else [
+                curr for curr in out_storage_to_tensors[curr_storage]
+                if has_same_metadata(o, curr) and curr.requires_grad and o is not curr
+            ]
+            if not isinstance(o, torch.Tensor):
+                output_type = OutputType.non_alias
+                base_idx = None
+            elif curr_storage in inp_storage_refs:
+                base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 if is_input_tensor:
                     output_type = OutputType.is_input
@@ -798,12 +809,11 @@ def run_functionalized_fw_and_collect_metadata(
             # the intermediate base and the output require gradients.
             # See Note [AOT Autograd: outputs aliasing inputs or intermediates!]
             elif (
-                isinstance(o, torch.Tensor)
-                and o._base is not None
+                o._base is not None
                 and o.requires_grad
                 and o._base.requires_grad
             ):
-                if out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] == 1:
+                if out_tensor_alias_counts[curr_storage] == 1:
                     # Note [Intermediate Bases Optimization]
                     # Normally if we have an output that aliases an intermediate,
                     # we need to add the extra "intermediate base" logic further down
@@ -843,6 +853,20 @@ def run_functionalized_fw_and_collect_metadata(
                             output_type = OutputType.alias_of_intermediate_save_as_output
                             intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
                             intermediate_bases.append(o._base)
+            elif (
+                # See https://github.com/pytorch/pytorch/issues/100348 for this case.
+                # This protects against the specific case where a user fn returns (output, output.detach())
+                out_tensor_alias_counts[curr_storage] > 1
+                and len(outs_with_identical_metadata_that_require_grad) > 0
+                and not o.requires_grad
+            ):
+                assert len(outs_with_identical_metadata_that_require_grad) > 0
+                # In theory we could use any of these tensors to regenerat the aliased outputs from,
+                # since they all alias each other and have identical metatadata
+                out_alias = outs_with_identical_metadata_that_require_grad[0]
+                existing_out_idx = out_tensor_ids[id(out_alias)]
+                output_type = OutputType.alias_of_intermediate_base_is_user_output
+                base_idx = existing_out_idx
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
