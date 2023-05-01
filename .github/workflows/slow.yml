@@ -105,3 +105,26 @@ jobs:
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+  linux-focal-py3_9-clang7-asan-build:
+    name: linux-focal-py3.9-clang7-asan
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
+        ]}
+      sync-tag: asan-build
+
+  linux-focal-py3_9-clang7-asan-test:
+    name: linux-focal-py3.9-clang7-asan
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_9-clang7-asan-build
+    with:
+      build-environment: linux-focal-py3.9-clang7-asan
+      docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
+      sync-tag: asan-test

@@ -27,11 +27,7 @@ from torch.ao.quantization._quantize_pt2e import (
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 
 from torch.ao.quantization.qconfig import default_per_channel_symmetric_qnnpack_qconfig
-from torch.ao.quantization.quantize_fx import (
-    _convert_to_reference_decomposed_fx,
-    convert_to_reference_fx,
-    prepare_fx,
-)
+from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -218,7 +214,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                 m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
             )
             m_fx(*example_inputs)
-            m_fx = _convert_to_reference_decomposed_fx(
+            m_fx = convert_to_reference_fx(
                 m_fx, backend_config=backend_config
             )
             m_fx, _ = torchdynamo.export(
@@ -282,7 +278,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
         )
         m_fx(*example_inputs)
-        m_fx = _convert_to_reference_decomposed_fx(m_fx, backend_config=backend_config)
+        m_fx = convert_to_reference_fx(m_fx, backend_config=backend_config)
         fx_quant_output = m_fx(*example_inputs)
         self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
 
