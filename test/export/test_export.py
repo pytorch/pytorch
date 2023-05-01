@@ -579,6 +579,11 @@ class TestExport(TestCase):
         loaded_gm = pickle.loads(pickled_gm)
         self.assertTrue(torch.allclose(loaded_gm(*inputs), mmep(*inputs)))
 
+        # Check metadata
+        self.assertEqual(len(loaded_gm.methods()), 1)
+        self.assertTrue(loaded_gm.meta is not None)
+        self.assertTrue(loaded_gm.in_spec is not None)
+        self.assertTrue(loaded_gm.out_spec is not None)
 
 
 if __name__ == '__main__':
