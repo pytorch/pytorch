@@ -277,7 +277,8 @@ class BackendConfig:
             self.device_backend_map = {
                 device : backend_val for device in supported_devices
             }
-        else:
+        elif ":" in backend.lower():
+            # Backend specified in "device:backend" format
             # make sure the backend string is in the correct format
             # "{device_type1}:{backend1},{device_type2}:{backend2}"
             # e.g. "cpu:gloo,cuda:nccl"
@@ -296,6 +297,20 @@ class BackendConfig:
                     raise ValueError(f"Duplicate device type {device} \
                                      in backend string: {backend}. {backend_str_error_message}")
                 self.device_backend_map[device] = Backend(backend)
+        else:
+            # User specified a single backend name whose device capability is
+            # unknown, assuming it can support the default devices of PyTorch
+            # (cpu and cuda)
+            warnings.warn(
+                f"Device capability of {backend} unknown, assuming `cpu` and "
+                "`cuda`. You can specify it in `device:backend` format in "
+                "`init_process_group` call."
+            )
+            backend_val = Backend(backend)
+            self.device_backend_map = {
+                "cpu" : backend_val,
+                "cuda" : backend_val,
+            }
 
         logger.info(
             f"Using backend config: {self.device_backend_map}"  # noqa: G004
@@ -418,6 +433,7 @@ class _World:
     def __init__(self):
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
+        self._pg_object_coll_device: Dict[ProcessGroup, torch.device] = {}
 
     @property
     def default_pg(self):
@@ -503,6 +519,10 @@ class _World:
     def pg_coalesce_state(self) -> Dict[ProcessGroup, List[Union[_CollOp, P2POp]]]:
         return self._pg_coalesce_state
 
+    @property
+    def pg_object_coll_device(self) -> Dict[ProcessGroup, torch.device]:
+        return self._pg_object_coll_device
+
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
 
@@ -535,6 +555,9 @@ STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 def _get_object_coll_device(group: Optional[ProcessGroup] = None):
     group = group or _get_default_group()
+    if group in _world.pg_object_coll_device:
+        # Previously searched and cached; just return
+        return _world.pg_object_coll_device[group]
     """
     ``group._device_types`` is a property pybind that returns the devices
     ("cpu", "cuda", etc) supported by ``group``. Can be multiple if the
@@ -544,24 +567,26 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
 
     if len(devices) == 1:
         # User fixed exactly one backend in `init_process_group`
-        return devices[0]
+        _world.pg_object_coll_device[group] = devices[0]
     elif len(devices) == 0:
         # No backend has been registered with this PG (maybe because no
         # collective has been run?) We pick cpu as the default and hopefully
         # this would lazily init Gloo or other available cpu backend.
-        return torch.device("cpu")
+        _world.pg_object_coll_device[group] = torch.device("cpu")
     elif torch.device("cpu") in devices:
         # There are multiple backends in this PG and cpu is among them.
         # cpu is preferred as the object is in cpu memory. No need for device
         # copy.
-        return torch.device("cpu")
+        _world.pg_object_coll_device[group] = torch.device("cpu")
     else:
         # No cpu in the backend list. Randomly pick the first backend
-        return devices[0]
-    """
-    TODO: see if we can cache this object_coll_device so that we only need to
-    find it once
-    """
+        _world.pg_object_coll_device[group] = devices[0]
+
+    logger.info(
+        f"Using device {_world.pg_object_coll_device[group]} for object "
+        "collectives."
+    )
+    return _world.pg_object_coll_device[group]
 
 
 # Environment variable to control whether we do a barrier after process group
@@ -1304,6 +1329,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
+        _world.pg_object_coll_device.clear()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1319,6 +1345,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
+        del _world.pg_object_coll_device[pg]
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
