@@ -2869,7 +2869,7 @@ Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
 
 Args:
-    real (Tensor): The real part of the complex tensor. Must be float or double.
+    real (Tensor): The real part of the complex tensor. Must be half, float or double.
     imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
         as :attr:`real`.
 
@@ -9357,7 +9357,7 @@ with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
-comparing against :attr:`end`; to avoid inconsistency, we advise adding a small epsilon to :attr:`end`
+comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
 in such cases.
 
 .. math::
