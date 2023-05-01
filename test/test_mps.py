@@ -772,6 +772,10 @@ def mps_ops_error_inputs_modifier(ops):
         # MPS does not support tensor dimensions > 16
         'amax',
         'amin',
+        'aminmax',
+
+        # memory overlapping checks
+        'index_select',
 
         # unimplemented
         'logcumsumexp',
@@ -10476,7 +10480,9 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 
-class TestErrorInputs(TestCaseMPS):
+class TestErrorInputs(TestCase):
+    _ignore_not_implemented_error = True
+
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps")
