@@ -60,13 +60,6 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
-        # Top 60
-        # CPU: empty is returning all 0's and there is a mismatch with MPS
-        # allocation (MacOS 13). According to
-        # https://pytorch.org/docs/2.0/generated/torch.empty.html
-        #    PyTorch `empty`, Returns a tensor filled with  uninitialized data.
-        'empty': [torch.float16, torch.float32],
-
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
@@ -119,7 +112,6 @@ def mps_ops_grad_modifier(ops):
         'signal.windows.hann': [torch.float32],
         'signal.windows.kaiser': [torch.float32],
         'signal.windows.nuttall': [torch.float32],
-        'empty_permuted': [torch.float16, torch.float32],
         'eye': [torch.float16, torch.float32],
 
         # trunc_tensor not working properly for float16
@@ -315,11 +307,6 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # fill tensors with uninitialized data, causing mismatch with CPU
-        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
-                           torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
-                  torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -678,12 +665,6 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
 
-        # these fill tensors with uninitialized data, causing mismatch with CPU
-        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # 'empty': [torch.int8],
-        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
-                              torch.int32, torch.int64, torch.uint8, torch.int8],
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
         # zero to negative integer powers are undefined
@@ -714,12 +695,33 @@ def mps_ops_modifier(ops):
         'byte': [torch.float16, torch.float32],
     }
 
+    EMPTY_OPS_SKIPLIST = {
+        # Fill tensors with uninitialized data, causing mismatch with CPU.
+        # They occasionally match, thus skipping them.
+        # See https://github.com/pytorch/pytorch/issues/100175
+        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
+                              torch.int32, torch.int64, torch.uint8, torch.int8],
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
+                           torch.int32, torch.int64, torch.uint8, torch.int8],
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
 
     for op in ops:
         key = op.name + op.variant_test_name
+        if key in EMPTY_OPS_SKIPLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip("Skipping empty ops."),
+                         dtypes=EMPTY_OPS_SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
