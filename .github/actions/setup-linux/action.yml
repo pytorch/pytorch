@@ -26,6 +26,23 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
+    - name: Add user to Docker group if not already in docker group (GCP only)
+      shell: bash
+      if: ${{ contains(runner.name, 'gcp') }}
+      run: |
+        if ! id -nG "$USER" | grep -qw "docker"; then
+          (
+            set -x
+            sudo usermod -aG docker "${USER}"
+          )
+        fi
+
+    - name: Check docker version
+      shell: bash
+      run: |
+        # This should also check if we can actually access the docker daemon
+        docker version
+
     - name: Start docker if docker deamon is not running
       shell: bash
       run: |
