@@ -734,6 +734,13 @@ static bool is_int_or_symint_list(
     if (is_int_or_symint(item.ptr())) {
       return true;
     }
+
+    // NOTE: In dynamo, numpy int act as fake tensor
+    if (is_dynamo_compiling && THPVariable_Check(item.ptr()) &&
+         THPVariable_Unpack(item.ptr()).sizes().empty()) {
+      return true;
+    }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -1386,9 +1393,7 @@ bool FunctionSignature::parse(
         varargs_eligible &&
         ((int_list_overload
               ? is_int_list(args, param.size, &failed_idx)
-              : is_int_or_symint_list(args, param.size, &failed_idx)) ||
-         // allow fake tensor when varargs_eligible is true
-         THPVariable_Check(obj))) {
+              : is_int_or_symint_list(args, param.size, &failed_idx)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
