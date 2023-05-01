@@ -46,13 +46,11 @@ def install_config_module(module):
     config = dict()
     visit(module, module, "")
     module._config = config
-    module._allowed_keys = set(config.keys())
     module.__class__ = ConfigModuleInstance
 
 
 class ConfigModule(ModuleType):
     _config: Dict[str, Any]
-    _allowed_keys: Set[str]
     _bypass_keys: Set[str]
 
     def __init__(self):
@@ -63,7 +61,7 @@ class ConfigModule(ModuleType):
     def __setattr__(self, name, value):
         if name in self._bypass_keys:
             super().__setattr__(name, value)
-        elif name not in self._allowed_keys:
+        elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
             self._config[name] = value
