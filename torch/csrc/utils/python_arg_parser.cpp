@@ -737,7 +737,7 @@ static bool is_int_or_symint_list(
 
     // NOTE: In dynamo, numpy int act as fake tensor
     if (is_dynamo_compiling && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes().empty()) {
+        THPVariable_Unpack(item.ptr()).sizes().empty()) {
       return true;
     }
 

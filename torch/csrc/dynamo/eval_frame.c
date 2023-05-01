@@ -171,8 +171,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 #define SKIP_CODE ((void*)0x1)
 
 bool is_dynamo_compiling = false;
-static PyObject* noargs = NULL; /* cached empty tuple */
-static PyObject* dotzerokey = NULL; /* ".0" */
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
 static PyObject* profiler_start_hook = NULL;
