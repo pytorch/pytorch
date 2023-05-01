@@ -3000,13 +3000,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_opt_step = torch._dynamo.optimize("eager")(opt_step)
 
         def compiled_model_step(x):
-            optimizer.zero_grad(True)
+            optimizer.zero_grad()
             y = model(x)
             torch.sum(y).backward()
             compiled_opt_step()
 
         compiled_model_step(x)
 
+        # Picked "square_avg" arbitrarily to check that
+        # optimizer state tensors are deallocated
         state_ref = weakref.ref(
             optimizer.state[optimizer.param_groups[0]["params"][0]]["square_avg"]
         )
