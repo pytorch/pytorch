@@ -91,12 +91,6 @@ diagnose_call = functools.partial(
     format_argument=format_argument,
 )
 
-diagnose_step = functools.partial(
-    decorator.diagnose_step,
-    diagnostics.export_context,
-    format_argument=format_argument,
-)
-
 rules = diagnostics.rules
 export_context = diagnostics.export_context
 levels = diagnostics.levels
