@@ -7,7 +7,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import suppress
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -545,7 +545,7 @@ class CommonDistributedDataParallelTest:
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
             err_ctx = (
-                suppress() if not use_reentrant else
+                nullcontext() if not use_reentrant else
                 self.assertRaisesRegex(
                     RuntimeError,
                     "Expected to mark a variable ready only once."
@@ -577,7 +577,7 @@ class CommonDistributedDataParallelTest:
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
             err_ctx = (
-                suppress() if not use_reentrant else
+                nullcontext() if not use_reentrant else
                 self.assertRaisesRegex(
                     RuntimeError,
                     "Expected to mark a variable ready only once."
@@ -678,7 +678,7 @@ class CommonDistributedDataParallelTest:
                 self.assertRaisesRegex(
                     RuntimeError,
                     "Your training graph has changed in this iteration"
-                ) if static_graph and not use_reentrant else suppress()
+                ) if static_graph and not use_reentrant else nullcontext()
             )
             with err_ctx:
                 self._test_ddp_checkpointing(
