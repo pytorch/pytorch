@@ -38,7 +38,7 @@ class SwiGLU(nn.Module):
         x5 = x4 @ self.w3.transpose(-2, -1) + self.b3
         return x5
 
-class CUTLASSSwiGLU(SwiGLU):
+class CUTLASSSwiGLU1(SwiGLU):
 
     def forward(self, x):
         b = x.view(-1, x.shape[-1]).T
@@ -70,6 +70,7 @@ class CUTLASSSwiGLU(SwiGLU):
         cutlass_swiglu = cls(mod.m, mod.k, mod.dtype)
 
         m, k = mod.m, mod.k
+
         mask1 = mod.w1.data != 0
         mask2 = mod.w2.data != 0
 
@@ -84,6 +85,46 @@ class CUTLASSSwiGLU(SwiGLU):
         cutlass_swiglu.meta1 = None
         cutlass_swiglu.mask2 = mask2
         cutlass_swiglu.meta2 = None
+
+        return cutlass_swiglu
+
+class CUTLASSSwiGLU2(SwiGLU):
+
+    def forward(self, x):
+        #x12 = x @ self.w12.transpose(-2, -1) + self.b12
+        b = x.view(-1, x.shape[-1]).T
+        c = self.b12.view(torch.numel(self.b12), 1)
+        if self.mask12 is not None:
+            x12, self.meta12 = torch._cutlass_linear(self.w12, b, c, self.mask12)
+            self.mask12 = None
+        else:
+            x12, _ = torch._cutlass_linear(self.w12, b, c, self.meta12)
+
+        x1, x2 = torch.split(x12, m)
+        x1 = x1.T.view(*x.shape[:-1], -1)
+        x2 = x2.T.view(*x.shape[:-1], -1)
+        x3 = torch.nn.functional.silu(x1)
+        x4 = x3 * x2
+        x5 = x4 @ self.w3.transpose(-2, -1) + self.b3
+        return x5
+
+    @classmethod
+    def from_dense(cls, mod):
+        cutlass_swiglu = cls(mod.m, mod.k, mod.dtype)
+
+        m, k = mod.m, mod.k
+
+        w12 = torch.cat((mod.w1, mod.w2))
+        b12 = torch.cat((mod.b1, mod.b2))
+        mask12 = w12.data != 0
+
+        cutlass_swiglu.w12 = torch.nn.parameter.Parameter(w12.data.masked_select(mask12).view(2 * m, k // 2))
+        cutlass_swiglu.b12 = torch.nn.parameter.Parameter(b12)
+        cutlass_swiglu.w3 = torch.nn.parameter.Parameter(mod.w3)
+        cutlass_swiglu.b3 = torch.nn.parameter.Parameter(mod.b3)
+
+        cutlass_swiglu.mask12 = mask12
+        cutlass_swiglu.meta12 = None
 
         return cutlass_swiglu
 
@@ -151,8 +192,12 @@ if __name__ == '__main__':
             pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2)
             pruner.prepare(model, [{'tensor_fqn': 'swiglu.w1'}, {'tensor_fqn': 'swiglu.w2'}])
             pruner.step()
-            sparse_linear = pruner.convert(model, mapping={SwiGLU: CUTLASSSwiGLU})
-            print(sparse_linear)
+
+            sparse_linear1 = pruner.convert(model, mapping={SwiGLU: CUTLASSSwiGLU1})
+            print(sparse_linear1)
+
+            sparse_linear2 = pruner.convert(model, mapping={SwiGLU: CUTLASSSwiGLU2})
+            print(sparse_linear2)
 
             pruner.squash_mask()
             dense_linear = model
@@ -161,17 +206,28 @@ if __name__ == '__main__':
             for i in range(2):
                 input_tensor = torch.randn(batch_size, n, k, device=device, dtype=dtype)
                 dense_output = dense_linear(input_tensor)
-                sparse_output = sparse_linear(input_tensor)
+                sparse_output1 = sparse_linear1(input_tensor)
+                sparse_output2 = sparse_linear2(input_tensor)
 
-                assert torch.allclose(sparse_output, dense_output, rtol=1e-3, atol=1e-3)
+                assert torch.allclose(sparse_output1, dense_output, rtol=1e-3, atol=1e-3)
+                assert torch.allclose(sparse_output2, dense_output, rtol=1e-3, atol=1e-3)
 
 
             measurement = benchmark.Timer(
                 stmt='sparse_linear(input_tensor)',
-                globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear},
+                globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear1},
                 label=label,
                 sub_label=sub_label,
-                description='sparse latency',
+                description='sparse latency 1',
+            ).blocked_autorange()
+            results.append(measurement)
+
+            measurement = benchmark.Timer(
+                stmt='sparse_linear(input_tensor)',
+                globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear2},
+                label=label,
+                sub_label=sub_label,
+                description='sparse latency 2',
             ).blocked_autorange()
             results.append(measurement)
 
