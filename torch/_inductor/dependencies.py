@@ -170,15 +170,26 @@ class _RecordLoadStoreInner(V.MockHandler):
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
-        sizes = list(self._var_ranges.values())
-        sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
-            return index, tuple([x for x in sizes if x != 1])
+            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
+            var_names = tuple(
+                k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
+            )
+            sizes = tuple(v for v in sizes if v != 1)
+            return index, sizes
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
-        index_vars = list(self._var_ranges.keys())
+        free_symbols = index.free_symbols
+        var_ranges = {
+            k: V.graph.sizevars.simplify(v)
+            for k, v in self._var_ranges.items()
+            # TODO(jansel): explore this further normalization
+            # if k in free_symbols
+        }
+        index_vars = [*var_ranges.keys()]
+        sizes = [*var_ranges.values()]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -189,7 +200,6 @@ class _RecordLoadStoreInner(V.MockHandler):
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
         new_vars, add_var = var_builder(canonicalization_prefix())
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
-
         index = sympy_subs(sympy.expand(index), replacement)
 
         new_vars = [*new_vars.keys()]
@@ -200,7 +210,6 @@ class _RecordLoadStoreInner(V.MockHandler):
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-
         return index, tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
