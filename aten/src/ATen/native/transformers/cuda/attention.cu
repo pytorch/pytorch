@@ -824,8 +824,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   at::Tensor output = at::empty_like(query);
 
-  Tensor logsumexp, debug_attn_mask;
-  Tensor philox_seed, philox_offset;
+  Tensor logsumexp, debug_attn_mask, philox_seed, philox_offset;
   std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
       query,
       key,

@@ -35,7 +35,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/ops/scalar_tensor.h>
-#include <iostream>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -324,7 +323,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
 
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-        // generator_state = at::Tensor::wrap_tensor_impl(gen -> get_state());
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
           auto [seed, offset] = at::cuda::philox::unpack(philox_state);
