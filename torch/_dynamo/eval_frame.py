@@ -723,8 +723,7 @@ def export(
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
         Required if aten_graph or tracing_mode is specified. Default is None.
 
-        tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
-        If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
+        tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -734,7 +733,7 @@ def export(
         Guards: The guards we accumulated during tracing f above
 
     Raises:
-        AssertionError: If decomposition_table or tracing_mode is specified without setting aten_graph=True,
+        AssertionError: If decomposition_table is specified without setting aten_graph=True,
         or if graph breaks during tracing in export.
 
         AssertionError: If Dynamo input and output is not consistent with traced input/output.
