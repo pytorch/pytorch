@@ -203,6 +203,66 @@ class PythonStore : public ::c10d::Store {
       const std::chrono::milliseconds& timeout) override {
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
   }
+
+  // Note: this function manually calls the Python-side overload
+  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // macros. This is done so that we can call the Python-side
+  // function with a std::string instead of a std::vector<uint8_t>.
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "append");
+    if (!fn) {
+      return Store::append(key, value);
+    }
+    // Call function with a py::bytes object for the value.
+    fn(key,
+       py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
+  }
+
+  virtual std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "multi_get");
+    if (!fn) {
+      return Store::multiGet(keys);
+    }
+    std::vector<std::string> py_list =
+        pybind11::cast<std::vector<std::string>>(fn(keys));
+    std::vector<std::vector<uint8_t>> res;
+
+    for (auto& str : py_list) {
+      res.emplace_back(std::vector<uint8_t>(str.begin(), str.end()));
+    }
+
+    return res;
+  }
+
+  virtual void multiSet(
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "multi_set");
+    if (!fn) {
+      return Store::multiSet(keys, values);
+    }
+
+    std::vector<py::bytes> bytes;
+    for (auto& value : values) {
+      bytes.emplace_back(
+          py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
+    }
+
+    fn(keys, bytes);
+  }
+
+  bool hasExtendedApi() const override {
+    PYBIND11_OVERLOAD_NAME(
+        bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
+  }
 };
 
 // Called from DDP's Python API to create a c10d Python comm hook object.
@@ -1046,7 +1106,98 @@ Example::
           .def_property_readonly(
               "timeout",
               &::c10d::Store::getTimeout,
-              R"(Gets the timeout of the store.)");
+              R"(Gets the timeout of the store.)")
+          .def(
+              "append",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 const std::string& value) {
+                std::vector<uint8_t> value_(value.begin(), value.end());
+                store.append(key, value_);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Append the key-value pair into the store based on the supplied ``key`` and
+``value``. If ``key`` does not exists in the store, it will be created.
+
+Arguments:
+    key (str): The key to be appended to the store.
+    value (str): The value associated with ``key`` to be added to the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.append("first_key", "po")
+    >>> store.append("first_key", "tato")
+    >>> # Should return "potato"
+    >>> store.get("first_key")
+)")
+          .def(
+              "multi_get",
+              [](::c10d::Store& store, const std::vector<std::string>& keys) {
+                auto values = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.multiGet(keys);
+                }();
+                std::vector<py::bytes> res;
+                for (auto& value : values) {
+                  auto bytes = py::bytes(
+                      reinterpret_cast<const char*>(value.data()),
+                      value.size());
+                  res.push_back(bytes);
+                }
+                return res;
+              },
+              R"(
+Retrieve all values in ``keys``. If any key in ``keys`` is not
+present in the store, the function will wait for ``timeout``
+
+Arguments:
+    keys (List[str]): The keys to be retrieved from the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.set("first_key", "po")
+    >>> store.set("second_key", "tato")
+    >>> # Should return [b"po", b"tato"]
+    >>> store.multi_get(["first_key", "second_key"])
+)")
+          .def(
+              "multi_set",
+              [](::c10d::Store& store,
+                 const std::vector<std::string>& keys,
+                 const std::vector<std::string>& values) {
+                std::vector<std::vector<uint8_t>> vals;
+                for (auto& value : values) {
+                  vals.push_back(
+                      std::vector<uint8_t>(value.begin(), value.end()));
+                }
+                store.multiSet(keys, vals);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Inserts a list key-value pair into the store based on the supplied ``keys`` and ``values``
+
+Arguments:
+    keys (List[str]): The keys to insert.
+    values (List[str]): The values to insert.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.multi_set(["first_key", "second_key"], ["po", "tato"])
+    >>> # Should return b"po"
+    >>> store.get("first_key")
+)")
+
+          .def_property_readonly(
+              "has_extended_api",
+              &::c10d::Store::hasExtendedApi,
+              R"(Returns true if the store supports extended operations.)");
 
   intrusive_ptr_class_<::c10d::FileStore>(
       module,
