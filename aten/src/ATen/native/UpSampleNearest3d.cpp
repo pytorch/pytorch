@@ -36,7 +36,9 @@ TORCH_META_FUNC(upsample_nearest3d) (
       "Non-empty 5D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
+  // set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
+  auto memory_format = native::upsample_3d_get_memory_format(input);
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(memory_format));
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact3d) (
@@ -54,7 +56,9 @@ TORCH_META_FUNC(_upsample_nearest_exact3d) (
       "Non-empty 5D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
+  // set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
+  auto memory_format = native::upsample_3d_get_memory_format(input);
+  set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(memory_format));
 }
 
 TORCH_META_FUNC(upsample_nearest3d_backward) (

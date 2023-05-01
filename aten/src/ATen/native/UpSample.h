@@ -164,6 +164,26 @@ static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
   return {nbatch, channels, output_height, output_width};
 }
 
+static C10_UNUSED at::MemoryFormat upsample_2d_get_memory_format(const Tensor& input) {
+  auto memory_format = input.suggest_memory_format();
+  auto input_memory_format = (input.is_contiguous(at::MemoryFormat::ChannelsLast)) ? \
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  if (memory_format != input_memory_format) {
+    memory_format = input_memory_format;
+  }
+  return memory_format;
+}
+
+static C10_UNUSED at::MemoryFormat upsample_3d_get_memory_format(const Tensor& input) {
+  auto memory_format = input.suggest_memory_format();
+  auto input_memory_format = (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) ? \
+      at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::Contiguous;
+  if (memory_format != input_memory_format) {
+    memory_format = input_memory_format;
+  }
+  return memory_format;
+}
+
 static C10_UNUSED
 std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
