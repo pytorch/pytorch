@@ -57,17 +57,28 @@ kernel void index_select(
 
 template<typename T>
 void index_put_impl(
+#if __METAL_VERSION__ >= 300
+    constant IndexAB  * indexAB,
+#else
     constant IndexAB  & indexAB,
+#endif
     constant int64_t  * index_sizes,
     constant int64_t  * index_strides,
     constant uint3    * offsets,
     constant void     * inputData,
     device   void     * outputData,
+    constant uint32_t & num_indices,
     uint thread_index
 ){
     int64_t offset = 0;
     for (uint32_t i = 0; i < num_indices; i++) {
-        int64_t index = ((constant int64_t*)(indexAB.indexArray[i]))[offsets[thread_index].z / sizeof(int64_t)];
+#if __METAL_VERSION__ >= 300
+        constant int64_t* indexArray = indexAB[i].indexArray;
+#else
+        constant int64_t* indexArray = (constant int64_t*)indexAB.indexArray[i];
+#endif
+        int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
+
         if (index < 0) {
             index += index_sizes[i];
         }
@@ -80,20 +91,25 @@ void index_put_impl(
 
 template<typename T>
 kernel void index_put_serial(
+#if __METAL_VERSION__ >= 300
+    constant IndexAB  * indexAB           [[buffer(0)]],
+#else
     constant IndexAB  & indexAB           [[buffer(0)]],
+#endif
     constant void     * indexSizes        [[buffer(1)]],
     constant void     * indexStrides      [[buffer(2)]],
     constant uint3    * offsets           [[buffer(3)]],
     constant void     * inputData         [[buffer(4)]],
     device   void     * outputData        [[buffer(5)]],
-    constant uint     * numIters          [[buffer(6)]],
+    constant uint32_t & num_indices       [[buffer(6)]],
+    constant uint     * numIters          [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
 
     constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
     constant int64_t * index_strides = (constant int64_t *)indexStrides;
 
     for (uint iter_i = 0; iter_i < *numIters; iter_i++) {
-        index_put_impl<T>(indexAB, index_sizes, index_strides, offsets, inputData, outputData, iter_i);
+        index_put_impl<T>(indexAB, index_sizes, index_strides, offsets, inputData, outputData, num_indices, iter_i);
     }
 }
 
@@ -114,23 +130,7 @@ kernel void index_put(
 
     constant int64_t * index_sizes   = (constant int64_t *)indexSizes;
     constant int64_t * index_strides = (constant int64_t *)indexStrides;
-    int64_t offset = 0;
-    for (uint32_t i = 0; i < num_indices; i++) {
-#if __METAL_VERSION__ >= 300
-        constant int64_t* indexArray = indexAB[i].indexArray;
-#else
-        constant int64_t* indexArray = (constant int64_t*)indexAB.indexArray[i];
-#endif
-        int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
-
-        if (index < 0) {
-            index += index_sizes[i];
-        }
-        offset += index * index_strides[i];
-     }
-    device T * out = (device T*)((device char*)outputData + offsets[thread_index].x + offset);
-    constant T * in  = (constant T*)((constant char*)inputData  + offsets[thread_index].y);
-    *out = *in;
+    index_put_impl<T>(indexAB, index_sizes, index_strides, offsets, inputData, outputData, num_indices, thread_index);
 }
 
 #if __METAL_VERSION__ < 300
@@ -181,7 +181,8 @@ kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
     constant uint3   * offsets           [[buffer(3)]],         \
     constant void    * inputData         [[buffer(4)]],         \
     device   void    * outputData        [[buffer(5)]],         \
-    constant uint    * numIters          [[buffer(6)]],         \
+    constant uint32_t & num_indices       [[buffer(6)]],        \
+    constant uint    * numIters          [[buffer(7)]],         \
     uint thread_index [[thread_position_in_grid]]);
 
 #define REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)     \

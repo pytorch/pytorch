@@ -102,7 +102,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
 
-      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      std::string indexFunction =
+          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
       id<MTLComputePipelineState> indexSelectPSO = nil;
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
@@ -143,12 +144,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
         TORCH_CHECK(
             indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       }
->>>>>>> main
-
-        indexSelectPSO = [[device newComputePipelineStateWithFunction:indexKernelFunction error:&error] autorelease];
-        TORCH_CHECK(
-            indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-      }
 
       [computeEncoder setComputePipelineState:indexSelectPSO];
       [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
@@ -159,8 +154,9 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       [computeEncoder setBuffer:outputBuffer
                          offset:outputTensor.storage_offset() * outputTensor.element_size()
                         atIndex:5];
+      [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
       if (serial_index_put) {
-        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:6];
+        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
         gridSize = MTLSizeMake(1, 1, 1);
         numThreads = 1;
       } else {
