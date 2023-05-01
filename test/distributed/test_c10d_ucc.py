@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import tempfile
+import unittest
 from functools import reduce
 
 import torch
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle,
 )
 
+prePascal = torch.cuda.is_available() and torch.cuda.get_device_capability() <= (6, 0)
 
 def simple_reduce_tests(rank, world_size):
     tests = [
@@ -1011,6 +1013,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
+    @unittest.skipIf(prePascal)
     @skip_if_lt_x_gpu(2)
     @requires_ucc()
     def test_ucc_warn_not_in_group(self):
