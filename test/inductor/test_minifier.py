@@ -17,10 +17,11 @@ class MinifierTests(MinifierTestBase):
     # Generates code that patches CppOverrides/TritonOverrides.
     def _gen_codegen_fn_patch_code(self, device, bug_type):
         assert bug_type in ("compile_error", "runtime_error", "accuracy")
-        if device == "cpu":
-            return f"torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY = {bug_type!r}"
-        else:
-            return f"torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = {bug_type!r}"
+        return f"""\
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_TESTING_ONLY = {bug_type!r}
+"""
 
     # Test that compile and accuracy errors after aot can be repro'd (both CPU and CUDA)
     def _test_after_aot(self, device, bug_type, repro_level):
