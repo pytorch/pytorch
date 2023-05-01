@@ -73,10 +73,10 @@ def get_source_partitions(
         # module
 
         if (source_fn := node.meta.get("source_fn", None)) is None:
-           continue
-        
+            continue
+
         if source_fn[1] not in wanted_sources:
-           continue
+            continue
 
         diff_modules = modules.setdefault(source_fn[1], {})
         partition = diff_modules.setdefault(source_fn[0], [])
@@ -98,7 +98,13 @@ def get_source_partitions(
                 if user not in nodes:
                     output_nodes.add(node)
 
-        return SourcePartition(nodes, module_type, list(input_nodes), list(output_nodes), list(params))
+        return SourcePartition(
+            nodes,
+            module_type,
+            list(input_nodes),
+            list(output_nodes),
+            list(params),  # type: ignore[arg-type]
+        )
 
     ret: Dict[Type[Any], List[SourcePartition]] = {}
     for k, v in modules.items():
