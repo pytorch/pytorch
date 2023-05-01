@@ -90,9 +90,19 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "detach",  detach is not in OP-TEST-DB
         "div",
         "dot",
-        # "nn.functional.adaptive_avg_pool1d",  other ops needed
-        # "nn.functional.adaptive_avg_pool2d",  other ops needed
-        # "nn.functional.adaptive_avg_pool3d",  other ops needed
+        # "empty",  non-deterministic
+        # "empty_like",  non-deterministic
+        # "empty_strided",  empty_strided is not in OPS_DB
+        "eq",
+        "equal",
+        "erf",
+        "exp",
+        "exp2",
+        "expand",
+        "expand_as",
+        "nn.functional.adaptive_avg_pool1d",
+        "nn.functional.adaptive_avg_pool2d",
+        "nn.functional.adaptive_avg_pool3d",
         "nn.functional.conv1d",
         # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
         # "nn.functional.conv3d",  extra opinfo needed
@@ -100,6 +110,8 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.cross_entropy",
         "nn.functional.celu",
         "nn.functional.dropout",
+        "nn.functional.elu",
+        "nn.functional.embedding",
         "unflatten",
     ]
 )
@@ -385,8 +397,68 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("MatMul", "uint8, int8, int16")
     ),
     xfail(
+        "eq",
+        dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Equal", "uint8, int8, int16"),
+    ),
+    xfail(
+        "equal",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten.equal.default")
+    ),
+    xfail(
+        "erf",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Erf", "bool"),
+    ),
+    xfail(
+        "erf",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Erf", "int"),
+    ),
+    xfail(
+        "erf",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Erf", "float64"),
+    ),
+    xfail(
+        "exp",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Exp", "bool, int"),
+    ),
+    xfail(
+        "exp2",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Pow", "bool"),
+    ),
+    xfail(
+        "exp2",
+        dtypes=onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int"),
+    ),
+    xfail(
+        "nn.functional.adaptive_avg_pool1d",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+    ),
+    xfail(
+        "nn.functional.adaptive_avg_pool2d",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+    ),
+    xfail(
+        "nn.functional.adaptive_avg_pool3d",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+    ),
+    xfail(
         "nn.functional.dropout",
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
+    ),
+    xfail(
+        "nn.functional.elu",
+        dtypes=(torch.float64,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Elu", "float64"),
+    ),
+    xfail(
+        "nn.functional.embedding",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
     ),
     skip(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
