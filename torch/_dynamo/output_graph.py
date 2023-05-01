@@ -1014,8 +1014,15 @@ class SubgraphTracer(fx.Tracer):
         # Building a new Variable automatically lifts the freevar to be an
         # input of the root SubgraphTracer.
         #
-        # After that happens, since the variable is now being tracked,
-        # we are now back to case 1.
+        # The implications for the code below are:
+        # - We will always be in Case 1 when we get to this code.
+        # - Any "free variable" we encounter here is guaranteed to already be
+        #   bound, that is, it is either a graph input of the root graph, or
+        #   some local variable of the root graph or a subgraph.
+        # - The additional work we need to do here is *only* that we need to
+        #   lift this free variable into inputs (recursively) of each nested
+        #   higher-order-op subgraph until we hit the subgraph where the free
+        #   variable is bound
         if self.parent is not None:
             flat_args, _ = pytree.tree_flatten(args)
             for arg in flat_args:
