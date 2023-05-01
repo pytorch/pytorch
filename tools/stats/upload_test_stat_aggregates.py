@@ -39,10 +39,10 @@ def get_test_stat_aggregates(date: datetime.date) -> Any:
     # Initialize the Rockset client with your API key
     rockset_api_key = os.environ["ROCKSET_API_KEY"]
     rockset_api_server = "api.rs2.usw2.rockset.com"
-    iso_date = date.isoformat()
     rs = rockset.RocksetClient(
         host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
+    iso_date = date.isoformat()
 
     # Define the name of the Rockset collection and lambda function
     collection_name = "commons"

@@ -5739,7 +5739,7 @@ for shape in [(1,), ()]:
                 "none of output has requires_grad=True"
             )
             if use_reentrant
-            else contextlib.suppress()
+            else contextlib.nullcontext()
         )
 
         a = torch.randn(2, 2, requires_grad=True)
