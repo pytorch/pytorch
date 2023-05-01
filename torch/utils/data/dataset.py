@@ -42,7 +42,7 @@ class Dataset(Generic[T_co]):
     :meth:`__len__`, which is expected to return the size of the dataset by many
     :class:`~torch.utils.data.Sampler` implementations and the default options
     of :class:`~torch.utils.data.DataLoader`. Subclasses could also
-    optionally overwrite :meth:`__getitems__`, for speedup batched samples
+    optionally implement :meth:`__getitems__`, for speedup batched samples
     loading. This method accepts list of indices of samples of batch and returns
     list of samples.
 
