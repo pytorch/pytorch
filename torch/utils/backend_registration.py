@@ -86,19 +86,25 @@ def _check_register_once(module, attr):
 
 
 def _normalization_device(custom_backend_name: str, device: Optional[Union[int, torch.device]] = None) -> int:
-    _get_device_index = "current_device"
-    if device is None:
+    def _get_current_device_index():
+        _get_device_index = "current_device"
         if hasattr(torch, custom_backend_name) and \
                 hasattr(getattr(torch, custom_backend_name), _get_device_index):
-            device_idx = getattr(getattr(torch, custom_backend_name), _get_device_index)()
+            return getattr(getattr(torch, custom_backend_name), _get_device_index)()
         else:
             # The default device index is 0.
-            device_idx = 0
+            return 0
+
+    if device is None:
+        device_idx = _get_current_device_index()
     elif isinstance(device, torch.device):
         if device.type != custom_backend_name:
             raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
+        elif device.index is None:
+            device_idx = _get_current_device_index()
         else:
             device_idx = device.index
+    # if isinstance(device, int), we can take the index number directly
     else:
         device_idx = device
     return device_idx
