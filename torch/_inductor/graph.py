@@ -1,4 +1,3 @@
-import functools
 import logging
 import operator
 import os
@@ -75,8 +74,10 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
 
 def may_get_constant_buffer_dtype(constant_buffer):
     assert isinstance(
-        constant_buffer, sympy.Symbol
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol"
+        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
+    if isinstance(constant_buffer, sympy.core.numbers.Integer):
+        return torch.int64
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
@@ -88,7 +89,6 @@ def may_get_constant_buffer_dtype(constant_buffer):
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
-
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -134,6 +134,7 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
+    ITER = 0
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -145,6 +146,12 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
+        with open(f"/tmp/graphlowering_{self.ITER}.fx", "w") as f:
+            f.write(gm.print_readable(False))
+
+        # from fxana import analyze
+        # analyze(gm)
+
         # it's hard to optimize layout for models with both normal conv
         # and group conv. Normal conv prefers channels last while grouped
         # conv prefers contiguous. For such model like timm_regnet we can
@@ -154,6 +161,13 @@ class GraphLowering(torch.fx.Interpreter):
             print("FOUND GROUPED CONVOLUTION!")
             config.layout_opt = False
 
+        # Channels last does not help much for convolution whose out channel is smaller than in channels.
+        # Even worse, channels last may hurt perf in that case.
+        # We skip the layout optimizations if the model contains such convolution. pytorch_unet is such
+        # an example
+        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) for n in gm.graph.nodes):
+            print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
+            config.layout_opt = False
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -169,6 +183,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
+        self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -612,6 +627,31 @@ class GraphLowering(torch.fx.Interpreter):
                 # reads, but they converge to a user.
                 result.realize_hint()
 
+        # This is not complete, but it doesn't have to be: origin_node
+        # tracking is best effort.  The logic here critically relies on direct
+        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
+        # to get views to work.  Feel free to add any extra cases as needed.
+        #
+        # Note: we can't YOLO tree_map over this result, because if there are
+        # buffers or a view involved, we might not be able to validly assign
+        # the origin_node here.
+        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
+            if isinstance(result.data.data, ir.Loops):
+                result.data.data.origin_node = n
+            elif isinstance(result.data.data, ir.Buffer):
+                result.data.data.origin_node = n
+                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
+                    result.data.data.data, ir.Loops
+                ):
+                    result.data.data.data.origin_node = n
+                # Not really multi-output, can straightforwardly recurse in
+                elif (
+                    isinstance(result.data.data, ir.MultiOutput)
+                    and not result.data.data.indices
+                ):
+                    if isinstance(result.data.data.inputs[0], ir.Buffer):
+                        result.data.data.inputs[0].origin_node = n
+
         return result
 
     def check_cpp_codegen_disabled(self):
@@ -622,44 +662,38 @@ class GraphLowering(torch.fx.Interpreter):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    @functools.lru_cache(None)
-    def get_single_device(self):
-        return list(self.device_types)[0] if len(self.device_types) == 1 else None
-
-    def check_input_for_cpp_buffer(self, cuda):
+    def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
-            elif isinstance(value, sympy.Symbol):
+            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, cuda):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
             self.disable_cpp_wrapper("Constants")
 
-    def check_cpp_wrapper(self, cuda):
+    def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
-        self.check_input_for_cpp_buffer(cuda)
+        self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
+        self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            device = self.get_single_device()
-            assert device == "cpu" or device == "cuda"
-            cuda = device == "cuda"
-            self.check_cpp_wrapper(cuda)
+            self.check_cpp_wrapper()
             # Re-check self.cpp_wrapper because it might be disabled due to failed checking
-            if cuda:
+            if self.cuda:
                 assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
 
             if self.cpp_wrapper:
                 self.wrapper_code = (
-                    CudaWrapperCodeGen() if cuda else CppWrapperCodeGen()
+                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
                 )
                 return
 
@@ -742,10 +776,7 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
-            )
-            return lambda dummy: libpath
+            return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
             return self.compile_to_module().call
 

@@ -129,6 +129,10 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     # Huggingface
     "BartForConditionalGeneration",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
+    # Torchbench
+    "speech_transformer",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_isoneutral_mixing",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_turbulent_kinetic_energy",  # https://github.com/pytorch/pytorch/issues/99893
 ]
 
 CI_SKIP[CI("aot_eager", training=True)] = [
@@ -263,7 +267,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
     "levit_128",  # Accuracy fails on A10G, passes on A100
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
@@ -1062,11 +1065,11 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
 
 def skip_layout_opt(name):
     """
-    TODO: this is a hack to remove
+    TODO: this is not called now. But leave it to document what models I need follow up.
+    Will remove this.
     """
     if name in [
         # torchbench
-        "pytorch_unet",
         "Background_Matting",
         "drq",
         "functorch_maml_omniglot",
@@ -1316,7 +1319,7 @@ class BenchmarkRunner:
                 fields.append(v)
 
             output_csv(output_filename, headers, fields)
-            return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
+            return accuracy_status
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
@@ -1554,7 +1557,7 @@ class BenchmarkRunner:
         explain=False,
         tag=None,
     ):
-        skip_layout_opt(name)
+        # skip_layout_opt(name)
         mode = "train" if self.args.training else "eval"
         msg = f"{current_device:4} {mode:5} {current_name:34} "
         if tag:
@@ -2080,6 +2083,8 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+        if not args.dynamic_batch_only:
+            torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:

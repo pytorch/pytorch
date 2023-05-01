@@ -4,6 +4,7 @@ import itertools
 import logging
 import operator
 import tempfile
+import time
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import (
@@ -79,20 +80,21 @@ def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
         def pass_wrapper(
             gm: Union[fx.GraphModule, IterGraphModule], *args: Any, **kwargs: Any
         ) -> None:
-            pass_key = ".".join([func.__module__, func.__name__])
+            begin = time.time()
+            func_key = ".".join([func.__module__, func.__name__])
             assert isinstance(gm, (fx.GraphModule, IterGraphModule)), (
                 "The first argument of the pass must be either "
                 "fx.GraphModule or IterGraphModule."
             )
-            assert pass_key not in _optimized_func, f"Cannot apply {pass_key} twice."
-            invalid_passes = _run_before_sets[pass_key].intersection(_optimized_func)
-            assert not invalid_passes, f"{invalid_passes} must run after {pass_key}."
+            assert func_key not in _optimized_func, f"Cannot apply {func_key} twice."
+            invalid_passes = _run_before_sets[func_key].intersection(_optimized_func)
+            assert not invalid_passes, f"{invalid_passes} must run after {func_key}."
 
             func(gm, *args, **kwargs)
             gm.graph.lint()
             gm.graph.eliminate_dead_code()
             gm.recompile()
-            _optimized_func.add(pass_key)
+            _optimized_func.add(func_key)
 
             prefix = f"after_{func.__name__}"
             if _dump_graph_folder:
@@ -107,6 +109,8 @@ def graph_optimization_pass(run_after: Iterable[str]) -> Callable:
                     )
                 else:
                     dump_graphs_to_files({prefix: gm}, _dump_graph_folder)
+
+            logger.info("Spent %f seconds applying %s", time.time() - begin, func_key)
 
         return pass_wrapper
 
