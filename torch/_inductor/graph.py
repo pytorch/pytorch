@@ -633,7 +633,7 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 return
 
-        self.wrapper_code = WrapperCodeGen()
+        self.wrapper_code = WrapperCodeGen(cuda=self.cuda)
 
     def codegen(self):
         from .scheduler import Scheduler
