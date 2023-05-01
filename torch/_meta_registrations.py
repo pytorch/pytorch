@@ -1625,7 +1625,7 @@ def meta_embedding_bag(
             max_indices = indices.new_empty(0)
     else:
         fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
-        if mode == MODE_MEAN or mode == MODE_MAX or not fast_path_sum:
+        if mode in (MODE_MEAN, MODE_MAX) or not fast_path_sum:
             offset2bag = offsets.new_empty(indices.size(0))
         else:
             offset2bag = offsets.new_empty(0)
