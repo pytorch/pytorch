@@ -558,6 +558,7 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
     if group in _world.pg_object_coll_device:
         # Previously searched and cached; just return
         return _world.pg_object_coll_device[group]
+
     if not isinstance(group, ProcessGroup):
         # Provide backward compatibility to cases where `group` passed in is
         # actually a Backend (like `ProcessGroupGloo`) rather than a
@@ -569,6 +570,7 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
         )
         # Most users create Gloo with private API for object collectives
         return torch.device("cpu")
+
     """
     ``group._device_types`` is a property pybind that returns the devices
     ("cpu", "cuda", etc) supported by ``group``. Can be multiple if the
@@ -594,7 +596,7 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
         _world.pg_object_coll_device[group] = devices[0]
 
     logger.info(
-        f"Using device {_world.pg_object_coll_device[group]} for object "
+        f"Using device {_world.pg_object_coll_device[group]} for object "  # noqa: G004
         "collectives."
     )
     return _world.pg_object_coll_device[group]
