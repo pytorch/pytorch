@@ -5631,6 +5631,27 @@ class TestBlockStateAbsorption(TestCase):
         inp = torch.rand([1, 3, 255, 255], device="cuda")
         self.checkFunction(m, [inp])
 
+    def test_check_pool_live_allocations(self):
+
+        def foo():
+            return torch.ones([4], device="cuda")
+
+        pool = torch.cuda.graph_pool_handle()
+        graph, outputs = cudagraphify(foo, [], pool=pool)
+
+        index = outputs[0].device.index
+
+        def check(live_dps):
+            return torch._C._cuda_checkPoolLiveAllocations(index, pool, live_dps)
+
+        self.assertTrue(check({outputs[0].data_ptr()}))
+
+        self.assertFalse(check({outputs[0].data_ptr(), 0}))
+        self.assertFalse(check(set()))
+
+        del outputs
+        self.assertTrue(check(set()))
+
 
     def test_allocate_in_thread_to_pool(self):
 
