@@ -1,9 +1,12 @@
+import io
+import logging
 import os
 import re
 import shutil
 import subprocess
 import tempfile
-import unittest
+import traceback
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -42,15 +45,67 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
         cls._exit_stack.close()
 
+    def _maybe_subprocess_run(self, args, *, isolate=True, cwd=None):
+        if not isolate:
+            assert len(args) >= 2, args
+            assert args[0] == "python3", args
+            if args[1] == "-c":
+                assert len(args) == 3, args
+                code = args[2]
+                args = ["-c"]
+            else:
+                assert len(args) >= 2, args
+                with open(args[1], "r") as f:
+                    code = f.read()
+                args = args[1:]
+
+            # WARNING: This is not a perfect simulation of running
+            # the program out of tree.  We only interpose on things we KNOW we
+            # need to handle for tests.  If you need more stuff, you will
+            # need to augment this appropriately.
+            dynamo_config = torch._dynamo.config.save_config()
+            inductor_config = torch._inductor.config.save_config()
+            try:
+                stderr = io.StringIO()
+                log_handler = logging.StreamHandler(stderr)
+                log = logging.getLogger("torch._dynamo")
+                log.addHandler(log_handler)
+                try:
+                    prev_cwd = os.getcwd()
+                    if cwd is not None:
+                        os.chdir(cwd)
+                    with patch("sys.argv", args):
+                        exec(code, {"__name__": "__main__"})
+                    rc = 0
+                except Exception:
+                    rc = 1
+                    traceback.print_exc(file=stderr)
+                finally:
+                    log.removeHandler(log_handler)
+                    if cwd is not None:
+                        os.chdir(prev_cwd)
+            finally:
+                torch._dynamo.config.load_config(dynamo_config)
+                torch._inductor.config.load_config(inductor_config)
+
+            # TODO: return a more appropriate data structure here
+            return subprocess.CompletedProcess(
+                args,
+                rc,
+                b"",
+                stderr.getvalue().encode("utf-8"),
+            )
+        else:
+            return subprocess.run(args, capture_output=True, cwd=cwd)
+
     # Run `code` in a separate python process.
     # Returns the completed process state and the directory containing the
     # minifier launcher script, if `code` outputted it.
-    def _run_test_code(self, code):
-        proc = subprocess.run(
-            ["python3", "-c", code], capture_output=True, cwd=self.DEBUG_DIR
-        )
-        print("stdout:", proc.stdout.decode("utf-8"))
-        print("stderr:", proc.stderr.decode("utf-8"))
+    def _run_test_code(self, code, *, isolate=True):
+        proc = self._maybe_subprocess_run(["python3", "-c", code], isolate=isolate)
+
+        print("test stdout:", proc.stdout.decode("utf-8"))
+        print("test stderr:", proc.stderr.decode("utf-8"))
         repro_dir_match = re.search(
             r"(\S+)minifier_launcher.py", proc.stderr.decode("utf-8")
         )
@@ -59,34 +114,35 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         return proc, None
 
     # Runs the minifier launcher script in `repro_dir`
-    def _run_minifier_launcher(self, repro_dir):
+    def _run_minifier_launcher(self, repro_dir, isolate=True):
         self.assertIsNotNone(repro_dir)
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
         with open(launch_file, "r") as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
 
-        launch_proc = subprocess.run(
-            ["python3", launch_file],
-            capture_output=True,
-            cwd=repro_dir,
-        )
+        args = ["python3", launch_file, "minify"]
+        if not isolate:
+            args.append("--no-isolate")
+        launch_proc = self._maybe_subprocess_run(args, isolate=isolate, cwd=repro_dir)
         print("minifier stdout:", launch_proc.stdout.decode("utf-8"))
         print("minifier stderr:", launch_proc.stderr.decode("utf-8"))
 
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`
-    def _run_repro(self, repro_dir):
+    def _run_repro(self, repro_dir, *, isolate=True):
         self.assertIsNotNone(repro_dir)
         repro_file = os.path.join(repro_dir, "repro.py")
         with open(repro_file, "r") as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
 
-        repro_proc = subprocess.run(
-            ["python3", repro_file], capture_output=True, cwd=repro_dir
+        repro_proc = self._maybe_subprocess_run(
+            ["python3", repro_file], isolate=isolate
         )
+        print("repro stdout:", repro_proc.stdout.decode("utf-8"))
+        print("repro stderr:", repro_proc.stderr.decode("utf-8"))
         return repro_proc, repro_code
 
     # Template for testing code.
@@ -109,16 +165,24 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # 1. Run the problematic code (in a separate process since it could segfault)
     # 2. Run the generated minifier launcher script
     # 3. Run the generated repro script
-    def _run_full_test(self, run_code, repro_after, repro_level, patch_code):
+    def _run_full_test(
+        self, run_code, repro_after, repro_level, patch_code, *, isolate=True
+    ):
         test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
-        test_proc, repro_dir = self._run_test_code(test_code)
+        test_proc, repro_dir = self._run_test_code(test_code, isolate=isolate)
         self.assertIsNotNone(repro_dir)
         print("running minifier")
-        launch_proc, launch_code = self._run_minifier_launcher(repro_dir)
+        launch_proc, launch_code = self._run_minifier_launcher(
+            repro_dir, isolate=isolate
+        )
         print("running repro")
-        repro_proc, repro_code = self._run_repro(repro_dir)
+        repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)
         return (test_proc, launch_proc, repro_proc), (launch_code, repro_code)
 
-    def _run_full_test_nocode(self, run_code, repro_after, repro_level, patch_code):
-        tbs, _ = self._run_full_test(run_code, repro_after, repro_level, patch_code)
+    def _run_full_test_nocode(
+        self, run_code, repro_after, repro_level, patch_code, *, isolate=True
+    ):
+        tbs, _ = self._run_full_test(
+            run_code, repro_after, repro_level, patch_code, isolate=isolate
+        )
         return tbs
