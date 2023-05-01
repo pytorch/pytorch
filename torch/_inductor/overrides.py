@@ -2,12 +2,15 @@ import logging
 import random
 import weakref
 
+import functorch
+
 import torch
 from torch import _prims
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.overrides import TorchFunctionMode
 
 from . import config
+from .utils import decode_device
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +99,7 @@ class PhiloxRandomState:
         cls.last_tracer_ref = weakref.ref(tracer) if tracer is not None else null_ref
 
     @classmethod
-    def get_seed_offset(cls, x):
+    def get_seed_offset(cls, x, device=None):
         modes = torch.fx.experimental.proxy_tensor.get_torch_dispatch_modes()
         proxy_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
         if proxy_modes:
@@ -108,7 +111,9 @@ class PhiloxRandomState:
             # no tracer, need to reset state
             cls.reset()
 
-        device = x.device
+        if device is None:
+            device = x.device
+        device = decode_device(device)
         if device not in cls.seed:
             # Compute the seed just once per trace so that we pass fewer
             # things from forward to backward
@@ -124,7 +129,7 @@ class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, p):
         ctx.p = p
-        scale = float(1.0 / (1.0 - p))
+        scale = float(0.0) if p == 1.0 else float(1.0 / (1.0 - p))
         seed, offset = PhiloxRandomState.get_seed_offset(x)
         ctx.save_for_backward(seed)
         ctx.offset = offset
@@ -134,7 +139,7 @@ class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         p = ctx.p
-        scale = float(1.0 / (1.0 - p))
+        scale = float(0.0) if p == 1.0 else float(1.0 / (1.0 - p))
         (seed,) = ctx.saved_tensors
         bool_mask = philox_rand_like(grad_output, seed, ctx.offset) > p
         return bool_mask.to(grad_output.dtype) * grad_output * scale, None
@@ -163,9 +168,11 @@ def rand_like(x, **kwargs):
     if isinstance(x, torch.fx.Proxy):
         # double check we don't FX trace this
         return x.tracer.create_proxy("call_function", rand_like, (x), kwargs)
-    assert kwargs.get("device", x.device) == x.device
-    seed, offset = PhiloxRandomState.get_seed_offset(x)
-    return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
+    device = kwargs.get("device", x.device)
+    seed, offset = PhiloxRandomState.get_seed_offset(x, device)
+    return philox_rand_like(x.to(device), seed, offset).to(
+        kwargs.get("dtype", torch.float32)
+    )
 
 
 def replace_fn(fn):
@@ -176,5 +183,9 @@ def replace_fn(fn):
         return fn
     if config.lowmem_dropout and fn is torch.nn.functional.dropout:
         return lowmem_dropout
-    replacements = {torch.rand_like: rand_like}
+
+    replacements = {}
+    # TODO: Revisit the functionalize_rng_ops for lowmem dropout
+    if not functorch.compile.config.functionalize_rng_ops:
+        replacements.update({torch.rand_like: rand_like})
     return replacements.get(fn, fn)

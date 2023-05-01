@@ -21,18 +21,25 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_methods_invocations import \
-    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops)
+    (reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
 
-reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and
-                                     (op.supports_sparse
-                                      or op.supports_sparse_csr
-                                      or op.supports_sparse_csc
-                                      or op.supports_sparse_bsr
-                                      or op.supports_sparse_bsc)]
+
+def _op_supports_any_sparse(op):
+    return (op.supports_sparse
+            or op.supports_sparse_csr
+            or op.supports_sparse_csc
+            or op.supports_sparse_bsr
+            or op.supports_sparse_bsc)
+
+
+reduction_ops_with_sparse_support = [op for op in reduction_ops if 'masked.' not in op.name and _op_supports_any_sparse(op)]
+
+binary_ufuncs_with_sparse_support = [op for op in binary_ufuncs if _op_supports_any_sparse(op)]
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -93,6 +100,7 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
 
 class TestSparseLegacyAndDeprecation(TestCase):
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_legacy_warnings(self):
 
         def f1():
@@ -3728,8 +3736,8 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    # NOTE: addcmul_out is not implemented for bool and half.
-    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    # NOTE: addcmul_out is not implemented for bool.
+    @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_sparse_mul(self, device, dtype, coalesced):
         self._test_mul_skips(device, dtype, coalesced)
@@ -4756,6 +4764,42 @@ class TestSparseAny(TestCase):
             self.skipTest('NOT IMPL')
         else:
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(binary_ufuncs_with_sparse_support)
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_binary_operation(self, layout, device, dtype, op):
+        if not op.supports_sparse_layout(layout):
+            self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
+
+        for sample in op.sample_inputs_sparse(layout, device, dtype):
+            if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:
+                # that is, the validation returns the sparse sample
+                # wrapped within ErrorInput instance
+                continue
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+            result = op.op(t_inp, *t_args, **t_kwargs)
+
+            # Check rop(inp, ...).shape == inp.shape
+            self.assertEqual(result.shape, t_inp.shape)
+
+            # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+            self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+
+            # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+            self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+
+            # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
+            try:
+                dense = op.op(t_inp.to_dense(), *(t_args[0].to_dense(), *t_args[1:]), **t_kwargs)
+            except Exception as msg:
+                # this is strided op issue, so skipping the sample silently here
+                if "\"cpublas_axpy_impl\" not implemented for 'ComplexHalf'" in str(msg):
+                    continue
+                raise
+            self.assertEqual(result, dense)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

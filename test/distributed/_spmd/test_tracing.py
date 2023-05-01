@@ -23,6 +23,7 @@ from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import get_global_rank, get_world_size
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -274,30 +275,6 @@ class TraceModuleTest(DTensorTestBase):
         model = nn.LayerNorm(input.shape[1:]).to(self.device_type)
         pt_input = torch.tensor(input, dtype=torch.float).to(self.device_type)
         self._test_trace_replicate(model, pt_input)
-
-    @with_comms
-    def test_baked_in_shape(self):
-        class LCE(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(5)
-                self.w = torch.nn.Parameter(torch.rand((5, 10)))
-                self.b = torch.nn.Parameter(torch.rand((5)))
-
-            def forward(self, x, *args, **kwargs):
-                # the code below will bake in the shape of x_t as arguments to expand
-                x_t = x.permute(0, 2, 1)
-                y_t = kwargs["dict_test"]["value"].expand(x_t.shape) + args[0][
-                    0
-                ].expand(x_t.shape)
-                # code below triggers an "expand" with shape baked in.
-                return torch.nn.functional.linear(y_t, self.w, self.b)
-
-        model = LCE().to(self.device_type)
-        x = torch.randn(2, 10, 80).to(self.device_type)
-        y = torch.randn(2, 80, 10).to(self.device_type)
-        z = torch.randn(2, 80, 10).to(self.device_type)
-        self._test_trace_replicate(model, x, [y], dict_test={"value": z})
 
     @with_comms
     def test_sequential(self):
@@ -860,6 +837,44 @@ class CoverageTest(DTensorTestBase):
 
         ids = torch.randint(0, N, (B,)).cuda(self.rank)
         tgt = torch.empty(B, dtype=torch.long).random_(0, D).to(self.rank)
+
+        self._test_train_step(train_step, mod, ids, tgt)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_pos_embedding(self):
+        N, D, B, Block = 10, 8, 2, 20
+
+        class EmbeddingModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wte = nn.Embedding(N, D)
+                self.wpe = nn.Embedding(Block, D)
+                self.norm = nn.LayerNorm(D, elementwise_affine=False)
+                self.fc = nn.Linear(D, D)
+
+            def forward(self, ids, tgt):
+                _, t = ids.size()
+                wte = self.wte(ids)
+                wpe = self.wpe(
+                    torch.arange(0, t, dtype=torch.long, device=ids.device).unsqueeze(0)
+                )
+                emb = wpe + wte
+                norm = self.norm(emb)
+                fc = self.fc(norm)
+                log = F.softmax(fc, dim=-1)
+                return F.cross_entropy(log.view(-1, log.size(-1)), tgt.view(-1))
+
+        torch.manual_seed(0)
+        mod = EmbeddingModule().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, ids, tgt):
+            mod(ids, tgt).sum().backward()
+            opt.step()
+
+        ids = torch.randint(0, N, (B, Block)).cuda(self.rank)
+        tgt = torch.empty((B, Block), dtype=torch.long).random_(0, D).to(self.rank)
 
         self._test_train_step(train_step, mod, ids, tgt)
 

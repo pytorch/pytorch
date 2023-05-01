@@ -1,5 +1,4 @@
 import copy
-import functools
 import logging
 from typing import Optional
 
@@ -13,18 +12,29 @@ from torch.fx.experimental.optimization import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
+
 from .. import config, overrides
 
 from ..fx_utils import matches_module_function_pattern
 from ..mkldnn import mkldnn_fuse_fx
+from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
 from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
+patterns = PatternMatcherPass()
 
-@functools.lru_cache(None)
+
+@init_once_fakemode
 def lazy_init():
-    pass
+    from .split_cat import _split_cat_init
+
+    _split_cat_init()
+
+    if config.is_fbcode():
+        from .fb.split_cat import _split_cat_init as _fb_split_cat_init
+
+        _fb_split_cat_init()
 
 
 def pre_grad_passes(gm, example_inputs):
@@ -46,6 +56,10 @@ def pre_grad_passes(gm, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
+        patterns.apply(gm.graph)
+
+    gm.graph.lint()
+    gm.recompile()
 
     return gm
 

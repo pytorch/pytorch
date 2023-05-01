@@ -158,6 +158,15 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten.randperm.default)
+def meta_randperm_default(
+    n, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
+    return torch.empty(
+        n, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 @register_meta(aten.randint.default)
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
@@ -284,6 +293,16 @@ def meta_angle(self):
 def meta_angle_out(self, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.angle(self))
+
+
+@register_meta(aten._assert_async.default)
+def assert_async(val):
+    return
+
+
+@register_meta(aten._assert_async.msg)
+def assert_async_meta(val, assert_msg):
+    return
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
@@ -1354,7 +1373,7 @@ def meta__foreach_binop_scalar(self, scalar=1):
 )
 def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
     check(
-        all([isinstance(l, List) for l in [self, tensor1, tensor2]]),
+        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
         lambda: (
             "All arguments of _foreach_addc*_ must be List[Tensor], "
             f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
@@ -1375,7 +1394,7 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
 )
 def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
     check(
-        all([isinstance(l, List) for l in [self, tensor1, tensor2]]),
+        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
         lambda: (
             "All arguments must be List[Tensor], "
             f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
@@ -1420,9 +1439,46 @@ def meta__fused_adam_(
 ):
     for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
         check(
-            isinstance(self, List),
-            lambda: f"exponent must be a tensor list but got {type(self)}",
+            isinstance(l, List),
+            lambda: f"exponent must be a tensor list but got {type(l)}",
         )
+
+
+@register_meta([aten._fused_adam.default])
+def meta__fused_adam(
+    self,
+    grads,
+    exp_avgs,
+    exp_avg_sqs,
+    max_exp_avg_sqs,
+    state_steps,
+    *,
+    lr,
+    beta1,
+    beta2,
+    weight_decay,
+    eps,
+    amsgrad,
+    maximize,
+    grad_scale=None,
+    found_inf=None,
+):
+    for l in [self, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]:
+        check(
+            isinstance(l, List),
+            lambda: f"exponent must be a tensor list but got {type(l)}",
+        )
+
+    def empty_like_list(tensor_list):
+        return [torch.empty_like(t) for t in tensor_list]
+
+    return (
+        empty_like_list(self),
+        empty_like_list(grads),
+        empty_like_list(exp_avgs),
+        empty_like_list(exp_avg_sqs),
+        empty_like_list(max_exp_avg_sqs),
+    )
 
 
 @register_meta([aten._int_mm])
@@ -1569,7 +1625,7 @@ def meta_embedding_bag(
             max_indices = indices.new_empty(0)
     else:
         fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
-        if mode == MODE_MEAN or mode == MODE_MAX or not fast_path_sum:
+        if mode in (MODE_MEAN, MODE_MAX) or not fast_path_sum:
             offset2bag = offsets.new_empty(indices.size(0))
         else:
             offset2bag = offsets.new_empty(0)
@@ -2585,7 +2641,7 @@ def upsample_common_check(input_size, output_size, num_spatial_dims):
     )
 
     check(
-        all([s > 0 for s in input_size[2:]]) and all([s > 0 for s in output_size]),
+        all(s > 0 for s in input_size[2:]) and all(s > 0 for s in output_size),
         lambda: f"Input and output sizes should be greater than 0, but got "
         f"input size {input_size} and output size {output_size}",
     )
@@ -3016,7 +3072,7 @@ def meta_upsample_bilinear2d_aa(
         input.size(), output_size, num_spatial_dims=2
     )
     check(
-        input.numel() != 0 or all([size > 0 for size in input.size()[1:]]),
+        input.numel() != 0 or all(size > 0 for size in input.size()[1:]),
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
