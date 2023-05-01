@@ -9,7 +9,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value, get_real_value
+from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 from torch.utils import _pytree as pytree
@@ -174,7 +174,7 @@ class TorchVariable(VariableTracker):
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
             return type(self.value)
-        if type(self.value) is type:
+        if isinstance(self.value, type):
             return type
         return super().python_type()
 
@@ -311,6 +311,32 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif self.value is torch.from_numpy:
+            if not config.numpy_ndarray_as_tensor:
+                unimplemented(
+                    "torch.from_numpy(). Turn on config.numpy_ndarray_as_tensor to support "
+                    "torch.from_numpy()."
+                )
+            assert len(args) == 1, f"Got arguments {args}"
+            assert not kwargs
+            t = args[0]
+            from .tensor import NumpyNdarrayVariable
+
+            if isinstance(t, NumpyNdarrayVariable):
+                # TODO: mark the tensor as non-resizable
+                return wrap_fx_proxy_cls(
+                    target_cls=TensorVariable,
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch_np._helpers.ndarrays_to_tensors,
+                        *proxy_args_kwargs(args, {}),
+                    ),
+                    example_value=None,
+                    **options,
+                )
+            else:
+                unimplemented(f"torch.from_numpy(<{type(t)}>)")
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
         elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
@@ -896,7 +922,10 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             tx.output.guards.update(output.guards)
             tx.output.create_node(
-                "output", "output", (tx.output.current_tracer.create_arg((output.as_proxy(),))), {}
+                "output",
+                "output",
+                (tx.output.current_tracer.create_arg((output.as_proxy(),))),
+                {},
             )
 
             tx.output.side_effects.prune_dead_object_new(tx)
@@ -926,7 +955,9 @@ class TorchHigherOrderOperator(VariableTracker):
                     args = []
                     # One argument to graph per sub_args
                     for a in sub_args:
-                        assert not isinstance(a, torch.Tensor), "Tensors should already be tracked?"
+                        assert not isinstance(
+                            a, torch.Tensor
+                        ), "Tensors should already be tracked?"
                         if isinstance(a, ConstantVariable):
                             proxy = tracer.create_graph_input("const")
                             args.append(a)
@@ -941,7 +972,9 @@ class TorchHigherOrderOperator(VariableTracker):
                     # Modeled off of compile_and_call_fx_graph
                     # TODO: support non single Tensor output
                     if not isinstance(output, TensorVariable):
-                        unimplemented("HigherOrderOperator with body with non single Tensor output")
+                        unimplemented(
+                            "HigherOrderOperator with body with non single Tensor output"
+                        )
 
                     tx.output.guards.update(output.guards)
                     tx.output.create_node(
@@ -1061,10 +1094,24 @@ class TorchHigherOrderOperator(VariableTracker):
             true_tracked_fakes = true_cmp.output.tracked_fakes
             false_tracked_fakes = false_cmp.output.tracked_fakes
             tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
+            true_tensor_weakref_to_sizes_strides = (
+                true_cmp.output.tensor_weakref_to_sizes_strides
+            )
+            false_tensor_weakref_to_sizes_strides = (
+                false_cmp.output.tensor_weakref_to_sizes_strides
+            )
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
             tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
+
+            # Add tracking
+            tx.output.tensor_weakref_to_sizes_strides.update(
+                true_tensor_weakref_to_sizes_strides
+            )
+            tx.output.tensor_weakref_to_sizes_strides.update(
+                false_tensor_weakref_to_sizes_strides
+            )
 
             true_name = add_subgraph(
                 "true", torch.fx.GraphModule(true_nn_modules, true_graph)
@@ -1123,9 +1170,16 @@ class TorchHigherOrderOperator(VariableTracker):
             parent_tracked_fakes = parent_cmp.output.tracked_fakes
             body_tracked_fakes = body_cmp.output.tracked_fakes
             tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
+            body_tensor_weakref_to_sizes_strides = (
+                body_cmp.output.tensor_weakref_to_sizes_strides
+            )
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+            # Add tracking
+            tx.output.tensor_weakref_to_sizes_strides.update(
+                body_tensor_weakref_to_sizes_strides
+            )
 
             body_name = add_subgraph(
                 "body", torch.fx.GraphModule(body_nn_modules, body_graph)

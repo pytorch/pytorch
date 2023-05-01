@@ -1,13 +1,12 @@
 # Owner(s): ["module: dynamo"]
-import re
 import unittest
 
 import torch
 
 import torch._dynamo.test_case
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._ops import wrap
-from torch._dynamo.testing import CompileCounterWithBackend, CompileCounter
 
 
 # Equivalent to backend="eager", but also records graphs that
@@ -182,7 +181,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self._test_wrap_simple(f, (x,), 2)
 
     def test_capture_global_num_adds_guard(self):
-        @torch.compile(backend='eager', fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=True)
         def f(x):
             return wrap(lambda x: x + global_num, x)
 
@@ -359,6 +358,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
     def test_capture_numpy_number(self):
         import numpy as np
+
         y = np.float32(1.0)
 
         def f(x):
@@ -390,7 +390,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
     def test_lift_tensor_constant(self):
         def f(x):
-            y = torch.tensor(1.)
+            y = torch.tensor(1.0)
             return wrap(lambda x: x + y, x)
 
         x = torch.randn(3)
