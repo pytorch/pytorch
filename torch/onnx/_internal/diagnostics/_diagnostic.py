@@ -105,7 +105,6 @@ class ExportDiagnosticEngine:
         self._background_context = infra.DiagnosticContext(
             name="torch.onnx",
             version=torch.__version__,
-            diagnostic_type=ExportDiagnostic,
         )
 
     @property
@@ -131,9 +130,7 @@ class ExportDiagnosticEngine:
         """
         if options is None:
             options = infra.DiagnosticOptions()
-        context = infra.DiagnosticContext(
-            name, version, options, diagnostic_type=diagnostic_type
-        )
+        context = infra.DiagnosticContext(name, version, options)
         self.contexts.append(context)
         return context
 
@@ -201,14 +198,14 @@ def diagnose(
 ) -> ExportDiagnostic:
     """Creates a diagnostic and record it in the global diagnostic context.
 
-    This is a wrapper around `context.add_diagnostic` that uses the global diagnostic
+    This is a wrapper around `context.log` that uses the global diagnostic
     context.
     """
     # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
     diagnostic = ExportDiagnostic(
         rule, level, message, frames_to_skip=frames_to_skip, **kwargs
     )
-    export_context().add_diagnostic(diagnostic)
+    export_context().log(diagnostic)
     return diagnostic
 
 
