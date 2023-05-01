@@ -1911,13 +1911,18 @@ class TritonScheduling:
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        if config.generate_intermediate_hooks:
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+        ):
+            # Not every node in the schedule will actually be live on output;
+            # we can't check dead buffers.
+            live_outs = kernel.args.live_output_buffers()
             for node in node_schedule:
                 if not isinstance(node, scheduler.BaseSchedulerNode):
                     continue
-                # TODO: not sure if this is the right thing to do
                 name = node.get_name()
-                if kernel.args.is_removed(name):
+                if name not in live_outs:
                     continue
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
