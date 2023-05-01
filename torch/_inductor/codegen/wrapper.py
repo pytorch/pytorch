@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -348,6 +348,7 @@ class WrapperCodeGen(CodeGen):
             and config.generate_intermediate_hooks
             and origin_node is not None
         ):
+            counters["inductor"]["intermediate_hooks"] += 1
             self.writeline(
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
