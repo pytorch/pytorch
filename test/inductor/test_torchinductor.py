@@ -57,7 +57,6 @@ importlib.import_module("functorch")
 importlib.import_module("filelock")
 
 from torch._inductor import config, test_operators
-
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import (
     has_torchvision_roi_align,
@@ -646,6 +645,20 @@ class CommonTemplate:
         x = torch.randn(128, 128, device=self.device)
         result, (code,) = run_and_get_code(fn, x)
         self.assertEqual(result, x.sin().mean(dim=0))
+        if self.device != "cpu":
+            self.assertEqual(code.count("@triton.jit"), 1)
+
+    def test_reshape_fusion(self):
+        def fn(x, y):
+            x = x + y
+            x = test_operators.realize(x)
+            x = x.permute(1, 0, 4, 3, 2).reshape(9 * 8, 7 * 6 * 5)
+            return x
+
+        x = torch.randn(9, 8, 7, 6, 5, device=self.device)
+        y = torch.randn(9, 8, 7, 6, 5, device=self.device)
+        result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
+        self.assertEqual(result, fn(x, y))
         if self.device != "cpu":
             self.assertEqual(code.count("@triton.jit"), 1)
 

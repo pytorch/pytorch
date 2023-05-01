@@ -25,7 +25,7 @@ static_weight_shapes = True
 size_asserts = True
 
 # maximum number of candidate loop orderings to explore, 1 to disable
-loop_ordering_search_limit = 64
+loop_ordering_search_limit = 120
 
 # generate inplace computations
 inplace_buffers = True

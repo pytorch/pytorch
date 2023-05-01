@@ -17,7 +17,7 @@ from . import config, dependencies, ir, metrics
 from .codegen.common import index_prevent_reordering
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, has_triton
+from .utils import cache_on_self, cmp, has_triton, sympy_product
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -374,14 +374,26 @@ class LoopOrder:
             reduce_idx = index[len(iter_size) :]
             return body([iter_idx[i] for i in order], reduce_idx)
 
-        return cls(wrapped, ([iter_size[i] for i in order], reduce_size))
+        return cls(
+            wrapped, ([iter_size[i] for i in order], reduce_size), permute_order=order
+        )
 
-    def __init__(self, body, sizes, read_writes=None):
+    def __init__(self, body, sizes, read_writes=None, permute_order=None):
         self.body = body
         self.sizes = sizes
         if read_writes is None:
             read_writes = dependencies.extract_read_writes(body, *sizes, normalize=True)
         self.read_writes = read_writes
+        self.permute_order = permute_order
+
+    def has_contiguous(self):
+        for dep in itertools.chain(
+            self.read_writes.reads,
+            self.read_writes.writes,
+        ):
+            if dep.is_contiguous():
+                return True
+        return False
 
 
 class SchedulerNode(BaseSchedulerNode):
@@ -443,6 +455,9 @@ class SchedulerNode(BaseSchedulerNode):
             if len(choices) >= config.loop_ordering_search_limit:
                 # would be exponential without a size cap
                 break
+
+        # TODO(jansel): explore is this can be removed
+        choices = [choices[0], *[c for c in choices[1:] if c.has_contiguous()]]
         return choices
 
     def active_loop_orders(self):
@@ -577,16 +592,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @staticmethod
     def select_loop_orders(snodes: List[SchedulerNode]):
         def is_valid(ordering: Dict[SchedulerNode, LoopOrder]):
-            writes = set()
-            write_names = set()
+            writes = dict()
             for order in ordering.values():
-                if any(
-                    (dep.name in write_names and dep not in writes)
-                    for dep in order.read_writes.reads
-                ):
-                    return False
-                writes.update(order.read_writes.writes)
-                write_names.update(dep.name for dep in order.read_writes.writes)
+                for dep in order.read_writes.reads:
+                    if dep.name in writes and not dep.can_read_from(writes[dep.name]):
+                        if len(debug_reasons) < 1:
+                            debug_reasons.append(f"{dep}!={writes[dep.name]}")
+                        return False
+                for dep in order.read_writes.writes:
+                    assert dep.name not in writes
+                    writes[dep.name] = dep
             return True
 
         def score(ordering: Dict[SchedulerNode, LoopOrder]):
@@ -600,16 +615,30 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 combined.update(union)
                 reads.update(order.read_writes.reads)
                 writes.update(order.read_writes.writes)
+
             write_and_read = writes & reads
 
             return (
+                # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                sum(int(dep.is_contiguous()) for dep in combined - write_and_read),
-                sum(int(dep.is_contiguous()) for dep in write_and_read),
+                sum(
+                    int(dep.is_contiguous())
+                    for dep in itertools.chain(combined, combined - write_and_read)
+                ),
+                sum(int(x.permute_order is None) for x in ordering.values()),
+                # sum(int(dep.is_contiguous()) for dep in writes - write_and_read),
+                # sum(int(dep.is_contiguous()) for dep in write_and_read),
+                # sum(int(dep.is_contiguous()) for dep in reads - write_and_read),
+                # sum(int(dep.is_contiguous()) for dep in combined),
+                # sum(int(dep.is_contiguous()) for dep in combined - write_and_read),
+                # sum(int(dep.is_contiguous()) for dep in write_and_read),
+                # sum(int(dep.is_contiguous()) for dep in reads),
+                # sum(int(dep.is_contiguous()) for dep in writes),
             )
 
         orderings: List[Dict[SchedulerNode, LoopOrder]] = [dict()]
         for node in snodes:
+            debug_reasons = []
             new_orderings = []
             for base in orderings:
                 for choice in node.active_loop_orders():
@@ -619,7 +648,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     if is_valid(ordering):
                         new_orderings.append(ordering)
             if not new_orderings:
-                raise FusionFailed()
+                raise FusionFailed(" | ".join(debug_reasons))
             new_orderings.sort(key=score, reverse=True)
             orderings = new_orderings[: config.loop_ordering_search_limit]
 
@@ -1052,7 +1081,8 @@ class Scheduler:
             ):
                 try:
                     node3 = FusedSchedulerNode.fuse(node1, node2)
-                except FusionFailed:
+                except FusionFailed as e:
+                    log.debug("FusionFailed %s", e)
                     self.block_fusion.add((node1, node2))
                     continue
                 fused_nodes.remove(node1)
@@ -1191,7 +1221,7 @@ class Scheduler:
         computed_deps = set()
 
         for rd in node2.unmet_dependencies:
-            if rd in node1.read_writes.writes and not isinstance(rd, StarDep):
+            if rd in node1.read_writes.writes and rd.can_read_from(rd):
                 computed_deps.add(rd)
 
         remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}

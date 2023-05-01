@@ -374,6 +374,8 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
     """
     xreplace is faster than subs, but is way more picky
     """
+    if not replacements:
+        return expr
 
     def promote_strings(key):
         if isinstance(key, str):

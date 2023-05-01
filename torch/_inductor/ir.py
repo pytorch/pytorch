@@ -232,6 +232,25 @@ class ModularIndexing(sympy.Function):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
 
+def match_modular_indexing(term, v):
+    scale = sympy.Wild("scale")
+    divisor = sympy.Wild("divisor")
+    modulus = sympy.Wild("modulus")
+    if term.has(ModularIndexing):
+        m = term.match(scale * ModularIndexing(v, divisor, modulus))
+        if m and not m[scale].has(v) and not m[divisor].has(v):
+            return m[scale], m[divisor], m[modulus]
+    if term.has(CleanDiv):
+        m = term.match(scale * CleanDiv(v, divisor))
+        if m and not m[scale].has(v) and not m[divisor].has(v):
+            return m[scale], m[divisor], None
+    if term.has(FloorDiv):
+        m = term.match(scale * FloorDiv(v, divisor))
+        if m and not m[scale].has(v) and not m[divisor].has(v):
+            return m[scale], m[divisor], None
+    return None, None, None
+
+
 class CleanDiv(FloorDiv):
     """
     Div where we can assume no rounding.
@@ -2192,12 +2211,6 @@ class ComputedBuffer(Buffer):
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
-            reads_bufs = [
-                V.graph.name_to_buffer[r.name]
-                if r.name in V.graph.name_to_buffer.keys()
-                else None
-                for r in reads
-            ]
             # only consider reads to buffer of same size
             reads = [
                 sympy_subs(
@@ -2239,13 +2252,17 @@ class ComputedBuffer(Buffer):
                 var_ranges,
             )
 
-        return (
-            (
-                [var_ranges[v] for v in args[0] if v != 0],
-                [var_ranges[v] for v in args[1] if v != 0],
-            ),
-            body,
-        )
+        iter_sizes = [var_ranges[v] for v in args[0] if v != 0]
+        reduce_sizes = [var_ranges[v] for v in args[1] if v != 0]
+
+        splits = body.split_var_ranges()
+        if splits:
+            assert len(splits) == len(iter_sizes) + len(reduce_sizes)
+            k = len(iter_sizes)
+            iter_sizes = [*itertools.chain.from_iterable(splits[:k])]
+            reduce_sizes = [*itertools.chain.from_iterable(splits[k:])]
+
+        return ((iter_sizes, reduce_sizes), body)
 
     def get_reduction_size(self):
         return self.data.get_reduction_size()
@@ -3873,11 +3890,6 @@ class LoopBody:
         self.var_ranges = var_ranges
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
-        self.reads = []
-        self.writes = []
-        self.reads_name2expr = {}
-        self.writes_name2expr = {}
-        self.other = []
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
@@ -3885,6 +3897,97 @@ class LoopBody:
         self.indirect_new = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    def split_var_ranges(self):
+        """
+        After view operations we sometimes have complex indexing formulas like:
+
+            210*((q0//9)) + (q1//42) + 1680*ModularIndexing(q0, 1, 9) +
+                30*ModularIndexing(q1, 1, 7) + 5*ModularIndexing(q1, 7, 6)
+
+        This optimization pass splits the iteration space to simplify them to:
+
+            210*f0 + f2 + 1680*f1 + 30*f4 + 5*f3
+
+        Which creates added fusion opportunities.
+        """
+        self.indexing_exprs_name = None  # only needed at creation time
+        ranges = self.var_ranges
+        var_splits = dict()
+
+        # first pass to detect any cases where we want to split vars up
+        for v in ranges.keys():
+            for index in self.indexing_exprs.values():
+                if isinstance(index, sympy.Add) and index.has(ModularIndexing):
+                    terms = [
+                        match_modular_indexing(t, v) for t in index.args if t.has(v)
+                    ]
+                    divisor_to_term = {
+                        divisor: (scale, modulus) for scale, divisor, modulus in terms
+                    }
+                    matched_sizes = []
+                    wanted_divisor = 1
+                    if (
+                        len(divisor_to_term) > 1
+                        and len(divisor_to_term) == len(terms)
+                        and all(k is not None for k in divisor_to_term.keys())
+                    ):
+                        remaining_numel = ranges[v]
+                        for _ in terms:
+                            if wanted_divisor not in divisor_to_term:
+                                break  # failed match
+                            scale, modulus = divisor_to_term[wanted_divisor]
+                            if modulus is None:
+                                matched_sizes.append(
+                                    V.graph.sizevars.simplify(remaining_numel)
+                                )
+                                wanted_divisor = None
+                            else:
+                                remaining_numel = FloorDiv(remaining_numel, modulus)
+                                matched_sizes.append(modulus)
+                                wanted_divisor = wanted_divisor * modulus
+
+                    if len(matched_sizes) == len(terms) and wanted_divisor is None:
+                        V.graph.sizevars.guard_equals(
+                            ranges[v], sympy_product(matched_sizes)
+                        )
+                        var_splits[v] = [*reversed(matched_sizes)]
+                        break  # move on to next variable
+
+        if not var_splits:
+            return None  # nothing to split
+
+        # build set of replacements to index formulas
+        var_replacements = {}
+        expr_replacements = {}
+        new_var_ranges, add_var = var_builder("f")
+        for old_var, old_size in ranges.items():
+            new_size = var_splits.get(old_var, [old_size])
+            new_vars = [add_var(s) for s in new_size]
+            if len(new_vars) > 1:
+                var_replacements[old_var] = sympy_dot(
+                    new_vars, FlexibleLayout.contiguous_strides(var_splits[old_var])
+                )
+                wanted_divisor = 1
+                for i, v, s in reversed([*zip(itertools.count(), new_vars, new_size)]):
+                    expr_replacements[ModularIndexing(old_var, wanted_divisor, s)] = v
+                    if i == 0:
+                        expr_replacements[FloorDiv(old_var, wanted_divisor)] = v
+                        expr_replacements[CleanDiv(old_var, wanted_divisor)] = v
+                    wanted_divisor = wanted_divisor * s
+            else:
+                var_replacements[old_var] = new_vars[0]
+
+        def replace(expr):
+            if expr.has(ModularIndexing) or expr.has(FloorDiv) or expr.has(CleanDiv):
+                expr = expr.subs(expr_replacements)
+            return sympy_subs(expr, var_replacements)
+
+        self.var_ranges = new_var_ranges
+        self.indexing_exprs = {k: replace(v) for k, v in self.indexing_exprs.items()}
+        return [
+            var_splits.get(old_var, [old_size]) for old_var, old_size in ranges.items()
+        ]
 
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
@@ -3900,9 +4003,6 @@ class LoopBody:
         return "\n".join(lines)
 
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
-        getattr(self, category).append(expr)
-        if buf_name is not None:
-            getattr(self, f"{category}_name2expr")[buf_name] = expr
         if expr not in self.indexing_exprs_name:
             name = f"index{len(self.indexing_exprs)}"
             self.indexing_exprs_name[expr] = name
