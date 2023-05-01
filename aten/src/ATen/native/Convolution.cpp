@@ -247,6 +247,7 @@ bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int str
 }
 
 
+#if defined(C10_MOBILE)
 static bool xnnpack_use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
@@ -271,6 +272,7 @@ static bool xnnpack_use_convolution2d(
   // Never use xnnpack for symbolic tracing
   return false;
 }
+#endif
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 // This struct is templated so that we can run backend selection in a dynamic
