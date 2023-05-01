@@ -1070,7 +1070,6 @@ def skip_layout_opt(name):
     """
     if name in [
         # torchbench
-        "functorch_maml_omniglot",
         "yolov3",
 
         # timm

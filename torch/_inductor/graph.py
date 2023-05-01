@@ -176,6 +176,12 @@ class GraphLowering(torch.fx.Interpreter):
             print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
             config.layout_opt = False
 
+        # Following models are skipped due to this:
+        # - functorch_maml_omniglot
+        if all(n.args[1].meta['val'].size(0) <= 64 and n.args[1].meta['val'].size(1) <= 64 for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default):
+            print("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
+            config.layout_opt = False
+
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
