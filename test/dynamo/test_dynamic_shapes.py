@@ -7,21 +7,21 @@ try:
         test_ctx_manager,
         test_export,
         test_functions,
+        test_higher_order_ops,
         test_misc,
         test_modules,
         test_repros,
         test_subgraphs,
-        test_higher_order_ops,
     )
 except ImportError:
     import test_ctx_manager
     import test_export
     import test_functions
+    import test_higher_order_ops
     import test_misc
     import test_modules
     import test_repros
     import test_subgraphs
-    import test_higher_order_ops
 
 import unittest
 
@@ -127,6 +127,11 @@ unittest.expectedFailure(
 
 unittest.expectedFailure(
     DynamicShapesNNModuleTests.test_lazy_module5_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module6_dynamic_shapes
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
 )
 
