@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple, Type
@@ -177,7 +179,7 @@ def diagnose_step(
 
             try:
                 diag = ctx.inflight_diagnostic(rule=rule)
-            except infra.engine.DiagnosticError:
+            except infra.context.DiagnosticError:
                 # TODO(bowbao): this should trigger a built-in diagnostic.
                 traceback.print_exc()
                 return fn(*args, **kwargs)
