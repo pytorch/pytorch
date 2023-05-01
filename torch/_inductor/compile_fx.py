@@ -628,6 +628,10 @@ def compile_fx(
 
     # InstanceNorm is too slow with channels last. Disable layout-optimization for
     # convolution which needs channels last inputs.
+    #
+    # Revisit since https://github.com/pytorch/pytorch/pull/99528 may have improve
+    # the perf.
+    # 
     if any(isinstance(x, torch.nn.modules.instancenorm.InstanceNorm2d) for x in model_.modules()):
         print("DIABLE LAYOUT_OPT BECAUSE INSTANCE_NORM")
         config.layout_opt = False

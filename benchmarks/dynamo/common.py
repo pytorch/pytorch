@@ -1073,10 +1073,7 @@ def skip_layout_opt(name):
         "Background_Matting",
         "drq",
         "functorch_maml_omniglot",
-        "phlippe_densenet",
         "pytorch_CycleGAN_and_pix2pix",
-        "resnext50_32x4d",
-        "shufflenet_v2_x1_0",
         "yolov3",
         "timm_efficientdet",
 

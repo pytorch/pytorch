@@ -149,23 +149,29 @@ class GraphLowering(torch.fx.Interpreter):
         with open(f"/tmp/graphlowering_{self.ITER}.fx", "w") as f:
             f.write(gm.print_readable(False))
 
-        # from fxana import analyze
-        # analyze(gm)
+        # from fxana import analyze; analyze(gm)
 
         # it's hard to optimize layout for models with both normal conv
         # and group conv. Normal conv prefers channels last while grouped
         # conv prefers contiguous. For such model like timm_regnet we can
         # make inference faster but training will slow down so far.
         # Simply disable layout optimization for such model for now.
+        #
+        # Follow models are skipped duo to this:
+        # - shufflenet_v2_x1_0
+        # - timm_regnet
+        # - resnext50_32x4d
         if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 for n in gm.graph.nodes):
             print("FOUND GROUPED CONVOLUTION!")
             config.layout_opt = False
 
         # Channels last does not help much for convolution whose out channel is smaller than in channels.
         # Even worse, channels last may hurt perf in that case.
-        # We skip the layout optimizations if the model contains such convolution. pytorch_unet is such
-        # an example
-        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) for n in gm.graph.nodes):
+        # We skip the layout optimizations if the model contains such convolution.
+        # Following models are skipped due to this:
+        # - pytorch_unet
+        # - phlippe_densenet
+        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes ):
             print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
             config.layout_opt = False
 
