@@ -2,7 +2,8 @@ name: periodic
 
 on:
   schedule:
-    - cron: 45 0,4,8,12,16,20 * * *
+    - cron: 45 0,8,16 * * *
+    - cron: 45 4,12,20 * * *
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
@@ -138,20 +139,9 @@ jobs:
       cuda-version: "11.8"
       test-matrix: ${{ needs.win-vs2019-cuda11_8-py3-build.outputs.test-matrix }}
 
-  ios-12-5-1-x86-64:
-    name: ios-12-5-1-x86-64
-    uses: ./.github/workflows/_ios-build-test.yml
-    with:
-      build-environment: ios-12-5-1-x86-64
-      ios-platform: SIMULATOR
-      ios-arch: x86_64
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
-
   ios-12-5-1-x86-64-coreml:
     name: ios-12-5-1-x86-64-coreml
+    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * *'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-x86-64-coreml
@@ -162,47 +152,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
         ]}
 
-  ios-12-5-1-arm64:
-    name: ios-12-5-1-arm64
-    uses: ./.github/workflows/_ios-build-test.yml
-    with:
-      build-environment: ios-12-5-1-arm64
-      ios-platform: OS
-      ios-arch: arm64
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
-
-  ios-12-5-1-arm64-coreml:
-    name: ios-12-5-1-arm64-coreml
-    uses: ./.github/workflows/_ios-build-test.yml
-    with:
-      build-environment: ios-12-5-1-arm64-coreml
-      ios-platform: OS
-      ios-arch: arm64
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
-
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
+    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * *'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-custom-ops
-      ios-platform: OS
-      ios-arch: arm64
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
-
-  ios-12-5-1-arm64-metal:
-    name: ios-12-5-1-arm64-metal
-    uses: ./.github/workflows/_ios-build-test.yml
-    with:
-      build-environment: ios-12-5-1-arm64-metal
       ios-platform: OS
       ios-arch: arm64
       test-matrix: |
@@ -221,6 +176,7 @@ jobs:
 
   macos-12-py3-x86-64-build:
     name: macos-12-py3-x86-64
+    if: github.event_name != 'schedule' || github.event.schedule == '45 4,12,20 * * *'
     uses: ./.github/workflows/_mac-build.yml
     with:
       build-environment: macos-12-py3-x86-64
@@ -244,20 +200,6 @@ jobs:
       build-environment: macos-12-py3-x86-64
       test-matrix: ${{ needs.macos-12-py3-x86-64-build.outputs.test-matrix }}
       arch: x86_64
-
-  macos-12-py3-x86-64-lite-interpreter-build-test:
-    name: macos-12-py3-x86-64-lite-interpreter
-    uses: ./.github/workflows/_mac-build.yml
-    with:
-      build-environment: macos-12-py3-lite-interpreter-x86-64
-      xcode-version: "13.3.1"
-      runner-type: macos-12-xl
-      build-generates-artifacts: false
-      sccache-use-gha: true
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
 
   android-emulator-build-test:
     name: android-emulator-build-test

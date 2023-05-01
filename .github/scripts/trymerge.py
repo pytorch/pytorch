@@ -236,6 +236,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -343,6 +344,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -943,6 +945,7 @@ class GitHubPR:
             author_association=node["authorAssociation"],
             editor_login=editor["login"] if editor else None,
             database_id=node["databaseId"],
+            url=node["url"],
         )
 
     def get_comments(self) -> List[GitHubComment]:
@@ -1646,7 +1649,12 @@ def try_revert(
     except PostCommentError as e:
         return post_comment(str(e))
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    revert_msg += f" due to {reason}\n" if reason is not None else "\n"
+    revert_msg += f" due to {reason}" if reason is not None else ""
+    revert_msg += (
+        f" ([comment]({pr.get_comment_by_id(comment_id).url}))\n"
+        if comment_id is not None
+        else "\n"
+    )
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")

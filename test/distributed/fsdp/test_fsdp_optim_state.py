@@ -15,6 +15,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullOptimStateDictConfig,
     FullStateDictConfig,
@@ -1881,6 +1882,32 @@ class TestFSDPOptimState(FSDPTest):
                 self.assertEqual(state["value2"], None)
 
         self.run_subtests({"use_orig_params": [False, True]}, _run_test)
+
+    @skip_if_lt_x_gpu(2)
+    def test_use_orig_param_with_no_shard(self):
+        model = FSDP(
+            TestDummyModel().cuda(),
+            sharding_strategy=ShardingStrategy.NO_SHARD,
+            use_orig_params=True,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        def step():
+            loss = model(model.get_input())
+            loss.backward(loss)
+            optim.step()
+
+        step()
+
+        original_osd = deepcopy(optim.state_dict())
+
+        osd = FSDP.optim_state_dict(model, optim)
+        osd_to_load = FSDP.optim_state_dict_to_load(model, optim, osd)
+        optim.load_state_dict(osd_to_load)
+
+        new_osd = optim.state_dict()
+
+        self.assertEqual(original_osd, new_osd)
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
