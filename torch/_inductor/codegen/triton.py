@@ -15,10 +15,12 @@ import torch
 import torch._logging
 from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
+from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..scheduler import FusedSchedulerNode
 from ..utils import (
     get_fused_kernel_name,
     get_kernel_category_by_source_code,
@@ -1656,17 +1658,51 @@ class TritonScheduling:
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
 
-        if node1.is_reduction() == node2.is_reduction():
+        if node1.is_reduction() and node2.is_reduction():
             return numel1 == numel2 and rnumel1 == rnumel2
+
+        if not node1.is_reduction() and not node2.is_reduction():
+            assert rnumel1 == 1 and rnumel2 == 1
+            if numel1 != numel2:
+                return False
+
+            if (
+                config.triton.tiling_prevents_pointwise_fusion
+                and not node1.is_template()
+            ):
+                loop_order = list(
+                    FusedSchedulerNode.select_loop_orders((node1, node2))[0].values()
+                )
+                tiling1 = self.select_tiling(
+                    loop_order[: len(node1.get_nodes())], numel1
+                )
+                tiling2 = self.select_tiling(
+                    loop_order[len(node1.get_nodes()) :], numel1
+                )
+                # TODO(jansel): this doesn't handle 3D tiling (disabled by config)
+                if len(tiling1) > 2 and len(tiling2) > 2 and tiling1 != tiling2:
+                    return False  # tiled differently
+
+            return True
 
         if not node1.is_reduction() and node2.is_reduction():
             assert rnumel1 == 1 and rnumel2 != 1
-            if numel1 == numel2 * rnumel2:
-                return all(
-                    TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
-                    for n in node1.get_nodes()
+            if node1.is_template() or numel1 not in (numel2, numel2 * rnumel2):
+                return False
+
+            if config.triton.tiling_prevents_reduction_fusion:
+                loop_order = list(
+                    FusedSchedulerNode.select_loop_orders((node1, node2))[0].values()
                 )
-            return numel1 == numel2
+                tiling = self.select_tiling(
+                    loop_order[: len(node1.get_nodes())], numel1
+                )
+                return tiling in (
+                    (numel1, 1),
+                    (numel2, rnumel2, 1),
+                )
+
+            return True
 
         assert node1.is_reduction() and not node2.is_reduction()
         # swap args to hit the case above
@@ -1674,6 +1710,17 @@ class TritonScheduling:
 
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
+
+    def is_loop_order_valid(self, nodes):
+        for node in nodes:
+            if node.is_reduction():
+                _, (numel, rnumel) = node.group
+                return all(
+                    TritonKernel.is_compatible((numel, rnumel), n.get_ranges())
+                    for n in nodes
+                    if n.group[1] == (numel * rnumel, 1)
+                )
+        return True
 
     def codegen_nodes(self, nodes):
         """
@@ -1756,15 +1803,41 @@ class TritonScheduling:
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
-    def reduction_hint(node):
-        assert node.is_reduction()
-        if all(
-            dep.is_contiguous()
+    def all_contiguous(node):
+        return all(
+            dep.is_contiguous() or dep.is_scalar()
             for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)
-        ):
+        )
+
+    @classmethod
+    def reduction_hint(cls, node):
+        assert node.is_reduction()
+        if cls.all_contiguous(node):
             return ReductionHint.INNER
         else:
             return node.node.data.reduction_hint
+
+    @classmethod
+    def combined_reduction_hint(cls, nodes):
+        hint = ReductionHint.DEFAULT
+        nodes = [n for n in nodes if n not in (EnableReduction, DisableReduction)]
+        hints = [cls.reduction_hint(n) for n in nodes if n.is_reduction()]
+        if hints and hints.count(hints[0]) == len(hints):
+            hint = hints[0]  # all the hints are the same
+
+        if hint == ReductionHint.INNER:
+            for node in nodes:
+                if not node.is_reduction() and not cls.all_contiguous(node):
+                    # fused with something more complex, forget the hint
+                    return ReductionHint.DEFAULT
+        elif hint == ReductionHint.OUTER:
+            for node in nodes:
+                if not node.is_reduction() and any(
+                    dep.is_contiguous() for dep in node.read_writes.reads
+                ):
+                    # fused with something more complex, forget the hint
+                    return ReductionHint.DEFAULT
+        return hint
 
     @staticmethod
     def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
@@ -1824,21 +1897,6 @@ class TritonScheduling:
 
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-        reductions = list(
-            filter(
-                lambda n: n not in (EnableReduction, DisableReduction)
-                and n.is_reduction(),
-                node_schedule,
-            )
-        )
-        if len(reductions) > 0:
-            hints = [self.reduction_hint(n) for n in reductions]
-            if hints.count(hints[0]) == len(hints):
-                reduction_hint_val = hints[0]
-            else:
-                reduction_hint_val = ReductionHint.DEFAULT
-        else:
-            reduction_hint_val = ReductionHint.DEFAULT
 
         mutations = set()
         for node in node_schedule:
@@ -1849,7 +1907,7 @@ class TritonScheduling:
 
         with TritonKernel(
             *tiled_groups,
-            reduction_hint=reduction_hint_val,
+            reduction_hint=self.combined_reduction_hint(node_schedule),
             mutations=mutations,
             index_dtype=index_dtype,
         ) as kernel:
@@ -1875,16 +1933,22 @@ class TritonScheduling:
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        if config.generate_intermediate_hooks:
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+        ):
+            # Not every node in the schedule will actually be live on output;
+            # we can't check dead buffers.
+            live_outs = kernel.args.live_output_buffers()
             for node in node_schedule:
                 if not isinstance(node, scheduler.BaseSchedulerNode):
                     continue
-                # TODO: not sure if this is the right thing to do
                 name = node.get_name()
-                if kernel.args.is_removed(name):
+                if name not in live_outs:
                     continue
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
+                    counters["inductor"]["intermediate_hooks"] += 1
                     V.graph.wrapper_code.writeline(
                         f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )

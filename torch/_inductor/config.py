@@ -221,7 +221,10 @@ class triton:
     cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
-    slow_path_cudagraph_asserts = False
+    slow_path_cudagraph_asserts = True
+
+    # TODO - need to debug why this prevents cleanup
+    cudagraph_trees_history_recording = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -244,6 +247,10 @@ class triton:
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
+
+    # should we stop a fusion to allow better tiling?
+    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_reduction_fusion = True
 
     # assert that indirect indexing does not read / write out of bounds
     assert_indirect_indexing = True

@@ -59,7 +59,12 @@ class MemoryDep(typing.NamedTuple):
         )
 
     def is_contiguous(self) -> bool:
-        return isinstance(self.index, (sympy.Symbol, sympy.Integer))
+        return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+    def is_scalar(self) -> bool:
+        if isinstance(self.index, sympy.Symbol):
+            return self.index not in self.var_names
+        return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
         return any(is_indirect(v.name) for v in self.index.free_symbols)
@@ -112,6 +117,9 @@ class StarDep(typing.NamedTuple):
         ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
+        return False
+
+    def is_scalar(self) -> bool:
         return False
 
     def is_indirect(self) -> bool:

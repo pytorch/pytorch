@@ -811,7 +811,9 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
     ]
 
     # TODO(jansel): we should be able to improve these heuristics
-    if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+    if config.max_autotune or config.max_autotune_pointwise:
+        pass
+    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
         configs = configs[:1]
     elif reduction_hint == ReductionHint.OUTER:
         configs = configs[-1:]
@@ -821,6 +823,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
+
     for c in configs:
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")

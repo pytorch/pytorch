@@ -2372,6 +2372,9 @@ class CppScheduling:
     def can_fuse_vertical(cls, node1, node2):
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
+    def is_loop_order_valid(self, nodes):
+        return True
+
     def codegen_nodes(self, nodes):
         """
         Turn an set of pre-fused nodes into a C++ kernel.

@@ -6,6 +6,7 @@ import logging
 import os
 import pprint
 import textwrap
+import types
 from typing import Dict, List, Optional, Set
 
 import sympy
@@ -17,7 +18,7 @@ from . import config, dependencies, ir, metrics
 from .codegen.common import index_prevent_reordering
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, has_triton, sympy_product
+from .utils import cache_on_self, cmp, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -363,7 +364,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 @dataclasses.dataclass
 class LoopOrder:
     @classmethod
-    def permute(cls, body, sizes, order):
+    def permute(cls, node, body, sizes, order):
         iter_size, reduce_size = sizes
         assert len(order) == len(iter_size)
 
@@ -375,16 +376,26 @@ class LoopOrder:
             return body([iter_idx[i] for i in order], reduce_idx)
 
         return cls(
-            wrapped, ([iter_size[i] for i in order], reduce_size), permute_order=order
+            node,
+            wrapped,
+            ([iter_size[i] for i in order], reduce_size),
+            permute_order=order,
         )
 
-    def __init__(self, body, sizes, read_writes=None, permute_order=None):
+    def __init__(self, node, body, sizes, read_writes=None, permute_order=None):
+        self.node = node
         self.body = body
         self.sizes = sizes
         if read_writes is None:
             read_writes = dependencies.extract_read_writes(body, *sizes, normalize=True)
         self.read_writes = read_writes
         self.permute_order = permute_order
+
+    def __hash__(self):
+        return id(self)
+
+    def __eq__(self, other):
+        return self is other
 
     def has_contiguous(self):
         for dep in itertools.chain(
@@ -394,6 +405,27 @@ class LoopOrder:
             if dep.is_contiguous():
                 return True
         return False
+
+    def pointwise_read_writes(self):
+        """
+        Get the memory dependencies in the non-reduction axis.
+        """
+        sizes, reduction_sizes = self.sizes
+
+        def fn(index):
+            return self.body(index, [sympy.Integer(0) for _ in reduction_sizes])
+
+        return dependencies.extract_read_writes(fn, sizes)
+
+    def get_ranges(self):
+        return self.sizes
+
+    @property
+    def group(self):
+        return self.node.group
+
+    def is_reduction(self):
+        return self.node.is_reduction()
 
 
 class SchedulerNode(BaseSchedulerNode):
@@ -405,7 +437,7 @@ class SchedulerNode(BaseSchedulerNode):
         ) = node.get_sizes_and_body()
 
         if not self.can_reorder():  # on CPU do reordering before fusion
-            self.apply_loop_order(LoopOrder(self._body, self._sizes))
+            self.apply_loop_order(LoopOrder(self, self._body, self._sizes))
 
             # TODO(jansel): I'd expect this to be faster, but it causes segfaults
             # self.can_reorder = lambda: True
@@ -432,12 +464,14 @@ class SchedulerNode(BaseSchedulerNode):
     def possible_loop_orders(self):
         if self.is_template():
             return [
-                LoopOrder(self._body, self._sizes, self.node.normalized_read_writes())
+                LoopOrder(
+                    self, self._body, self._sizes, self.node.normalized_read_writes()
+                )
             ]
-        choices = [LoopOrder(self._body, self._sizes)]
+        choices = [LoopOrder(self, self._body, self._sizes)]
         if not self.can_reorder():
             return choices
-        permute = functools.partial(LoopOrder.permute, self._body, self._sizes)
+        permute = functools.partial(LoopOrder.permute, self, self._body, self._sizes)
         iter_sizes, reduce_sizes = self._sizes
         n = len(iter_sizes)
         tried = {tuple(range(n))}
@@ -456,8 +490,9 @@ class SchedulerNode(BaseSchedulerNode):
                 # would be exponential without a size cap
                 break
 
-        # TODO(jansel): explore is this can be removed
-        choices = [choices[0], *[c for c in choices[1:] if c.has_contiguous()]]
+        if False:
+            # TODO(jansel): explore is this can be removed
+            choices = [choices[0], *[c for c in choices[1:] if c.has_contiguous()]]
         return choices
 
     def active_loop_orders(self):
@@ -574,7 +609,7 @@ class SchedulerNode(BaseSchedulerNode):
     def prepare_for_codegen(self):
         if self.can_reorder():
             self.apply_loop_order(
-                FusedSchedulerNode.select_loop_orders([self])[0][self]
+                FusedSchedulerNode.select_loop_orders((self,))[0][self]
             )
 
 
@@ -590,8 +625,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
     """
 
     @staticmethod
+    @functools.lru_cache(1024)
     def select_loop_orders(snodes: List[SchedulerNode]):
         def is_valid(ordering: Dict[SchedulerNode, LoopOrder]):
+            if len(ordering) <= 1:
+                return True
             writes = dict()
             for order in ordering.values():
                 for dep in order.read_writes.reads:
@@ -617,26 +655,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 writes.update(order.read_writes.writes)
 
             write_and_read = writes & reads
-
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                sum(
-                    int(dep.is_contiguous())
-                    for dep in itertools.chain(combined, combined - write_and_read)
-                ),
+                sum(int(dep.is_contiguous()) for dep in combined - write_and_read),
+                sum(int(dep.is_contiguous()) for dep in write_and_read),
                 sum(int(x.permute_order is None) for x in ordering.values()),
-                # sum(int(dep.is_contiguous()) for dep in writes - write_and_read),
-                # sum(int(dep.is_contiguous()) for dep in write_and_read),
-                # sum(int(dep.is_contiguous()) for dep in reads - write_and_read),
-                # sum(int(dep.is_contiguous()) for dep in combined),
-                # sum(int(dep.is_contiguous()) for dep in combined - write_and_read),
-                # sum(int(dep.is_contiguous()) for dep in write_and_read),
-                # sum(int(dep.is_contiguous()) for dep in reads),
-                # sum(int(dep.is_contiguous()) for dep in writes),
             )
 
         orderings: List[Dict[SchedulerNode, LoopOrder]] = [dict()]
+        backend = snodes[0].scheduler.get_backend(snodes[0].get_device())
         for node in snodes:
             debug_reasons = []
             new_orderings = []
@@ -645,7 +673,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     ordering = dict(base)
                     ordering.update(choice)
                     assert len(ordering) == len(base) + len(choice)
-                    if is_valid(ordering):
+                    if is_valid(ordering) and backend.is_loop_order_valid(
+                        ordering.values()
+                    ):
                         new_orderings.append(ordering)
             if not new_orderings:
                 raise FusionFailed(" | ".join(debug_reasons))
@@ -657,7 +687,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @classmethod
     def fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         assert node1.scheduler is node2.scheduler
-        loop_orders = cls.select_loop_orders([node1, node2])
+        loop_orders = cls.select_loop_orders((node1, node2))
         return cls(node1.scheduler, node1.get_nodes() + node2.get_nodes(), loop_orders)
 
     def __init__(
@@ -856,7 +886,6 @@ class Scheduler:
 
         self.name_to_node = {node.get_name(): node for node in self.nodes}
         self.name_to_fused_node = None  # set in fuse_nods()
-        self.block_fusion = set()
 
         # we handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
@@ -1063,6 +1092,7 @@ class Scheduler:
             self.fuse_nodes_once()
             if len(self.nodes) == old_len:
                 break
+        FusedSchedulerNode.select_loop_orders.cache_clear()
 
     def fuse_nodes_once(self):
         """
@@ -1079,12 +1109,7 @@ class Scheduler:
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
-                try:
-                    node3 = FusedSchedulerNode.fuse(node1, node2)
-                except FusionFailed as e:
-                    log.debug("FusionFailed %s", e)
-                    self.block_fusion.add((node1, node2))
-                    continue
+                node3 = FusedSchedulerNode.fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
                 fused_nodes.add(node3)
@@ -1164,8 +1189,6 @@ class Scheduler:
         """
         if node1 is node2:
             return False
-        if (node1, node2) in self.block_fusion:
-            return False
         if (
             isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node1.is_template()
@@ -1234,6 +1257,11 @@ class Scheduler:
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].recursive_predecessors:
                 return False
+
+        try:
+            FusedSchedulerNode.select_loop_orders((node1, node2))
+        except FusionFailed:
+            return False
 
         return True
 
@@ -1437,3 +1465,4 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
+        FusedSchedulerNode.select_loop_orders.cache_clear()
