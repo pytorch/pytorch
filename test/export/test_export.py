@@ -1,18 +1,15 @@
 # Owner(s): ["module: dynamo"]
-import pickle
 import unittest
 
 import torch
 import torch._dynamo as torchdynamo
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import _export, dynamic_dim, export
+from torch._export import _export, export
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size
 from torch._export.graph_module import get_export_meta
-from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
-from functorch.experimental import control_flow
 
 
 class TestExperimentalExport(TestCase):
@@ -526,120 +523,6 @@ class TestExport(TestCase):
 
         self.assertTrue(torch.allclose(eager_results, exported_results))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
-    def test_pickle(self) -> None:
-        def f(x: torch.Tensor) -> torch.Tensor:
-            def true_fn(x):
-                def inner_true_fn(y):
-                    return x + y
-
-                return inner_true_fn(x)
-
-            def false_fn(x):
-                def inner_false_fn(y):
-                    return x - y
-
-                return inner_false_fn(x)
-
-            return control_flow.cond(x.shape[0] < 10, true_fn, false_fn, [x])
-
-        inputs = (torch.ones(3),)
-        mmep = export(f, inputs, constraints=[dynamic_dim(inputs[0], 0)])
-        gm = mmep.find_method("forward")
-        gm.print_readable()
-
-        # Pickle the ExportGraphModule
-        pickled_gm = pickle.dumps(gm)
-        loaded_gm = pickle.loads(pickled_gm)
-
-        for node1, node2 in zip(loaded_gm.graph.nodes, gm.graph.nodes):
-            val1 = node1.meta.get("val", None)
-            val2 = node2.meta.get("val", None)
-
-            if val1 is None or val2 is None:
-                # Either both are None
-                self.assertEqual(val1, val2)
-            elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
-                # Or both are fake tensors with the same shape/dtype
-                self.assertEqual(val1.shape, val2.shape)
-                self.assertEqual(val1.dtype, val2.dtype)
-            elif isinstance(val1, list) and isinstance(val2, list):
-                # Or both are fake tensors lists with one element and with the
-                # same shape/dtype
-                self.assertTrue(len(val1) == len(val2) and len(val1) == 1)
-                self.assertEqual(val1[0].shape, val2[0].shape)
-                self.assertEqual(val1[0].dtype, val2[0].dtype)
-            else:
-                # For expressions like 's0 < 10' can only compare through string
-                self.assertEqual(str(val1), str(val2))
-
-        self.assertTrue(torch.allclose(loaded_gm(*inputs), gm(*inputs)))
-
-        # Pickle the MultiMethodExportedProgram
-        pickled_gm = pickle.dumps(mmep)
-        loaded_gm = pickle.loads(pickled_gm)
-        self.assertTrue(torch.allclose(loaded_gm(*inputs), mmep(*inputs)))
-
-        # Check metadata
-        self.assertEqual(len(loaded_gm.methods()), 1)
-        self.assertTrue(loaded_gm.meta is not None)
-        self.assertTrue(loaded_gm.in_spec is not None)
-        self.assertTrue(loaded_gm.out_spec is not None)
-
-
-    def test_pickle_dynamic(self) -> None:
-        class DynamicShapeSimpleModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, a, b, c) -> torch.Tensor:
-                d = (torch.matmul(a, b) + c) / 2
-                d_s0 = d.shape[0]
-                d_s1 = d.shape[1]
-                d_s3 = d_s0 * d_s1
-                e = d.view(d_s3)
-                return torch.cat([e, e])
-
-        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
-        mmep = export(DynamicShapeSimpleModel(), inputs, constraints=[dynamic_dim(inputs[0], 0)])
-        gm = mmep.find_method("forward")
-
-        # Pickle the ExportGraphModule
-        pickled_gm = pickle.dumps(gm)
-        loaded_gm = pickle.loads(pickled_gm)
-
-        for node1, node2 in zip(loaded_gm.graph.nodes, gm.graph.nodes):
-            val1 = node1.meta.get("val", None)
-            val2 = node2.meta.get("val", None)
-
-            if val1 is None or val2 is None:
-                # Either both are None
-                self.assertEqual(val1, val2)
-            elif isinstance(val1, FakeTensor) and isinstance(val2, FakeTensor):
-                # Or both are fake tensors with the same shape/dtype
-                self.assertEqual(val1.shape, val2.shape)
-                self.assertEqual(val1.dtype, val2.dtype)
-            elif isinstance(val1, list) and isinstance(val2, list):
-                # Or both are fake tensors lists with one element and with the
-                # same shape/dtype
-                self.assertTrue(len(val1) == len(val2) and len(val1) == 1)
-                self.assertEqual(val1[0].shape, val2[0].shape)
-                self.assertEqual(val1[0].dtype, val2[0].dtype)
-            else:
-                self.assertEqual(val1, val2)
-
-        self.assertTrue(torch.allclose(loaded_gm(*inputs), gm(*inputs)))
-
-        # Pickle the MultiMethodExportedProgram
-        pickled_gm = pickle.dumps(mmep)
-        loaded_gm = pickle.loads(pickled_gm)
-        self.assertTrue(torch.allclose(loaded_gm(*inputs), mmep(*inputs)))
-
-        # Check metadata
-        self.assertEqual(len(loaded_gm.methods()), 1)
-        self.assertTrue(loaded_gm.meta is not None)
-        self.assertTrue(loaded_gm.in_spec is not None)
-        self.assertTrue(loaded_gm.out_spec is not None)
 
 if __name__ == '__main__':
     run_tests()

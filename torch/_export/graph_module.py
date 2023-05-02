@@ -6,12 +6,9 @@ import warnings
 
 import torch
 import torch.fx as fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from . import error
-from .logical_schema import TensorMeta  # type: ignore[attr-defined]
 
 ExportGraphModule = fx.GraphModule
 
@@ -61,20 +58,6 @@ def is_export_graph_module(gm: fx.GraphModule) -> bool:
     return EXPORT_METADATA in gm.meta
 
 
-def _extract_tensor_meta(result: torch.Tensor) -> TensorMeta:
-    """
-    Extract a TensorMeta describing `result`.
-    """
-    return TensorMeta(
-        dtype=result.dtype,
-        sizes=result.shape,
-        requires_grad=result.requires_grad,
-        device=result.device,
-        strides=result.stride(),
-        storage_offset=0,
-        layout=result.layout,
-    )
-
 
 def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
     """
@@ -111,7 +94,6 @@ def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
 
     # Get the target ops since we serialized the targets with just their name
     graph = body["_graph"]
-    fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=body["_shape_env"])
     for node in graph.nodes:
 
         # Given the name of an operation, find the actual Op object
@@ -124,24 +106,6 @@ def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
 
         if (source_fn := node.meta.get("source_fn", None)) is not None:
             node.meta["source_fn"] = str_to_op(source_fn)
-
-        if (val := node.meta.get("val", None)) is not None:
-
-            def _extract_faketensor(tensor_meta: TensorMeta):
-                return FakeTensor(
-                    fake_tensor_mode,
-                    torch.empty(
-                        tensor_meta.sizes,
-                        dtype=tensor_meta.dtype,
-                        device="meta",
-                        requires_grad=tensor_meta.requires_grad,
-                    ),
-                    torch.device("cpu"),
-                )
-
-            node.meta["val"] = pytree.tree_map_only(
-                TensorMeta, _extract_faketensor, val
-            )
 
     # fx.GraphModule constructor expects the totally flattened dictionary for
     # attributes but directly passing the module dict doesn't comply with that
@@ -207,10 +171,10 @@ class ExportGraphModuleMixin:
         def op_to_str(op):
             try:
                 pickle.dumps(op)
-            except TypeError as e:
+            except TypeError:
                 if isinstance(op, torch._ops.HigherOrderOperator):
                     return f"torch.ops.{op.__name__}"
-                if "torch" in op.__module__:
+                elif "torch" in op.__module__:
                     return f"torch.ops.{str(op)}"
                 else:
                     raise pickle.PickleError(f"Unable to pickle op {op}")
@@ -220,7 +184,6 @@ class ExportGraphModuleMixin:
         gm_dict["_graphmodule_cls_name"] = self.__class__.__name__
 
         graph = copy.deepcopy(gm_dict["_graph"])
-        shape_env = None
         for node in graph.nodes:
             # Replace the ops with their names since we cannot serialize the ops
             if node.op == "call_function":
@@ -231,34 +194,6 @@ class ExportGraphModuleMixin:
 
             if (source_fn := node.meta.get("source_fn", None)) is not None:
                 node.meta["source_fn"] = op_to_str(source_fn)
-
-            # Replace the faketensor metadata with the tensor metadata dataclass
-            # since we cannot serialize faketensors
-            def get_shape_env(val) -> Optional[ShapeEnv]:
-                val_flat, _ = pytree.tree_flatten(val)
-                shape_env = None
-                for v in val_flat:
-                    if not isinstance(v, FakeTensor):
-                        continue
-                    if shape_env is None:
-                        shape_env = v.fake_mode.shape_env
-                    else:
-                        assert (
-                            shape_env is v.fake_mode.shape_env
-                        ), "Multiple shape envs detected."
-                return shape_env
-
-            if (val := node.meta.get("val", None)) is not None:
-                if shape_env is None:
-                    shape_env = get_shape_env(val)
-                elif (new_shape_env := get_shape_env(val)) is not None:
-                    assert (
-                        shape_env is new_shape_env
-                    ), "Multiple shape envs detected."
-
-                node.meta["val"] = pytree.tree_map_only(
-                    torch.Tensor, _extract_tensor_meta, val
-                )
 
             # Check if other metadata are pickleable
             unpickleable_keys = []
@@ -275,7 +210,6 @@ class ExportGraphModuleMixin:
                 del node.meta[key]
 
         gm_dict["_graph"] = graph
-        gm_dict["_shape_env"] = shape_env
         pickled_state = pickle.dumps(gm_dict)
 
         return (reduce_graph_module, (pickled_state,))
