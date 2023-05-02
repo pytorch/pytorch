@@ -103,6 +103,9 @@ def minifier_dir():
     return path
 
 
+MAX_CONSTANT_NUMEL_INLINE = 4
+
+
 class NNModuleToString:
     safe_reprs = [
         torch.nn.Linear,
@@ -167,7 +170,13 @@ class NNModuleToString:
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
                 continue
-            if torch.is_floating_point(buffer):
+            # Serialize full data for small buffers
+            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                from torch._tensor_str import PRINT_OPTS
+
+                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                tensor_str = repr(buffer)
+            elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
@@ -330,16 +339,17 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
-    try:
-        fp64_model, fp64_examples = cast_to_fp64(
-            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
-        )
-        fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
-    except Exception:
-        if require_fp64:
-            raise RuntimeError("Could not generate fp64 outputs")
-        log.warning("Could not generate fp64 outputs")
-        fp64_ref = None
+    fp64_ref = None
+    if config.same_two_models_use_fp64:
+        try:
+            fp64_model, fp64_examples = cast_to_fp64(
+                copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+            )
+            fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
+        except Exception:
+            if require_fp64:
+                raise RuntimeError("Could not generate fp64 outputs")
+            log.warning("Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)

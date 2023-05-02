@@ -1,5 +1,4 @@
 import argparse
-from enum import Enum
 import copy
 import functools
 import io
@@ -13,10 +12,11 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
+import torch.nn as nn
 import torch.fx as fx
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
@@ -27,6 +27,7 @@ from torch._dynamo.debug_utils import (
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
+    MAX_CONSTANT_NUMEL_INLINE,
     minifier_dir,
     NNModuleToString,
     same_two_models,
@@ -484,7 +485,9 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
-        save_graph_repro(fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy)
+        save_graph_repro(
+            fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
+        )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
     try:
@@ -622,7 +625,15 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_common(options, mod, load_args):
     # Invariant for graphs we generate with the repro script
-    assert not any(mod.named_parameters()) and not any(mod.named_buffers())
+    assert not any(mod.named_parameters())
+    for n, b in mod.named_buffers():
+        if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
+            log.warning(
+                "Constant %s was not serialized, generated random data instead. "
+                "If you think this is affecting you, please comment on "
+                "https://github.com/pytorch/pytorch/issues/100468",
+                n,
+            )
 
     if not hasattr(load_args, "_version"):
         log.warning(
@@ -655,10 +666,10 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
-ACCURACY_FAILS = {
-    '': inductor_fails,
-    'accuracy': inductor_accuracy_fails,
-    'strict_accuracy': inductor_accuracy_fails,
+ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
+    "": inductor_fails,
+    "accuracy": inductor_accuracy_fails,
+    "strict_accuracy": inductor_accuracy_fails,
 }
 
 
@@ -914,7 +925,7 @@ default settings on this script:
             action="store_const",
             const="",
             default=accuracy,
-            help=f"do not test accuracy, just run the module and see if it errors",
+            help="do not test accuracy, just run the module and see if it errors",
         )
         accuracy_group.add_argument(
             "--accuracy",
