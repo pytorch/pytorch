@@ -2183,12 +2183,11 @@ class ShapeEnv:
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
-                if constraint is not None:
+                if constraint is not None and val not in (0, 1):
                     record_constraint_violation(constraint, lambda: (
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
-                        # TODO: fold this into TORCH_LOGS
-                        "about why it is constant, set torch._dynamo.config.print_specializations = True"
+                        "about why it is constant, run with TORCH_LOGS=dynamic"
                     ))
 
         for t, source, constraint in zip(placeholders, sources, constraint_inputs):
