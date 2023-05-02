@@ -133,11 +133,11 @@ TESTED_OPS: frozenset[str] = frozenset(
 #     are now fixed, removed the corresponding xfail.
 #     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
-    skip(
+    xfail(
         "acos", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Acos")
     ),
-    skip(
+    xfail(
         "acosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Acosh")
     ),
@@ -432,12 +432,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
         "amax",
         matcher=lambda sample: len(sample.input.shape) == 0,
-        reason="fixme (core dump): ORT aborts on scalar inputs to ReduceMax-18",
+        reason="Op (ReduceMax) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
     ),
     skip(
         "amin",
         matcher=lambda sample: len(sample.input.shape) == 0,
-        reason="fixme (core dump): ORT aborts on scalar inputs to ReduceMin-18",
+        reason="Op (ReduceMax) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
     ),
     skip(
         "arange",
