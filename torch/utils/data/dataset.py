@@ -306,7 +306,7 @@ class Subset(Dataset[T_co]):
     def __getitems__(self, indices: List[int]) -> List[T_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
-        if hasattr(self.dataset, "__getitems__") and self.dataset.__getitems__:
+        if callable(getattr(self.dataset, "__getitems__", None)):
             return self.dataset.__getitems__([self.indices[idx] for idx in indices])  # type: ignore[attr-defined]
         else:
             return [self.dataset[self.indices[idx]] for idx in indices]
