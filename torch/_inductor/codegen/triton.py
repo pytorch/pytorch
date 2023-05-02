@@ -15,6 +15,7 @@ import torch
 import torch._logging
 from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
+from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
@@ -1655,16 +1656,51 @@ class TritonScheduling:
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
 
-        if node1.is_reduction() == node2.is_reduction():
+        if node1.is_reduction() and node2.is_reduction():
             return numel1 == numel2 and rnumel1 == rnumel2
+
+        if not node1.is_reduction() and not node2.is_reduction():
+            if not (numel1 == numel2 and rnumel1 == rnumel2):
+                return False
+
+            if node1.is_template():
+                return True  # skip checks for compatible tiling
+
+            # check for a bad combined tiling
+            tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
+            tiling2 = self.select_tiling(node2.get_nodes(), numel1, rnumel1)
+            tiling3 = self.select_tiling(
+                node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
+            )
+            if config.triton.tiling_prevents_pointwise_fusion:
+                if len(tiling1) > 2:
+                    if len(tiling2) > 2:
+                        return tiling1 == tiling2 == tiling3
+                    else:
+                        return tiling1 == tiling3
+                elif len(tiling2) > 2:
+                    return tiling2 == tiling3
+
+            return True
 
         if not node1.is_reduction() and node2.is_reduction():
             assert rnumel1 == 1 and rnumel2 != 1
             if numel1 == numel2 * rnumel2:
-                return all(
+                if not all(
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
-                )
+                ):
+                    return False
+                if (
+                    config.triton.tiling_prevents_reduction_fusion
+                    and not node1.is_template()
+                ):
+                    return self.select_tiling(node1.get_nodes(), numel1) in (
+                        (numel1, 1),
+                        (numel2, rnumel2, 1),
+                    )
+                return True
+
             return numel1 == numel2
 
         assert node1.is_reduction() and not node2.is_reduction()
@@ -1874,16 +1910,22 @@ class TritonScheduling:
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        if config.generate_intermediate_hooks:
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+        ):
+            # Not every node in the schedule will actually be live on output;
+            # we can't check dead buffers.
+            live_outs = kernel.args.live_output_buffers()
             for node in node_schedule:
                 if not isinstance(node, scheduler.BaseSchedulerNode):
                     continue
-                # TODO: not sure if this is the right thing to do
                 name = node.get_name()
-                if kernel.args.is_removed(name):
+                if name not in live_outs:
                     continue
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
+                    counters["inductor"]["intermediate_hooks"] += 1
                     V.graph.wrapper_code.writeline(
                         f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )
