@@ -34,7 +34,7 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -147,7 +147,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-release-build
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -280,7 +280,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -393,7 +393,7 @@ jobs:
   libtorch-cpu-shared-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-release-build
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -526,7 +526,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -639,7 +639,7 @@ jobs:
   libtorch-cpu-static-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-release-build
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -772,7 +772,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -885,7 +885,7 @@ jobs:
   libtorch-cpu-static-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-release-build
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1018,7 +1018,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_7-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1267,7 +1267,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_7-shared-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1516,7 +1516,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_7-static-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1765,7 +1765,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_7-static-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2014,7 +2014,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_8-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2263,7 +2263,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_8-shared-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2512,7 +2512,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_8-static-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2761,7 +2761,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda11_8-static-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3010,7 +3010,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_1-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3259,7 +3259,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_1-shared-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3508,7 +3508,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_1-static-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3757,7 +3757,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_1-static-without-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
