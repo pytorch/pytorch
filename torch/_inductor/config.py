@@ -30,6 +30,9 @@ pick_loop_orders = True
 # generate inplace computations
 inplace_buffers = True
 
+# allow reusing buffers for more efficient memory use
+allow_buffer_reuse = True
+
 # codegen benchmark harness
 benchmark_harness = True
 
