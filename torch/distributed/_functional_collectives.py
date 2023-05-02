@@ -27,7 +27,7 @@ if _is_running_under_torch_deploy():
         """Can't import torchdynamo in torchdeploy builds currently."""
         return False
 else:
-    import torch._dynamo.external_utils.is_compiling as is_torchdynamo_compiling
+    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
 
 """
 New traceable, functional collectives.
