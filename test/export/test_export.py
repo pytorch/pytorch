@@ -76,7 +76,7 @@ class TestExperimentalExport(TestCase):
             return x.cos()
 
         def foo(x):
-            return cond(torch.tensor(x.shape[0] > 4), true_fn, false_fn, [x])
+            return torch.ops.cond(torch.tensor(x.shape[0] > 4), true_fn, false_fn, [x])
 
 
 class TestExport(TestCase):
