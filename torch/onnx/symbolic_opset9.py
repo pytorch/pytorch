@@ -2547,7 +2547,7 @@ def _convolution_mode(
         # Catch a more specific exception instead.
         kernel_shape = None
 
-    if kernel_shape is None or any([i is None for i in kernel_shape]):
+    if kernel_shape is None or any(i is None for i in kernel_shape):
         raise errors.SymbolicValueError(
             "Unsupported: ONNX export of convolution for kernel of unknown shape.",
             input,
