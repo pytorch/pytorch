@@ -60,6 +60,7 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    graph_break_reasons,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     nnmodule_doc_url_msg,
@@ -129,6 +130,10 @@ class GraphCompileReason:
 
     # Indicates if this was a graph compile reason due to graph break.
     graph_break: bool = True
+
+    def __post_init__(self):
+        if self.graph_break:
+            graph_break_reasons.append(self)
 
 
 def _get_gen_rand_values_fn(random_calls):

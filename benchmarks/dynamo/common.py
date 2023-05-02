@@ -30,7 +30,7 @@ from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs
+from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
@@ -368,6 +368,20 @@ def synchronize():
     pass
 
 
+def summarize_graph_break(filename):
+    """
+    Sorts and de-dupes the graphs breaks on the reason string. Note that this
+    function is just a best effort to reduce the logging information. We could
+    miss some graph breaks because of de-duping. We can further refine this
+    function as need arises.
+    """
+    log_file = f"{filename.removesuffix('.csv')}_graph_breaks.csv"
+    if os.path.exists(log_file):
+        df = pd.read_csv(log_file)
+        df_sorted = df.sort_values("reason").drop_duplicates(subset="reason")
+        df_sorted.to_csv(f"{log_file.removesuffix('.csv')}_deduped.csv", index=False)
+
+
 def print_summary(filename):
     if not (filename and os.path.exists(filename)):
         return
@@ -380,6 +394,7 @@ def print_summary(filename):
             print_summary_table(data[data.tag == tag])
     else:
         print_summary_table(data)
+    summarize_graph_break(filename)
 
 
 def print_summary_table(data):
@@ -1572,6 +1587,24 @@ class BenchmarkRunner:
                 f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
 
+        if explain or self.args.log_graph_breaks or self.args.print_graph_breaks:
+            filename = f"{output_filename.removesuffix('.csv')}_graph_breaks.csv"
+
+            def add_double_quotes(x):
+                # Delimiter because reason could have comma
+                return f'"{x}"'
+
+            for graph_break in graph_break_reasons:
+                reason = add_double_quotes(graph_break.reason)
+                user_stack = add_double_quotes(
+                    ", ".join([str(x) for x in graph_break.user_stack])
+                )
+                output_csv(
+                    filename,
+                    ["model", "reason", "user_stack"],
+                    [current_name, reason, user_stack],
+                )
+
         if self.args.stats:
             Stats.print_summary()
 
@@ -1862,6 +1895,11 @@ def parse_args(args=None):
         "--print-graph-breaks",
         action="store_true",
         help="Show a warning whenever graph break",
+    )
+    parser.add_argument(
+        "--log-graph-breaks",
+        action="store_true",
+        help="log graph breaks in a file",
     )
     parser.add_argument(
         "--trace-on-xla",
