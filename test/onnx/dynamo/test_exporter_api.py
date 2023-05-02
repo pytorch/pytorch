@@ -1,13 +1,14 @@
 # Owner(s): ["module: onnx"]
 import io
 import logging
+import os
 
 import onnx
-
 import torch
 from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ExportOutput
 from torch.onnx._internal import exporter
+from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.exporter import (
     _DEFAULT_OPSET_VERSION,
     ExportOutputSerializer,
@@ -132,11 +133,30 @@ class TestDynamoExportAPI(common_utils.TestCase):
             with open(path, "r") as fp:
                 self.assertEquals(fp.read(), expected_buffer)
 
+    def test_save_sarif_log_to_file_with_successful_export(self):
+        with common_utils.TemporaryFileName() as path:
+            dynamo_export(SampleModel(), torch.randn(1, 1, 2)).diagnostic_context.dump(
+                path
+            )
+            self.assertTrue(os.path.exists(path))
+
+    def test_save_sarif_log_to_file_with_failed_export(self):
+        class ModelWithExportError(torch.nn.Module):
+            def forward(self, x):
+                raise RuntimeError("Export error")
+
+        with self.assertRaises(RuntimeError):
+            dynamo_export(ModelWithExportError(), torch.randn(1, 1, 2))
+        self.assertTrue(os.path.exists(exporter._DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH))
+
     def test_raise_on_invalid_save_argument_type(self):
         with self.assertRaises(roar.BeartypeException):
             ExportOutput(torch.nn.Linear(2, 3))  # type: ignore[arg-type]
         export_output = ExportOutput(
-            onnx.ModelProto(), exporter.InputAdapter(), exporter.OutputAdapter()
+            onnx.ModelProto(),
+            exporter.InputAdapter(),
+            exporter.OutputAdapter(),
+            infra.DiagnosticContext("test", "1.0"),
         )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]

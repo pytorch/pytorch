@@ -68,3 +68,39 @@ register_backend(
 # by using the relevant fuser with torch.jit.fuser(...)
 aot_ts = aot_autograd(fw_compiler=ts_compile)
 register_backend(name="aot_ts", compiler_fn=aot_ts)
+
+# These buggy backends are used for inducing bugs so that we can test
+# our repro extraction / minifier scripts
+
+
+class ReluCompileError(Exception):
+    pass
+
+
+@register_backend
+def relu_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
+    for node in gm.graph.nodes:
+        if node.target == torch.relu:
+            raise ReluCompileError()
+    return gm
+
+
+@register_backend
+def relu_runtime_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
+    for node in gm.graph.nodes:
+        if node.target == torch.relu:
+            node.target = torch._assert
+            node.args = (False, "ReluRuntimeError")
+    gm.recompile()
+    return gm
+
+
+@register_backend
+def relu_accuracy_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
+    for node in gm.graph.nodes:
+        if node.target == torch.relu:
+            node.target = torch.add
+            node.args = (node.args[0], 1)
+    gm.recompile()
+
+    return gm
