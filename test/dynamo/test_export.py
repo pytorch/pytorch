@@ -1,4 +1,9 @@
 # Owner(s): ["module: dynamo"]
+"""
+Disable pytest AST rewriting (breaks some Dyanmo tests)
+
+PYTEST_DONT_REWRITE
+"""
 import functools
 import inspect
 import math
