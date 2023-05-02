@@ -10,7 +10,6 @@ from .quantizer import (
 from .qnnpack_quantizer import (
     _TORCH_DTYPE_TO_QDTYPE,
     _is_annotated,
-    _get_default_obs_or_fq_ctr,
 )
 from typing import List, Dict, Optional
 from torch.fx import Node
@@ -199,7 +198,6 @@ class X86InductorQuantizer(Quantizer):
             "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
             "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -210,12 +208,10 @@ class X86InductorQuantizer(Quantizer):
         # Maybe use "args_act_index"
         binary_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "_annotated": True,
             "args_act_index": [extra_input_node_idx],
         }
         unary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
@@ -255,7 +251,6 @@ class X86InductorQuantizer(Quantizer):
             "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
             "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -287,7 +282,6 @@ class X86InductorQuantizer(Quantizer):
             "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
             "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -295,7 +289,6 @@ class X86InductorQuantizer(Quantizer):
             "_annotated": True,
         }
         unary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_default_obs_or_fq_ctr(),
             "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
