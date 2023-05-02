@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -81,11 +81,15 @@ class MemoryPlanningState:
 @dataclasses.dataclass
 class EnterCudaDeviceContextManagerLine:
     device_idx: int
+    first_time: bool
 
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            if self.first_time:
+                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            else:
+                code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -205,6 +209,8 @@ class WrapperCodeGen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
+        self.first_device_guard = True
+        self.supports_intermediate_hooks = True
 
         self.write_header()
         self.write_prefix()
@@ -240,6 +246,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
+                from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
                 from torch import empty_strided, as_strided, device
@@ -315,7 +322,10 @@ class WrapperCodeGen(CodeGen):
         return f"{next(self._names_iter)}"
 
     def codegen_cuda_device_guard_enter(self, device_idx):
-        self.writeline(EnterCudaDeviceContextManagerLine(device_idx))
+        self.writeline(
+            EnterCudaDeviceContextManagerLine(device_idx, self.first_device_guard)
+        )
+        self.first_device_guard = False
 
     def codegen_cuda_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
@@ -329,10 +339,19 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
-    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):
         self.writeline(
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
+        if (
+            self.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+            and origin_node is not None
+        ):
+            counters["inductor"]["intermediate_hooks"] += 1
+            self.writeline(
+                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+            )
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
@@ -565,7 +584,7 @@ class WrapperCodeGen(CodeGen):
                 ]
             )
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None):
+    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=False):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
@@ -577,7 +596,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
         stack.enter_context(self.wrapper_call.indent())
 
-    def generate_kernel_call(self, name, call_args, device_index=None):
+    def generate_kernel_call(self, name, call_args, device_index=None, cpp=False):
         self.writeline(self.wrap_kernel_call(name, call_args))
 
     def call_kernel(self, name: str, kernel: Kernel):
@@ -727,6 +746,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.stride = "strides()"
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
+        self.supports_intermediate_hooks = False
 
     def seed(self):
         """
@@ -813,7 +833,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate()
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=True):
         self.header.splice(f"\n{kernel}\n")
 
     def generate_return(self, output_refs):
@@ -832,7 +852,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             vec_isa=codecache.pick_vec_isa(),
             cuda=self.cuda,
         )
-        optimization_flags = codecache.optimization_flags(cuda=self.cuda)
+        optimization_flags = codecache.optimization_flags()
         use_custom_generated_macros = codecache.use_custom_generated_macros()
 
         extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
@@ -1029,7 +1049,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=False):
+        if cpp:
+            return super().define_kernel(name, kernel, metadata)
         pass
 
     def generate(self):
@@ -1070,7 +1092,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
         return ", ".join(new_args)
 
-    def generate_kernel_call(self, name, call_args, device_index):
+    def generate_kernel_call(self, name, call_args, device_index=None, cpp=False):
+        if cpp:
+            return super().generate_kernel_call(name, call_args, device_index)
+
         params = CudaKernelParamCache.get(self.kernel_to_hash.get(name, None))
         assert (
             params is not None
