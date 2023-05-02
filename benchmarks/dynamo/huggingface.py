@@ -114,9 +114,9 @@ BATCH_SIZE_DIVISORS = {
     "BlenderbotSmallForCausalLM": 4,
     "BlenderbotSmallForConditionalGeneration": 2,
     "CamemBert": 2,
-    "DebertaForMaskedLM": 8,
-    "DebertaForQuestionAnswering": 4,
-    "DebertaV2ForMaskedLM": 8,
+    "DebertaForMaskedLM": 4,
+    "DebertaForQuestionAnswering": 2,
+    "DebertaV2ForMaskedLM": 4,
     "DebertaV2ForQuestionAnswering": 4,
     "DistilBertForMaskedLM": 2,
     "DistilBertForQuestionAnswering": 2,
@@ -137,7 +137,7 @@ BATCH_SIZE_DIVISORS = {
     "MT5ForConditionalGeneration": 2,
     "MegatronBertForCausalLM": 4,
     "MegatronBertForQuestionAnswering": 2,
-    "MobileBertForMaskedLM": 4,
+    "MobileBertForMaskedLM": 2,
     "MobileBertForQuestionAnswering": 2,
     "OPTForCausalLM": 2,
     "PLBartForCausalLM": 2,
@@ -204,7 +204,7 @@ def get_sequence_length(model_cls, model_name):
     elif model_name.startswith("MobileBert"):
         seq_length = 128
     else:
-        log.warning(
+        log.info(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
         )
         seq_length = 128
@@ -408,15 +408,15 @@ class HuggingfaceRunner(BenchmarkRunner):
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
-            log.warning(
-                "Batch size not specified for {model_name}. Setting batch_size=16"
+            log.info(
+                f"Batch size not specified for {model_name}. Setting batch_size=16"
             )
 
         if batch_size is None:
             batch_size = batch_size_default
             if model_name in BATCH_SIZE_DIVISORS:
                 batch_size = max(int(batch_size / BATCH_SIZE_DIVISORS[model_name]), 1)
-                log.warning(
+                log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
 

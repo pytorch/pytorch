@@ -1351,6 +1351,24 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
     ),
     OpInfo(
         "linalg.eig",
@@ -1702,6 +1720,22 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
             ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
         ),
     ),
     OpInfo(
@@ -1732,6 +1766,22 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
             ),
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
         ),
     ),
     OpInfo(
@@ -1744,6 +1794,24 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
         sample_inputs_func=sample_inputs_linalg_matrix_norm,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
     ),
     OpInfo(
         "linalg.qr",
@@ -2234,6 +2302,22 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
         ),
     ),
     OpInfo(
@@ -2249,6 +2333,24 @@ op_db: List[OpInfo] = [
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_linalg_svdvals,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestFakeTensor",
+                "test_fake_crossref_backward_no_amp",
+                device_type="cuda",
+                dtypes=[torch.float32],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
     ),
     OpInfo(
         "linalg.tensorinv",

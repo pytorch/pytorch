@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
@@ -24,7 +25,7 @@ from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
-from .cuda_properties import get_device_capability
+from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,26 @@ VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
 try:
-    from triton.testing import do_bench
+    from triton.testing import do_bench as triton_do_bench
+
+    # triton PR https://github.com/openai/triton/pull/1513 change the
+    # quantile fields name from 'percentiles' to 'quantiles'
+    # and change the default value from (0.5, 0.2, 0.8) to None.
+    # This may break inductor since a caller expects a tuple may get a item.
+    #
+    # Add a wrapper to maintain the same behavior for inductor.
+    # Maybe we should have own implementation of this function?
+    quantile_field_name = (
+        "quantiles"
+        if inspect.signature(triton_do_bench).parameters.get("quantiles") is not None
+        else "percentiles"
+    )
+
+    def do_bench(*args, **kwargs):
+        if quantile_field_name not in kwargs:
+            kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
+        return triton_do_bench(*args, **kwargs)[0]
+
 except ImportError:
 
     def do_bench(*args, **kwargs):
@@ -65,6 +85,16 @@ def has_torchvision_roi_align():
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def decode_device(device):
+    if device is None:
+        return torch.tensor(0.0).device  # default device
+    if isinstance(device, str):
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=current_device())
+    return device
 
 
 def sympy_product(it):
@@ -224,9 +254,9 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
-def pad_list(x):
+def pad_listlike(x, size):
     if len(x) == 1:
-        return [x[0], x[0]]
+        return type(x)([x[0]]) * size
     else:
         return x
 
@@ -371,7 +401,20 @@ def has_incompatible_cudagraph_ops(gm):
         "fbgemm.jagged_to_padded_dense.default",
     }
     if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update({"aten.index_put.default", "aten.index_put_.default"})
+        forbidden_set.update(
+            {
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
@@ -622,12 +665,12 @@ def run_and_get_code(fn, *args, **kwargs):
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
         torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
+        result = fn(*args, **kwargs)
+    return result, source_codes
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
+    _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"
@@ -721,7 +764,7 @@ def get_kernel_category(kernel_mod):
     - reduction
     - persistent_reduction
 
-    Currently we simply decide the cateory depending on what decorator is imported
+    Currently we simply decide the category depending on what decorator is imported
     by the kernel.
     """
     choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]
@@ -809,7 +852,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
@@ -1017,3 +1060,14 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         parse_profile_event_list(
             benchmark_name, event_list, wall_time_ms, times * repeat
         )
+
+
+def triton_config_to_hashable(cfg):
+    """
+    Convert triton config to a tuple that can uniquely identify it. We can use
+    the return value as a dictionary key.
+    """
+    items = sorted(cfg.kwargs.items())
+    items.append(("num_warps", cfg.num_warps))
+    items.append(("num_stages", cfg.num_stages))
+    return tuple(items)

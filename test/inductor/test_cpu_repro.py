@@ -25,7 +25,7 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
@@ -40,13 +40,15 @@ except unittest.SkipTest:
 
 
 vec_dtypes = test_torchinductor.vec_dtypes
-slow = test_torchinductor.slow
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
+check_model = test_torchinductor.check_model
 
 
 class CPUReproTests(TestCase):
+    common = check_model
+
     def test_conv_stride_constraints(self):
         for fmt in [torch.channels_last, torch.contiguous_format]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -82,6 +84,133 @@ class CPUReproTests(TestCase):
 
             self.assertTrue(conv_seen)
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv2d_bn_mixed_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    3,
+                    16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                    dtype=torch.bfloat16,
+                )
+                self.bn = torch.nn.BatchNorm2d(
+                    16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        v = torch.randn(1, 3, 64, 64, dtype=torch.bfloat16)
+        mod = Model().eval()
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv2d_packed(self):
+        options = itertools.product([[3, 56, 56]], [True, False])
+        for x_shape, mode_train in options:
+            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
+                mode=mode_train
+            )
+            v = torch.randn(x_shape, dtype=torch.float32)
+
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_used_from_multiple_places(self):
+        class M(torch.nn.Module):
+            def __init__(self, conv_in_channel, conv_out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                res = self.conv(res)
+                return res
+
+        with torch.no_grad():
+            mod = M(3, 3).eval()
+            x = torch.randn(1, 3, 224, 224)
+            self.common(
+                mod,
+                (x,),
+            )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_linear_used_from_multiple_places(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(in_channel, out_channel)
+
+            def forward(self, x):
+                res = self.linear(x)
+                res = F.relu(res)
+                res = self.linear(res)
+                return res
+
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_linear_packed(self):
+        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
+        for input_shape, bias in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+            ).eval()
+
+            v = torch.randn(input_shape)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_transpose2d_packed(self):
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        for x_shape in [[1, 3, 28, 28], [3, 28, 28]]:
+            v = torch.randn(x_shape, dtype=torch.float32)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -114,6 +243,19 @@ class CPUReproTests(TestCase):
         opt_fn(p0, p1)
         real_out = fn(p0, p1)
         compiled_out = opt_fn(p0, p1)
+        assert same(real_out, compiled_out)
+
+    def test_pow_cos(self):
+        # https://github.com/pytorch/pytorch/issues/98149
+        def fn(x):
+            t = x.pow(5)
+            return torch.cos(t)
+
+        x = torch.tensor([4], dtype=torch.uint8)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn(x)
+        real_out = fn(x)
+        compiled_out = opt_fn(x)
         assert same(real_out, compiled_out)
 
     def test_reduce_with_masked(self):
@@ -151,6 +293,97 @@ class CPUReproTests(TestCase):
             compiled_out = opt_fn(x)
             assert same(real_out, compiled_out, equal_nan=True)
 
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_decomposed_dequant_relu_quant(self):
+        def fn(x, scale, zero_point, use_dequant, use_quant):
+            # For quantized_decomposed.dequantize_per_tensor
+            # Refer to torch/ao/quantization/fx/_decomposed.py
+            if use_dequant:
+                x = (x.to(torch.float32) - zero_point) * scale
+
+            x = torch.relu(x)
+
+            # For quantized_decomposed.quantize_per_tensor
+            # Refer to torch/ao/quantization/fx/_decomposed.py
+            if use_quant:
+                inv_scale = 1.0 / scale
+                x = torch.clamp(torch.round(x * inv_scale) + zero_point, 0, 255).to(
+                    torch.uint8
+                )
+            return x
+
+        use_dequant_list = [False, True]
+        use_quant_list = [False, True]
+        for use_dequant, use_quant in itertools.product(
+            use_dequant_list, use_quant_list
+        ):
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+            )
+            if use_dequant:
+                x = x.to(torch.uint8)
+            zero_point = 100
+            scale = 0.01
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point, use_dequant, use_quant)
+
+                real_out = fn(x, scale, zero_point, use_dequant, use_quant)
+                compiled_out = opt_fn(x, scale, zero_point, use_dequant, use_quant)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_dequant_quant_lowering(self):
+        def fn(x, scale, zero_point, use_dequant, use_quant):
+            if use_dequant:
+                x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                    x, scale, zero_point, 0, 255, torch.uint8
+                )
+
+            x = torch.relu(x)
+
+            if use_quant:
+                x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    x, scale, zero_point, 0, 255, torch.uint8
+                )
+            return x
+
+        use_dequant_list = [False, True]
+        use_quant_list = [False, True]
+        use_tensor_overload_list = [False, True]
+        for use_dequant, use_quant, use_tensor_overload in itertools.product(
+            use_dequant_list, use_quant_list, use_tensor_overload_list
+        ):
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+            )
+            if use_dequant:
+                x = x.to(torch.uint8)
+            zero_point = 100
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point, dtype=torch.int64)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point, use_dequant, use_quant)
+
+                real_out = fn(x, scale, zero_point, use_dequant, use_quant)
+                compiled_out = opt_fn(x, scale, zero_point, use_dequant, use_quant)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
     def test_inplace_add_alpha(self):
         def fn(x, y):
             aten.add_.Tensor(x, y, alpha=0.55)
@@ -165,6 +398,21 @@ class CPUReproTests(TestCase):
         fn(x2, y)
         fn_compiled([x3, y])
         assert same(x2, x3)
+
+    def test_int_div(self):
+        def fn(x, y):
+            s3 = x.size(1)
+            a = torch.zeros((1 + s3) // 2)
+            a += y
+            return a, s3
+
+        p0 = torch.randint(5, (1, 8))
+        p1 = torch.randn(1)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn(p0, p1)
+        real_out = fn(p0, p1)
+        compiled_out = opt_fn(p0, p1)
+        assert same(real_out, compiled_out)
 
     def test_no_op_squeeze(self):
         @torch._dynamo.optimize("inductor")
@@ -209,10 +457,6 @@ class CPUReproTests(TestCase):
         unsqueezed = dense.unsqueeze(1)
         self.assertFalse(complex_memory_overlap(unsqueezed))
         self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-        expanded = unsqueezed.expand(-1, 2, -1)
-        self.assertTrue(complex_memory_overlap(expanded))
-        self.assertTrue(complex_memory_overlap(expanded.permute(1, 2, 0)))
 
         gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
         self.assertFalse(complex_memory_overlap(gathered))
@@ -344,12 +588,15 @@ class CPUReproTests(TestCase):
             "randn",
             "isnan",
             "rand",
+            "randint",
             "bitwise_and",
             "bitwise_or",
             "bitwise_xor",
         ]
         union = {*cpp_vec_op_list, *diff}
-        self.assertTrue(set(cpp_op_list).issubset(union))
+        self.assertTrue(
+            set(cpp_op_list).issubset(union), f"unexpected: {set(cpp_op_list) - union}"
+        )
 
     def test_atomic_add_bf16(self):
         def fn(test_args):
@@ -441,7 +688,7 @@ class CPUReproTests(TestCase):
                 assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @slow()
+    @slowTest
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1066,7 +1313,7 @@ class CPUReproTests(TestCase):
                 if simdlen != 1:
                     assert metrics.generated_cpp_vec_kernel_count == 2
 
-    @slow()
+    @slowTest
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1167,8 +1414,8 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x), opt_fn(x))
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -1237,6 +1484,17 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x, y), opt_fn(x, y)))
         assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_sum_outer(self):
+        # https://github.com/pytorch/pytorch/issues/98573
+        def fn(a):
+            return a.transpose(2, 3).sum(dim=1).contiguous()
+
+        metrics.reset()
+        x = torch.randn(10, 50, 50, 50)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":

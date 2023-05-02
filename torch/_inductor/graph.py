@@ -1,4 +1,3 @@
-import functools
 import logging
 import operator
 import os
@@ -25,12 +24,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import (
-    CppAotWrapperCodeGen,
-    CppWrapperCodeGen,
-    CudaAotWrapperCodeGen,
-    WrapperCodeGen,
-)
+from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -60,7 +54,7 @@ log = logging.getLogger(__name__)
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
-def supported_dtype_of_cpp_wrapper(dtype):
+def supported_dtype_of_cpp_wrapper(dtype, cuda):
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -73,7 +67,24 @@ def supported_dtype_of_cpp_wrapper(dtype):
         torch.bfloat16,
         # torch.float16, # TODO: implement this
     }
+    if cuda:
+        supported_dtype.add(torch.float16)
+
     return dtype in supported_dtype
+
+
+def may_get_constant_buffer_dtype(constant_buffer):
+    assert isinstance(
+        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
+    if isinstance(constant_buffer, sympy.core.numbers.Integer):
+        return torch.int64
+    if constant_buffer.is_integer:
+        return torch.int64
+    elif constant_buffer.is_float:
+        return torch.float32
+    else:
+        return None
 
 
 def is_magic_method(op):
@@ -102,7 +113,7 @@ class GraphLowering(torch.fx.Interpreter):
             # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
-                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
             )
             (
                 size,
@@ -131,8 +142,8 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
-        aot_mode=False,
         cpp_wrapper=False,
+        aot_mode=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -149,6 +160,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.device_idxs: Set[int] = set()
+        self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -162,9 +174,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        # TODO: aot_mode and cpp_wrapper are tangled now. Some refactoring is needed.
-        self.aot_mode = aot_mode
         self.cpp_wrapper = cpp_wrapper
+        self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -172,7 +183,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.info(f"Using FallbackKernel: {name}")
+            log.info("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -239,18 +250,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def disable_cpp_wrapper(self, cond):
         self.cpp_wrapper = False
-        assert not self.aot_mode, "AOT compilation failed"
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
-    def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
-        if isinstance(buffer, ir.ExternKernel):
-            if not getattr(buffer, "cpp_kernel", False):
-                self.disable_cpp_wrapper("ExternKernel")
-
     def register_buffer(self, buffer: ir.ComputedBuffer):
-        if self.cpp_wrapper:
-            self.check_buffer_for_cpp_wrapper(buffer)
-
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
@@ -427,6 +429,7 @@ class GraphLowering(torch.fx.Interpreter):
                     type(None),
                     ir.ConstantBuffer,
                     sympy.Expr,
+                    sympy.Rel,
                     int,
                 ),
             )
@@ -560,6 +563,31 @@ class GraphLowering(torch.fx.Interpreter):
                 # reads, but they converge to a user.
                 result.realize_hint()
 
+        # This is not complete, but it doesn't have to be: origin_node
+        # tracking is best effort.  The logic here critically relies on direct
+        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
+        # to get views to work.  Feel free to add any extra cases as needed.
+        #
+        # Note: we can't YOLO tree_map over this result, because if there are
+        # buffers or a view involved, we might not be able to validly assign
+        # the origin_node here.
+        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
+            if isinstance(result.data.data, ir.Loops):
+                result.data.data.origin_node = n
+            elif isinstance(result.data.data, ir.Buffer):
+                result.data.data.origin_node = n
+                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
+                    result.data.data.data, ir.Loops
+                ):
+                    result.data.data.data.origin_node = n
+                # Not really multi-output, can straightforwardly recurse in
+                elif (
+                    isinstance(result.data.data, ir.MultiOutput)
+                    and not result.data.data.indices
+                ):
+                    if isinstance(result.data.data.inputs[0], ir.Buffer):
+                        result.data.data.inputs[0].origin_node = n
+
         return result
 
     def check_cpp_codegen_disabled(self):
@@ -570,18 +598,15 @@ class GraphLowering(torch.fx.Interpreter):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    @functools.lru_cache(None)
-    def get_single_device(self):
-        return list(self.device_types)[0] if len(self.device_types) == 1 else None
-
-    def check_device_for_cpp_buffer(self):
-        device = self.get_single_device()
-        if self.get_single_device() is None:
-            self.disable_cpp_wrapper("device not CPU or CUDA")
-
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
-            if not supported_dtype_of_cpp_wrapper(value.get_dtype()):
+            dtype = None
+            if isinstance(value, TensorBox):
+                dtype = value.get_dtype()
+            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
+                dtype = may_get_constant_buffer_dtype(value)
+
+            if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
     def check_constant_for_cpp_buffer(self):
@@ -591,27 +616,24 @@ class GraphLowering(torch.fx.Interpreter):
     def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
-        self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if self.aot_mode:
-            device = self.get_single_device()
+        self.cuda = "cuda" in self.device_types
+        if self.cpp_wrapper:
             self.check_cpp_wrapper()
-            if device == "cpu":
-                self.wrapper_code = CppAotWrapperCodeGen()
-            else:
-                assert device == "cuda", "Non-supported device for AOT compilation"
-                self.wrapper_code = CudaAotWrapperCodeGen()
-        elif self.cpp_wrapper:
-            self.check_cpp_wrapper()
+            # Re-check self.cpp_wrapper because it might be disabled due to failed checking
+            if self.cuda:
+                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
+
             if self.cpp_wrapper:
-                self.wrapper_code = CppWrapperCodeGen()
-            else:
-                self.wrapper_code = WrapperCodeGen()
-        else:
-            self.wrapper_code = WrapperCodeGen()
+                self.wrapper_code = (
+                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
+                )
+                return
+
+        self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -671,11 +693,12 @@ class GraphLowering(torch.fx.Interpreter):
 
         code, linemap = self.codegen()
         mod = PyCodeCache.load(code, linemap=linemap)
+
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.debug(f"Output code written to: {mod.__file__}")
-        output_code_log.debug(f"Output code: \n{code}")
+        log.debug("Output code written to: %s", mod.__file__)
+        output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -687,12 +710,9 @@ class GraphLowering(torch.fx.Interpreter):
             from .codecache import AotCodeCache
 
             code, linemap = self.codegen()
-            output_code_log.debug(f"Output code: \n{code}")
+            output_code_log.debug("Output code: \n%s", code)
 
-            libpath = AotCodeCache.compile(
-                code, cuda=(self.get_single_device() == "cuda")
-            )
-            return lambda dummy: libpath
+            return AotCodeCache.compile(self, code, cuda=self.cuda)
         else:
             return self.compile_to_module().call
 

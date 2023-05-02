@@ -755,7 +755,7 @@ def _lower_weight_only_weighted_ref_module(model: GraphModule):
         # TODO: maybe define a WeightedWeightOnlyQuantizedModule
         q_module = q_class.from_reference(ref_module)  # type: ignore[union-attr]
 
-        # replace reference moduel with dynamically quantized module
+        # replace reference module with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
 
@@ -981,7 +981,7 @@ def _lower_quantized_binary_op(
         assert bop_node.target in QBIN_OP_MAPPING
         binop_to_qbinop = QBIN_OP_MAPPING if relu_node is None else QBIN_RELU_OP_MAPPING
         qbin_op = binop_to_qbinop[bop_node.target]
-        # prepare the args for quantized bianry op
+        # prepare the args for quantized binary op
         # (x, y)
         qop_node_args = list(bop_node.args)
         # (x, y, scale, zero_point)
