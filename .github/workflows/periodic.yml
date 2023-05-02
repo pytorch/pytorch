@@ -37,12 +37,12 @@ jobs:
       docker-image: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.parallelnative-linux-focal-py3_8-gcc7-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build:
-    name: cuda11.7-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
+  linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build:
+    name: cuda12.1-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
@@ -60,14 +60,14 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-test:
-    name: cuda11.7-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
+  linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-test:
+    name: cuda12.1-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build
+    needs: linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
+      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_8-py3_9-gcc7-build:
     name: linux-bionic-cuda11.8-py3.9-gcc7
