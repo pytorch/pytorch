@@ -1049,10 +1049,6 @@ class GitHubPR:
                 full_label = f"{label_base}X{count}"
         gh_add_labels(self.org, self.project, self.pr_num, [full_label])
 
-    def remove_label(self, label: str) -> None:
-        if self.get_labels() is not None and label in self.get_labels():
-            gh_remove_label(self.org, self.project, self.pr_num, label)
-
     def merge_into(
         self,
         repo: GitRepo,
@@ -2049,7 +2045,7 @@ def main() -> None:
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
     finally:
-        pr.remove_label(MERGE_IN_PROGRESS_LABEL)
+        gh_remove_label(org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL)
 
 
 if __name__ == "__main__":

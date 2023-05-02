@@ -124,6 +124,10 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
     return Object()
 
 
+def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+    pass
+
+
 def mock_revert(
     repo: GitRepo,
     pr: GitHubPR,
@@ -376,6 +380,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(False, True))
+    @mock.patch("trymerge.gh_remove_label", side_effect=mock_remove_label)
     @mock.patch("trymerge.merge", side_effect=mock_merge)
     def test_main_force(
         self, mock_merge: Any, mock_parse_args: Any, *args: Any
@@ -392,6 +397,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(False, False))
+    @mock.patch("trymerge.gh_remove_label", side_effect=mock_remove_label)
     @mock.patch("trymerge.merge", side_effect=mock_merge)
     def test_main_merge(self, mock_merge: Any, *args: Any) -> None:
         trymerge_main()
