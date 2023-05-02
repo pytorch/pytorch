@@ -25,7 +25,6 @@ Note:
 from __future__ import annotations
 
 import copy
-import warnings
 from typing import Optional, Tuple
 
 import onnx_test_common
@@ -33,7 +32,7 @@ import onnx_test_common
 import parameterized
 
 import torch
-from onnx_test_common import fixme, skip, xfail
+from onnx_test_common import skip, xfail
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
@@ -63,22 +62,21 @@ TESTED_OPS: frozenset[str] = frozenset(
 # Expected failures for onnx export.
 # The list should be sorted alphabetically by op name.
 # Q: When should I use fixme vs vs skip vs xfail?
-# A: Use fixme when we want to fix the test eventually but it doesn't fail consistently,
-#        e.g. the test is flaky or some tests pass. Otherwise, use xfail.
-#    Use skip if we don't care about the test passing, e.g. ONNX doesn't support the usage.
-#    Use xfail if a test fails now and we want to eventually fix the test.
+# A: Prefer xfail over skip when possible.
+#     2a. If a test is now failing because of xpass, because some previous errors
+#     are now fixed, removed the corresponding xfail.
+#     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
-    fixme("ceil", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3 (https://github.com/pytorch/pytorch/issues/99534)"),
 )
 # fmt: on
 
-SKIP_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
-    fixme(
+SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
+    xfail(
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
@@ -89,7 +87,7 @@ SKIP_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
 
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
-OP_WITH_SKIPPED_SUBTESTS = frozenset(meta.op_name for meta in SKIP_SUBTESTS)
+OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
 assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
@@ -107,17 +105,19 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
-def _should_skip_test_sample(op_name: str, sample) -> Optional[str]:
+def _should_skip_xfail_test_sample(
+    op_name: str, sample
+) -> Tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
-    if op_name not in OP_WITH_SKIPPED_SUBTESTS:
-        return None
-    for decorator_meta in SKIP_SUBTESTS:
-        # Linear search on SKIP_SUBTESTS. That's fine because the list is small.
+    if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
+        return None, None
+    for decorator_meta in SKIP_XFAIL_SUBTESTS:
+        # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
         if decorator_meta.op_name == op_name:
             assert decorator_meta.matcher is not None, "Matcher must be defined"
             if decorator_meta.matcher(sample):
-                return decorator_meta.reason
-    return None
+                return decorator_meta.test_behavior, decorator_meta.reason
+    return None, None
 
 
 def _get_test_class_name(cls, num, params_dict) -> str:
@@ -171,31 +171,31 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                 inputs=repr(inputs),
                 kwargs=repr(cpu_sample.kwargs),
             ):
-                skip_reason = _should_skip_test_sample(op.name, cpu_sample)
-                if skip_reason is not None:
-                    # Cannot use self.skip because pytest would skip the entire test
-                    warnings.warn(f"skipped sample {i}. Reason: {skip_reason}")
-                    continue
-
-                model = SingleOpModel(op.op, cpu_sample.kwargs)
-                model.eval()
-
-                if dtype == torch.float32:
-                    # Relax atol and rtol for float32 based on empirical results
-                    # The current most relaxed values are for aten::stft
-                    rtol = 1e-5
-                    atol = 2e-5
-                elif dtype == torch.float64:
-                    # The current most relaxed values are for aten::stft
-                    rtol = 1e-5
-                    atol = 2e-5
-                else:
-                    rtol = None
-                    atol = None
-                # Run the test
-                self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                    model, inputs, rtol=rtol, atol=atol
+                test_behavior, reason = _should_skip_xfail_test_sample(
+                    op.name, cpu_sample
                 )
+                with onnx_test_common.normal_xfail_skip_test_behaviors(
+                    test_behavior, reason
+                ):
+                    model = SingleOpModel(op.op, cpu_sample.kwargs)
+                    model.eval()
+
+                    if dtype == torch.float32:
+                        # Relax atol and rtol for float32 based on empirical results
+                        # The current most relaxed values are for aten::stft
+                        rtol = 1e-5
+                        atol = 2e-5
+                    elif dtype == torch.float64:
+                        # The current most relaxed values are for aten::stft
+                        rtol = 1e-5
+                        atol = 2e-5
+                    else:
+                        rtol = None
+                        atol = None
+                    # Run the test
+                    self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                        model, inputs, rtol=rtol, atol=atol
+                    )
 
 
 for opset in onnx_test_common.FX_TESTED_OPSETS:
