@@ -1,7 +1,7 @@
 import collections
 import functools
 import itertools
-from typing import List, Set
+from typing import List, NamedTuple, Set
 
 import sympy
 
@@ -11,9 +11,21 @@ from ..utils import ceildiv, sympy_product, sympy_subs
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton_overrides import TritonOverrides
-from .triton_utils import config_of, IterationRangesRoot, signature_of, TritonPrinter
+from .triton_utils import (
+    config_of,
+    IterationRangesRoot,
+    signature_of,
+    TritonCSEVariable,
+    TritonPrinter,
+)
 
 texpr = TritonPrinter().doprint
+
+
+class ListTracker(NamedTuple):
+    var: TritonCSEVariable
+    arg_names: List[str]
+    layouts: List[Layout]
 
 
 class ForeachKernel(Kernel):
@@ -47,8 +59,7 @@ class ForeachKernel(Kernel):
             )
         super().__init__()
         self.sublist_indices = sublist_indices
-        self.list_name_to_var_name = {}
-        self.list_name_to_arg_names = collections.defaultdict(list)
+        self.lists = {}
         self.tensor_elem_counts = [
             int(sympy_product(layout.size))
             for layout in layouts[sublist_indices[0] : sublist_indices[1]]
@@ -160,10 +171,9 @@ class ForeachKernel(Kernel):
                 cond = "if"
                 # initialize tile ptrs
                 code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
-                for list_name, arg_names in self.list_name_to_arg_names.items():
-                    var = self.list_name_to_var_name[list_name]
+                for list_tracker in self.lists.values():
                     code.splice(
-                        f"{var}_tile_ptrs = {arg_names[index]} + tl.arange(0, BLOCK_SIZE)"
+                        f"{list_tracker.var}_tile_ptrs = {list_tracker.arg_names[index]} + tl.arange(0, BLOCK_SIZE)"
                     )
             else:
                 cond = "elif"
@@ -171,15 +181,14 @@ class ForeachKernel(Kernel):
             code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
             with code.indent():
                 code.splice(f"elem_ind_offset = (pid - {lower_bound_pid}) * BLOCK_SIZE")
-                for list_name, arg_names in self.list_name_to_arg_names.items():
-                    var = self.list_name_to_var_name[list_name]
+                for list_tracker in self.lists.values():
                     code.splice(
-                        f"{var}_tile_ptrs = ({arg_names[index]} + elem_ind_offset) + tl.arange(0, BLOCK_SIZE)"
+                        f"{list_tracker.var}_tile_ptrs = ({list_tracker.arg_names[index]} + elem_ind_offset) + tl.arange(0, BLOCK_SIZE)"
                     )
                 code.splice(f"if pid == {upper_bound_pid - 1}:")
                 with code.indent():
                     code.splice(f"elem_count = {last_block_elem_count}")
-                    code.splice(f"mask = tl.arange(0, BLOCK_SIZE) < elem_count")
+                    code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count")
 
             block_count += num_blocks
 
@@ -258,33 +267,38 @@ class ForeachKernel(Kernel):
             + "@triton.jit"
         )
 
+    def _list_tracker(self, list_name, var, arg_names, layouts):
+        self.lists[list_name] = ListTracker(var, arg_names, layouts)
+        return self.lists[list_name]
+
     def get_list(self, list_name):
         return V.graph.lists[list_name][
             self.sublist_indices[0] : self.sublist_indices[1]
         ]
 
+    # TODO: handle the case where we see the same list with different layouts
     def load_list(self, list_name: str, layouts: List[Layout]):
-        if list_name not in self.list_name_to_var_name:
+        if list_name not in self.lists:
             var = self.cse.newvar()
-            self.list_name_to_var_name[list_name] = var
+            arg_names = []
 
             for buffer_name in self.get_list(list_name):
-                arg_name = self.args.input(buffer_name)
-                self.list_name_to_arg_names[list_name].append(arg_name)
+                arg_names.append(self.args.input(buffer_name))
 
+            self._list_tracker(list_name, var, arg_names, layouts)
             self.loads.writeline(f"{var} = tl.load({var}_tile_ptrs, mask=mask)")
 
-        return self.list_name_to_var_name[list_name]
+        return self.lists[list_name].var
 
     def store_list(self, list_name: str, layouts: List[Layout], value):
-        if list_name not in self.list_name_to_var_name:
+        if list_name not in self.lists:
             var = self.cse.newvar()
-            self.list_name_to_var_name[list_name] = var
 
+            arg_names = []
             for buffer_name in self.get_list(list_name):
-                arg_name = self.args.output(buffer_name)
-                self.list_name_to_arg_names[list_name].append(arg_name)
+                arg_names.append(self.args.output(buffer_name))
 
+            self._list_tracker(list_name, var, arg_names, layouts)
             self.stores.writeline(f"tl.store({var}_tile_ptrs, {value}, mask=mask)")
 
     def codegen_kernel(self, name=None):

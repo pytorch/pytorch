@@ -1,6 +1,6 @@
 import dataclasses
 import functools
-from typing import Dict, List
+from typing import Dict, List, Set
 
 import sympy
 from triton.runtime.jit import JITFunction
@@ -8,7 +8,25 @@ from triton.runtime.jit import JITFunction
 from .. import config, ir
 from ..utils import instance_descriptor, sympy_symbol
 from ..virtualized import V
-from .common import Kernel, PythonPrinter, SizeArg, TensorArg
+from .common import CSEVariable, Kernel, PythonPrinter, SizeArg, TensorArg
+
+
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        # We'll use this to track which masks the variable needs when used for indirect indexing
+        self.mask_vars: Set[str] = set()
+
+    def update_on_args(self, name, args, kwargs):
+        # When making a variable that is going to be used in indirect indexing
+        # if a where clause is used it should mean that the result is always a
+        # valid index, so you shouldn't include any of the dependent variables
+        # in the resulting load mask
+        if name == "where":
+            return
+        for arg in args:
+            if isinstance(arg, TritonCSEVariable):
+                self.mask_vars.update(arg.mask_vars)
 
 
 def signature_of(arg):

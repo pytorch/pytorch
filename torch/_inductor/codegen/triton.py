@@ -29,7 +29,6 @@ from ..utils import (
 from ..virtualized import V
 
 from .common import (
-    CSEVariable,
     DeferredLine,
     free_symbol_startswith,
     IndentedBuffer,
@@ -40,7 +39,13 @@ from .common import (
 )
 from .triton_foreach import ForeachKernel
 from .triton_overrides import triton_compute_type, triton_constant, TritonOverrides
-from .triton_utils import config_of, IterationRangesRoot, signature_of, TritonPrinter
+from .triton_utils import (
+    config_of,
+    IterationRangesRoot,
+    signature_of,
+    TritonCSEVariable,
+    TritonPrinter,
+)
 
 
 log = logging.getLogger(__name__)
@@ -49,24 +54,6 @@ schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
-
-
-class TritonCSEVariable(CSEVariable):
-    def __init__(self, name):
-        super().__init__(name)
-        # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars: Set[str] = set()
-
-    def update_on_args(self, name, args, kwargs):
-        # When making a variable that is going to be used in indirect indexing
-        # if a where clause is used it should mean that the result is always a
-        # valid index, so you shouldn't include any of the dependent variables
-        # in the resulting load mask
-        if name == "where":
-            return
-        for arg in args:
-            if isinstance(arg, TritonCSEVariable):
-                self.mask_vars.update(arg.mask_vars)
 
 
 class TritonKernel(Kernel):
