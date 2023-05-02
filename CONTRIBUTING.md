@@ -2,57 +2,56 @@
 
 <!-- toc -->
 
-- [Table of Contents](#table-of-contents)
-  - [Contributing to PyTorch](#contributing-to-pytorch)
-  - [Developing PyTorch](#developing-pytorch)
-    - [Tips and Debugging](#tips-and-debugging)
-  - [Nightly Checkout \& Pull](#nightly-checkout--pull)
-  - [Codebase structure](#codebase-structure)
-  - [Unit testing](#unit-testing)
-    - [Python Unit Testing](#python-unit-testing)
-    - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
-    - [Local linting](#local-linting)
-      - [Running `mypy`](#running-mypy)
-    - [C++ Unit Testing](#c-unit-testing)
-    - [Run Specific CI Jobs](#run-specific-ci-jobs)
-  - [Merging your Change](#merging-your-change)
-  - [Writing documentation](#writing-documentation)
-    - [Docstring type formatting](#docstring-type-formatting)
-    - [Building documentation](#building-documentation)
-      - [Tips](#tips)
-      - [Building C++ Documentation](#building-c-documentation)
-    - [Previewing changes locally](#previewing-changes-locally)
-    - [Previewing documentation on PRs](#previewing-documentation-on-prs)
-    - [Adding documentation tests](#adding-documentation-tests)
-  - [Profiling with `py-spy`](#profiling-with-py-spy)
-  - [Managing multiple build trees](#managing-multiple-build-trees)
-  - [C++ development tips](#c-development-tips)
-    - [Build only what you need](#build-only-what-you-need)
-    - [Code completion and IDE support](#code-completion-and-ide-support)
-    - [Make no-op build fast](#make-no-op-build-fast)
-      - [Use Ninja](#use-ninja)
-      - [Use CCache](#use-ccache)
-      - [Use a faster linker](#use-a-faster-linker)
-      - [Use pre-compiled headers](#use-pre-compiled-headers)
-      - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
-    - [C++ frontend development tips](#c-frontend-development-tips)
-    - [GDB integration](#gdb-integration)
-    - [C++ stacktraces](#c-stacktraces)
-  - [CUDA development tips](#cuda-development-tips)
-  - [Windows development tips](#windows-development-tips)
-    - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
-    - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
-  - [Running clang-tidy](#running-clang-tidy)
-  - [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
-  - [Building PyTorch with ASAN](#building-pytorch-with-asan)
-    - [Getting `ccache` to work](#getting-ccache-to-work)
-    - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-    - [Why LD\_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-    - [Why no leak detection?](#why-no-leak-detection)
-  - [Caffe2 notes](#caffe2-notes)
-  - [CI failure tips](#ci-failure-tips)
-    - [Which commit is used in CI?](#which-commit-is-used-in-ci)
-  - [Dev Infra Office Hours](#dev-infra-office-hours)
+- [Contributing to PyTorch](#contributing-to-pytorch)
+- [Developing PyTorch](#developing-pytorch)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
+- [Codebase structure](#codebase-structure)
+- [Unit testing](#unit-testing)
+  - [Python Unit Testing](#python-unit-testing)
+  - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
+  - [Local linting](#local-linting)
+    - [Running `mypy`](#running-mypy)
+  - [C++ Unit Testing](#c-unit-testing)
+  - [Run Specific CI Jobs](#run-specific-ci-jobs)
+- [Merging your Change](#merging-your-change)
+- [Writing documentation](#writing-documentation)
+  - [Docstring type formatting](#docstring-type-formatting)
+  - [Building documentation](#building-documentation)
+    - [Tips](#tips)
+    - [Building C++ Documentation](#building-c-documentation)
+  - [Previewing changes locally](#previewing-changes-locally)
+  - [Previewing documentation on PRs](#previewing-documentation-on-prs)
+  - [Adding documentation tests](#adding-documentation-tests)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
+- [Managing multiple build trees](#managing-multiple-build-trees)
+- [C++ development tips](#c-development-tips)
+  - [Build only what you need](#build-only-what-you-need)
+  - [Code completion and IDE support](#code-completion-and-ide-support)
+  - [Make no-op build fast](#make-no-op-build-fast)
+    - [Use Ninja](#use-ninja)
+    - [Use CCache](#use-ccache)
+    - [Use a faster linker](#use-a-faster-linker)
+    - [Use pre-compiled headers](#use-pre-compiled-headers)
+    - [Workaround for header dependency bug in nvcc](#workaround-for-header-dependency-bug-in-nvcc)
+  - [C++ frontend development tips](#c-frontend-development-tips)
+  - [GDB integration](#gdb-integration)
+  - [C++ stacktraces](#c-stacktraces)
+- [CUDA development tips](#cuda-development-tips)
+- [Windows development tips](#windows-development-tips)
+  - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
+  - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
+- [Running clang-tidy](#running-clang-tidy)
+- [Pre-commit tidy/linting hook](#pre-commit-tidylinting-hook)
+- [Building PyTorch with ASAN](#building-pytorch-with-asan)
+  - [Getting `ccache` to work](#getting-ccache-to-work)
+  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why no leak detection?](#why-no-leak-detection)
+- [Caffe2 notes](#caffe2-notes)
+- [CI failure tips](#ci-failure-tips)
+  - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -1061,7 +1060,7 @@ Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/
 linter and static analysis tool based on the clang compiler. We run clang-tidy
 in our CI to make sure that new C++ code is safe, sane and efficient. See the
 [`clang-tidy` job in our GitHub Workflow's
-lint.yml file](https://github.com/pytorch/pytorch/blob/main/.github/workflows/lint.yml)
+lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
@@ -1101,7 +1100,7 @@ If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point main))
+  flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
 You'll need to install an appropriately configured flake8; see
@@ -1242,11 +1241,11 @@ our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-f
 
 ### Which commit is used in CI?
 
-For CI run on `main`, this repository is checked out for a given `main`
+For CI run on `master`, this repository is checked out for a given `master`
 commit, and CI is run on that commit (there isn't really any other choice).
 
 For PRs, however, it's a bit more complicated. Consider this commit graph, where
-`main` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
 commit `B`:
 
 ```
@@ -1254,7 +1253,7 @@ commit `B`:
       /         \
      /           C (refs/pull/42/merge)
     /           /
----o---o---o---A (merge-destination) - usually main
+---o---o---o---A (merge-destination) - usually master
 ```
 
 There are two possible choices for which commit to use:
@@ -1262,7 +1261,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `main`).
+   were merged into it's destination (usually `master`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
@@ -1270,7 +1269,7 @@ commit `B` (choice **1**).
 However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
 a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
-PR and the `main` branch. But only the workflow files get taken from that merged
+PR and the `master` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
 
