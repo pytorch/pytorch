@@ -29,7 +29,6 @@ from torch._dynamo.debug_utils import (
     minifier_dir,
     NNModuleToString,
     same_two_models,
-    TEST_REPLACEABLE_COMMENT,
 )
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import clone_inputs, counters, same
@@ -395,9 +394,7 @@ class InputWriter:
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(
-    gm, args, *, stable_output=False, save_dir=None, patch_code=None
-):
+def generate_compiler_repro_string(gm, args, *, stable_output=False, save_dir=None):
     model_str = textwrap.dedent(
         f"""
 import torch
@@ -410,7 +407,6 @@ from math import inf
 
 isolate_fails_code_str = None
 
-{TEST_REPLACEABLE_COMMENT if patch_code is None else patch_code}
 {extra_imports}
 
         """
@@ -454,7 +450,6 @@ def save_graph_repro(
     stable_output=False,
     save_dir=None,
     command="run",
-    patch_code=None,
 ):
     # TODO: not sure why we need this import
     if "inductor" in compiler_name:
@@ -465,7 +460,6 @@ def save_graph_repro(
             args,
             stable_output=stable_output,
             save_dir=save_dir,
-            patch_code=patch_code,
         )
     )
     accuracy = "_accuracy" in compiler_name
@@ -476,8 +470,7 @@ def save_graph_repro(
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
         f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, patch_code=isolate_fails_code_str, "
-        f"tracing_mode={tracing_mode!r}"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}"
         ")\n"
     )
 
@@ -524,7 +517,6 @@ def isolate_fails(
     args,
     compiler_name: str,
     env=None,
-    patch_code=None,
     save_dir=None,
     accuracy=False,
 ):
@@ -541,7 +533,6 @@ def isolate_fails(
             args,
             compiler_name,
             save_dir=save_dir,
-            patch_code=patch_code,
             command="minifier-query",
         )
     # with open(file_name, "r") as fd:
@@ -687,7 +678,6 @@ def repro_minify(options, mod, load_args):
             isolate_fails,
             env=env_variables,
             compiler_name=compiler_name,
-            patch_code=options.patch_code,
             save_dir=options.save_dir,
             accuracy=options.accuracy,
         )
@@ -871,14 +861,19 @@ def run_repro(
     command="run",
     accuracy=False,
     save_dir=None,
-    patch_code=None,
     tracing_mode=None,
+    patch_code=None,
     **kwargs,
 ):
     for k in kwargs:
         log.warning(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
             k,
+        )
+
+    if patch_code is not None:
+        log.warning(
+            "patch_code no longer works on this version of PyTorch, silently ignoring"
         )
 
     parser = argparse.ArgumentParser(
@@ -892,7 +887,6 @@ default settings on this script:
   {accuracy=}
   {tracing_mode=}
   {save_dir=}
-  {patch_code=}
 """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -918,9 +912,6 @@ default settings on this script:
             type=str,
             default=save_dir,
             help="directory where saved inputs live",
-        )
-        parser.add_argument(
-            "--patch-code", type=str, default=patch_code, help="patch code for testing"
         )
         parser.add_argument(
             "--tracing-mode",
