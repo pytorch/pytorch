@@ -3860,6 +3860,10 @@
   dispatch:
     CUDA: _int_mm_out_cuda
 
+- func: _two_four_sparse_linear(Tensor a, Tensor b, Tensor mask_or_metaa) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _two_four_sparse_linear
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 

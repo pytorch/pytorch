@@ -4759,6 +4759,58 @@ class TestSparseAny(TestCase):
             torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
 
 
+    @onlyCUDA
+    @dtypes(*[torch.int8] if torch.cuda.get_device_capability()[0] == 8 else [],
+            *[torch.half] if torch.cuda.get_device_capability()[0] == 8 else [])
+    def test_two_four_sparse_linear(self, device, dtype):
+        def make_tensor(shape, dtype):
+            if dtype.is_complex:
+                return torch.zeros(shape, dtype=dtype)
+            elif dtype.is_floating_point:
+                return torch.randn(shape, dtype=dtype) / 10
+            else:
+                return torch.randint(-5, 5, shape, dtype=dtype)
+
+        def random_mask_choice(i=None):
+            choices = [
+                [1, 1, 0, 0],
+                [1, 0, 1, 0],
+                [1, 0, 0, 1],
+                [0, 1, 1, 0],
+                [0, 1, 0, 1],
+                [0, 0, 1, 1]
+            ]
+            if i is None:
+                i = random.randint(0, len(choices) - 1)
+            return choices[i]
+
+        def run_test(m, n, k, device, dtype):
+            a = make_tensor((m, k), dtype).to(device)
+            b = make_tensor((n, k), dtype).to(device).T
+
+            for meta_choice in (list(range(6)) + [None]):
+                mask_entries = [random_mask_choice(meta_choice) for i in range(m * (k // 4))]
+                mask = torch.tensor(mask_entries, dtype=torch.bool).view(m, k).to(device)
+
+                a_sparse = a.masked_select(mask).view(m, k // 2)
+                a_dense = a.masked_fill(~mask, 0)
+
+                dtype_dense = torch.float
+                c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense))
+
+                c0, meta = torch._two_four_sparse_linear(a_sparse, b, mask)
+                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
+
+                c0, _ = torch._two_four_sparse_linear(a_sparse, b, meta)
+                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
+
+        for (m, n, k) in itertools.product(range(4), range(4), range(4)):
+            m = (m + 1) * 32
+            n = (n + 1) * 32
+            k = (k + 1) * 128
+            run_test(m, n, k, device, dtype)
+
+
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
 
