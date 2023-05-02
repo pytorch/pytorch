@@ -81,4 +81,4 @@ runs:
         fi
 
         echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
-        host "${PT_DOMAIN}"
+        cat /etc/hosts
