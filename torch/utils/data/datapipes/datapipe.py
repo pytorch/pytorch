@@ -282,7 +282,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
         function = functools.partial(class_function, cls_to_register)
         functools.update_wrapper(
-            wrapper=unction, wrapped=cls_to_register, assigned=("__doc__",)
+            wrapper=function, wrapped=cls_to_register, assigned=("__doc__",)
         )
         cls.functions[function_name] = function
 
