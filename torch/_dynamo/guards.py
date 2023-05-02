@@ -1,6 +1,7 @@
 import ast
 import builtins
 import collections
+import dataclasses
 import enum
 import importlib
 import itertools
@@ -711,36 +712,51 @@ class GuardBuilder(GuardBuilderBase):
 #     2. Replace those that occur more than once by a fresh variable 'v'.
 #        'v' will be defined in the 'preface' list (output argument to
 #        'NodeTransformer')
+#
+# NB: the use of 'ast.unparse' while visiting the nodes makes this pass
+# quadratic on the depth of the tree.
+#
+# NB: this pass creates a new variable for each AST node that is repeated
+# more than 'USE_THRESHOLD'. e.g. if 'a.b.c.d' is used 10 times, 'a.b.c'
+# and 'a.b' are also used 10 times. So, there will be a new variable for
+# each of them.
 class PyExprCSEPass:
+    # Maximum number of times a given expression can be used without being
+    # replaced by a fresh variable.
+    USE_THRESHOLD = 2
+
+    # Ad-Hoc: AST nodes this pass focuses on.
     ALLOWED_NODE_TYPES = (
         ast.Attribute,
         ast.Call,
         ast.Subscript
     )
 
-    class CSEVisitor(ast.NodeVisitor):
-        IGNORE = object()
+    @dataclasses.dataclass
+    class Config:
+        expr_count: Dict[str, int]
+        expr_to_name: Dict[str, str]
 
-        def __init__(self) -> None:
-            self._expr_counter: Dict[str, int] = collections.defaultdict(lambda: 0)
+    class ExprCounter(ast.NodeVisitor):
+        def __init__(self, config: "PyExprCSEPass.Config") -> None:
+            self._config = config
 
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
-                self._expr_counter[_ast_unparse(node)] += 1
+                expr = _ast_unparse(node)
+                self._config.expr_count[expr] = self._config.expr_count.setdefault(expr, 0) + 1
             super().visit(node)
 
-    class CSETransformer(ast.NodeTransformer):
+    class Replacer(ast.NodeTransformer):
         def __init__(
             self,
-            expr_counter: Dict[str, int],
-            preface: List[str],
+            config: "PyExprCSEPass.Config",
             gen_name: Callable[[], str],
         ) -> None:
             super().__init__()
-            self._expr_counter = expr_counter
-            self._preface = preface
+            self._config = config
             self._gen_name = gen_name
-            self._expr_to_name: Dict[str, str] = {}
+            self.preface: List[str] = []
 
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
@@ -748,8 +764,8 @@ class PyExprCSEPass:
 
                 # Replacement only occurs if a given expression is used more
                 # than once.
-                if self._expr_counter[expr] > 1:
-                    if expr not in self._expr_to_name:
+                if self._config.expr_count[expr] > PyExprCSEPass.USE_THRESHOLD:
+                    if expr not in self._config.expr_to_name:
                         # Parent 'visit' is called so that we CSE the inner expressions first.
                         #
                         # The resulting expression is used as right-hand-side of the variable
@@ -760,38 +776,32 @@ class PyExprCSEPass:
                         node_ = super().visit(node)
                         expr_ = _ast_unparse(node_)
                         var_name = self._gen_name()
-                        self._preface.append(f"{var_name} = {expr_}")
-                        self._expr_to_name[expr] = var_name
+                        self.preface.append(f"{var_name} = {expr_}")
+                        self._config.expr_to_name[expr] = var_name
                     else:
-                        var_name = self._expr_to_name[expr]
+                        var_name = self._config.expr_to_name[expr]
                     return ast.Name(var_name, ast.Load())
 
             return super().visit(node)
 
     def __init__(self) -> None:
         self._counter = 0
+        self._config = self.Config(expr_count={}, expr_to_name={})
 
     def _new_var(self, prefix: str = "_var") -> str:
         name = f"{prefix}{self._counter}"
         self._counter += 1
         return name
 
-    def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
-        preface: List[str] = []
-        parsed_exprs = [ast.parse(e) for e in exprs]
-        new_exprs = []
+    def count(self, exprs: List[str]) -> None:
+        counter = self.ExprCounter(self._config)
+        for e in exprs:
+            counter.visit(ast.parse(e))
 
-        visitor = self.CSEVisitor()
-        transformer = self.CSETransformer(
-            visitor._expr_counter, preface, self._new_var
-        )
-
-        for e in parsed_exprs:
-            visitor.visit(e)
-        for e in parsed_exprs:
-            new_exprs.append(_ast_unparse(transformer.visit(e)))
-
-        return preface, new_exprs
+    def replace(self, expr: str) -> Tuple[List[str], str]:
+        replacer = self.Replacer(self._config, self._new_var)
+        new_node = replacer.visit(ast.parse(expr))
+        return replacer.preface, _ast_unparse(new_node)
 
 
 # NB: Naively, you'd expect this to only be a function that produces
@@ -965,27 +975,6 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        def indent(line):
-            return " " * 4 + line
-
-        if HAS_UNPARSE_FUNCTIONS:
-            preface, code_parts = PyExprCSEPass().run(list(unique(code_parts)))
-        else:
-            preface = []
-            code_parts = list(unique(code_parts))
-
-
-        if len(preface) > 0:
-            preface = [
-                "try:",
-                *[indent(line) for line in preface],
-                "except:",
-                indent("return False"),
-            ]
-
-        preface_str = "\n".join(indent(indent(line)) for line in preface)
-        code = " and ".join(code_parts)
-
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
@@ -996,15 +985,13 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
-        py_code = f"""\
-def ___make_guard_fn({','.join(closure_vars.keys())}):
-    def guard(L):
-{preface_str}
-        return {code}
-    return guard
-"""
+
+        unique_code_parts = list(unique(code_parts))
+        make_guard_fn_args = ", ".join(closure_vars.keys())
+        pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
+
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", code)
+            print("GUARDS", " and ".join(unique_code_parts))
 
         if config.report_guard_failures or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
@@ -1014,7 +1001,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
             set_guard_fail_hook(guard_fail_hook)
 
         out: Dict[str, Any] = dict()
-        exec(py_code, global_builder.scope, out)
+        exec(pycode, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
@@ -1039,6 +1026,35 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+
+def build_guard_function(code_parts, closure_args) -> str:
+    from torch._inductor.utils import IndentedBuffer
+
+    codebuf = IndentedBuffer()
+    codebuf.writeline(f"def ___make_guard_fn({closure_args}):")
+
+    if HAS_UNPARSE_FUNCTIONS:
+        csepass = PyExprCSEPass()
+        csepass.count(code_parts)
+
+    guardbuf = IndentedBuffer()
+    guardbuf.writeline("def guard(L):")
+    with guardbuf.indent():
+        for expr in code_parts:
+            if HAS_UNPARSE_FUNCTIONS:
+                preface, expr = csepass.replace(expr)
+                guardbuf.writelines(preface)
+            guardbuf.writeline(f"if not ({expr}):")
+            with guardbuf.indent():
+                guardbuf.writeline("return False")
+        guardbuf.writeline("return True")
+
+    with codebuf.indent():
+        codebuf.splice(guardbuf)
+        codebuf.writeline("return guard")
+
+    return codebuf.getvalue()
 
 
 stashed_first_fail_reason = None
