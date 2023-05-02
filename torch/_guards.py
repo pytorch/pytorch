@@ -8,7 +8,19 @@ import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    TypeVar,
+)
+
+import torch
 
 log = logging.getLogger(__name__)
 
