@@ -215,6 +215,10 @@ class cpp:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
 
+    # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
+    # force usage as specified, without testing.
+    vec_isa_ok = None
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -225,7 +229,10 @@ class triton:
     cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
-    slow_path_cudagraph_asserts = False
+    slow_path_cudagraph_asserts = True
+
+    # TODO - need to debug why this prevents cleanup
+    cudagraph_trees_history_recording = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
