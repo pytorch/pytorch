@@ -378,8 +378,17 @@ def summarize_graph_break(filename):
     log_file = f"{filename.removesuffix('.csv')}_graph_breaks.csv"
     if os.path.exists(log_file):
         df = pd.read_csv(log_file)
-        df_sorted = df.sort_values("reason").drop_duplicates(subset="reason")
-        df_sorted.to_csv(f"{log_file.removesuffix('.csv')}_deduped.csv", index=False)
+        df = df.sort_values("reason").drop_duplicates(subset="reason")
+
+        # Specialize for multi tensor sgd as reason is not identical
+        multi_tensor_sgd_row = df.loc[
+            df["reason"].str.contains("_multi_tensor_sgd")
+        ].iloc[0]
+        df = df[~df["reason"].str.contains("_multi_tensor_sgd")]  # Drop all sgd rows
+        df = pd.concat(
+            [df, pd.DataFrame([multi_tensor_sgd_row])], axis=0
+        )  # Add back a single row
+        df.to_csv(f"{log_file.removesuffix('.csv')}_deduped.csv", index=False)
 
 
 def print_summary(filename):
