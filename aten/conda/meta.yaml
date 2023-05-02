@@ -26,7 +26,7 @@ requirements:
 about:
   home: https://github.com/pytorch/pytorch
   license: BSD
-  summary: A TENsor library for C++17
+  summary: A TENsor library for C++14
 
 extra:
   recipe-maintainers:
