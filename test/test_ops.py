@@ -544,8 +544,6 @@ class TestCommon(TestCase):
     @ops([op for op in op_db if op.error_inputs_sparse_func is not None], dtypes=OpDTypes.none)
     @parametrize("layout", (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc, torch.sparse_coo))
     def test_errors_sparse(self, device, op, layout):
-        if not op.supports_sparse_layout(layout):
-            self.skipTest('unsupported layout')
         for ei in op.error_inputs_sparse(device, layout):
             si = ei.sample_input
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
