@@ -28,8 +28,6 @@ class FloatToFusedNBitRowwiseQuantizedOp final : public Operator<CPUContext> {
   ~FloatToFusedNBitRowwiseQuantizedOp() override {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(internal::is_little_endian(), "Unsupported endianness");
-
     const auto& input = Input(DATA_FLOAT);
 
     CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");
@@ -167,8 +165,6 @@ class FusedNBitRowwiseQuantizedToFloatOp final : public Operator<CPUContext> {
   ~FusedNBitRowwiseQuantizedToFloatOp() override {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(internal::is_little_endian(), "Unsupported endianness");
-
     const auto& input = Input(DATA_FUSED_SCALE_BIAS);
 
     CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");

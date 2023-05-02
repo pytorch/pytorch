@@ -924,7 +924,7 @@ class MultiheadAttention(Module):
     function, for speeding up Inference, MHA will use
     fastpath inference with support for Nested Tensors, iff:
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor.
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor).
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
@@ -1068,6 +1068,8 @@ class MultiheadAttention(Module):
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
+            Set ``need_weights=False`` to use the optimized ``scaled_dot_product_attention``
+            and achieve the best performance for MHA.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
             :math:`(L, S)` or :math:`(N\cdot\text{num\_heads}, L, S)`, where :math:`N` is the batch size,
@@ -1140,6 +1142,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
             why_not_fast_path = "training is enabled"
+        elif (self.num_heads % 2) != 0:
+            why_not_fast_path = "self.num_heads is not even"
         elif not self.batch_first:
             why_not_fast_path = "batch_first was not True"
         elif self.bias_k is not None:
@@ -1170,9 +1174,9 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all([_arg_cuda_or_cpu(x) for x in tensor_args]):
+            elif not all(_arg_cuda_or_cpu(x) for x in tensor_args):
                 why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([_arg_requires_grad(x) for x in tensor_args]):
+            elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
@@ -1258,20 +1262,27 @@ class MultiheadAttention(Module):
         mask_type: Optional[int] = None
         merged_mask: Optional[Tensor] = None
 
-        if attn_mask is not None:
-            mask_type = 0
-            merged_mask = attn_mask
         if key_padding_mask is not None:
             mask_type = 1
             merged_mask = key_padding_mask
-        if (attn_mask is not None) and (key_padding_mask is not None):
+
+        if attn_mask is not None:
             # In this branch query can't be a nested tensor, so it has a shape
             batch_size, seq_len, _ = query.shape
             mask_type = 2
-            key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len) \
-                                                        .expand(-1, self.num_heads, -1, -1)
-            attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
-            merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+            # Always expands attn_mask to 4D
+            if attn_mask.dim() == 3:
+                attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
+            else:  # attn_mask.dim() == 2:
+                attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
+            merged_mask = attn_mask_expanded
+
+            if key_padding_mask is not None:
+                key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
+                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+        # no attn_mask and no key_padding_mask, returns None, None
         return merged_mask, mask_type
 
 

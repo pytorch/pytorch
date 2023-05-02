@@ -40,6 +40,10 @@ C10_DIAGNOSTIC_POP()
 #include <ATen/ops/empty.h>
 #endif
 
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
+
 namespace at { namespace native {
 
 namespace {
@@ -62,6 +66,22 @@ uint8_t getAlignment(const Tensor &t) {
 }
 
 cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const at::MemoryFormat memory_format, const bool _virtual) {
+#if defined(__linux__) && !defined(FBCODE_CAFFE2) && CUDNN_MAJOR == 8 && CUDNN_MINOR > 5
+  // Workaround for cudnn error handling deficiency, that results in a crash on Ubuntu-22+
+  // if `libnvrtc.so` is not found on the system, which strictly speaking is not necessary
+  // for usecases below
+  // See https://github.com/pytorch/pytorch/issues/97041
+  static C10_UNUSED auto cudnn_cnn_infer_handler = [] {
+    void *handle = dlopen("libcudnn_cnn_infer.so.8", RTLD_LAZY);
+    char *err = dlerror();
+    if (!handle) {
+      TORCH_WARN("Attempt to open cnn_infer failed: handle=", handle, " error: ", err);
+    } else if (err) {
+      TORCH_WARN("Applied workaround for CuDNN issue, install nvrtc.so");
+    }
+    return handle;
+  }();
+#endif
   auto sizes = t.sizes();
   auto strides = t.strides();
   bool channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
@@ -326,7 +346,7 @@ auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tenso
 
 int64_t get_available_workspace() {
   int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   size_t max_block_size = 0;
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
   return static_cast<int64_t>(max_block_size);

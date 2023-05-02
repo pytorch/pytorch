@@ -7,14 +7,19 @@ import types
 from typing import Dict, List
 
 import torch._C
-
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    HAS_NUMPY_TORCH_INTEROP,
+    identity,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .user_defined import UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
@@ -108,6 +113,12 @@ class SuperVariable(VariableTracker):
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
+    """
+
+
+class DelayGraphBreakVariable(UnknownVariable):
+    """
+    Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
 
 
@@ -227,7 +238,7 @@ class AutogradFunctionVariable(VariableTracker):
             # TODO(jansel): handle this in training mode
             unimplemented("autograd.Function with requires_grad")
 
-        args = [BlackHoleVariable()] + list(args)
+        args = [AutogradFunctionContextVariable.create_for_inference(tx), *args]
         options = VariableTracker.propagate(self, args, kwargs.values())
         options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
@@ -249,8 +260,23 @@ class AutogradFunctionVariable(VariableTracker):
         return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
 
-class BlackHoleVariable(VariableTracker):
-    """A autograd.function context that just ignores everything (for forward extraction)"""
+class AutogradFunctionContextVariable(UserDefinedObjectVariable):
+    """
+    Tracks an autograd.Function() context using mutation tracking in side_effects.py
+    """
+
+    def __init__(self, value, value_type=None, inference=False, **kwargs):
+        super().__init__(value=value, value_type=value_type, **kwargs)
+        self.inference = inference
+
+    @staticmethod
+    def create_for_inference(tx):
+        return tx.output.side_effects.track_object_new(
+            None,
+            torch.autograd.function.FunctionCtx,
+            functools.partial(AutogradFunctionContextVariable, inference=True),
+            {},
+        )
 
     def call_method(
         self,
@@ -259,20 +285,23 @@ class BlackHoleVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        assert name in ("__setattr__", "save_for_backward"), name
+        if name != "save_for_backward":
+            unimplemented(f"autograd.Function context method: {name}")
+
+        if not self.inference:
+            assert self.source and not kwargs
+            tx.output.side_effects.track_save_for_backward(self, args)
+
         return variables.ConstantVariable(
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
 
-
-class AutogradFunctionContextVariable(VariableTracker):
-    """
-    A autograd.function context used after graph break in forward.
-    Any call method on this context object will be graph break.
-    The is different from BlackHoleVariable which is only used in inference mode.
-    """
-
-    pass
+    def var_getattr(self, tx, name):
+        if name == "save_for_backward":
+            return LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            ).add_options(self)
+        return super().var_getattr(tx, name)
 
 
 class LambdaVariable(VariableTracker):
@@ -480,6 +509,19 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif (
+            self.value is functools.wraps
+            and not kwargs
+            and len(args) == 1
+            and args[0].source
+        ):
+
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    return fn.clone(wraps_source=args[0].source)
+                unimplemented(f"functools.wraps({fn})")
+
+            return variables.LambdaVariable(wraps, **options)
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -528,7 +570,30 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        unimplemented("numpy")
+        if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+            unimplemented(f"numpy.{self.value}()")
+        import torch_np
+
+        from .builder import wrap_fx_proxy_cls
+        from .tensor import NumpyNdarrayVariable
+
+        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
+        # lookup method name in torch_np
+        if hasattr(torch_np, self.value.__name__):
+            func = getattr(torch_np, self.value.__name__)
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    func,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                example_value=None,
+                **options,
+            )
+        else:
+            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,
@@ -558,3 +623,7 @@ class NullVariable(VariableTracker):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         return [create_instruction("PUSH_NULL")]
+
+
+class DeletedVariable(VariableTracker):
+    """Marker used to implement delattr()"""

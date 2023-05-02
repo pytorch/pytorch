@@ -426,7 +426,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """tensor 'L['a']' strides mismatch at index 0. expected 3, actual 1""",
+            """tensor 'L['a']' stride mismatch at index 0. expected 3, actual 1""",
         )
 
         torch._dynamo.reset()

@@ -369,8 +369,8 @@ if __name__ == "__main__":
         failed_tests_cases,
     )
 
-    if args.head_branch == "master":
-        # For master jobs, upload everything.
+    if args.head_branch == "main":
+        # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )
