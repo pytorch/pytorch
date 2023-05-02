@@ -683,6 +683,10 @@ class WrapperCodeGen(CodeGen):
     def codegen_free(self, buffer):
         name = buffer.get_name()
 
+        if not config.allow_buffer_reuse:
+            self.writeline(self.make_buffer_free(buffer))
+            return
+
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
             self.writeline(self.make_buffer_free(buffer))
