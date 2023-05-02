@@ -228,19 +228,14 @@ def generate_config_string(*, stable_output=False):
     if stable_output:
         return "# config omitted due to stable_output=True"
 
-    return textwrap.dedent(
-        f"""\
+    return f"""\
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
-torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
-torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
-        """
-    )
-
-
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+{torch._functorch.config.codegen_config()}
+"""
 
 
 def get_minifier_repro_path():
@@ -274,7 +269,8 @@ def clone_inputs_retaining_gradness(example_inputs):
     """
     cloned_inputs = clone_inputs(example_inputs)
     for idx in range(len(example_inputs)):
-        cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+        if isinstance(cloned_inputs[idx], torch.Tensor):
+            cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
     return cloned_inputs
 
 
@@ -313,7 +309,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=False):
+def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
     """
     Check two models have same accuracy.
     """
@@ -340,8 +336,6 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
     except Exception:
-        if require_fp64:
-            raise RuntimeError("Could not generate fp64 outputs")
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
