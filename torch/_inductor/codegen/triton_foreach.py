@@ -1,6 +1,5 @@
-import functools
 import itertools
-from typing import List, NamedTuple, Set
+from typing import List, Set
 
 import sympy
 
@@ -21,10 +20,37 @@ from .triton_utils import (
 texpr = TritonPrinter().doprint
 
 
-class ListTracker(NamedTuple):
-    var: TritonCSEVariable
-    arg_names: List[str]
-    layouts: List[Layout]
+class ListTracker:
+    def __init__(self, var, arg_names, layouts):
+        self.var: TritonCSEVariable = var
+        self.arg_names: List[str] = arg_names
+        self.layouts: List[Layout] = layouts
+        self.indexers = [layout.make_indexer() for layout in layouts]
+        self.range_trees: List[IterationRangesRoot] = []
+        self.index_vars: List[sympy.symbol] = []
+        name = "xindex"
+        for layout in layouts:
+            tree = IterationRangesRoot(
+                "xindex", sympy_product(layout.size), name[0], 0, V.kernel
+            )
+            self.range_trees.append(tree)
+            self.index_vars.append(tree.construct(layout.size))
+
+    def codegen_tile_ptrs(self, code: IndentedBuffer, list_index: int):
+        index_vars = reversed(self.index_vars[list_index])
+        nodes = [V.kernel.range_tree_nodes[v] for v in index_vars]
+        for node in nodes:
+            node.codegen_into(code)
+
+        code.splice(
+            f"{self.var}_tile_ptrs = {self.arg_names[list_index]} + ({self.index_expr(list_index)})"
+        )
+
+    def index_expr(self, list_index: int):
+        expr = self.indexers[list_index](self.index_vars[list_index])
+        return V.graph.sizevars.simplify_with_ranges(
+            expr, self.range_trees[list_index].var_ranges
+        )
 
 
 class ForeachKernel(Kernel):
@@ -63,6 +89,7 @@ class ForeachKernel(Kernel):
             int(sympy_product(layout.size))
             for layout in layouts[sublist_indices[0] : sublist_indices[1]]
         ]
+        self.sizes = [layout.size for layout in layouts]
         # TODO: try tuning this value
         self.block_size = 1024
         self.grid = (
@@ -72,19 +99,8 @@ class ForeachKernel(Kernel):
         )
         self.num_warps = 8
 
-        self.range_trees = []
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count(0)
-
-        self._initialize_range_tree()
-
-        # define this in a closure to make cache local to object
-        @functools.lru_cache(None)
-        def simplify_indexing(index: sympy.Expr):
-            index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
-            return index
-
-        self.simplify_indexing = simplify_indexing
 
     def __enter__(self):
         class CSEProxy:
@@ -142,8 +158,11 @@ class ForeachKernel(Kernel):
 
     def _initialize_range_tree(self):
         name = "xindex"
-        self.range_trees.append(
-            IterationRangesRoot(name, self.block_size, name[0], 0, self)
+        self.range_trees.extend(
+            [
+                IterationRangesRoot(name, numel, name[0], 0, self)
+                for numel in self.tensor_elem_counts
+            ]
         )
         # for tree in self.range_trees:
         #    tree.codegen_header(self.body)
@@ -169,7 +188,7 @@ class ForeachKernel(Kernel):
             if block_count == 0:
                 cond = "if"
                 # initialize tile ptrs
-                code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
+                code.splice("mask = tl.arange(0, BLOCK_SIZE) < BLOCK_SIZE\n")
                 for list_tracker in self.lists.values():
                     code.splice(
                         f"{list_tracker.var}_tile_ptrs = {list_tracker.arg_names[index]} + tl.arange(0, BLOCK_SIZE)"
@@ -179,15 +198,16 @@ class ForeachKernel(Kernel):
 
             code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
             with code.indent():
-                code.splice(f"elem_ind_offset = (pid - {lower_bound_pid}) * BLOCK_SIZE")
+                code.splice(f"xoffset = (pid - {lower_bound_pid}) * BLOCK_SIZE")
+                code.splice("xindex = xoffset + tl.arange(0, BLOCK_SIZE)")
                 for list_tracker in self.lists.values():
-                    code.splice(
-                        f"{list_tracker.var}_tile_ptrs = ({list_tracker.arg_names[index]} + elem_ind_offset) + tl.arange(0, BLOCK_SIZE)"
-                    )
+                    list_tracker.codegen_tile_ptrs(code, index)
+
                 code.splice(f"if pid == {upper_bound_pid - 1}:")
                 with code.indent():
-                    code.splice(f"elem_count = {last_block_elem_count}")
-                    code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count")
+                    code.splice(
+                        f"mask = tl.arange(0, BLOCK_SIZE) < {last_block_elem_count}"
+                    )
 
             block_count += num_blocks
 
@@ -330,7 +350,6 @@ class ForeachKernel(Kernel):
         with code.indent():
             code.splice("pid = tl.program_id(0)")
             code.splice(f"BLOCK_SIZE: tl.constexpr = {self.block_size}")
-            code.splice(f"elem_count = {self.block_size}")
 
             self._gen_tile_ptrs(code)
 
