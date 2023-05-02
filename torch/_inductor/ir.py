@@ -3945,13 +3945,12 @@ class StorageBox(MutableBox):
 
     @cache_on_self
     def is_non_scalar_tensor_num_reads_larger_than_one(self):
-        data = self.data
-        if isinstance(data, Pointwise):
-            reads = data.get_reads()
-            return sum(read.index != 0 for read in reads) > 1
-        else:
-            # Skip the check for non Loops instances
-            return True
+        # Skip the check for non Pointwise instances
+        return (
+            (sum(read.index != 0 for read in self.data.get_reads()) > 1)
+            if isinstance(self.data, Pointwise)
+            else True
+        )
 
 
 class InterpreterShim(torch.fx.Interpreter):
