@@ -1681,7 +1681,7 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-
+    # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
@@ -1772,6 +1772,7 @@ class TestSDPA(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
+    # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
