@@ -167,6 +167,7 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
+          # Mount /etc/hosts into the container to propagate all shortcuts
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
@@ -205,6 +206,7 @@ jobs:
             --detach \
             --name="${container_name}" \
             --user jenkins \
+            -v "/etc/hosts:/etc/hosts:ro" \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
