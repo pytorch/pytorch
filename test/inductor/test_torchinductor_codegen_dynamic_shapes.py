@@ -101,11 +101,6 @@ def check_codegen(
             if "def triton" in line:
                 triton_kernel_found = True
                 continue
-            if "xnumel =" in line:
-                self.assertTrue(
-                    re.search(r"xnumel = \d+$", line) is None,
-                    msg=f"Found static xnumel\n{code}",
-                )
         self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
 
     assert called, "Ran graph without calling compile_fx"

@@ -187,6 +187,7 @@ def augment_exc_message(exc, msg="\n"):
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
+            "    import torch._dynamo\n"
             "    torch._dynamo.config.suppress_errors = True\n"
         )
 

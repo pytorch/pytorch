@@ -506,7 +506,7 @@ inline static PyObject* eval_custom_code(
   if (name_to_idx == NULL) {
     DEBUG_TRACE0("unable to create localsplus name dict");
     _PyFrame_Clear(shadow);
-    // free(shadow);
+    free(shadow);
     Py_DECREF(func);
     return NULL;
   }
@@ -517,7 +517,7 @@ inline static PyObject* eval_custom_code(
     if (name == NULL || idx == NULL || PyDict_SetItem(name_to_idx, name, idx) != 0) {
       Py_DECREF(name_to_idx);
       _PyFrame_Clear(shadow);
-      // free(shadow);
+      free(shadow);
       Py_DECREF(func);
       return NULL;
     }
@@ -530,7 +530,7 @@ inline static PyObject* eval_custom_code(
     if (name == NULL || idx == NULL || (new_i == (Py_ssize_t)-1 && PyErr_Occurred() != NULL)) {
       Py_DECREF(name_to_idx);
       _PyFrame_Clear(shadow);
-      // free(shadow);
+      free(shadow);
       Py_DECREF(func);
       return NULL;
     }
@@ -570,7 +570,7 @@ inline static PyObject* eval_custom_code(
   #if IS_PYTHON_3_11_PLUS
 
   _PyFrame_Clear(shadow);
-  // free(shadow);
+  free(shadow);
   Py_DECREF(func);
 
   #else
