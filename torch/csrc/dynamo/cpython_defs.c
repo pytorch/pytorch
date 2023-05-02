@@ -23,6 +23,7 @@
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#include <internal/pycore_frame.h>
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
@@ -32,7 +33,7 @@
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1079
 static int
-_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
+THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 {
     // This only works when opcode is a non-quickened form:
     CHECK(_PyOpcode_Deopt[opcode] == opcode);
@@ -117,7 +118,7 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
                 // run yet.
                 if (value != NULL) {
                     if (PyCell_Check(value) &&
-                            _PyFrame_OpAlreadyRan(frame, MAKE_CELL, i)) {
+                            THP_PyFrame_OpAlreadyRan(frame, MAKE_CELL, i)) {
                         // (likely) MAKE_CELL must have executed already.
                         value = PyCell_GET(value);
                     }
@@ -193,9 +194,11 @@ _PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
   return op;
 }
 
+// From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Objects/frameobject.c#L1020
 PyFrameObject*
 THP_PyFrame_New_NoTrack(PyCodeObject *code)
 {
+    // DYNAMO: commented out
     // CALL_STAT_INC(frame_objects_created);
     int slots = code->co_nlocalsplus + code->co_stacksize;
     PyFrameObject *f = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, slots);
@@ -211,6 +214,7 @@ THP_PyFrame_New_NoTrack(PyCodeObject *code)
     return f;
 }
 
+// From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L27
 PyFrameObject *
 THP_PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame)
 {
@@ -251,6 +255,7 @@ THP_PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame)
     return f;
 }
 
+// From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Include/internal/pycore_frame.h#L163
 static inline PyFrameObject *
 THP_PyFrame_GetFrameObject(_PyInterpreterFrame *frame)
 {
@@ -263,8 +268,9 @@ THP_PyFrame_GetFrameObject(_PyInterpreterFrame *frame)
     return THP_PyFrame_MakeAndSetFrameObject(frame);
 }
 
+// From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L79
 static void
-take_ownership(PyFrameObject *f, _PyInterpreterFrame *frame)
+THP_take_ownership(PyFrameObject *f, _PyInterpreterFrame *frame)
 {
     CHECK(frame->owner != FRAME_OWNED_BY_FRAME_OBJECT);
     CHECK(frame->owner != FRAME_CLEARED);
@@ -299,15 +305,15 @@ take_ownership(PyFrameObject *f, _PyInterpreterFrame *frame)
         }
         frame->previous = NULL;
     }
+    // DYNAMO: use public GC functions instead of internal ones
     if (!PyObject_GC_IsTracked((PyObject *) f)) {
         PyObject_GC_Track((PyObject *) f);
-
     }
 }
 
 // From https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/frame.c#L120
 void
-_PyFrame_Clear(_PyInterpreterFrame *frame)
+THP_PyFrame_Clear(_PyInterpreterFrame *frame)
 {
     /* It is the responsibility of the owning generator/coroutine
      * to have cleared the enclosing generator, if any. */
@@ -320,7 +326,7 @@ _PyFrame_Clear(_PyInterpreterFrame *frame)
         PyFrameObject *f = frame->frame_obj;
         frame->frame_obj = NULL;
         if (Py_REFCNT(f) > 1) {
-            take_ownership(f, frame);
+            THP_take_ownership(f, frame);
             Py_DECREF(f);
             return;
         }
