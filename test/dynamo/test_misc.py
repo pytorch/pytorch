@@ -5200,6 +5200,130 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_guards_cse_pass_single(self):
+        from torch._dynamo.guards import PyExprCSEPass
+
+        exprs = [
+            "x[0].a",
+            "x[1].a",
+            "x[2].a",
+            "a.b.c[0].d.e",
+            "a.b.c[1].d.e",
+            "a.b.c[2].d.e",
+            "f(m.n[0], '0').x.y.z",
+            "f(m.n[0], '1').x.y.z",
+            "f(m.n[0], '2').x.y.z",
+            "self.g(a, b).k",
+            "self.g(a, b).k",
+            "self.g(a, b).k",
+        ]
+
+        csepass = PyExprCSEPass()
+        csepass.count(exprs)
+
+        def expect(expr, ex_preface, ex_expr):
+            r_preface, r_expr = csepass.replace(expr)
+            self.assertEqual(r_preface, ex_preface)
+            self.assertEqual(r_expr, ex_expr)
+
+        # Nothing gets CSE-d, since the only repeated sub-expression is 'x'.
+        # i.e. not a node type we are interested on.
+        expect("x[0].a", ex_preface=[], ex_expr="x[0].a")
+        expect("x[1].a", ex_preface=[], ex_expr="x[1].a")
+        expect("x[2].a", ex_preface=[], ex_expr="x[2].a")
+
+        # 'a.b.c' gets CSE-d, since they are used more than 'PyExprCSEPass.USE_THRESHOLD'.
+        expect("a.b.c[0].d.e", ex_preface=["_var0 = a.b", "_var1 = _var0.c"], ex_expr="_var1[0].d.e")
+        expect("a.b.c[1].d.e", ex_preface=[], ex_expr="_var1[1].d.e")
+        expect("a.b.c[2].d.e", ex_preface=[], ex_expr="_var1[2].d.e")
+
+        # 'm.n[0]' gets CSE-d, since it is a sub-expression of the function call.
+        expect("f(m.n[0], '0').x.y.z", ex_preface=["_var2 = m.n", "_var3 = _var2[0]"], ex_expr="f(_var3, '0').x.y.z")
+        expect("f(m.n[0], '1').x.y.z", ex_preface=[], ex_expr="f(_var3, '1').x.y.z")
+        expect("f(m.n[0], '2').x.y.z", ex_preface=[], ex_expr="f(_var3, '2').x.y.z")
+
+        # The whole expressiong gets CSE-d, as well as all of its sub-expressions.
+        expect("self.g(a, b).k", ex_preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"], ex_expr="_var6")
+        expect("self.g(a, b).k", ex_preface=[], ex_expr="_var6")
+        expect("self.g(a, b).k", ex_preface=[], ex_expr="_var6")
+
+    def test_guards_cse_pass_multiple(self):
+        from torch._dynamo.guards import PyExprCSEPass
+
+        exprs = [
+            "x[0].a < x[1].a * (3 - x[2].a)",
+            "a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0",
+            "f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512",
+            "self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
+        ]
+
+        csepass = PyExprCSEPass()
+        csepass.count(exprs)
+
+        def expect(expr, ex_preface, ex_expr):
+            r_preface, r_expr = csepass.replace(expr)
+            self.assertEqual(r_preface, ex_preface)
+            self.assertEqual(r_expr, ex_expr)
+
+        expect(
+            "x[0].a < x[1].a * (3 - x[2].a)",
+            ex_preface=[],
+            ex_expr="x[0].a < x[1].a * (3 - x[2].a)",
+        )
+
+        expect(
+            "a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0",
+            ex_preface=["_var0 = a.b", "_var1 = _var0.c"],
+            ex_expr="_var1[0].d.e + _var1[1].d.e * _var1[2].d.e > 0",
+        )
+
+        expect(
+            "f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512",
+            ex_preface=["_var2 = m.n", "_var3 = _var2[0]"],
+            ex_expr="f(_var3, '0').x.y.z * f(_var3, '1').x.y.z * f(_var3, '2').x.y.z < 512",
+        )
+
+        expect(
+            "self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
+            ex_preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
+            ex_expr="_var6 + (1 - _var6) <= x[0].a + _var6",
+        )
+
+    def test_guard_function_builder_with_cse(self):
+        from torch._dynamo.guards import build_guard_function
+
+        exprs = [
+            "x[0].a < x[1].a * (3 - x[2].a)",
+            "a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0",
+            "f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512",
+            "self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
+        ]
+
+        pycode = build_guard_function(exprs, "")
+        expected = """\
+def ___make_guard_fn():
+    def guard(L):
+        if not (x[0].a < x[1].a * (3 - x[2].a)):
+            return False
+        _var0 = a.b
+        _var1 = _var0.c
+        if not (_var1[0].d.e + _var1[1].d.e * _var1[2].d.e > 0):
+            return False
+        _var2 = m.n
+        _var3 = _var2[0]
+        if not (f(_var3, '0').x.y.z * f(_var3, '1').x.y.z * f(_var3, '2').x.y.z < 512):
+            return False
+        _var4 = self.g
+        _var5 = _var4(a, b)
+        _var6 = _var5.k
+        if not (_var6 + (1 - _var6) <= x[0].a + _var6):
+            return False
+        return True
+    return guard
+"""
+
+        self.assertEqual(expected, pycode)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
