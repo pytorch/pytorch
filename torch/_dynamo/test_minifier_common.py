@@ -27,8 +27,10 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Comment me out to retain temporary directory
-        shutil.rmtree(cls.DEBUG_DIR)
+        if os.getenv("PYTORCH_KEEP_TMPDIR", "0") != "1":
+            shutil.rmtree(cls.DEBUG_DIR)
+        else:
+            print("test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
         cls._exit_stack.close()
 
     # Search for the name of the first function defined in a code string.
