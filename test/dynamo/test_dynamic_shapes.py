@@ -11,6 +11,7 @@ try:
         test_modules,
         test_repros,
         test_subgraphs,
+        test_aot_autograd,
     )
 except ImportError:
     import test_ctx_manager
@@ -20,6 +21,7 @@ except ImportError:
     import test_modules
     import test_repros
     import test_subgraphs
+    import test_aot_autograd
 
 import unittest
 
@@ -79,6 +81,7 @@ tests = [
     test_modules.NNModuleTests,
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
+    test_aot_autograd.AotAutogradFallbackTests,
 ]
 for test in tests:
     make_dynamic_cls(test)
