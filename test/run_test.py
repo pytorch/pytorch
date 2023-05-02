@@ -721,9 +721,6 @@ def test_distributed(test_module, test_directory, options):
             continue
         if backend == "mpi" and not mpi_available:
             continue
-        # UCC does not support Maxwell GPUs
-        if backend == "ucc" and not (torch.cuda.is_available() and torch.cuda.get_device_capability() <= (6, 0)):
-            continue
         for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
                 continue
