@@ -14,6 +14,9 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -47,6 +50,17 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_basic_forced_memo_only(self):
+        x = torch.empty(2, 2, device="cpu")
+        y = torch.empty(4, 2, 2, device="cpu")
+        with FakeTensorMode() as mode:
+            x_fake = mode.from_tensor(x)
+            x2 = mode.from_tensor(x, memoized_only=True)
+            self.assertTrue(x2 is not None)
+            y = mode.from_tensor(y, memoized_only=True)
+            self.assertIs(y, None)
+
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
@@ -75,6 +89,13 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.shape, (8, 8))
             self.assertEqual(out.device.type, "cpu")
             self.assertTrue(isinstance(out, FakeTensor))
+
+    def test_repr(self):
+        with FakeTensorMode():
+            x = torch.empty(2, 2, device="cpu")
+            self.assertEqual(repr(x), 'FakeTensor(..., size=(2, 2))')
+            x = torch.empty(2, 2, device="meta")
+            self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
@@ -499,6 +520,34 @@ class FakeTensorTest(TestCase):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
 
+    def test_mixed_real_and_fake_inputs(self):
+        class _TestPattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(1)
+
+            def forward(self, input):
+                running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+                scale_factor = self.bn.weight / running_std
+                weight_shape = [1] * len(self.conv.weight.shape)
+                weight_shape[0] = -1
+                bias_shape = [1] * len(self.conv.weight.shape)
+                bias_shape[1] = -1
+                scaled_weight = self.conv.weight * scale_factor.reshape(weight_shape)
+                zero_bias = torch.zeros_like(self.conv.bias, dtype=input.dtype)
+                conv = self.conv._conv_forward(input, scaled_weight, zero_bias)
+                conv_orig = conv / scale_factor.reshape(bias_shape)
+                conv_orig = conv_orig + self.conv.bias.reshape(bias_shape)
+                conv = self.bn(conv_orig)
+                return conv
+
+        example_inputs = (torch.randn(1, 1, 3, 3),)
+        mod = _TestPattern()
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            out = mod(torch.randn(1, 1, 3, 3))
+        self.checkType(out, "cpu", (1, 1, 3, 3))
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -596,6 +645,26 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
+class FakeTensorOpInfoTest(TestCase):
+    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    def test_fake(self, device, dtype, op):
+        data_dependent_outputs = {
+            'NumpyNMSCustomOp',
+            'NumpyNonzeroCustomOp',
+        }
+
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in sample_inputs_itr:
+            args = (sample_input.input,) + sample_input.args
+            kwargs = sample_input.kwargs
+        with torch._subclasses.CrossRefFakeMode():
+            try:
+                op(*args, **kwargs)
+            except DynamicOutputShapeException:
+                if op.name not in data_dependent_outputs:
+                    raise
+
+
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -672,6 +741,17 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(mode, out.fake_mode)
         self.assertTrue(isinstance(out, FakeTensor))
         self.assertEqual(out.device.type, "cpu")
+
+    def test_multiple_modes(self):
+        t = torch.rand(([4]))
+        t2 = torch.rand([4])
+        with FakeTensorMode() as m:
+            with FakeTensorMode() as m2:
+                t_fake = m.from_tensor(t)
+                t2_fake = m2.from_tensor(t2)
+
+                with self.assertRaisesRegex(Exception, "Mixing fake modes"):
+                    t_fake + t2_fake
 
     def test_separate_mode_error(self):
         with FakeTensorMode():
@@ -786,6 +866,21 @@ class FakeTensorOperatorInvariants(TestCase):
         self.assertEqual(len(ref_out), len(meta_out))
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
+
+    def test_cross_entropy_loss(self):
+        inp = torch.randn(3, 5)
+        target = torch.randint(5, (3,), dtype=torch.long)
+        weight = torch.rand(5)
+        fn = torch.nn.functional.cross_entropy
+        for w in (weight, None):
+            args = (inp, target, w)
+            ref = fn(*args)
+            with FakeTensorMode() as m:
+                meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+                meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
+
+            self.assertEqual(ref.size(), meta_out.size())
+
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
@@ -922,6 +1017,9 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 instantiate_parametrized_tests(FakeTensorTest)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=only_for)
 
 if __name__ == "__main__":
     run_tests()
