@@ -1395,8 +1395,8 @@ def emit_body(
                     expr = f"SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})"
                 else:
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
-                if foreacharg is not None and "original_selfs" not in expr:
-                    expr = expr.replace(src_name, name_in_expr)
+                    if foreacharg is not None and "original_selfs" not in expr:
+                        expr = expr.replace(src_name, name_in_expr)
             elif (
                 type == BaseCType(tensorListT)
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
