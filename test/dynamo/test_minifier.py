@@ -315,10 +315,10 @@ class MinifierTests(MinifierTestBase):
             """\
             import torch._dynamo.config
             torch._dynamo.config.cache_size_limit = 55
-            data = torch._dynamo.config.save_config()
+            config = torch._dynamo.config.codegen_config()
             torch._dynamo.config.cache_size_limit = 3
             torch._dynamo.config.repro_after = "dynamo"
-            torch._dynamo.config.load_config(data)
+            exec(config)
             assert torch._dynamo.config.cache_size_limit == 55
             assert torch._dynamo.config.repro_after == "dynamo"
         """
