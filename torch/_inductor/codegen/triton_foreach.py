@@ -89,16 +89,13 @@ class ForeachKernel(Kernel):
             int(sympy_product(layout.size))
             for layout in layouts[sublist_indices[0] : sublist_indices[1]]
         ]
-        self.sizes = [layout.size for layout in layouts]
-        # TODO: try tuning this value
-        self.block_size = 1024
+        self.block_size = 1024  # Try tuning this value
         self.grid = (
             ForeachKernel._compute_num_blocks(self.tensor_elem_counts, self.block_size),
             1,
             1,
         )
         self.num_warps = 8
-
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count(0)
 
@@ -141,31 +138,6 @@ class ForeachKernel(Kernel):
         self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
-
-    def _set_ranges(self, *lengths):
-        assert len(lengths) == len(self.range_trees)
-        return [
-            ranges.construct(length)
-            for length, ranges in zip(lengths, self.range_trees)
-        ]
-
-    def _var_ranges(self):
-        return dict(
-            itertools.chain.from_iterable(
-                tree.var_ranges.items() for tree in self.range_trees
-            )
-        )
-
-    def _initialize_range_tree(self):
-        name = "xindex"
-        self.range_trees.extend(
-            [
-                IterationRangesRoot(name, numel, name[0], 0, self)
-                for numel in self.tensor_elem_counts
-            ]
-        )
-        # for tree in self.range_trees:
-        #    tree.codegen_header(self.body)
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
