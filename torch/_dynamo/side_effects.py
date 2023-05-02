@@ -237,7 +237,7 @@ class SideEffects:
         options,
     ):
         from torch._dynamo.variables.misc import SaveSimulatingAutogradFunctionContext
-        
+
         if user_cls is SaveSimulatingAutogradFunctionContext:
             obj = SaveSimulatingAutogradFunctionContext()
         elif user_cls is torch.autograd.function.FunctionCtx:

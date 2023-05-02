@@ -530,63 +530,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
-            if self.value == torch._C._nn.scaled_dot_product_attention:
-                # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
-                # in pytorch/torch/_meta_registrations.py
-                all_kwargs = kwargs.copy()
-                all_kwargs.update(
-                    dict(
-                        zip(
-                            (
-                                "query",
-                                "key",
-                                "value",
-                                "attn_mask",
-                                "dropout_p",
-                                "is_causal",
-                            ),
-                            args,
-                        )
-                    )
-                )
-                fake_query = all_kwargs["query"].as_proxy().node.meta["example_value"]
-                fake_key = all_kwargs["key"].as_proxy().node.meta["example_value"]
-                fake_value = all_kwargs["value"].as_proxy().node.meta["example_value"]
-                fake_mask = all_kwargs.get("attn_mask")
-                if isinstance(fake_mask, TensorVariable):
-                    fake_mask = fake_mask.as_proxy().node.meta["example_value"]
-                else:
-                    fake_mask = None
-                dropout_p = kwargs.get("dropout_p")
-                dropout_p = dropout_p.value if dropout_p is not None else 0.0
-                is_causal = kwargs.get("is_causal")
-                is_causal = is_causal.value if is_causal is not None else False
-                # We look through the stack to find a cuda autocast context
-                # If we do we will convert the fake tensors to torch.float16
-                is_cuda_autocast_context = False
-                for block in tx.block_stack:
-                    if (
-                        isinstance(block.with_context, AutocastModeVariable)
-                        and block.with_context.target_values[0] == "cuda"
-                    ):
-                        is_cuda_autocast_context = True
-                        break
-
-                if is_cuda_autocast_context and fake_query.device.type == "cuda":
-                    amp_dtype = torch.float16
-                    fake_query = fake_query.clone().to(amp_dtype)
-                    fake_key = fake_key.clone().to(amp_dtype)
-                    fake_value = fake_value.clone().to(amp_dtype)
-
-                backend_choice = torch._fused_sdp_choice(
-                    fake_query, fake_key, fake_value, fake_mask, dropout_p, is_causal
-                )
-                if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
-                    if dropout_p is not None and dropout_p != 0.0:
-                        unimplemented(
-                            "FlashAttention with dropout is not supported in cuda graphs"
-                        )
-
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
@@ -799,21 +742,23 @@ def is_fn_safe_to_run(tx, f, sub_args):
     # Snapshot state
     graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
     # Will raise if not sound
-    output, graph, lifted_freevars = speculate_subgraph(tx, f, sub_args, graph_checkpoint, checkpoint, always_restore=True)
+    output, graph, lifted_freevars = speculate_subgraph(
+        tx, f, sub_args, graph_checkpoint, checkpoint, always_restore=True
+    )
     # If we got here, we are probably sound, but we do not support freevars yet, so lets call cases where we found them
     # unsafe.
     if lifted_freevars:
         return False
     return True
 
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
-def speculate_subgraph(tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False):
-    from . import (
-        ConstantVariable,
-        TensorVariable,
-        AutogradFunctionContextVariable,
-    )
+def speculate_subgraph(
+    tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
+):
+    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+
     try:
         with tx.output.new_subtracer() as tracer:
             args = []
@@ -827,7 +772,9 @@ def speculate_subgraph(tx, f, sub_args, graph_checkpoint, checkpoint, *, always_
                 elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
                     tracer.create_graph_input(a.as_proxy().node.name)
                 else:
-                    raise unimplemented("HigherOrderOperator with body that accepts non-Tensors as input")
+                    raise unimplemented(
+                        "HigherOrderOperator with body that accepts non-Tensors as input"
+                    )
                 args.append(a)
             output = f.call_function(tx, args, {})
             # Register output to graph
@@ -869,6 +816,7 @@ def speculate_subgraph(tx, f, sub_args, graph_checkpoint, checkpoint, *, always_
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
         raise
+
 
 class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
@@ -1263,11 +1211,13 @@ class TorchHigherOrderOperator(VariableTracker):
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
-        elif self.value.__name__ in ("trampoline_autograd_fwd", "trampoline_autograd_bwd", "trampoline_autograd_apply"):
-            always_restore = (self.value.__name__ == "trampoline_autograd_bwd")
-            fn = TorchVariable(
-                self.value
-            )
+        elif self.value.__name__ in (
+            "trampoline_autograd_fwd",
+            "trampoline_autograd_bwd",
+            "trampoline_autograd_apply",
+        ):
+            always_restore = self.value.__name__ == "trampoline_autograd_bwd"
+            fn = TorchVariable(self.value)
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
             (
@@ -1283,7 +1233,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 graph_checkpoint,
                 checkpoint,
                 # Backwards should never, ever be stored!
-                always_restore = always_restore
+                always_restore=always_restore,
             )
             if body_lifted_freevars:
                 unimplemented("NYI - freevars in autograd function.")
