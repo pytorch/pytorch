@@ -87,18 +87,69 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.example_inputs = pytree.tree_flatten(get_export_meta(self.current_gm).example_inputs)[0]
         return super().call(graph_module)
 
+    def _insert_specialized_shapes_assert(self, arg, dims, meta, current_inp):
+        current_fake_mode = meta["val"].fake_mode
+        # we don't want to get shapes from meta as they will be symbolic
+        shapes = current_inp.shape
+        for dim in dims:
+            assert_msg = (
+                f"Input #{self.input_tracker}'s dimension #{dim} size is "
+                f"specialized at {shapes[dim]}"
+            )
+            dim_node = self._fx(
+                "call_function",
+                torch.ops.aten.sym_size,
+                (arg, dim),
+                {},
+                self._create_dummy_node_metadata(current_fake_mode),
+                self.interpreter,
+            )
+            eq = self._fx(
+                "call_function",
+                operator.eq,
+                (dim_node, shapes[dim]),
+                {},
+                self._create_dummy_node_metadata(current_fake_mode),
+                self.interpreter,
+            )
+            tensor_eq = self._fx(
+                "call_function",
+                torch.ops.aten.scalar_tensor.default,
+                (eq,),
+                {},
+                self._create_dummy_node_metadata(current_fake_mode, torch.tensor(1)),
+                self.interpreter,
+            )
+            self._fx(
+                "call_function",
+                torch.ops.aten._assert_async.msg,
+                (tensor_eq, assert_msg),
+                {},
+                self._create_dummy_node_metadata(current_fake_mode),
+                self.interpreter,
+            )
+
     def placeholder(self, name: str, arg, meta) -> ProxyValue:
         arg = super().placeholder(name, arg, meta)
         assert self.current_gm is not None
         current_inp = self.example_inputs[self.input_tracker]
+        current_fake_mode = meta["val"].fake_mode
+        all_dims = set(range(current_inp.dim()))
+
+        # If no dynamism is specified, we assume all dimensions are specialized
         if id(current_inp) not in self.constraints:
+            self._insert_specialized_shapes_assert(arg, all_dims, meta, current_inp)
             self.input_tracker += 1
             return arg
 
         constraints = self.constraints[id(current_inp)]
-        current_fake_mode = meta["val"].fake_mode
 
+        constrained_dims = set()
+        # Add runtime asserts for user specified constraints for each
+        # individual dimensions (e.g not the relational constraints like
+        # x[1] == x[0])
         for constraint in constraints:
+            constrained_dims.add(constraint.constraint_dim)
             dim = self._fx(
                 "call_function",
                 torch.ops.aten.sym_size,
@@ -164,6 +215,11 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     self.interpreter,
                 )
 
+        specialized_dims = all_dims - constrained_dims
+        # Make all non-constrained dims to be static
+        self._insert_specialized_shapes_assert(arg, specialized_dims, meta, current_inp)
+
+        # TODO Add relational constraints
         self.input_tracker += 1
         return arg
     # TODO implement adding inline constraints as assertion

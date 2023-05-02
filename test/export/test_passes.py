@@ -22,8 +22,8 @@ def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> 
     return count
 
 
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_replace_broken_ops(self) -> None:
         x = torch.randn([2, 3, 4, 5])
         model: torch.nn.Linear = torch.nn.Linear(5, 5)
@@ -44,7 +44,6 @@ class TestPasses(TestCase):
         self.assertEqual(count_after, 0)
         self.assertTrue(torch.allclose(gm(x), f(x)))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_const_prop_pass(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -69,7 +68,6 @@ class TestPasses(TestCase):
         new_gm = new_gm.graph_module
         self.assertEqual(count_additions(new_gm), 1)
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -88,16 +86,14 @@ class TestPasses(TestCase):
         num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
 
-        self.assertEqual(num_assert, 1)
-        self.assertEqual(num_scalar_tensor, 1)
+        self.assertEqual(num_assert, 3)
+        self.assertEqual(num_scalar_tensor, 3)
 
         with self.assertRaisesRegex(RuntimeError, "Input #0"):
             pass_result.graph_module(torch.zeros(2, 7, 3))
 
         self.assertEqual(pass_result.graph_module(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
 
-
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -124,14 +120,56 @@ class TestPasses(TestCase):
         num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
 
-        self.assertEqual(num_assert, 3)
-        self.assertEqual(num_scalar_tensor, 3)
+        self.assertEqual(num_assert, 6)
+        self.assertEqual(num_scalar_tensor, 6)
 
         with self.assertRaisesRegex(RuntimeError, "Input #0"):
             pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         with self.assertRaisesRegex(RuntimeError, "Input #1"):
             pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+
+    def test_runtime_assert_some_dims_not_specified(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x.cos().sum() + y.sin().sum()
+
+        x = torch.zeros(4, 2, 3)
+        y = torch.zeros(5, 5, 5)
+
+        constraints = [
+            dynamic_dim(x, 1) >= 2,
+            dynamic_dim(x, 1) <= 6,
+            dynamic_dim(x, 0) >= 3
+        ]
+
+        gm = _export(M(), (x, y), constraints=constraints)
+
+        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
+        self.assertTrue(pass_result.modified)
+
+        num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
+
+        # there are 3 asserts from y and 2 from dynamic x dims and 1 from static x dim
+        self.assertEqual(num_assert, 6)
+        self.assertEqual(num_scalar_tensor, 6)
+
+        with self.assertRaisesRegex(RuntimeError, "Input #0"):
+            pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+
+        # y is specialized to 5
+        with self.assertRaisesRegex(RuntimeError, "Input #1's dimension #0 size is specialized at 5"):
+            pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+
+        # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
+        gm_result_for_1_size = pass_result.graph_module(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
+        eager_result_for_1_size = M().forward(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
+
+        self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
 
 
 if __name__ == '__main__':

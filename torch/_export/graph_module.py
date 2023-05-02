@@ -35,7 +35,7 @@ class ExportMetadata:
     # TODO(gmagogsfm): Expose constraints in Metadata
     # Mapping from output name to mutated buffer names.
     mutation: List[Tuple[str, List[str]]] = dataclasses.field(default_factory=list)
-    input_shape_constraints: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    input_shape_constraints: List[Any] = dataclasses.field(default_factory=list)
     inline_constraints: Dict[str, Any] = dataclasses.field(default_factory=dict)
     example_inputs: Any = None
 
@@ -101,7 +101,7 @@ def make_export_graph_module(
     in_spec: Optional[pytree.TreeSpec] = None,
     out_spec: Optional[pytree.TreeSpec] = None,
     mutation: Optional[List[Tuple[str, List[str]]]] = None,
-    input_shape_constraints: Optional[Dict] = None,
+    input_shape_constraints: Optional[List] = None,
     inline_constraints: Optional[Dict] = None,
     example_inputs: Any = None,
     class_name: str = "ExportGraphModule",
