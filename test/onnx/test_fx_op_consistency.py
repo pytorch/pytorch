@@ -141,14 +141,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "acosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Acosh")
     ),
-    skip(
-        "acos", dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Acos")
-    ),
-    skip(
-        "acosh", dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Acosh")
-    ),
     xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
@@ -230,32 +222,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Asinh", "bool and int")
     ),
     xfail(
-        "asin",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Asin", "float64"),
-    ),
-    xfail(
-        "asinh",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Asinh", "float64"
-        ),
-    ),
-    xfail(
         "atan", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atan", "bool and int")
-    ),
-    xfail(
-        "atan",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", "float64"),
-    ),
-    xfail(
-        "atanh",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Atanh", "float64"
-        ),
     ),
     xfail(
         "atanh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
@@ -348,23 +316,9 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
     ),
     xfail(
-        "nn.functional.conv1d",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Conv1d", "float64"
-        ),
-    ),
-    xfail(
         "nn.functional.conv2d",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_does_not_support("Conv2d", "int64"),
-    ),
-    xfail(
-        "nn.functional.conv2d",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Conv2d", "float64"
-        ),
     ),
     skip(
         "cos", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
@@ -373,18 +327,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     skip(
         "cosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Cosh")
-    ),
-    xfail(
-        "cos",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Cos", "float64"),
-    ),
-    xfail(
-        "cosh",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Cosh", "float64"
-        ),
     ),
     xfail(
         "cross",
@@ -422,11 +364,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Erf", "int"),
     ),
     xfail(
-        "erf",
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_does_not_support("Erf", "float64"),
-    ),
-    xfail(
         "exp",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Exp", "bool, int"),
@@ -448,8 +385,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "full_like",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + (torch.float16, torch.float64,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int and float16, float64"),
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int and float16"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool1d",
@@ -466,11 +403,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.dropout",
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
-    ),
-    skip(
-        "nn.functional.elu",  # SegFault when ORT < 1.15
-        dtypes=(torch.float64,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Elu", "float64"),
     ),
     xfail(
         "nn.functional.embedding",
@@ -511,12 +443,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "arange",
         matcher=lambda sample: len(sample.args) != 1,
         reason="arange_start overload takes two arguments (input, start)",
-    ),
-    xfail(
-        "arange",
-        matcher=lambda sample: sample.input == 0.1
-        and sample.kwargs["dtype"] == torch.float64,
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Arange"),
     ),
     skip(
         "cat",
@@ -654,10 +580,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
                     if dtype == torch.float32:
                         # Relax atol and rtol for float32 based on empirical results
-                        # The current most relaxed values are for aten::stft
-                        rtol = 1e-5
-                        atol = 2e-5
-                    elif dtype == torch.float64:
                         # The current most relaxed values are for aten::stft
                         rtol = 1e-5
                         atol = 2e-5

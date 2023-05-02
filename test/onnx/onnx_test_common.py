@@ -412,7 +412,7 @@ QINT_TYPES = (
 FLOAT_TYPES = (
     torch.float16,
     torch.float32,
-    torch.float64,
+    # torch.float64,  ORT doesn't support
 )
 
 COMPLEX_TYPES = (
