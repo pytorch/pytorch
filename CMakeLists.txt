@@ -971,6 +971,7 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
+      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS")
       string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
       # To suppress MPSGraph availability warnings
