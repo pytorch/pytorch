@@ -4176,7 +4176,10 @@ class TensorListItem:
 class ForeachPointwise(IRNode):
     def __init__(self, left, right, op_fn):
         super().__init__()
-        self.layouts = left.get_layouts()
+        self.layouts = [
+            FixedLayout(layout.device, layout.dtype, layout.size)
+            for layout in left.get_layouts()
+        ]
         self.left = left
         self.right = right
         self.op_fn = op_fn
