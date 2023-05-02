@@ -6,6 +6,7 @@ from torch.distributed.tensor.parallel.multihead_attention_tp import (
 
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
+    ColwiseParallelForAttn,
     ColwiseParallelForPairwise,
     make_input_replicate_1d,
     make_input_reshard_replicate,
@@ -19,16 +20,19 @@ from torch.distributed.tensor.parallel.style import (
     PairwiseSequenceParallel,
     ParallelStyle,
     RowwiseParallel,
+    RowwiseParallelForAttn,
     RowwiseParallelForPairwise,
 )
 
 __all__ = [
     "ColwiseParallel",
+    "ColwiseParallelForAttn",
     "ColwiseParallelForPairwise",
     "PairwiseParallel",
     "PairwiseSequenceParallel",
     "ParallelStyle",
     "RowwiseParallel",
+    "RowwiseParallelForAttn",
     "RowwiseParallelForPairwise",
     "TensorParallelMultiheadAttention",
     "make_input_replicate_1d",

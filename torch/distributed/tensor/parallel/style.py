@@ -14,8 +14,10 @@ from torch.distributed.tensor.parallel._utils import (
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
+    "RowwiseParallelForAttn",
     "RowwiseParallelForPairwise",
     "ColwiseParallel",
+    "ColwiseParallelForAttn",
     "ColwiseParallelForPairwise",
     "PairwiseParallel",
     "PairwiseSequenceParallel",
@@ -124,6 +126,28 @@ class RowwiseParallelForPairwise(ParallelStyle):
         super().__init__(None, make_output_replicate_1d)
 
 
+class ColwiseParallelForAttn(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    We don't perform reshard for output.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, make_sharded_output_tensor)
+
+
+class RowwiseParallelForAttn(ParallelStyle):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
+    We don't perform reshard for input.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_shard_1d_last_dim, make_output_tensor)
+
+
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_shard_1d(
     input: Union[torch.Tensor, DTensor],
@@ -183,7 +207,7 @@ def make_input_shard_1d_last_dim(
     Returns:
         A :class:`DTensor` sharded on the last dimension over ``device_mesh``.
     """
-    return make_input_shard_1d(input, device_mesh, dim=-1)  # type: ignore[call-arg]
+    return make_input_shard_1d(input, device_mesh, dim=input.dim() - 1)  # type: ignore[call-arg]
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
@@ -318,6 +342,28 @@ def make_output_tensor(
     return make_output_replicate_1d(  # type: ignore[attr-defined]
         output, device_mesh
     ).to_local()  # type: ignore[call-arg]
+
+
+@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
+def make_sharded_output_tensor(
+    output: DTensor, _device_mesh: Optional[DeviceMesh] = None
+) -> torch.Tensor:
+    """
+    Convert sharded Output DTensor to Tensor.
+
+    Args:
+        output (:class:`DTensor`):
+            Output of module to be converted.
+        _device_mesh (:class:`DeviceMesh`, optional):
+            Object which is not needed and is just to keep here to match with
+            the signature in its callsite in ``distribute_module``.
+            Default: ``None``
+
+    Return:
+        A :class:`torch.Tensor` object converted from output DTensor.
+    """
+
+    return output.to_local()  # type: ignore[call-arg]
 
 
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]

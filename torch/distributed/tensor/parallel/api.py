@@ -18,10 +18,12 @@ from torch.distributed.tensor.parallel.multihead_attention_tp import (
 )
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
+    ColwiseParallelForAttn,
     ColwiseParallelForPairwise,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
+    RowwiseParallelForAttn,
     RowwiseParallelForPairwise,
 )
 
@@ -89,7 +91,7 @@ def parallelize_module(  # type: ignore[return]
         # RowwiseParallel or ColwiseParallel
         if isinstance(
             parallelize_plan,
-            (ColwiseParallel, ColwiseParallelForPairwise, RowwiseParallel, RowwiseParallelForPairwise)
+            (ColwiseParallel, ColwiseParallelForAttn, ColwiseParallelForPairwise, RowwiseParallel, RowwiseParallelForAttn, RowwiseParallelForPairwise)
         ):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
         # PairwiseParallel
@@ -268,7 +270,7 @@ def _parallelize_linear(
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
-    if isinstance(parallel_style, (RowwiseParallel, RowwiseParallelForPairwise)):
+    if isinstance(parallel_style, (RowwiseParallel, RowwiseParallelForAttn, RowwiseParallelForPairwise)):
         distribute_module(
             module,
             device_mesh,
@@ -276,7 +278,7 @@ def _parallelize_linear(
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
-    elif isinstance(parallel_style, (ColwiseParallel, ColwiseParallelForPairwise)):
+    elif isinstance(parallel_style, (ColwiseParallel, ColwiseParallelForAttn, ColwiseParallelForPairwise)):
         distribute_module(
             module,
             device_mesh,
