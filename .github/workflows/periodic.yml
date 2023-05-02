@@ -91,10 +91,10 @@ jobs:
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc11-build.outputs.test-matrix }}
 
   linux-bionic-cuda11_8-py3_10-gcc11-debug-build:
-    name: linux-bionic-cuda11.8-py3.9-gcc11-debug
+    name: linux-bionic-cuda11.8-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc11-debug
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc11-debug
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11
       build-with-debug: true
       test-matrix: |

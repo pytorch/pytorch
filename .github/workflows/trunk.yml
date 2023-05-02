@@ -29,7 +29,7 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-bionic-cuda11_8-py3_9-gcc11-build:
+  linux-bionic-cuda11_8-py3_10-gcc11-build:
     name: linux-bionic-cuda11.8-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -42,14 +42,14 @@ jobs:
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_8-py3_9-gcc11-test:
+  linux-bionic-cuda11_8-py3_10-gcc11-test:
     name: linux-bionic-cuda11.8-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_9-gcc11-build
+    needs: linux-bionic-cuda11_8-py3_10-gcc11-build
     with:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc11
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc11-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-build.outputs.test-matrix }}
 
   libtorch-linux-bionic-cuda11_8-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.8-py3.7-gcc7
@@ -65,7 +65,7 @@ jobs:
         ]}
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-bionic-cuda11_8-py3_9-gcc11-no-ops-build:
+  linux-bionic-cuda11_8-py3_10-gcc11-no-ops-build:
     name: linux-bionic-cuda11.8-py3.10-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:

@@ -17,7 +17,7 @@ jobs:
     name: cuda11.8-py3.10-gcc11-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc11-sm86
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc11-sm86
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11
       cuda-arch-list: '8.6'
       test-matrix: |
@@ -39,7 +39,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_8-py3_10-gcc11-inductor-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc11-sm86
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc11-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-inductor-build.outputs.test-matrix }}
 
@@ -47,7 +47,7 @@ jobs:
     name: cuda11.8-py3.10-gcc11-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc11-sm80
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc11-sm80
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11
       cuda-arch-list: '8.0'
       test-matrix: |
@@ -60,7 +60,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_8-py3_10-gcc11-inductor-build-gcp
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc11-sm80
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc11-sm80
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
