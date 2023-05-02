@@ -8163,12 +8163,14 @@ class foreach_inputs_sample_func:
         return kwargs
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
-        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        num_input_tensors_specified = "num_input_tensors" in kwargs
+        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         # zero_size tensor
-        if dtype == torch.float32 and ("cuda" in device):
+        if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
             rightmost_arg_type = self._rightmost_arg_types[0]
             zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
             zero_size_foreach_inputs_kwargs["zero_size"] = True
@@ -8226,6 +8228,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2)):
             for zero_size in (False, True) if "cuda" in device and dtype == torch.float32 and ord not in (-1, -2) else (False,):
@@ -8269,12 +8272,14 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         return dtype in integral_types_and(torch.bool) and opinfo.ref in (torch.addcmul,)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
-        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        num_input_tensors_specified = "num_input_tensors" in kwargs
+        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         # zero_size tensor
-        if dtype == torch.float32 and ("cuda" in device):
+        if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
             input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
             args = [
                 sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)

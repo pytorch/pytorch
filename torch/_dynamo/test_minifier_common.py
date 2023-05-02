@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -11,8 +12,7 @@ from torch._dynamo.debug_utils import TEST_REPLACEABLE_COMMENT
 
 
 class MinifierTestBase(torch._dynamo.test_case.TestCase):
-    _debug_dir_obj = tempfile.TemporaryDirectory()
-    DEBUG_DIR = _debug_dir_obj.name
+    DEBUG_DIR = tempfile.mkdtemp()
 
     @classmethod
     def setUpClass(cls):
@@ -24,11 +24,11 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
                 cls.DEBUG_DIR,
             )
         )
-        os.makedirs(cls.DEBUG_DIR, exist_ok=True)
 
     @classmethod
     def tearDownClass(cls):
-        cls._debug_dir_obj.cleanup()
+        # Comment me out to retain temporary directory
+        shutil.rmtree(cls.DEBUG_DIR)
         cls._exit_stack.close()
 
     # Search for the name of the first function defined in a code string.
@@ -119,6 +119,8 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
         test_proc, repro_dir = self._run_test_code(test_code)
         self.assertIsNotNone(repro_dir)
+        print("running minifier")
         launch_proc, launch_code = self._run_minifier_launcher(patch_code, repro_dir)
+        print("running repro")
         repro_proc, repro_code = self._run_repro(patch_code, repro_dir)
         return ((test_proc, launch_proc, repro_proc), (launch_code, repro_code))

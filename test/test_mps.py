@@ -2012,9 +2012,19 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
 
     def test_batch_norm_backward(self):
-        inputs = torch.rand(1, 8, 4, 4, device='mps', requires_grad=True)
+        inputs = torch.rand(1, 8, 4, 4, device="mps", requires_grad=True)
         x = torch.nn.BatchNorm2d(8).to("mps")
         y = torch.nn.BatchNorm2d(8).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
+    def test_layer_norm_backward(self):
+        inputs = torch.rand(4, 4, device="mps", requires_grad=True)
+        x = torch.nn.LayerNorm(4).to("mps")
+        y = torch.nn.LayerNorm(4).to("mps")
         y.weight.requires_grad = False
         y.bias.requires_grad = False
         outputs = y(x(inputs))

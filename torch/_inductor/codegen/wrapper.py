@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -210,6 +210,7 @@ class WrapperCodeGen(CodeGen):
         self.size = "size()"
         self.stride = "stride()"
         self.first_device_guard = True
+        self.supports_intermediate_hooks = True
 
         self.write_header()
         self.write_prefix()
@@ -245,6 +246,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
+                from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
                 from torch import empty_strided, as_strided, device
@@ -337,10 +339,19 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
-    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):
         self.writeline(
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
+        if (
+            self.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+            and origin_node is not None
+        ):
+            counters["inductor"]["intermediate_hooks"] += 1
+            self.writeline(
+                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+            )
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
@@ -735,6 +746,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.stride = "strides()"
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
+        self.supports_intermediate_hooks = False
 
     def seed(self):
         """
