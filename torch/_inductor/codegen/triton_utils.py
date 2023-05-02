@@ -266,6 +266,8 @@ class IterationRangesEntry(IterationRanges):
         )
         self.parent = parent
         self.expr = expr
+        self.codegen = functools.lru_cache(None)(self._codegen)
+        self.code = functools.lru_cache(None)(self._code)
 
     def set_name(self, name):
         self.codegen = lambda: name
@@ -275,15 +277,13 @@ class IterationRangesEntry(IterationRanges):
     def cache_clear(self):
         self.codegen.cache_clear()
 
-    @functools.lru_cache(None)
     def _code(self):
         return f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr))
 
     def codegen_into(self, buffer):
         buffer.writeline(self._code())
 
-    @functools.lru_cache(None)
-    def codegen(self):
+    def _codegen(self):
         if self.is_loop():
             self.codegen_into(V.kernel.indexing_code)
         else:
