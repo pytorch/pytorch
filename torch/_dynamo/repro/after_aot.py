@@ -16,8 +16,8 @@ from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
-import torch.nn as nn
 import torch.fx as fx
+import torch.nn as nn
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -609,10 +609,18 @@ def inductor_fails(fx_g, args, check_str=None):
     return False
 
 
-def inductor_accuracy_fails(fx_g, args, check_str=None, *, require_fp64=False):
+def inductor_accuracy_fails(
+    fx_g, args, check_str=None, *, require_fp64=False, ignore_non_fp=False
+):
     from torch._inductor.compile_fx import compile_fx_inner
 
-    return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
+    return backend_aot_accuracy_fails(
+        fx_g,
+        args,
+        compile_fx_inner,
+        require_fp64=require_fp64,
+        ignore_non_fp=ignore_non_fp,
+    )
 
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
@@ -668,7 +676,13 @@ def repro_common(options, mod, load_args):
 
 ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
     "": inductor_fails,
-    "accuracy": inductor_accuracy_fails,
+    # This might look inverted but it's not.  strict_accuracy means "we will
+    # minify any time we see anything that diverges", whereas accuracy is more
+    # conservative, and will only minify if there is a meaningful fp64
+    # divergence
+    "accuracy": functools.partial(
+        inductor_accuracy_fails, require_fp64=True, ignore_non_fp=True
+    ),
     "strict_accuracy": inductor_accuracy_fails,
 }
 

@@ -318,9 +318,22 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=False):
+def same_two_models(
+    gm,
+    opt_gm,
+    example_inputs,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
+):
     """
     Check two models have same accuracy.
+
+    require_fp64: if True, raise an error if we unable to calculate the fp64 reference
+    ignore_non_fp: if True, do not compare outputs which are not floating point.  This
+        is mostly useful for the minifier (which wants to avoid quantizing floating point
+        error into integer/boolean error)
     """
     from .eval_frame import OptimizedModule
     from .testing import (
@@ -365,7 +378,14 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
+    passing = same(
+        ref,
+        res,
+        fp64_ref,
+        tol=config.repro_tolerance,
+        equal_nan=True,
+        ignore_non_fp=ignore_non_fp,
+    )
     return passing
 
 
@@ -406,14 +426,25 @@ def cast_to_fp64(model, inputs):
 
 
 def backend_accuracy_fails(
-    gm, example_inputs, compiler_fn, only_fwd=False, *, require_fp64=False
+    gm,
+    example_inputs,
+    compiler_fn,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
 ):
     try:
         compiled_gm = compiler_fn(
             copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
         )
         return not same_two_models(
-            gm, compiled_gm, example_inputs, only_fwd, require_fp64=require_fp64
+            gm,
+            compiled_gm,
+            example_inputs,
+            only_fwd,
+            require_fp64=require_fp64,
+            ignore_non_fp=ignore_non_fp,
         )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
