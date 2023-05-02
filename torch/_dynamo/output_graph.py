@@ -7,6 +7,7 @@ import operator
 import re
 import sys
 import traceback
+import weakref
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
@@ -185,7 +186,7 @@ class WrapperBackend:
             self.restore()
 
 
-class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
+class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
     generated fx.Graph.
@@ -202,7 +203,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         frame_state,
     ):
         super().__init__()
-        self.graph = torch.fx.Graph()
+        self.tracers = [SubgraphTracer(self)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
@@ -252,8 +253,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
-        # Node => computed real value (see utils.get_real_value)
-        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
@@ -267,10 +266,45 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
 
-        # Map from graph input name to its placeholder proxy object, where the
-        # map's keys give all current placeholder node names and can be used to
-        # create unique node names
-        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+    @property
+    def root_tracer(self):
+        return self.tracers[0]
+
+    @property
+    def current_tracer(self):
+        return self.tracers[-1]
+
+    @property
+    def graph(self):
+        return self.current_tracer.graph
+
+    # TODO(rzou): can delete after we refactor speculate_subgraph to use nested GraphTracer.
+    @graph.setter
+    def graph(self, value):
+        self.current_tracer.graph = value
+
+    @property
+    def input_name_to_proxy(self):
+        return self.current_tracer.input_name_to_proxy
+
+    @property
+    def real_value_cache(self):
+        return self.current_tracer.real_value_cache
+
+    def create_graph_input(self, *args, **kwargs):
+        return self.current_tracer.create_graph_input(*args, **kwargs)
+
+    def create_proxy(self, *args, **kwargs):
+        return self.current_tracer.create_proxy(*args, **kwargs)
+
+    def create_node(self, *args, **kwargs):
+        return self.current_tracer.create_node(*args, **kwargs)
+
+    def remove_node(self, *args, **kwargs):
+        return self.current_tracer.remove_node(*args, **kwargs)
+
+    def create_arg(self, *args, **kwargs):
+        return self.current_tracer.create_arg(*args, **kwargs)
 
     @property
     def output(self):
@@ -395,40 +429,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             else:
                 obj = getattr(obj, k)
         return obj
-
-    # when before=True, we will insert this input before the most recent
-    # inserted proxy.  This is a hack to get around an ordering problem,
-    # where we first insert a tensor argument, and then insert bindings
-    # for SymInts that may occur in the tensor argument.
-    # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
-    # fixed.
-    def create_graph_input(self, name, type_expr=None, before=False):
-        # unique
-        if name in self.input_name_to_proxy:
-            for i in itertools.count():
-                candidate_name = f"{name}_{i}"
-                if candidate_name not in self.input_name_to_proxy:
-                    name = candidate_name
-                    break
-
-        if self.input_name_to_proxy:
-            prev_name = next(reversed(self.input_name_to_proxy))
-            node = self.input_name_to_proxy[prev_name].node
-            if before:
-                ctx = self.graph.inserting_before(node)
-            else:
-                ctx = self.graph.inserting_after(node)
-        else:
-            ctx = self.graph.inserting_before(None)
-        with ctx:
-            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
-            if self.input_name_to_proxy and before:
-                k, v = self.input_name_to_proxy.popitem()
-                self.input_name_to_proxy[name] = proxy
-                self.input_name_to_proxy[k] = v
-            else:
-                self.input_name_to_proxy[name] = proxy
-            return proxy
 
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
@@ -570,7 +570,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: GraphCompileReason = None
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -923,6 +923,26 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
 
+
+class SubgraphTracer(fx.Tracer):
+    """
+    Holds an FX graph that is being traced. OutputGraph owns a SubgraphTracer
+    and the separation of responsibilities is that SubgraphTracer is
+    responsible for building the graph while OutputGraph is responsible for
+    compiling and executing the graph.
+    """
+
+    def __init__(self, output_graph):
+        super(SubgraphTracer, self).__init__()
+        self.output_graph = weakref.proxy(output_graph)
+        self.graph = torch.fx.Graph()
+        # Map from graph input name to its placeholder proxy object, where the
+        # map's keys give all current placeholder node names and can be used to
+        # create unique node names
+        self.input_name_to_proxy: OrderedDict[str, fx.Proxy] = collections.OrderedDict()
+        # Node => computed real value (see utils.get_real_value)
+        self.real_value_cache: Dict[fx.Node, torch.Tensor] = {}
+
     def create_proxy(
         self,
         kind,
@@ -938,7 +958,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         )
 
         # append stack trace to fx node
-        tx = self.current_tx
+        tx = self.output_graph.current_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
@@ -965,7 +985,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     def create_node(self, *args, **kwargs):
         node = super().create_node(*args, **kwargs)
-        node.meta["creation_timestamp"] = self.timestamp
+        node.meta["creation_timestamp"] = self.output_graph.timestamp
         return node
 
     # Note: we did not override erase_node since
@@ -973,3 +993,37 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def remove_node(self, node):
         self.graph.erase_node(node)
         self.input_name_to_proxy.pop(node.name, None)
+
+    # when before=True, we will insert this input before the most recent
+    # inserted proxy.  This is a hack to get around an ordering problem,
+    # where we first insert a tensor argument, and then insert bindings
+    # for SymInts that may occur in the tensor argument.
+    # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
+    # fixed.
+    def create_graph_input(self, name, type_expr=None, before=False):
+        # unique
+        if name in self.input_name_to_proxy:
+            for i in itertools.count():
+                candidate_name = f"{name}_{i}"
+                if candidate_name not in self.input_name_to_proxy:
+                    name = candidate_name
+                    break
+
+        if self.input_name_to_proxy:
+            prev_name = next(reversed(self.input_name_to_proxy))
+            node = self.input_name_to_proxy[prev_name].node
+            if before:
+                ctx = self.graph.inserting_before(node)
+            else:
+                ctx = self.graph.inserting_after(node)
+        else:
+            ctx = self.graph.inserting_before(None)
+        with ctx:
+            proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            if self.input_name_to_proxy and before:
+                k, v = self.input_name_to_proxy.popitem()
+                self.input_name_to_proxy[name] = proxy
+                self.input_name_to_proxy[k] = v
+            else:
+                self.input_name_to_proxy[name] = proxy
+            return proxy
