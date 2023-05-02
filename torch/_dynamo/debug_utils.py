@@ -309,7 +309,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
+def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=False):
     """
     Check two models have same accuracy.
     """
@@ -336,6 +336,8 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
     except Exception:
+        if require_fp64:
+            raise RuntimeError("Could not generate fp64 outputs")
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
@@ -393,10 +395,15 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
-def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
+def backend_accuracy_fails(
+    gm, example_inputs, compiler_fn, only_fwd=False, *, require_fp64=False
+):
     try:
         compiled_gm = compiler_fn(
             copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+        )
+        return not same_two_models(
+            gm, compiled_gm, example_inputs, only_fwd, require_fp64=require_fp64
         )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
@@ -409,5 +416,3 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
             )
         )
         return False
-
-    return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
