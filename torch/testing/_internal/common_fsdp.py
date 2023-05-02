@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from abc import ABC, abstractmethod
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -117,7 +117,7 @@ def _zero_model(
     summon_full=True,
 ):
     """Zeros the parameters and optionally buffers of ``model`` in place."""
-    ctx = FSDP.summon_full_params(model) if summon_full else suppress()
+    ctx = FSDP.summon_full_params(model) if summon_full else nullcontext()
     with ctx:
         for param in model.parameters():
             with torch.no_grad():
@@ -1121,7 +1121,7 @@ class FSDPTest(MultiProcessTestCase):
                 "has parameters on cuda",
             )
             if expects_device_error
-            else suppress()
+            else nullcontext()
         )
         with context:
             fsdp_loss = self._train_for_several_steps(
