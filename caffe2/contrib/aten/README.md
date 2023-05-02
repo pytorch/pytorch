@@ -1,7 +1,7 @@
 # An ATen operator for Caffe2
 
 ATen is a simple tensor library thats exposes the Tensor operations in Torch
-and PyTorch directly in C++17. This library provides a generated wrapper around the ATen API
+and PyTorch directly in C++14. This library provides a generated wrapper around the ATen API
 that makes these functions available in Caffe2 as an operator. It also makes it accessible using the
 ToffeeIR.
 
