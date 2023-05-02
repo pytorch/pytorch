@@ -298,21 +298,21 @@ class Subset(Dataset[T_co]):
         self.dataset = dataset
         self.indices = indices
 
-        # add batched sampling support when parent dataset supports it.
-        # see torch.utils.data._utils.fetch._MapDatasetFetcher
-        if getattr(dataset, "__getitems__", None):
-            self.__getitems__ = self._getitems
-
     def __getitem__(self, idx):
         if isinstance(idx, list):
             return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
 
+    def __getitems__(self, indices: List[int]) -> List[T_co]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if hasattr(self.dataset, "__getitems__") and self.dataset.__getitems__:
+            return self.dataset.__getitems__([self.indices[idx] for idx in indices])  # type: ignore[attr-defined]
+        else:
+            return [self.dataset[self.indices[idx]] for idx in indices]
+
     def __len__(self):
         return len(self.indices)
-
-    def _getitems(self, idx):
-        return self.dataset.__getitems__([self.indices[i] for i in idx])  # type: ignore[attr-defined]
 
 
 def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
