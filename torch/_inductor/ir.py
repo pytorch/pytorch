@@ -3946,17 +3946,9 @@ class StorageBox(MutableBox):
     @cache_on_self
     def is_non_scalar_tensor_num_reads_larger_than_one(self):
         data = self.data
-        if isinstance(data, Loops):
-            read_writes = ComputedBuffer(
-                name=None,
-                layout=FlexibleLayout(
-                    device=data.get_device(),
-                    dtype=data.get_dtype(),
-                    size=data.get_size(),
-                ),
-                data=data,
-            ).get_read_writes()
-            return sum(read.index != 0 for read in read_writes.reads) > 1
+        if isinstance(data, Pointwise):
+            reads = data.get_reads()
+            return sum(read.index != 0 for read in reads) > 1
         else:
             # Skip the check for non Loops instances
             return True
