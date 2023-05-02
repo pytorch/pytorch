@@ -148,8 +148,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         with open(f"/tmp/graphlowering_{self.ITER}.fx", "w") as f:
             f.write(gm.print_readable(False))
+        GraphLowering.ITER += 1
 
-        # from fxana import analyze; analyze(gm)
+        if GraphLowering.ITER == -1:
+            from fxana import analyze; analyze(gm)
 
         # it's hard to optimize layout for models with both normal conv
         # and group conv. Normal conv prefers channels last while grouped
@@ -176,9 +178,10 @@ class GraphLowering(torch.fx.Interpreter):
             print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
             config.layout_opt = False
 
+        nconv = len([n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default])
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(n.args[1].meta['val'].size(0) <= 64 and n.args[1].meta['val'].size(1) <= 64 for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default):
+        if nconv > 0 and all(n.args[1].meta['val'].size(0) <= 64 and n.args[1].meta['val'].size(1) <= 64 for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default):
             print("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
             config.layout_opt = False
 
