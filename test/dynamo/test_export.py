@@ -1,8 +1,7 @@
 # Owner(s): ["module: dynamo"]
 """
-Disable pytest AST rewriting (breaks some Dyanmo tests)
-
-PYTEST_DONT_REWRITE
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_export_persist_assert)
 """
 import functools
 import inspect
