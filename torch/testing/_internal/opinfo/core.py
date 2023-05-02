@@ -1195,12 +1195,16 @@ class OpInfo:
         Returns an iterable of ErrorInputs that contain sparse sample
         inputs with a specified layout.
         """
+        if not self.supports_sparse_layout(layout):
+            raise unittest.SkipTest("unsupported sparse layout")
         return self.error_inputs_sparse_func(self, device, layout, **kwargs)
 
     def supports_sparse_layout(self, layout):
         """Return True if OpInfo supports the specified sparse layout."""
-        layout_name = str(layout).split(".")[-1].replace("_coo", "")
-        return getattr(self, "supports_" + layout_name)
+        layout_name = str(layout).split(".")[-1]
+        # map torch.sparse_coo to OpInfo.supports_sparse:
+        layout_name = layout_name.replace("_coo", "")
+        return getattr(self, f"supports_{layout_name}")
 
     def sample_inputs_sparse(
         self, layout, device, dtype, requires_grad=False, **kwargs
