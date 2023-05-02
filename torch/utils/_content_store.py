@@ -142,6 +142,7 @@ class ContentStoreWriter:
         self.seen_storage_hashes: Set[str] = set()
         self.stable_hash = stable_hash
 
+    # TODO: offer some sort of non-blocking API to speed things up
     def write_storage(self, storage: torch.UntypedStorage) -> str:
         h = hash_storage(storage, stable_hash=self.stable_hash)
         if h in self.seen_storage_hashes:
@@ -150,15 +151,17 @@ class ContentStoreWriter:
         # need any metadata for the storage
         subfolder = os.path.join(self.loc, "storages")
         os.makedirs(subfolder, exist_ok=True)
-        torch.save(storage, os.path.join(subfolder, h))
+        target = os.path.join(subfolder, h)
+        if os.path.exists(target):
+            return h
+        torch.save(storage, target)
         self.seen_storage_hashes.add(h)
         return h
 
-    def write_tensor(self, name: str, t: torch.Tensor) -> None:
-        storage = t.untyped_storage()
-        h = self.write_storage(storage)
-        # TODO: Support more advanced snapshotting of requires_grad/grad/etc
-        payload = (
+    def compute_tensor_metadata(self, t: torch.Tensor, h=None):
+        if h is None:
+            h = hash_storage(t.untyped_storage(), stable_hash=self.stable_hash)
+        return (
             t.dtype,
             h,
             t.storage_offset(),
@@ -166,9 +169,16 @@ class ContentStoreWriter:
             t.stride(),
             torch._utils.get_tensor_metadata(t),
         )
-        subfolder = os.path.join(self.loc, "tensors")
+
+    def write_tensor(self, name: str, t: torch.Tensor) -> None:
+        storage = t.untyped_storage()
+        h = self.write_storage(storage)
+        # TODO: Support more advanced snapshotting of requires_grad/grad/etc
+        d, f = os.path.split(name)
+        payload = self.compute_tensor_metadata(t)
+        subfolder = os.path.join(self.loc, "tensors", d)
         os.makedirs(subfolder, exist_ok=True)
-        torch.save(payload, os.path.join(subfolder, name))
+        torch.save(payload, os.path.join(subfolder, f))
 
 
 class ContentStoreReader:
@@ -190,9 +200,12 @@ class ContentStoreReader:
         self.storage_cache[h] = StorageWeakRef(s)
         return s
 
+    def read_tensor_metadata(self, name: str):
+        return torch.load(os.path.join(self.loc, "tensors", name), weights_only=True)
+
     def read_tensor(self, name: str) -> torch.Tensor:
-        dtype, h, storage_offset, size, stride, metadata = torch.load(
-            os.path.join(self.loc, "tensors", name), weights_only=True
+        dtype, h, storage_offset, size, stride, metadata = self.read_tensor_metadata(
+            name
         )
         storage = self.read_storage(h)
         t = torch.tensor([], dtype=dtype, device=storage.device)
