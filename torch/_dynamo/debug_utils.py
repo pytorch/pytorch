@@ -228,19 +228,14 @@ def generate_config_string(*, stable_output=False):
     if stable_output:
         return "# config omitted due to stable_output=True"
 
-    return textwrap.dedent(
-        f"""\
+    return f"""\
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
-torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
-torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
-        """
-    )
-
-
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+{torch._functorch.config.codegen_config()}
+"""
 
 
 def get_minifier_repro_path():
@@ -274,7 +269,8 @@ def clone_inputs_retaining_gradness(example_inputs):
     """
     cloned_inputs = clone_inputs(example_inputs)
     for idx in range(len(example_inputs)):
-        cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+        if isinstance(cloned_inputs[idx], torch.Tensor):
+            cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
     return cloned_inputs
 
 
