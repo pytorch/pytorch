@@ -580,9 +580,8 @@ std::vector<std::shared_ptr<${op}>> grad_fns;
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate(
     """\
-auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+[[maybe_unused]] auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
 ${extra_differentiability_conditions}
-(void)_any_requires_grad;
 """
 )
 
