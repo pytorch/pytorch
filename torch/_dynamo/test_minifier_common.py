@@ -63,8 +63,11 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             # the program out of tree.  We only interpose on things we KNOW we
             # need to handle for tests.  If you need more stuff, you will
             # need to augment this appropriately.
-            dynamo_config = torch._dynamo.config.save_config()
-            inductor_config = torch._inductor.config.save_config()
+
+            # NB: Can't use save_config because that will omit some fields,
+            # but we must save and reset ALL fields
+            dynamo_config = torch._dynamo.config._config.copy()
+            inductor_config = torch._inductor.config._config.copy()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
@@ -85,8 +88,8 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
                     if cwd is not None:
                         os.chdir(prev_cwd)
             finally:
-                torch._dynamo.config.load_config(dynamo_config)
-                torch._inductor.config.load_config(inductor_config)
+                object.__setattr__(torch._dynamo.config, "_config", dynamo_config)
+                object.__setattr__(torch._inductor.config, "_config", inductor_config)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
@@ -102,7 +105,9 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     # Returns the completed process state and the directory containing the
     # minifier launcher script, if `code` outputted it.
     def _run_test_code(self, code, *, isolate=True):
-        proc = self._maybe_subprocess_run(["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR)
+        proc = self._maybe_subprocess_run(
+            ["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR
+        )
 
         print("test stdout:", proc.stdout.decode("utf-8"))
         print("test stderr:", proc.stderr.decode("utf-8"))
