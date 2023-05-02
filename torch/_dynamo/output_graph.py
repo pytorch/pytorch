@@ -946,7 +946,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
-        self.side_effects.keepalive = []
+        self.side_effects.clear()
 
 
 class SubgraphTracer(fx.Tracer):
