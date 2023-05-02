@@ -274,7 +274,8 @@ def clone_inputs_retaining_gradness(example_inputs):
     """
     cloned_inputs = clone_inputs(example_inputs)
     for idx in range(len(example_inputs)):
-        cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+        if isinstance(cloned_inputs[idx], torch.Tensor):
+            cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
     return cloned_inputs
 
 
