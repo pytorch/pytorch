@@ -1,11 +1,11 @@
 import itertools
-from typing import List, Set
+from typing import List
 
 import sympy
 
 from .. import config
 from ..ir import Layout
-from ..utils import ceildiv, sympy_product, sympy_subs
+from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton_overrides import TritonOverrides
@@ -182,68 +182,6 @@ class ForeachKernel(Kernel):
                     )
 
             block_count += num_blocks
-
-    def _indexing(self, index: sympy.Expr):
-        """
-        Compute the index and mask to pass to tl.load() or tl.store()
-        """
-        index = self.simplify_indexing(index)
-
-        if len(index.atoms(sympy.ceiling)):
-            for a in index.atoms(sympy.ceiling):
-                # for nested exprs, atoms yields top level first (?)
-                # so if everything goes fine, lower level replacements will come up empty
-                symbols = a.free_symbols
-                if len(symbols) > 0 and all(
-                    s.name.startswith("s") or s.name.startswith("ps") for s in symbols
-                ):
-                    replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
-                    index = sympy_subs(index, replacements)
-
-        index_vars = index.free_symbols
-        index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
-
-        mask_vars: Set[str] = set()
-        for var in index_vars:
-            if var.name.startswith("tmp"):
-                # indirect indexing
-                cse_var = self.cse.varname_map[var.name]
-                mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps")):
-                pass
-            else:
-                # var is one of xN, yN or rN
-                assert var.name[0] in "xyr", var.name
-                mask_vars.add(f"{var.name[0]}mask")
-
-        need_dense = (
-            config.triton.dense_indexing or self._load_mask is not None
-        ) and index != 0
-
-        have_dense = True
-        dense_mask_vars = set()
-
-        for tree in self.range_trees:
-            if tree.prefix == "r" and not self.inside_reduction:
-                continue
-            if index_vars.intersection(tree.var_list):
-                have_loop_vars = True
-                have_dense = False
-            dense_mask_vars.add(f"{tree.prefix}mask")
-
-        expand_str = None
-
-        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
-            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            expand_str = self.dense_size_str()
-            if isinstance(index, sympy.Integer):
-                return index_str, set(), "None", expand_str
-            else:
-                mask_vars = dense_mask_vars
-
-        self.filter_masks(mask_vars)
-        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return index_str, mask_vars, mask_str, expand_str
 
     def jit_line(self):
         _, _, signature = self.args.python_argdefs()
