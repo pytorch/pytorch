@@ -146,7 +146,7 @@ inline at::Tensor construct_offsets(const at::Tensor& sizes) {
   }
   int64_t ntensors = sizes.size(0), orig_dim = sizes.size(1);
   auto offsets = at::empty({ntensors}, sizes.options());
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t *offsets_ptr = offsets.mutable_data_ptr<int64_t>();
   // nesting scalars has easy offsets
   if (orig_dim == 0) {
     std::iota(offsets_ptr, offsets_ptr + ntensors, 0);
@@ -292,18 +292,18 @@ bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 
 c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
 }
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
 }
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {

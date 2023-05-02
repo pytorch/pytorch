@@ -82,10 +82,7 @@ class FlakyRule:
             and self.name in job.get("name", "")
             and job.get("failure_captures") is not None
             and all(
-                [
-                    capture in job.get("failure_captures", [])
-                    for capture in self.captures
-                ]
+                capture in job.get("failure_captures", []) for capture in self.captures
             )
         )
 
@@ -239,6 +236,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -346,6 +344,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -436,7 +435,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
-REMOTE_MAIN_BRANCH = "origin/master"
+REMOTE_MAIN_BRANCH = "origin/main"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -636,7 +635,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
         if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
-                + f"branch {orig_ref} that would be merged into master.  "
+                + f"branch {orig_ref} that would be merged into main.  "
                 + "This usually happens because there is a non ghstack change in the PR.  "
                 + f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
@@ -946,6 +945,7 @@ class GitHubPR:
             author_association=node["authorAssociation"],
             editor_login=editor["login"] if editor else None,
             database_id=node["databaseId"],
+            url=node["url"],
         )
 
     def get_comments(self) -> List[GitHubComment]:
@@ -1575,7 +1575,7 @@ def get_classifications(
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
             )
-        elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
+        elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id
             )
@@ -1649,7 +1649,12 @@ def try_revert(
     except PostCommentError as e:
         return post_comment(str(e))
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    revert_msg += f" due to {reason}\n" if reason is not None else "\n"
+    revert_msg += f" due to {reason}" if reason is not None else ""
+    revert_msg += (
+        f" ([comment]({pr.get_comment_by_id(comment_id).url}))\n"
+        if comment_id is not None
+        else "\n"
+    )
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
@@ -1710,11 +1715,11 @@ def categorize_checks(
     relevant_checknames = [
         name
         for name in check_runs.keys()
-        if not required_checks or any([x in name for x in required_checks])
+        if not required_checks or any(x in name for x in required_checks)
     ]
 
     for checkname in required_checks:
-        if all([checkname not in x for x in check_runs.keys()]):
+        if all(checkname not in x for x in check_runs.keys()):
             pending_checks.append((checkname, None, None))
 
     for checkname in relevant_checknames:
