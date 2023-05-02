@@ -25,12 +25,7 @@ def install_config_module(module):
                 continue
 
             name = f"{prefix}{key}"
-            if isinstance(value, property) and dest is module:
-                # make @property work at the module level
-                delattr(module, key)
-                setattr(ConfigModuleInstance, key, value)
-                ConfigModuleInstance._bypass_keys.add(key)
-            elif isinstance(value, CONFIG_TYPES):
+            if isinstance(value, CONFIG_TYPES):
                 config[name] = value
                 if dest is module:
                     delattr(module, key)
