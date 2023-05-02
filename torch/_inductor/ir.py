@@ -346,7 +346,9 @@ class Loops(IRNode):
         return [
             # Carry forward "is_integer" status from the symbol. For nested tensor sizes,
             # the relevant symbol has is_integer=False to indicate a ragged dim.
-            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}", integer=s.is_integer)
+            sympy.Integer(0)
+            if s == 1
+            else sympy_symbol(f"{prefix}{n}", integer=s.is_integer)
             for n, s in enumerate(ranges)
         ]
 

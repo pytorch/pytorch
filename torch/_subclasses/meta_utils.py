@@ -272,9 +272,12 @@ class MetaConverter:
                     ), "Dynamic shapes must be enabled for nested tensors"
                     is_leaf = safe_is_leaf(t)
 
-                    from torch.nested._nested_tensor import NestedTensor
+                    from torch._dynamo.source import (
+                        TensorProperty,
+                        TensorPropertySource,
+                    )
                     from torch.fx.experimental.symbolic_shapes import constrain_range
-                    from torch._dynamo.source import TensorPropertySource, TensorProperty
+                    from torch.nested._nested_tensor import NestedTensor
 
                     buffer_size = shape_env.create_unbacked_symint()
                     constrain_range(buffer_size, min=2, max=sys.maxsize - 1)
@@ -293,9 +296,12 @@ class MetaConverter:
                         sym_sizes.append(
                             shape_env.create_symintnode(
                                 shape_env.create_symbol(
-                                    size, TensorPropertySource(source, TensorProperty.SIZE, i)
+                                    size,
+                                    TensorPropertySource(
+                                        source, TensorProperty.SIZE, i
+                                    ),
                                 ),
-                                hint=size
+                                hint=size,
                             )
                         )
 

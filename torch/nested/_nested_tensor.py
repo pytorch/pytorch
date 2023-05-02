@@ -1,13 +1,8 @@
-import unittest
-
 import torch
 from torch import Tensor, SymInt
-from torch.autograd import Function
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import tree_map
 from typing import List, Union
-from functools import reduce
-import operator
 
 # Python tensor subclass version of NT.
 # Properties:
@@ -29,7 +24,7 @@ class NestedTensor(Tensor):
         self.total_dim = len(self.sizes)
 
     @classmethod
-    def _sizes_from_shape_list(self, shape_list: Union[Tensor, List[torch.Size]]):
+    def _sizes_from_shape_list(cls, shape_list: Union[Tensor, List[torch.Size]]):
         # Produces a O(dim) size description from either a Tensor or list of shapes
         if isinstance(shape_list, Tensor):
             # Convert Tensor -> list of shapes
@@ -91,7 +86,7 @@ class NestedTensor(Tensor):
         def _calc_contiguous_strides(sizes):
             strides = []
             curr = 1
-            for i in range(len(sizes)-1, -1, -1):
+            for i in range(len(sizes) - 1, -1, -1):
                 strides.append(curr)
                 curr *= sizes[i]
             return strides[::-1]
@@ -117,7 +112,7 @@ class NestedTensor(Tensor):
         for i in range(self.n_tensors):
             tensor_size = self._component_size(i)
             numel = tensor_size.numel()
-            output.append(self.buffer[offset:offset+numel].view(tensor_size))
+            output.append(self.buffer[offset:offset + numel].view(tensor_size))
             offset += numel
         return output
 
@@ -127,13 +122,13 @@ class NestedTensor(Tensor):
 
         if output_size is None:
             output_size = [self.n_tensors]
-            for i in range(self.total_dim-1):
+            for i in range(self.total_dim - 1):
                 output_size.append(max([self._component_size(j)[i] for j in range(self.n_tensors)]))
 
         padded = self.buffer.new_empty(output_size).fill_(padding)
         for i, component in enumerate(self.unbind()):
             padded[i][tuple(slice(None, component.shape[j])
-                       for j in range(self.total_dim-1))].copy_(component)
+                            for j in range(self.total_dim - 1))].copy_(component)
 
         return padded
 
@@ -188,7 +183,7 @@ class BinaryTest(TestCase):
         native_nt = torch.nested.as_nested_tensor([a, b])
         dispatch_nt = NestedTensor.from_tensor_list([a, b])
         result_native = native_nt + native_nt
-        result_dispatch = dispatch_nt+ dispatch_nt
+        result_dispatch = dispatch_nt + dispatch_nt
         for native, dispatch in zip(result_native.unbind(), result_dispatch.unbind()):
             self.assertEqual(native, dispatch)
 

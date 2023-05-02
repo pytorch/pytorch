@@ -810,6 +810,7 @@ def should_allow_numbers_as_tensors(func: OpOverload):
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", False)
 
+
 # Hack to make isinstance(x, FakeTensor) return True when x is a fake-ified NestedTensor.
 # A NestedTensor that has been fake-ified simply has a fake buffer.
 class FakeTensorMeta(torch._C._TensorMeta):
@@ -820,6 +821,7 @@ class FakeTensorMeta(torch._C._TensorMeta):
             return isinstance(instance.buffer, self)
 
         return super().__instancecheck__(instance)
+
 
 class FakeTensor(torch.Tensor, metaclass=FakeTensorMeta):
     """
