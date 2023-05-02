@@ -516,7 +516,9 @@ class TraceTrainStepTest(DTensorTestBase):
             def __init__(self, outer):
                 self.outer = outer
 
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+            def replacement(
+                self, orig_submodule: torch.nn.Module, fqn: str
+            ) -> torch.nn.Module:
                 return orig_submodule
 
             def transform(
@@ -577,7 +579,9 @@ class TraceTrainStepTest(DTensorTestBase):
         transform_targets = []
 
         class DDMOverride(Override):
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+            def replacement(
+                self, orig_submodule: torch.nn.Module, fqn: str
+            ) -> torch.nn.Module:
                 return DummyDDM()
 
             def transform(
@@ -630,6 +634,76 @@ class TraceTrainStepTest(DTensorTestBase):
     @with_comms
     def test_module_fqn_override(self):
         self._test_train_step_override(module_override_key="ddm")
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_multi_fqn_override(self):
+        transform_targets = []
+
+        class DDMOverride(Override):
+            def replacement(
+                self, orig_submodule: torch.nn.Module, fqn: str
+            ) -> torch.nn.Module:
+                if fqn in ["ddm1", "ddm2"]:
+                    return DummyDDM()
+
+            def transform(
+                self,
+                gm: fx.GraphModule,
+                flat_state: List[torch.Tensor],
+            ) -> fx.Graph:
+                nonlocal transform_targets
+                for node in gm.graph.nodes:
+                    if node.target in [
+                        torch.ops.dummy.ddm.default,
+                        torch.ops.dummy.ddm_backward.default,
+                    ]:
+                        transform_targets.append(node.target)
+                        # N.B.: this is not a complete subgraph representing
+                        # original logic, as we are testing the ability to
+                        # modify graph after DTensor expansion.
+                        with gm.graph.inserting_before(node):
+                            new_node = gm.graph.call_function(torch.add, args=node.args)
+                        node.replace_all_uses_with(new_node)
+
+                gm.graph.eliminate_dead_code()
+
+                return gm
+
+        class MultiDDM(nn.Module):
+            def __init__(self, world_size):
+                super().__init__()
+                self.l1 = nn.Linear(10, 10)
+                self.ddm1 = DataDependentModule(world_size)
+                self.l2 = nn.Linear(10, 10)
+                self.ddm2 = DataDependentModule(world_size)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                assert len(x.size()) == 2
+
+                return self.relu(self.ddm2(self.l2(self.ddm1(self.l1(x)))))
+
+        @compile(module_override={DataDependentModule: DDMOverride()})
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = MultiDDM(self.world_size).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
+        inp = torch.randn(4, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+
+        # checking transforms are indeed invoked.
+        self.assertEqual(
+            transform_targets,
+            [
+                torch.ops.dummy.ddm.default,
+                torch.ops.dummy.ddm.default,
+                torch.ops.dummy.ddm_backward.default,
+                torch.ops.dummy.ddm_backward.default,
+            ],
+        )
 
     @skip_if_lt_x_gpu(2)
     @with_comms
