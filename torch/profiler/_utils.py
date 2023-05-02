@@ -350,6 +350,6 @@ def source_code_location(event):
 # Provide an OSS workaround for cudagraphs + CUPTI issue
 # https://github.com/pytorch/pytorch/issues/75504
 def _init_for_cuda_graphs():
-    from torch.profiler.profiler import profile
+    from torch.autograd.profiler import profile
     with profile():
         pass
