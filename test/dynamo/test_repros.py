@@ -2987,10 +2987,39 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
 
+    def test_optim_state_references_cleared(self):
+        model = torch.nn.Linear(2048, 2048, bias=False)
+        x = torch.ones(2048)
+        state_ref = 0
+
+        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
+
+        def opt_step():
+            optimizer.step()
+
+        compiled_opt_step = torch._dynamo.optimize("eager")(opt_step)
+
+        def compiled_model_step(x):
+            optimizer.zero_grad()
+            y = model(x)
+            torch.sum(y).backward()
+            compiled_opt_step()
+
+        compiled_model_step(x)
+
+        # Picked "square_avg" arbitrarily to check that
+        # optimizer state tensors are deallocated
+        state_ref = weakref.ref(
+            optimizer.state[optimizer.param_groups[0]["params"][0]]["square_avg"]
+        )
+        optimizer = None
+
+        self.assertIsNone(state_ref())
+
     def test_grad_references_cleared(self):
         model = torch.nn.Linear(2048, 2048, bias=False)
         x = torch.ones(2048)
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
 
         def opt_step():
             optimizer.step()
