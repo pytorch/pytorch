@@ -50,6 +50,17 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_cuda_accuracy_error(self):
         self._test_after_aot("cuda", "AccuracyError")
 
+    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_constant_in_graph(self):
+        run_code = """\
+@torch.compile()
+def inner(x):
+    return torch.tensor(2) + torch.relu(x)
+
+inner(torch.randn(2))
+"""
+        self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
+
 
 if __name__ == "__main__":
     import sys
