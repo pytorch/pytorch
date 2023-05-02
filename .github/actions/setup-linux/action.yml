@@ -68,7 +68,7 @@ runs:
         # TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400,
         # cleaning this up once the issue is fixed. There are more than one resolved IP here, the last
         # one is returned at random
-        RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}"  | tail -n1)
+        RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}" | tail -n1)
 
         if [ -z "${RESOLVED_IP}" ]; then
           echo "Couldn't resolve ${PT_DOMAIN}, exiting..."
