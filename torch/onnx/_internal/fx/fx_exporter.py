@@ -133,7 +133,13 @@ class RemoveNonTensorInputStep:
     """Remove the non-tensor input arguments.
 
     Dynamo does not support non-tensor input arguments (https://github.com/pytorch/pytorch/issues/99534).
-    But it does put the input into graph with an empty node, and consumed by no ones.
+
+    Specifically, it does put the input into graph with an empty node, but consumed by no ones.
+    The concrete value is embedded into the graph as a constant arg of a target node. Meta
+    suggests in this case that one should rewrite the model code to make it tensor if the
+    input value is supposed to change at runtime. We might need to further investigate
+    the feasibility of that suggestion.
+
     For example,
 
         def func(x, b=1.0):
