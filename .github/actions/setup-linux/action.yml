@@ -78,7 +78,7 @@ runs:
         if grep -r "${PT_DOMAIN}" /etc/hosts; then
           # Clean up any old records first
           sudo sed -i "/${PT_DOMAIN}/d" /etc/hosts
-          echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
         fi
 
+        echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
         host "${PT_DOMAIN}"
