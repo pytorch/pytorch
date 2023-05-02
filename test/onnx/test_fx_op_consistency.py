@@ -100,6 +100,12 @@ TESTED_OPS: frozenset[str] = frozenset(
         "exp2",
         "expand",
         "expand_as",
+        "fill",
+        "flip",
+        "floor",
+        "fmod",
+        "full",
+        "full_like",
         "nn.functional.adaptive_avg_pool1d",
         "nn.functional.adaptive_avg_pool2d",
         "nn.functional.adaptive_avg_pool3d",
@@ -436,6 +442,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int"),
     ),
     xfail(
+        "floor",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Floor", "bool, int"),
+    ),
+    xfail(
+        "full_like",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + (torch.float16, torch.float64,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int and float16, float64"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool1d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
     ),
@@ -451,8 +467,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.dropout",
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
     ),
-    xfail(
-        "nn.functional.elu",
+    skip(
+        "nn.functional.elu",  # SegFault when ORT < 1.15
         dtypes=(torch.float64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Elu", "float64"),
     ),
@@ -460,7 +476,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.embedding",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
     ),
-    skip(
+    xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
