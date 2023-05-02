@@ -2503,10 +2503,12 @@ def run(runner, args, original_dir=None):
             if args.progress:
                 print(f"Running model {i+1}/{nmodels}", flush=True)
 
-            def write_csv():
+            def write_csv(status):
                 for device in args.devices:
                     output_csv(
-                        output_filename, [], [device, name, placeholder_batch_size, 0.0]
+                        output_filename,
+                        ["dev", "name", "batch_size", "accuracy"],
+                        [device, name, placeholder_batch_size, status],
                     )
 
             try:
@@ -2518,10 +2520,10 @@ def run(runner, args, original_dir=None):
                 )
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
-                write_csv()
+                write_csv("timeout")
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
-                write_csv()
+                write_csv("infra_error")
         print_summary(output_filename)
 
 
