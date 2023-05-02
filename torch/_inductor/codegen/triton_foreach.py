@@ -1,4 +1,3 @@
-import collections
 import functools
 import itertools
 from typing import List, NamedTuple, Set
