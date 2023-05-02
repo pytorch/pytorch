@@ -9,7 +9,8 @@ set -ex
 echo "Environment variables:"
 env
 
-# Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400
+# TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400.
+# Cleaning this up once the issue is fixed
 sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
 sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
 
