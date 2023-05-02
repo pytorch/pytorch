@@ -11,6 +11,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
 #include <utility>

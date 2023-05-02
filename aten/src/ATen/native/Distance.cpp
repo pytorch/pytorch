@@ -4,7 +4,10 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
