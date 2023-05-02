@@ -129,10 +129,10 @@ class RemoveNoneInputStep:
         return tuple(arg for arg in model_args if arg is not None), {}
 
 
-class RemoveConstantInputStep:
-    """Remove the constant input arguments.
+class RemoveNonTensorInputStep:
+    """Remove the non-tensor input arguments.
 
-    Dynamo does not support constant input arguments (https://github.com/pytorch/pytorch/issues/99534).
+    Dynamo does not support non-tensor input arguments (https://github.com/pytorch/pytorch/issues/99534).
     But it does put the input into graph with an empty node, and consumed by no ones.
     For example,
 
@@ -154,8 +154,8 @@ class RemoveConstantInputStep:
         #         relu_default: f32[1, 1, 2] = torch.ops.aten.relu.default(add_tensor)
         #         return pytree.tree_unflatten([add_tensor, relu_default], self._out_spec)
 
-    ONNX graph deletes None input leading to a mismatched number of input with PyTorch.
-    Thus,we delete the useless input here.
+    Empty torch.fx.Node input leading to a mismatched number of input with PyTorch, as
+    it's ignored in ONNX graph. Thus, we delete the useless input here.
 
     """
 
