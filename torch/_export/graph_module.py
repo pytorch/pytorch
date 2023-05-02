@@ -6,6 +6,7 @@ import warnings
 
 import torch
 import torch.fx as fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -91,11 +92,16 @@ def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
     """
 
     def str_to_op(str_op: str):
-        # For HigherOrderOperators
-        if str_op.startswith("torch.ops."):
-            return getattr(torch.ops, str_op[len("torch.ops.") :])
+        if not isinstance(str_op, str):
+            return str_op
+
+        # Some source_fn values are just a string
+        if not str_op.startswith("torch.ops."):
+            return str_op
+
+        # Get the torch op
         target = None
-        for name in str_op.split("."):
+        for name in str_op.split(".")[2:]:
             target = (
                 getattr(torch.ops, name) if target is None else getattr(target, name)
             )
@@ -105,7 +111,7 @@ def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
 
     # Get the target ops since we serialized the targets with just their name
     graph = body["_graph"]
-    fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True)
+    fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=body["_shape_env"])
     for node in graph.nodes:
 
         # Given the name of an operation, find the actual Op object
@@ -199,19 +205,22 @@ class ExportGraphModuleMixin:
         """
 
         def op_to_str(op):
-            # Replace the targets with their names since we cannot serialize the ops
-            if isinstance(op, torch._ops.HigherOrderOperator):
-                return f"torch.ops.{op.__name__}"
-            elif "torch" in op.__module__:
-                return str(op)
-            else:
-                warnings.warn(f"Could not convert op {op} to str")
-                return ""
+            try:
+                pickle.dumps(op)
+            except TypeError as e:
+                if isinstance(op, torch._ops.HigherOrderOperator):
+                    return f"torch.ops.{op.__name__}"
+                if "torch" in op.__module__:
+                    return f"torch.ops.{str(op)}"
+                else:
+                    raise pickle.PickleError(f"Unable to pickle op {op}")
+            return op
 
         gm_dict = self.__dict__.copy()
         gm_dict["_graphmodule_cls_name"] = self.__class__.__name__
 
         graph = copy.deepcopy(gm_dict["_graph"])
+        shape_env = None
         for node in graph.nodes:
             # Replace the ops with their names since we cannot serialize the ops
             if node.op == "call_function":
@@ -225,7 +234,28 @@ class ExportGraphModuleMixin:
 
             # Replace the faketensor metadata with the tensor metadata dataclass
             # since we cannot serialize faketensors
+            def get_shape_env(val) -> Optional[ShapeEnv]:
+                val_flat, _ = pytree.tree_flatten(val)
+                shape_env = None
+                for v in val_flat:
+                    if not isinstance(v, FakeTensor):
+                        continue
+                    if shape_env is None:
+                        shape_env = v.fake_mode.shape_env
+                    else:
+                        assert (
+                            shape_env is v.fake_mode.shape_env
+                        ), "Multiple shape envs detected."
+                return shape_env
+
             if (val := node.meta.get("val", None)) is not None:
+                if shape_env is None:
+                    shape_env = get_shape_env(val)
+                elif (new_shape_env := get_shape_env(val)) is not None:
+                    assert (
+                        shape_env is new_shape_env
+                    ), "Multiple shape envs detected."
+
                 node.meta["val"] = pytree.tree_map_only(
                     torch.Tensor, _extract_tensor_meta, val
                 )
@@ -235,7 +265,7 @@ class ExportGraphModuleMixin:
             for key, val in node.meta.items():
                 try:
                     pickle.dumps(val)
-                except Exception:
+                except (pickle.PickleError, TypeError):
                     warnings.warn(
                         f"Cannot pickle node {node}'s metadata {key} with value {val}."
                     )
@@ -245,6 +275,7 @@ class ExportGraphModuleMixin:
                 del node.meta[key]
 
         gm_dict["_graph"] = graph
+        gm_dict["_shape_env"] = shape_env
         pickled_state = pickle.dumps(gm_dict)
 
         return (reduce_graph_module, (pickled_state,))
