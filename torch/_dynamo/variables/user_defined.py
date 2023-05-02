@@ -346,6 +346,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif callable(self.value):
+            return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
