@@ -8,6 +8,7 @@ import sympy
 import torch.utils._pytree as pytree
 import torch
 import torch.fx
+from torch.fx.passes.infra.pass_base import PassResult
 from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.graph_module import get_export_meta
 from torch._export.pass_infra.node_metadata import NodeMetadata
@@ -22,7 +23,7 @@ ConstraintSpec = namedtuple("ConstraintSpec", ["constraint_dim", "min_val", "max
 class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(self) -> None:
         super().__init__()
-        self.current_gm = None
+        self.current_gm: Optional[torch.fx.GraphModule] = None
 
     def _process_constraints(self, constraints) -> Dict[int, List[ConstraintSpec]]:
         constraints_id_to_constraint: Dict[int, List[ConstraintSpec]] = defaultdict(
@@ -68,10 +69,11 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
 
         return constraints_id_to_constraint
 
-    def call(self, graph_module: torch.fx.GraphModule) -> None:
+    def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         # resets the counter
         self.input_tracker = 0
         self.current_gm = graph_module
+        assert isinstance(self.current_gm, torch.fx.GraphModule)
         self.constraints = self._process_constraints(get_export_meta(self.current_gm).input_shape_constraints)
         self.example_inputs = pytree.tree_flatten(get_export_meta(self.current_gm).example_inputs)[0]
         return super().call(graph_module)
