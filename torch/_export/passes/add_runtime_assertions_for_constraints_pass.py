@@ -1,5 +1,5 @@
 from collections import defaultdict, namedtuple
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import math
 import operator
@@ -23,17 +23,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(self) -> None:
         super().__init__()
         self.current_gm = None
-
-    def _create_dummy_node_metadata(self, fake_mode, example_value: Optional[torch.Tensor] = None) -> NodeMetadata:
-        val = example_value if example_value is not None else torch.empty(0)
-        assert isinstance(val, torch.Tensor)
-
-        dummy_meta_dict = {}
-        dummy_meta_dict["val"] = fake_mode.from_tensor(val)
-        dummy_meta_dict["stack_trace"] = ""
-        dummy_meta_dict["nn_module_stack"] = {}
-        dummy_meta_dict["debug_handle"] = ""
-        return NodeMetadata(dummy_meta_dict)
 
     def _process_constraints(self, constraints) -> Dict[int, List[ConstraintSpec]]:
         constraints_id_to_constraint: Dict[int, List[ConstraintSpec]] = defaultdict(
@@ -87,8 +76,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.example_inputs = pytree.tree_flatten(get_export_meta(self.current_gm).example_inputs)[0]
         return super().call(graph_module)
 
-    def _insert_specialized_shapes_assert(self, arg, dims, meta, current_inp):
-        current_fake_mode = meta["val"].fake_mode
+    def _insert_specialized_shapes_assert(self, arg, dims, current_inp):
         # we don't want to get shapes from meta as they will be symbolic
         shapes = current_inp.shape
         for dim in dims:
@@ -96,37 +84,29 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 f"Input #{self.input_tracker}'s dimension #{dim} size is "
                 f"specialized at {shapes[dim]}"
             )
-            dim_node = self._fx(
-                "call_function",
+            dim_node = self.call_operator(
                 torch.ops.aten.sym_size,
                 (arg, dim),
                 {},
-                self._create_dummy_node_metadata(current_fake_mode),
-                self.interpreter,
+                NodeMetadata({}),
             )
-            eq = self._fx(
-                "call_function",
+            eq = self.call_operator(
                 operator.eq,
                 (dim_node, shapes[dim]),
                 {},
-                self._create_dummy_node_metadata(current_fake_mode),
-                self.interpreter,
+                NodeMetadata({}),
             )
-            tensor_eq = self._fx(
-                "call_function",
+            tensor_eq = self.call_operator(
                 torch.ops.aten.scalar_tensor.default,
                 (eq,),
                 {},
-                self._create_dummy_node_metadata(current_fake_mode, torch.tensor(1)),
-                self.interpreter,
+                NodeMetadata({}),
             )
-            self._fx(
-                "call_function",
+            self.call_operator(
                 torch.ops.aten._assert_async.msg,
                 (tensor_eq, assert_msg),
                 {},
-                self._create_dummy_node_metadata(current_fake_mode),
-                self.interpreter,
+                NodeMetadata({}),
             )
 
     def placeholder(self, name: str, arg, meta) -> ProxyValue:
@@ -138,7 +118,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
 
         # If no dynamism is specified, we assume all dimensions are specialized
         if id(current_inp) not in self.constraints:
-            self._insert_specialized_shapes_assert(arg, all_dims, meta, current_inp)
+            self._insert_specialized_shapes_assert(arg, all_dims, current_inp)
             self.input_tracker += 1
             return arg
 
@@ -150,13 +130,11 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         # x[1] == x[0])
         for constraint in constraints:
             constrained_dims.add(constraint.constraint_dim)
-            dim = self._fx(
-                "call_function",
+            dim = self.call_operator(
                 torch.ops.aten.sym_size,
                 (arg, constraint.constraint_dim),
                 {},
-                self._create_dummy_node_metadata(current_fake_mode),
-                self.interpreter,
+                NodeMetadata({}),
             )
             assert_msg = (
                 f"Input #{self.input_tracker}'s dimension #{constraint.constraint_dim} size is "
@@ -164,60 +142,48 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             )
 
             if constraint.min_val > 2:
-                ge = self._fx(
-                    "call_function",
+                ge = self.call_operator(
                     operator.ge,
                     (dim, constraint.min_val),
                     {},
-                    self._create_dummy_node_metadata(current_fake_mode),
-                    self.interpreter,
+                    NodeMetadata({}),
                 )
-                tensor_ge = self._fx(
-                    "call_function",
+                tensor_ge = self.call_operator(
                     torch.ops.aten.scalar_tensor.default,
                     (ge,),
                     {},
-                    self._create_dummy_node_metadata(current_fake_mode, torch.tensor(1)),
-                    self.interpreter,
+                    NodeMetadata({}),
                 )
-                self._fx(
-                    "call_function",
+                self.call_operator(
                     torch.ops.aten._assert_async.msg,
                     (tensor_ge, assert_msg),
                     {},
-                    self._create_dummy_node_metadata(current_fake_mode),
-                    self.interpreter,
+                    NodeMetadata({}),
                 )
 
             if constraint.max_val < math.inf:
-                le = self._fx(
-                    "call_function",
+                le = self.call_operator(
                     operator.le,
                     (dim, constraint.max_val),
                     {},
-                    self._create_dummy_node_metadata(current_fake_mode),
-                    self.interpreter,
+                    NodeMetadata({}),
                 )
-                tensor_le = self._fx(
-                    "call_function",
+                tensor_le = self.call_operator(
                     torch.ops.aten.scalar_tensor.default,
                     (le,),
                     {},
-                    self._create_dummy_node_metadata(current_fake_mode, torch.tensor(1)),
-                    self.interpreter
+                    NodeMetadata({}),
                 )
-                self._fx(
-                    "call_function",
+                self.call_operator(
                     torch.ops.aten._assert_async.msg,
                     (tensor_le, assert_msg),
                     {},
-                    self._create_dummy_node_metadata(current_fake_mode),
-                    self.interpreter,
+                    NodeMetadata({}),
                 )
 
         specialized_dims = all_dims - constrained_dims
         # Make all non-constrained dims to be static
-        self._insert_specialized_shapes_assert(arg, specialized_dims, meta, current_inp)
+        self._insert_specialized_shapes_assert(arg, specialized_dims, current_inp)
 
         # TODO Add relational constraints
         self.input_tracker += 1
