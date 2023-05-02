@@ -19432,6 +19432,16 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
         )
     ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs._conversions.polar",
+        torch_opinfo_name="polar",
+        # prims.empty_strided.default does not support nvfuser
+        supports_nvfuser=False,
+        skips=(
+            # Test doesn't account for complex's type promotion semantics
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.double",
         torch_opinfo_name="double",
