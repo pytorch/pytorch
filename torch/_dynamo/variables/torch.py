@@ -795,6 +795,81 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
+def is_fn_safe_to_run(tx, f, sub_args):
+    # Snapshot state
+    graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
+    # Will raise if not sound
+    output, graph, lifted_freevars = speculate_subgraph(tx, f, sub_args, graph_checkpoint, checkpoint, always_restore=True)
+    # If we got here, we are probably sound, but we do not support freevars yet, so lets call cases where we found them
+    # unsafe.
+    if lifted_freevars:
+        return False
+    return True
+
+# See NOTE [HigherOrderOperator tracing design] for details of the design
+# See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
+def speculate_subgraph(tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False):
+    from . import (
+        ConstantVariable,
+        TensorVariable,
+        AutogradFunctionContextVariable,
+    )
+    try:
+        with tx.output.new_subtracer() as tracer:
+            args = []
+            # One argument to graph per sub_args
+            for a in sub_args:
+                assert not isinstance(
+                    a, torch.Tensor
+                ), "Tensors should already be tracked?"
+                if isinstance(a, ConstantVariable):
+                    proxy = tracer.create_graph_input("const")
+                elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
+                    tracer.create_graph_input(a.as_proxy().node.name)
+                else:
+                    raise unimplemented("HigherOrderOperator with body that accepts non-Tensors as input")
+                args.append(a)
+            output = f.call_function(tx, args, {})
+            # Register output to graph
+            # Modeled off of compile_and_call_fx_graph
+            # TODO: support non single Tensor output
+            # We check always_restore because we dont use the output or side effects of always_restore code,
+            # like bwd.
+            if not isinstance(output, TensorVariable) and not always_restore:
+                unimplemented(
+                    "HigherOrderOperator with body with non single Tensor output"
+                )
+
+            if always_restore:
+                # Nothing left to do here
+                return output, tx.output.graph, tracer.lifted_freevars
+
+            tx.output.guards.update(output.guards)
+            tx.output.create_node(
+                "output",
+                "output",
+                (tracer.create_arg((output.as_proxy(),))),
+                {},
+            )
+
+            graph = tx.output.graph
+            lifted_freevars = tracer.lifted_freevars
+
+            if always_restore:
+                tx.output.graph = graph_checkpoint
+                tx.restore_graphstate(checkpoint)
+
+            return (
+                output,
+                graph,
+                lifted_freevars,
+            )
+
+    except torch._dynamo.exc.Unsupported as ex:
+        tx.output.graph = graph_checkpoint
+        tx.restore_graphstate(checkpoint)
+        raise
+
 class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -946,57 +1021,6 @@ class TorchHigherOrderOperator(VariableTracker):
                 nn_modules,
                 comparable_state,
             )
-
-        # See NOTE [HigherOrderOperator tracing design] for details of the design
-        # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
-        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
-            try:
-                with tx.output.new_subtracer() as tracer:
-                    args = []
-                    # One argument to graph per sub_args
-                    for a in sub_args:
-                        assert not isinstance(
-                            a, torch.Tensor
-                        ), "Tensors should already be tracked?"
-                        if isinstance(a, ConstantVariable):
-                            proxy = tracer.create_graph_input("const")
-                            args.append(a)
-                        elif isinstance(a, TensorVariable):
-                            tracer.create_graph_input(a.as_proxy().node.name)
-                            args.append(a)
-                        else:
-                            raise unimplemented("HigherOrderOperator with body that accepts non-Tensors as input")
-                    output = f.call_function(tx, args, {})
-                    # breakpoint()
-                    # Register output to graph
-                    # Modeled off of compile_and_call_fx_graph
-                    # TODO: support non single Tensor output
-                    if not isinstance(output, TensorVariable):
-                        unimplemented(
-                            "HigherOrderOperator with body with non single Tensor output"
-                        )
-
-                    tx.output.guards.update(output.guards)
-                    tx.output.create_node(
-                        "output",
-                        "output",
-                        (tracer.create_arg((output.as_proxy(),))),
-                        {},
-                    )
-
-                    graph = tx.output.graph
-                    lifted_freevars = tracer.lifted_freevars
-
-                    return (
-                        output,
-                        graph,
-                        lifted_freevars,
-                    )
-
-            except torch._dynamo.exc.Unsupported as ex:
-                tx.output.graph = graph_checkpoint
-                tx.restore_graphstate(checkpoint)
-                raise
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -1219,6 +1243,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
+                tx,
                 args[0],
                 [
                     *args[1:],
@@ -1238,11 +1263,11 @@ class TorchHigherOrderOperator(VariableTracker):
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
-        elif self.value.__name__ == "trampoline_autograd_fn":
+        elif self.value.__name__ in ("trampoline_autograd_fwd", "trampoline_autograd_bwd", "trampoline_autograd_apply"):
+            always_restore = (self.value.__name__ == "trampoline_autograd_bwd")
             fn = TorchVariable(
                 self.value
             )
-
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
             (
@@ -1250,13 +1275,23 @@ class TorchHigherOrderOperator(VariableTracker):
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
+                tx,
                 fn,
                 [
                     *args,
                 ],
                 graph_checkpoint,
                 checkpoint,
+                # Backwards should never, ever be stored!
+                always_restore = always_restore
             )
+            if body_lifted_freevars:
+                unimplemented("NYI - freevars in autograd function.")
+
+            if always_restore:
+                # Nothing left to do here
+                return None
+
             p_args = (
                 *(arg.as_proxy() for arg in args),
                 *(arg for arg in body_lifted_freevars),

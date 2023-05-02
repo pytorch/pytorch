@@ -236,7 +236,11 @@ class SideEffects:
         variable_cls: Any,
         options,
     ):
-        if user_cls is torch.autograd.function.FunctionCtx:
+        from torch._dynamo.variables.misc import SaveSimulatingAutogradFunctionContext
+        
+        if user_cls is SaveSimulatingAutogradFunctionContext:
+            obj = SaveSimulatingAutogradFunctionContext()
+        elif user_cls is torch.autograd.function.FunctionCtx:
             obj = torch.autograd.Function()
         else:
             obj = object_new(user_cls)

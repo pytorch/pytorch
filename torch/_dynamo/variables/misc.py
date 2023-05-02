@@ -234,19 +234,40 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.apply(visit, (args, kwargs))
 
+        ctx = AutogradFunctionContextVariable.create(tx)
+        args = [ctx, *args]
+
         if requires_grad and torch.is_grad_enabled():
-            from .torch import TorchHigherOrderOperator
+            from .torch import TorchHigherOrderOperator, is_fn_safe_to_run
 
-            def trampoline_autograd_fn(*args, **kwargs):
+            def trampoline_autograd_apply(*args, **kwargs):
                 return self.fn_cls.apply(*args, **kwargs)
+            
+            def trampoline_autograd_fwd(*args, **kwargs):
+                return self.fn_cls.forward(*args, **kwargs)
 
-            # Speculate fwd
-            # TODO(voz): Check bwd soundness, or something, I dunno, bug Horace
-            # TODO(voz): NOTE: This is unguarded, but the odds of someone swapping self.fn_cls from autograd fn to something else
-            # is very low. We can add guarding before we ship this PR.
-            return TorchHigherOrderOperator(trampoline_autograd_fn).call_function(tx, args, kwargs)
+            def trampoline_autograd_bwd(*args, **kwargs):
+                return self.fn_cls.backward(*args, **kwargs)
 
-        args = [AutogradFunctionContextVariable.create_for_inference(tx), *args]
+            # Speculate fwd, will raise unimplemented and bubble up if not sound, or will accumulate guards
+            # onto tx if sound.
+            # TODO(voz): NOTE: This function identity is unguarded, but the odds of someone swapping self.fn_cls from 
+            # autograd fn to something else is very low.
+            higher_order_autograd_fn = TorchHigherOrderOperator(trampoline_autograd_fwd)
+            # breakpoint()
+            speculated_fwd_result = higher_order_autograd_fn.call_function(tx, args, kwargs)
+            # breakpoint()
+            # breakpoint()
+            bwd_args = [ctx, speculated_fwd_result]
+            # breakpoint()
+            # ctx.value.saved_tensors = ctx.value.to_save
+            if not is_fn_safe_to_run(tx, TorchHigherOrderOperator(trampoline_autograd_bwd), bwd_args):
+                unimplemented("Unsafe bwd in autograd.function")
+            
+            # If fwd and backward are sound, we want apply in the graph.
+            args = args[1:]
+            return TorchHigherOrderOperator(trampoline_autograd_apply).call_function(tx, args, kwargs)
+            
         options = VariableTracker.propagate(self, args, kwargs.values())
         options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
@@ -267,6 +288,14 @@ class AutogradFunctionVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
+class SaveSimulatingAutogradFunctionContext(torch.autograd.function.FunctionCtx):
+    def __init__(self):
+        super().__init__()
+        self.saved_tensors = []
+
+    def save_for_backward(self, *tensors: torch.Tensor):
+        super().save_for_backward(tensors)
+        self.saved_tensors.extend([*tensors])
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
@@ -278,13 +307,25 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.inference = inference
 
     @staticmethod
-    def create_for_inference(tx):
-        return tx.output.side_effects.track_object_new(
+    def create(tx):
+        out = tx.output.side_effects.track_object_new(
             None,
-            torch.autograd.function.FunctionCtx,
+            SaveSimulatingAutogradFunctionContext,
             functools.partial(AutogradFunctionContextVariable, inference=True),
             {},
         )
+        out.proxy = tx.output.create_proxy(
+            "call_function",
+            SaveSimulatingAutogradFunctionContext,
+            tuple(),
+            {}
+        )
+        out.proxy.node.meta['example_value'] = out.value
+        return out
+        
+
+    def as_proxy(self):
+        return self.proxy 
 
     def call_method(
         self,
@@ -304,8 +345,15 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             None, **VariableTracker.propagate(self, args, kwargs.values())
         )
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        breakpoint()
+        print("CAlling")
+
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
+            breakpoint()
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             ).add_options(self)

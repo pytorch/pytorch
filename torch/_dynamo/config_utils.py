@@ -27,6 +27,7 @@ def install_config_module(module):
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
                 config[name] = value
+                default[name] = value
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -39,13 +40,21 @@ def install_config_module(module):
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
     config = dict()
+    default = dict()
     visit(module, module, "")
     module._config = config
+    module._default = default
     module._allowed_keys = set(config.keys())
     module.__class__ = ConfigModuleInstance
 
 
 class ConfigModule(ModuleType):
+    # The default values of the configuration settings.  This can be used to
+    # determine if the config has been changed or not.
+    _default: Dict[str, Any]
+    # The actual configuration settings.  E.g., torch._dynamo.config.debug
+    # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
+    # maps as "triton.cudagraphs"
     _config: Dict[str, Any]
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
@@ -81,6 +90,20 @@ class ConfigModule(ModuleType):
         for key in config.get("_save_config_ignore", ()):
             config.pop(key)
         return pickle.dumps(config, protocol=2)
+
+    def codegen_config(self):
+        """Convert config to Python statements that replicate current config.
+        This does NOT include config settings that are at default values.
+        """
+        lines = []
+        mod = self.__name__
+        for k, v in self._config.items():
+            if k in self._config.get("_save_config_ignore", ()):
+                continue
+            if v == self._default[k]:
+                continue
+            lines.append(f"{mod}.{k} = {v!r}")
+        return "\n".join(lines)
 
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
