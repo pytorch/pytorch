@@ -928,7 +928,6 @@ def export(
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
-    new_graph.meta["example_inputs"] = example_inputs
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints

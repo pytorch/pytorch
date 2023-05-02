@@ -113,7 +113,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         arg = super().placeholder(name, arg, meta)
         assert self.current_gm is not None
         current_inp = self.example_inputs[self.input_tracker]
-        current_fake_mode = meta["val"].fake_mode
         all_dims = set(range(current_inp.dim()))
 
         # If no dynamism is specified, we assume all dimensions are specialized
@@ -141,6 +140,11 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 f"outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
             )
 
+            # TODO (tmanlaibaatar) we are making an assumption that graph generated for
+            # input dim N >=2 generalizes to N < 2. Ideally we should check that:
+            # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
+            # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
+            # Above can be achieved via a seperate pass.
             if constraint.min_val > 2:
                 ge = self.call_operator(
                     operator.ge,

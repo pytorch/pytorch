@@ -171,6 +171,47 @@ class TestPasses(TestCase):
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
 
+    def test_runtime_assert_some_inps_not_used(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return y.cos().sum()
+
+        x = torch.zeros(4, 2, 3)
+        y = torch.zeros(5, 5, 5)
+
+        constraints = [
+            dynamic_dim(y, 1) >= 3,
+            dynamic_dim(y, 1) <= 6,
+        ]
+
+        gm = _export(M(), (x, y), constraints=constraints)
+
+        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
+        self.assertTrue(pass_result.modified)
+
+        num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
+
+        # there are 4 asserts from y and 3 from x
+        self.assertEqual(num_assert, 7)
+        self.assertEqual(num_scalar_tensor, 7)
+
+        with self.assertRaisesRegex(RuntimeError, "Input #0"):
+            pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+
+        # y is specialized to 5
+        with self.assertRaisesRegex(RuntimeError, "Input #1's dimension #0 size is specialized at 5"):
+            pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+
+        # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
+        gm_result_for_1_size = pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
+        eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
+
+        self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
+
 
 if __name__ == '__main__':
     run_tests()

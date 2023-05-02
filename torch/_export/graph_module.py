@@ -112,8 +112,8 @@ def make_export_graph_module(
         out_spec=out_spec,
         update_spec=0,
         mutation=mutation if mutation else [],
-        input_shape_constraints=input_shape_constraints,
-        inline_constraints=inline_constraints,
+        input_shape_constraints=input_shape_constraints if input_shape_constraints is not None else [],
+        inline_constraints=inline_constraints if inline_constraints is not None else {},
         example_inputs=example_inputs,
     )
     attach_export_graph_metadata(gm, meta)
