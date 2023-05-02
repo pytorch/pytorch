@@ -85,3 +85,9 @@ def min_with_index(value, index, dim):
 @triton.jit
 def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
+
+
+@triton.jit
+def device_assert_then(cond, msg, r):
+    tl.device_assert(cond, msg)
+    return r
