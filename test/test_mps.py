@@ -751,10 +751,6 @@ def mps_ops_error_inputs_modifier(ops):
         'bernoulli',
         'clamp_max',
         'clamp_min',
-        'index_add',
-        'trace',
-        'nn.functional.max_pool2d',
-        'nn.functional.gelu',
         'masked_scatter',
 
         # unsupported float64 dtype
@@ -1492,6 +1488,22 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(linear, linear_mps)
 
+    def test_linear_bias(self):
+        def helper(bias_shape):
+            device = "cpu"
+            x = torch.randn(2, 2, 2, 64, device=device)
+            linear = torch.nn.Linear(64, 4, device=device)
+            linear.bias = torch.nn.Parameter(torch.randn(bias_shape, dtype=torch.float32, device=device))
+            y = linear(x)
+            device = "mps"
+            x_mps = x.to(device)
+            linear.to(device)
+            y_mps = linear(x_mps)
+            self.assertEqual(y, y_mps)
+
+        helper(())
+        helper((2, 4))
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
@@ -2000,9 +2012,19 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
 
     def test_batch_norm_backward(self):
-        inputs = torch.rand(1, 8, 4, 4, device='mps', requires_grad=True)
+        inputs = torch.rand(1, 8, 4, 4, device="mps", requires_grad=True)
         x = torch.nn.BatchNorm2d(8).to("mps")
         y = torch.nn.BatchNorm2d(8).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
+    def test_layer_norm_backward(self):
+        inputs = torch.rand(4, 4, device="mps", requires_grad=True)
+        x = torch.nn.LayerNorm(4).to("mps")
+        y = torch.nn.LayerNorm(4).to("mps")
         y.weight.requires_grad = False
         y.bias.requires_grad = False
         outputs = y(x(inputs))
@@ -6943,6 +6965,7 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 8, 4, 5), diag=-3)
 
     def test_lu_factor(self):
+        # TODO: Remove this test after at::lu_unpack is implemented in favor of OpInfo.
         def helper(shape):
             cpu_A = torch.randn(shape, device='cpu', dtype=torch.float32, requires_grad=True)
             A = cpu_A.detach().clone().to('mps').requires_grad_()

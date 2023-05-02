@@ -97,28 +97,24 @@ enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   using namespace mps;
 
+  TORCH_CHECK(pivot, "linalg_lu_factor(): MPS doesn't allow pivot == False.");
+
   Tensor A_t = A;
   uint64_t aRows = A_t.size(-2);
   uint64_t aCols = A_t.size(-1);
   uint64_t aElemSize = A_t.element_size();
   uint64_t numPivots = std::min(aRows, aCols);
-  resize_output(LU, A_t.sizes());
   std::vector<int64_t> pivot_sizes(A_t.sizes().begin(), A_t.sizes().end() - 2);
   pivot_sizes.push_back(numPivots);
   resize_output(pivots, pivot_sizes);
 
-  if (A_t.numel() == 0 || LU.numel() == 0) {
-    LU.zero_();
+  if (A_t.numel() == 0) {
     return;
   }
 
   Tensor A_ = A_t.dim() > 3 ? A_t.flatten(0, -3) : A_t;
-  if (!A_.is_contiguous()) {
-    A_ = A_.clone(at::MemoryFormat::Contiguous);
-  }
 
   uint64_t batchSize = A_.dim() > 2 ? A_.size(0) : 1;
-
   std::vector<Tensor> status_tensors;
   std::vector<Tensor> pivots_list;
 
@@ -129,11 +125,16 @@ void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tens
     pivots_list.push_back(at::zeros(numPivots, kInt, c10::nullopt, kMPS, c10::nullopt));
   }
 
-  // Since the LUDecomposition functions in-place if the result matrix completely aliases the source matrix,
-  // We copy LU from A as the new A if there is only one batch dim.
-  if (A_t.dim() <= 3) {
+  // Since the MPSMatrixDecompositionLU functions in-place if the result matrix completely aliases the source matrix,
+  // We copy LU from A as the new A.
+  resize_output(LU, A_.sizes());
+  if (!LU.is_same(A_)) {
     A_ = LU.copy_(A_);
+  } else {
+    A_ = LU;
   }
+
+  TORCH_INTERNAL_ASSERT(A_.is_contiguous())
 
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
 
@@ -183,7 +184,7 @@ void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tens
   });
   auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];
   if (A_t.dim() > 3) {
-    LU.copy_(A_.view(A_t.sizes()));
+    resize_output(LU, A_t.sizes());
     pivots.copy_(stacked_pivots.view(pivot_sizes));
   } else {
     pivots.copy_(stacked_pivots);
