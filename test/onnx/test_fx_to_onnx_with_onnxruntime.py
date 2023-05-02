@@ -18,8 +18,12 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
-from torch.onnx._internal.fx.fx_symbolic_exporter import FXSymbolicTraceExporter
+from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import (
+    context as fx_context,
+    fx_symbolic_graph_extractor,
+    serialization as fx_serialization,
+)
 from torch.testing._internal import common_utils
 
 try:
@@ -69,23 +73,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def setUp(self):
         super().setUp()
-        self.diag_ctx = diagnostics.engine.create_diagnostic_context(
-            "test_fx_export", version=torch.__version__
-        )
         self.opset_version = 18
         self.ort_version = onnxruntime.__version__
-
-    def tearDown(self):
-        # TODO(bowbao): Don't dump logs by default. Set as configurable with
-        # `DiagnosticOptions`.
-        diagnostics.engine.dump(
-            f"test_report_{self._testMethodName}"
-            f"_op_level_debug_{self.op_level_debug}"
-            f"_dynamic_axes_{self.dynamic_shapes}"
-            ".sarif",
-            compress=False,
-        )
-        super().tearDown()
 
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
@@ -248,7 +237,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
-                self.conv2 = nn.Conv2d(32, 64, 3, 2, bias=True)
+                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
                 self.fc1 = nn.Linear(9216, 128, bias=True)
                 self.fc2 = nn.Linear(128, 10, bias=True)
 
@@ -257,10 +246,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 tensor_x = self.conv2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
+                tensor_x = torch.max_pool2d(tensor_x, 2)
                 tensor_x = torch.flatten(tensor_x, 1)
                 tensor_x = self.fc1(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                output = self.fc2(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                output = torch.log_softmax(tensor_x, dim=1)
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
@@ -294,7 +285,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return self.m(x)
 
         input = torch.randn(2)
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(self, Model(), (input,))
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
     @pytorch_test_common.xfail(
         "RuntimeError: false INTERNAL ASSERT FAILED at "
@@ -364,12 +355,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[((input_x, input_y),)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code returned "
-        "while running Expand node. Name:'_0x55b501ebaf10_n2' "
-        "Status Message: invalid expand shape"
-        "https://github.com/pytorch/pytorch/issues/99360"
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -442,8 +427,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             Squeeze(), (d3, d4), additional_test_inputs=[((d1, d3),)]
         )
 
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "https://github.com/pytorch/pytorch/issues/99360"
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
@@ -575,9 +562,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         version="1.15",
         dynamic_only=True,
     )
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "Shapes are assumed static by default by 'dynamo.export'."
-    )
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -613,13 +597,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
-    )
-    @pytorch_test_common.skip_dynamic_fx_test(
-        "onnxruntime::ReshapeHelper::ReshapeHelper(const onnxruntime::TensorShape&, "
-        "onnxruntime::TensorShapeVector&, bool) size != 0 && "
-        "(input_shape.Size() % size) == 0 was false. The input tensor cannot be "
-        "reshaped to the requested shape. Input shape:{1,4}, requested shape:{-1,3}\n"
-        "fx graph captures static graph."
     )
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -679,7 +656,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ftm = fake_tensor.FakeTensorMode(
                 allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
-            ctx = fx_onnx.FxToOnnxContext()
+            ctx = fx_context.FxToOnnxContext()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
@@ -694,16 +671,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Export ONNX model without initializers while ctx.paths records
                 # all files that contains real initializers.
 
-                export_output = FXSymbolicTraceExporter(
-                    options=torch.onnx.ExportOptions(
-                        opset_version=self.opset_version,
-                        dynamic_shapes=self.dynamic_shapes,
-                        op_level_debug=self.op_level_debug,
-                    ),
-                    model=fake_model,
-                    model_args=fake_args,
-                    model_kwargs={},
-                ).export()
+                options = torch.onnx.ExportOptions(
+                    opset_version=self.opset_version,
+                    dynamic_shapes=self.dynamic_shapes,
+                    op_level_debug=self.op_level_debug,
+                )
+                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
+                    options
+                )
+                export_options.fx_tracer = (
+                    fx_symbolic_graph_extractor.FXSymbolicTracer()
+                )
+                export_output = torch.onnx.dynamo_export(
+                    fake_model,
+                    *fake_args,
+                    export_options=export_options,
+                )
 
                 onnx_model = export_output.model_proto
 
@@ -718,7 +701,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
             onnx_model_location = model_name + "_external_data.onnx"
             onnx_initializer_location = model_name + "_initializers"
-            fx_onnx.save_model_with_external_data(
+            fx_serialization.save_model_with_external_data(
                 tmp_folder,
                 onnx_model_location,
                 onnx_initializer_location,
