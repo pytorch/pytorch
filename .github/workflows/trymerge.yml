@@ -75,7 +75,6 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
           set -ex
-          python3 .github/scripts/on_cancel_merge.py "${PR_NUM}"
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
 
 # We want newer merge commands to supercede old ones
