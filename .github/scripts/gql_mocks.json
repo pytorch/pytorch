@@ -12623,7 +12623,7 @@
                                 "databaseId": 11641175612
                               },
                               {
-                                "name": "docker-build (pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)",
+                                "name": "docker-build (pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4287687247/jobs/7469660861",
                                 "databaseId": 11641175833
@@ -17833,7 +17833,7 @@
                                 "databaseId": 11430080203
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / build",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303705363",
                                 "databaseId": 11430080325
@@ -17935,7 +17935,7 @@
                                 "databaseId": 11430388575
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / filter",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / filter",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303970913",
                                 "databaseId": 11430424674
@@ -17947,67 +17947,67 @@
                                 "databaseId": 11430425513
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (default, 1, 4, linux.4xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (default, 1, 4, linux.4xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974388",
                                 "databaseId": 11430429326
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974458",
                                 "databaseId": 11430429420
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (default, 3, 4, linux.4xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (default, 3, 4, linux.4xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974522",
                                 "databaseId": 11430429504
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (default, 4, 4, linux.4xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (default, 4, 4, linux.4xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974601",
                                 "databaseId": 11430429607
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (functorch, 1, 1, linux.4xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (functorch, 1, 1, linux.4xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974670",
                                 "databaseId": 11430429702
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (nogpu_AVX512, 1, 1, linux.2xlarge)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (nogpu_AVX512, 1, 1, linux.2xlarge)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974734",
                                 "databaseId": 11430429777
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974815",
                                 "databaseId": 11430429882
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974888",
                                 "databaseId": 11430429982
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303974962",
                                 "databaseId": 11430430065
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (distributed, 2, 3, linux.8xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (distributed, 2, 3, linux.8xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303975047",
                                 "databaseId": 11430430203
                               },
                               {
-                                "name": "linux-bionic-cuda11.8-py3.10-gcc7 / test (distributed, 3, 3, linux.8xlarge.nvidia.gpu)",
+                                "name": "linux-bionic-cuda11.8-py3.10-gcc11 / test (distributed, 3, 3, linux.8xlarge.nvidia.gpu)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4208042713/jobs/7303975129",
                                 "databaseId": 11430430315

@@ -69,33 +69,33 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_8-py3_9-gcc7-build:
-    name: linux-bionic-cuda11.8-py3.9-gcc7
+  linux-bionic-cuda11_8-py3_9-gcc11-build:
+    name: linux-bionic-cuda11.8-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.8-py3.9-gcc11
+      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11
       test-matrix: |
         { include: [
           { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
-  linux-bionic-cuda11_8-py3_9-gcc7-test:
-    name: linux-bionic-cuda11.8-py3.9-gcc7
+  linux-bionic-cuda11_8-py3_9-gcc11-test:
+    name: linux-bionic-cuda11.8-py3.9-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_9-gcc7-build
+    needs: linux-bionic-cuda11_8-py3_9-gcc11-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.9-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc7-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda11.8-py3.9-gcc11
+      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_9-gcc11-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-debug-build:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-debug
+  linux-bionic-cuda11_8-py3_10-gcc11-debug-build:
+    name: linux-bionic-cuda11.8-py3.9-gcc11-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-debug
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.8-py3.9-gcc11-debug
+      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc11
       build-with-debug: true
       test-matrix: |
         { include: [
@@ -106,14 +106,14 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-debug-test:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-debug
+  linux-bionic-cuda11_8-py3_10-gcc11-debug-test:
+    name: linux-bionic-cuda11.8-py3.10-gcc11-debug
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-debug-build
+    needs: linux-bionic-cuda11_8-py3_10-gcc11-debug-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-debug
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-debug-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-debug-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc11-debug
+      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-debug-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc11-debug-build.outputs.test-matrix }}
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
