@@ -712,53 +712,10 @@ class GuardBuilder(GuardBuilderBase):
 #        'v' will be defined in the 'preface' list (output argument to
 #        'NodeTransformer')
 class PyExprCSEPass:
-    IGNORED_NODE_TYPES = (
-        # Proxy nodes
-        # i.e. nodes that result in the same unparsed string as their children
-        ast.Expression,
-        ast.Index,
-        ast.Expr,
-        ast.Module,
-        # Leaf Expression nodes
-        ast.Name,
-        ast.Constant,
-        # Expr-Context nodes
-        ast.Load,
-        ast.Store,
-        ast.Del,
-        # Bool Operation nodes
-        ast.And,
-        ast.Or,
-        # Arithmetic Operation nodes
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.MatMult,
-        ast.Div,
-        ast.Mod,
-        ast.Pow,
-        ast.LShift,
-        ast.RShift,
-        ast.BitOr,
-        ast.BitXor,
-        ast.BitAnd,
-        ast.FloorDiv,
-        # Unary Operation nodes
-        ast.Invert,
-        ast.Not,
-        ast.UAdd,
-        ast.USub,
-        # Compare Operation nodes
-        ast.Eq,
-        ast.NotEq,
-        ast.Lt,
-        ast.LtE,
-        ast.Gt,
-        ast.GtE,
-        ast.Is,
-        ast.IsNot,
-        ast.In,
-        ast.NotIn,
+    ALLOWED_NODE_TYPES = (
+        ast.Attribute,
+        ast.Call,
+        ast.Subscript
     )
 
     class CSEVisitor(ast.NodeVisitor):
@@ -768,9 +725,7 @@ class PyExprCSEPass:
             self._expr_counter: Dict[str, int] = collections.defaultdict(lambda: 0)
 
         def visit(self, node: ast.AST) -> Any:
-            if _ast_unparse_implemented(node) and not isinstance(
-                node, PyExprCSEPass.IGNORED_NODE_TYPES
-            ):
+            if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
                 self._expr_counter[_ast_unparse(node)] += 1
             super().visit(node)
 
@@ -788,9 +743,7 @@ class PyExprCSEPass:
             self._expr_to_name: Dict[str, str] = {}
 
         def visit(self, node: ast.AST) -> Any:
-            if _ast_unparse_implemented(node) and not isinstance(
-                node, PyExprCSEPass.IGNORED_NODE_TYPES
-            ):
+            if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
                 expr = _ast_unparse(node)
 
                 # Replacement only occurs if a given expression is used more
