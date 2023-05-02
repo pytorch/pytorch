@@ -83,7 +83,7 @@ class ForeachTests(TestCase):
         inputs = (
             torch.rand(10, 1, device="cuda:0"),
             torch.rand(20, 20, device="cuda:0"),
-            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(1, 10, device="cuda:0"),
             torch.rand(20, 20, device="cuda:0"),
         )
         actual = fn_opt(*inputs)
