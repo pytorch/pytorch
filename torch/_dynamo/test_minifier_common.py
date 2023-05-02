@@ -3,7 +3,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import unittest
 
 import torch
 import torch._dynamo
@@ -17,10 +16,20 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.config,
-                "debug_dir_root",
-                cls.DEBUG_DIR,
+            torch._dynamo.config.patch(debug_dir_root=cls.DEBUG_DIR)
+        )
+        # These configurations make new process startup slower.  Disable them
+        # for the minification tests to speed them up.
+        cls._exit_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    # https://github.com/pytorch/pytorch/issues/100376
+                    "pattern_matcher": False,
+                    # multiprocess compilation takes a long time to warmup
+                    "compile_threads": 1,
+                    # https://github.com/pytorch/pytorch/issues/100378
+                    "cpp.vec_isa_ok": False,
+                }
             )
         )
 
@@ -29,7 +38,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         if os.getenv("PYTORCH_KEEP_TMPDIR", "0") != "1":
             shutil.rmtree(cls.DEBUG_DIR)
         else:
-            print("test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
+            print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
         cls._exit_stack.close()
 
     # Run `code` in a separate python process.
