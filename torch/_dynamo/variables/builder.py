@@ -591,6 +591,11 @@ class VariableBuilder:
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
             guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+
+        for item in value:
+            if item is value:
+                unimplemented("list elements are pointing to the list itself")
+
         output = [
             VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
                 item
@@ -901,7 +906,10 @@ class VariableBuilder:
                         )
                     )
                 fake_tensor_value = None
-                example_value = unspec_var.proxy.node.meta["example_value"]
+                if isinstance(unspec_var, ConstantVariable):
+                    example_value = unspec_var.value
+                else:
+                    example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 proxy.node.meta["grapharg"] = GraphArg(
