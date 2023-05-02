@@ -2,6 +2,8 @@
 import functools
 import unittest
 
+import numpy as np
+
 import torch
 
 import torch._dynamo
@@ -12,7 +14,6 @@ from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
-import numpy as np
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
