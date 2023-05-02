@@ -221,7 +221,7 @@ class Backend:
         return value
 
     @classmethod
-    def register_backend(cls, name, func, extended_api=False, devices=Optional[Union[str, List[str]]]):
+    def register_backend(cls, name, func, extended_api=False, devices: Optional[Union[str, List[str]]] = None):
         """
         Registers a new backend with the given name and instantiating function.
 
@@ -589,7 +589,8 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
             "of PyTorch Distributed instead."
         )
         # Most users create Gloo with private API for object collectives
-        return torch.device("cpu")
+        _world.pg_object_coll_device[group] = torch.device("cpu")
+        return _world.pg_object_coll_device[group]
 
     """
     ``group._device_types`` is a property pybind that returns the devices
@@ -1378,7 +1379,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        del _world.pg_object_coll_device[pg]
+        if pg in _world.pg_object_coll_device:
+            del _world.pg_object_coll_device[pg]
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
