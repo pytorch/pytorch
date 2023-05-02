@@ -345,3 +345,11 @@ def source_code_location(event):
             continue
         return event.name
     return "No source code location found"
+
+
+# Provide an OSS workaround for cudagraphs + CUPTI issue
+# https://github.com/pytorch/pytorch/issues/75504
+def _init_for_cuda_graphs():
+    from torch.profiler import profile
+    with profile():
+        pass
