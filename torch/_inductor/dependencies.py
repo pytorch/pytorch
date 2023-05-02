@@ -267,9 +267,9 @@ class RecordListLoadStores(V.MockHandler):
         self._writes: Set[Dep] = set()
         self._list_writes: Set[str] = set()
 
-    def load(self, name: str, index: sympy.Expr) -> str:
-        self._list_reads.add(name)
-        for buf_name in V.graph.lists[name]:
+    def load(self, list_name, _) -> str:
+        self._list_reads.add(list_name)
+        for buf_name in V.graph.lists[list_name]:
             buffer = V.graph.get_buffer(buf_name)
             (
                 _,
@@ -281,7 +281,7 @@ class RecordListLoadStores(V.MockHandler):
                 MemoryDep(buf_name, indexer(*index), tuple(buffer.layout.size))
             )
 
-    def store(self, name: str, index: sympy.Expr, value: str) -> None:
+    def store(self, name: str, layouts, value: str) -> None:
         for buf_name in V.graph.lists[name]:
             buffer = V.graph.get_buffer(buf_name)
             (

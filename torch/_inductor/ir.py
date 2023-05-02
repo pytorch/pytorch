@@ -2135,7 +2135,7 @@ class BufferList(IRNode):
 
     def get_store_function(self):
         def fn(result):
-            ops.store(self.list_name, None, result)
+            ops.store(self.list_name, self.data.layouts, result)
 
         return fn
 
@@ -4082,10 +4082,11 @@ class TensorListInputsWrapper:
     def __init__(self, tensor_boxes: List[TensorBox]):
         self.list_name = V.graph.register_list([t.data.realize() for t in tensor_boxes])
         self.tensor_boxes = tensor_boxes
+        self.layouts = [t.data.get_layout() for t in tensor_boxes]
 
     def make_loader(self):
         def fn():
-            return ops.load(self.list_name, sympy.Symbol("fake"))
+            return ops.load(self.list_name, self.layouts)
 
         return fn
 

@@ -1,14 +1,19 @@
 import collections
+import functools
+import itertools
+from typing import List, Set
+
+import sympy
 
 from .. import config
-from ..utils import ceildiv, sympy_product
+from ..ir import Layout
+from ..utils import ceildiv, sympy_product, sympy_subs
 from ..virtualized import V
-
 from .common import IndentedBuffer, Kernel
-
 from .triton_overrides import TritonOverrides
+from .triton_utils import config_of, IterationRangesRoot, signature_of, TritonPrinter
 
-from .triton_utils import config_of, signature_of
+texpr = TritonPrinter().doprint
 
 
 class ForeachKernel(Kernel):
@@ -48,6 +53,7 @@ class ForeachKernel(Kernel):
             int(sympy_product(layout.size))
             for layout in layouts[sublist_indices[0] : sublist_indices[1]]
         ]
+        # TODO: try tuning this value
         self.block_size = 1024
         self.grid = (
             ForeachKernel._compute_num_blocks(self.tensor_elem_counts, self.block_size),
@@ -55,6 +61,82 @@ class ForeachKernel(Kernel):
             1,
         )
         self.num_warps = 8
+
+        self.range_trees = []
+        self.range_tree_nodes = {}
+        self.iter_vars_count = itertools.count(0)
+
+        self._initialize_range_tree()
+
+        # define this in a closure to make cache local to object
+        @functools.lru_cache(None)
+        def simplify_indexing(index: sympy.Expr):
+            index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
+            return index
+
+        self.simplify_indexing = simplify_indexing
+
+    def __enter__(self):
+        class CSEProxy:
+            self.name = "CSEProxy"
+
+            @staticmethod
+            def __getattr__(name):
+                def inner(*args, **kwargs):
+                    csevar = self.cse.generate(
+                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
+                    )
+                    csevar.update_on_args(name, args, kwargs)
+                    return csevar
+
+                return inner
+
+            @staticmethod
+            def indirect_indexing(index_var, size):
+                raise NotImplementedError()
+
+            @staticmethod
+            def load(list_name: str, layouts: List[Layout]):
+                store_cache = self.cse.store_cache
+                if list_name in store_cache:
+                    return store_cache[list_name]
+                return self.load_list(list_name, layouts)
+
+            @staticmethod
+            def store(list_name, layouts, value):
+                self.cse.store_cache[list_name] = value
+                return self.store_list(list_name, layouts, value)
+
+            @staticmethod
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                raise NotImplementedError()
+
+        parent_handler = self.overrides(V.get_ops_handler())
+        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
+        self.exit_stack.enter_context(V.set_kernel_handler(self))
+        return self
+
+    def _set_ranges(self, *lengths):
+        assert len(lengths) == len(self.range_trees)
+        return [
+            ranges.construct(length)
+            for length, ranges in zip(lengths, self.range_trees)
+        ]
+
+    def _var_ranges(self):
+        return dict(
+            itertools.chain.from_iterable(
+                tree.var_ranges.items() for tree in self.range_trees
+            )
+        )
+
+    def _initialize_range_tree(self):
+        name = "xindex"
+        self.range_trees.append(
+            IterationRangesRoot(name, self.block_size, name[0], 0, self)
+        )
+        # for tree in self.range_trees:
+        #    tree.codegen_header(self.body)
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -77,9 +159,12 @@ class ForeachKernel(Kernel):
             if block_count == 0:
                 cond = "if"
                 # initialize tile ptrs
+                code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
                 for list_name, arg_names in self.list_name_to_arg_names.items():
                     var = self.list_name_to_var_name[list_name]
-                    code.splice(f"{var}_tile_ptr = {arg_names[index]}")
+                    code.splice(
+                        f"{var}_tile_ptrs = {arg_names[index]} + tl.arange(0, BLOCK_SIZE)"
+                    )
             else:
                 cond = "elif"
 
@@ -89,13 +174,76 @@ class ForeachKernel(Kernel):
                 for list_name, arg_names in self.list_name_to_arg_names.items():
                     var = self.list_name_to_var_name[list_name]
                     code.splice(
-                        f"{var}_tile_ptr = {arg_names[index]} + elem_ind_offset"
+                        f"{var}_tile_ptrs = ({arg_names[index]} + elem_ind_offset) + tl.arange(0, BLOCK_SIZE)"
                     )
                 code.splice(f"if pid == {upper_bound_pid - 1}:")
                 with code.indent():
                     code.splice(f"elem_count = {last_block_elem_count}")
+                    code.splice(f"mask = tl.arange(0, BLOCK_SIZE) < elem_count")
 
             block_count += num_blocks
+
+    def _indexing(self, index: sympy.Expr):
+        """
+        Compute the index and mask to pass to tl.load() or tl.store()
+        """
+        index = self.simplify_indexing(index)
+
+        if len(index.atoms(sympy.ceiling)):
+            for a in index.atoms(sympy.ceiling):
+                # for nested exprs, atoms yields top level first (?)
+                # so if everything goes fine, lower level replacements will come up empty
+                symbols = a.free_symbols
+                if len(symbols) > 0 and all(
+                    s.name.startswith("s") or s.name.startswith("ps") for s in symbols
+                ):
+                    replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
+                    index = sympy_subs(index, replacements)
+
+        index_vars = index.free_symbols
+        index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
+
+        mask_vars: Set[str] = set()
+        for var in index_vars:
+            if var.name.startswith("tmp"):
+                # indirect indexing
+                cse_var = self.cse.varname_map[var.name]
+                mask_vars.update(cse_var.mask_vars)
+            elif var.name.startswith(("s", "ps")):
+                pass
+            else:
+                # var is one of xN, yN or rN
+                assert var.name[0] in "xyr", var.name
+                mask_vars.add(f"{var.name[0]}mask")
+
+        need_dense = (
+            config.triton.dense_indexing or self._load_mask is not None
+        ) and index != 0
+
+        have_dense = True
+        dense_mask_vars = set()
+
+        for tree in self.range_trees:
+            if tree.prefix == "r" and not self.inside_reduction:
+                continue
+            if index_vars.intersection(tree.var_list):
+                have_loop_vars = True
+                have_dense = False
+            dense_mask_vars.add(f"{tree.prefix}mask")
+
+        expand_str = None
+
+        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
+            index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+            expand_str = self.dense_size_str()
+            if isinstance(index, sympy.Integer):
+                return index_str, set(), "None", expand_str
+            else:
+                mask_vars = dense_mask_vars
+
+        self.filter_masks(mask_vars)
+        mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
+        return index_str, mask_vars, mask_str, expand_str
 
     def jit_line(self):
         _, _, signature = self.args.python_argdefs()
@@ -115,7 +263,7 @@ class ForeachKernel(Kernel):
             self.sublist_indices[0] : self.sublist_indices[1]
         ]
 
-    def load(self, list_name: str, _):
+    def load_list(self, list_name: str, layouts: List[Layout]):
         if list_name not in self.list_name_to_var_name:
             var = self.cse.newvar()
             self.list_name_to_var_name[list_name] = var
@@ -124,13 +272,11 @@ class ForeachKernel(Kernel):
                 arg_name = self.args.input(buffer_name)
                 self.list_name_to_arg_names[list_name].append(arg_name)
 
-            self.loads.writeline(
-                f"{var} = tl.load({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), mask=mask)"
-            )
+            self.loads.writeline(f"{var} = tl.load({var}_tile_ptrs, mask=mask)")
 
         return self.list_name_to_var_name[list_name]
 
-    def store(self, list_name: str, _, value, mode=None):
+    def store_list(self, list_name: str, layouts: List[Layout], value):
         if list_name not in self.list_name_to_var_name:
             var = self.cse.newvar()
             self.list_name_to_var_name[list_name] = var
@@ -139,9 +285,7 @@ class ForeachKernel(Kernel):
                 arg_name = self.args.output(buffer_name)
                 self.list_name_to_arg_names[list_name].append(arg_name)
 
-            self.stores.writeline(
-                f"tl.store({var}_tile_ptr + tl.arange(0, BLOCK_SIZE), {value}, mask=mask)"
-            )
+            self.stores.writeline(f"tl.store({var}_tile_ptrs, {value}, mask=mask)")
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -177,11 +321,11 @@ class ForeachKernel(Kernel):
 
             self._gen_tile_ptrs(code)
 
-            code.splice("mask = tl.arange(0, BLOCK_SIZE) < elem_count\n")
             code.splice(self.loads)
             code.splice(self.compute)
             code.splice(self.stores)
 
+        print(code.getvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
