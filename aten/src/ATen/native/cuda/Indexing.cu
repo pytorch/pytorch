@@ -154,14 +154,14 @@ __global__ void indexing_backward_kernel_stride_1(
       } else {
         opmath_t gradient = (opmath_t)0.0;
 
-        int laneIdx = threadIdx.x & 0x1f;
+        int laneIdx = threadIdx.x % C10_WARP_SIZE;
         int64_t num_warp_passes = num_duplicates / C10_WARP_SIZE;
         for (int64_t i = 0; i < num_warp_passes; ++i) {
             grad_row = ((int64_t) indices[idx + i * C10_WARP_SIZE + laneIdx]) * stride + z * numel * stride;
             gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
         }
         WARP_SYNC();
-        for (int offset = 16; offset > 0; offset /= 2) {
+        for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
           gradient += WARP_SHFL_DOWN(gradient, offset);
         }
 
