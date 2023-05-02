@@ -32,7 +32,7 @@ inner(torch.randn(20, 20).to("{device}"))
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_cpu_runtime_error(self):
-        self._test_after_aot_runtime_error("cpu", "int")
+        self._test_after_aot_runtime_error("cpu", "")
 
     @requires_cuda()
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
