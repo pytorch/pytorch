@@ -1705,13 +1705,14 @@ class TestSDPA(NNTestCase):
             with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=True):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
-     # verified passing successfully on H100
+
+    # verified passing successfully on H100
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support SDPA")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
+    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if SM80OrLater else [8, 16, 32, 64])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
