@@ -501,8 +501,7 @@ class FXGraphExtractor(abc.ABC):
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
         # TODO: Import here to prevent circular dependency
-        import torch.onnx._internal.fx.fx_exporter as fx_exporter
-        import torch.onnx._internal.fx.passes as passes
+        from torch.onnx._internal.fx import analysis, fx_exporter, passes
 
         diagnostic_context = options.diagnostic_context
 
@@ -539,6 +538,8 @@ class FXGraphExtractor(abc.ABC):
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
+            analysis.UnsupportedFxNodesAnalysis(diagnostic_context, module).lint()
+
             onnxscript_graph = passes.export_fx_to_onnxscript(
                 diagnostic_context, module, options
             )

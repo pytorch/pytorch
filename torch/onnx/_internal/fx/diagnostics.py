@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import dataclasses
+
 import functools
-from typing import Any
+from typing import Any, Optional
 
 import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
@@ -101,3 +103,19 @@ diagnose_call = functools.partial(
 rules = diagnostics.rules
 levels = diagnostics.levels
 DiagnosticContext = infra.DiagnosticContext
+Diagnostic = infra.Diagnostic
+RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
+
+
+@dataclasses.dataclass
+class UnsupportedFxNodeDiagnostic(Diagnostic):
+    unsupported_fx_node: Optional[torch.fx.Node] = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # NOTE: This is a hack to make sure that the additional fields must be set and
+        # not None. Ideally they should not be set as optional. But this is a known
+        # limiation with `dataclasses`. Resolvable in Python 3.10 with `kw_only=True`.
+        # https://stackoverflow.com/questions/69711886/python-dataclasses-inheritance-and-default-values
+        if self.unsupported_fx_node is None:
+            raise ValueError("unsupported_fx_node must be specified.")

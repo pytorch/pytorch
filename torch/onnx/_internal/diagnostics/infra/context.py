@@ -38,6 +38,9 @@ class Diagnostic:
     source_exception: Optional[Exception] = None
     """The exception that caused this diagnostic to be created."""
 
+    def __post_init__(self) -> None:
+        pass
+
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
         message = self.message or self.rule.message_default_template
@@ -261,7 +264,9 @@ class DiagnosticContext:
     def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
         self.log(diagnostic)
         if diagnostic.level == infra.Level.ERROR:
-            raise RuntimeErrorWithDiagnostic(diagnostic) from diagnostic.source_exception
+            raise RuntimeErrorWithDiagnostic(
+                diagnostic
+            ) from diagnostic.source_exception
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(
