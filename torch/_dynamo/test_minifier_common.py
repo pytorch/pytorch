@@ -45,7 +45,15 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
         cls._exit_stack.close()
 
-    def _maybe_subprocess_run(self, args, *, isolate=True, cwd=None):
+    def _gen_codegen_fn_patch_code(self, device, bug_type):
+        assert bug_type in ("compile_error", "runtime_error", "accuracy")
+        return f"""\
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_TESTING_ONLY = {bug_type!r}
+"""
+
+    def _maybe_subprocess_run(self, args, *, isolate, cwd=None):
         if not isolate:
             assert len(args) >= 2, args
             assert args[0] == "python3", args
@@ -104,7 +112,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     # Run `code` in a separate python process.
     # Returns the completed process state and the directory containing the
     # minifier launcher script, if `code` outputted it.
-    def _run_test_code(self, code, *, isolate=True):
+    def _run_test_code(self, code, *, isolate):
         proc = self._maybe_subprocess_run(
             ["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR
         )
@@ -119,7 +127,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         return proc, None
 
     # Runs the minifier launcher script in `repro_dir`
-    def _run_minifier_launcher(self, repro_dir, isolate=True):
+    def _run_minifier_launcher(self, repro_dir, isolate):
         self.assertIsNotNone(repro_dir)
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
         with open(launch_file, "r") as f:
@@ -170,8 +178,12 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # 1. Run the problematic code (in a separate process since it could segfault)
     # 2. Run the generated minifier launcher script
     # 3. Run the generated repro script
+    #
+    # If possible, you should run the test with isolate=False; use
+    # isolate=True only if the bug you're testing would otherwise
+    # crash the process
     def _run_full_test(
-        self, run_code, repro_after, repro_level, patch_code, *, isolate=True
+        self, run_code, repro_after, repro_level, patch_code, *, isolate
     ):
         test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
         test_proc, repro_dir = self._run_test_code(test_code, isolate=isolate)
@@ -185,7 +197,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         return (test_proc, launch_proc, repro_proc), (launch_code, repro_code)
 
     def _run_full_test_nocode(
-        self, run_code, repro_after, repro_level, patch_code, *, isolate=True
+        self, run_code, repro_after, repro_level, patch_code, *, isolate
     ):
         tbs, _ = self._run_full_test(
             run_code, repro_after, repro_level, patch_code, isolate=isolate
