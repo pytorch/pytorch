@@ -1769,10 +1769,15 @@ def merge(
     print(f"Attempting merge of {initial_commit_sha}")
 
     if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
-        gh_add_labels(org, project, pr_num, [MERGE_IN_PROGRESS_LABEL])
+        gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])
 
     explainer = TryMergeExplainer(
-        skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project, ignore_current
+        skip_mandatory_checks,
+        pr.get_labels(),
+        pr.pr_num,
+        pr.org,
+        pr.project,
+        ignore_current,
     )
 
     # probably a bad name, but this is a list of current checks that should be
@@ -1782,12 +1787,16 @@ def merge(
     if pr.is_ghstack_pr():
         get_ghstack_prs(repo, pr)  # raises error if out of sync
 
-    check_for_sev(org, project, skip_mandatory_checks)
+    check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         gh_post_pr_comment(
-            org, project, pr.pr_num, explainer.get_merge_message(), dry_run=dry_run
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            explainer.get_merge_message(),
+            dry_run=dry_run,
         )
         return pr.merge_into(
             repo,
@@ -1808,8 +1817,8 @@ def merge(
         ignore_current_checks_info = failing
 
     gh_post_pr_comment(
-        org,
-        project,
+        pr.org,
+        pr.project,
         pr.pr_num,
         explainer.get_merge_message(ignore_current_checks_info),
         dry_run=dry_run,
@@ -1835,13 +1844,13 @@ def merge(
         x[0] for x in ignore_current_checks_info
     ]  # convert to List[str] for convenience
     while elapsed_time < timeout_minutes * 60:
-        check_for_sev(org, project, skip_mandatory_checks)
+        check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(
-            f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)"
+            f"Attempting merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} ({elapsed_time / 60} minutes elapsed)"
         )
-        pr = GitHubPR(org, project, pr_num)
+        pr = GitHubPR(pr.org, pr.project, pr.pr_num)
         if initial_commit_sha != pr.last_commit()["oid"]:
             raise RuntimeError(
                 "New commits were pushed while merging. Please rerun the merge command."
@@ -1910,14 +1919,14 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min"
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min"
             )
             time.sleep(5 * 60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
-        gh_add_labels(org, project, pr_num, ["land-failed"])
+        gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"])
     raise RuntimeError(msg)
 
 

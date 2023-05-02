@@ -136,7 +136,7 @@ def mock_revert(
 
 
 def mock_merge(
-    pr_num: int,
+    pr: GitHubPR,
     repo: GitRepo,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
