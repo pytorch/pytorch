@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 from typing import (
     Any,
     Callable,
@@ -12,11 +14,14 @@ from typing import (
     Tuple,
     Union,
 )
+
+import torch
+
 from torch.onnx._internal import _beartype
-import inspect
 from torch.utils import _pytree as pytree
 
 # TODO(bowbao): Add diagnostics for IO adapters.
+
 
 @runtime_checkable
 class InputAdaptStep(Protocol):
@@ -121,6 +126,7 @@ class OutputAdapter:
             model_outputs = step.apply(model_outputs)
         return model_outputs
 
+
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
 
@@ -218,6 +224,7 @@ class MergeKwargsIntoArgsStep:
         """
         return tuple(model_args) + tuple(model_kwargs.values()), {}
 
+
 class AppendPositionalsIntoArgsStep:
     """Merge the input kwargs into the input args."""
 
@@ -236,7 +243,8 @@ class AppendPositionalsIntoArgsStep:
         Returns:
             A tuple of the model args and kwargs, plus all extra appended inputs.
         """
-        return tuple(model_args + self.inputs), tuple(model_kwargs.values())
+        return tuple(model_args + self.inputs), model_kwargs
+
 
 class RemoveNoneInputStep:
     """Remove `None` from arguments.

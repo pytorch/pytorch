@@ -165,7 +165,9 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
     ) -> torch.fx.GraphModule:
         # Bind model args and kwargs with model signature to retrieve default values
         # of unprovided arguments. These are then used to construct ``concrete_args``.
-        bind_input_step = io_adapter.BindInputStep(torch.onnx.utils.model_signature(model))
+        bind_input_step = io_adapter.BindInputStep(
+            torch.onnx.utils.model_signature(model)
+        )
         self.input_adapter.append_step(bind_input_step)
         _, named_args = bind_input_step.apply(model_args, model_kwargs)
 
@@ -218,7 +220,9 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         )
         graph_module = replace_get_attr_with_placeholder_pass.run()
         replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
-        append_extra_input_step = io_adapter.AppendPositionalsIntoArgsStep(replaced_attrs)
+        append_extra_input_step = io_adapter.AppendPositionalsIntoArgsStep(
+            replaced_attrs
+        )
         self.input_adapter.append_step(append_extra_input_step)
         # Move all newly created placeholder nodes to the front of the graph.
         graph_module = passes.MovePlaceholderToFront(

@@ -195,5 +195,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         torch._dynamo.reset()
 
         # Export FX graph to ONNX ModelProto.
-        self.input_adapter.append_step(io_adapter.FlattenInputWithTreeSpecValidationStep())
+        self.input_adapter.append_step(
+            io_adapter.FlattenInputWithTreeSpecValidationStep()
+        )
         return graph_module  # type: ignore[return-value]

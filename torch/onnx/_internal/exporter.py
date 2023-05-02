@@ -14,8 +14,6 @@ from typing import (
     Protocol,
     runtime_checkable,
     Sequence,
-    Tuple,
-    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -469,10 +467,6 @@ class FXGraphExtractor(abc.ABC):
         Returns:
             The generated FX Graph.
         """
-        # By design, only torch.fx.GraphModule is needed
-        # But FXSymbolicTracer modifies model data, which will be needed
-        # to produce the ONNX proto in the next layer.
-        # TODO: Refactor after https://github.com/pytorch/pytorch/pull/98421
         ...
 
 
@@ -498,8 +492,7 @@ class Exporter:
         )
 
         updated_model_args = self.options.fx_tracer.input_adapter.apply(
-            *self.model_args,
-            **self.model_kwargs
+            *self.model_args, **self.model_kwargs
         )
 
         # Export FX graph to ONNX ModelProto.
