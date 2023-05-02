@@ -238,9 +238,6 @@ import torch._functorch.config
 """
 
 
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
-
-
 def get_minifier_repro_path():
     return os.path.join(minifier_dir(), "minifier_launcher.py")
 
