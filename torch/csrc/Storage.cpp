@@ -165,6 +165,8 @@ c10::Storage newStorageImplWithSharedDataPtr(c10::Storage storage) {
       data_ptr.get_deleter(),
       data_ptr.device());
 
+  reinterpret_cast<RefcountedDeleterContext*>(data_ptr.get_context())->incref();
+
   c10::Storage new_storage = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       storage_impl->nbytes(),
