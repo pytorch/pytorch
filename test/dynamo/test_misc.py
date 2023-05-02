@@ -4724,6 +4724,7 @@ def fn():
         self.assertEquals(tab[0].end, 4)
         self.assertEquals(tab[0].target, 6)
 
+    @unittest.skipIf(os.name != "posix", "return code check is POSIX only")
     def test_unhandled_exception_in_dynamo(self):
         # need to run in a separate process to properly test an unhandled
         # exception raised in dynamo optimized code
@@ -4746,6 +4747,7 @@ opt_fn(torch.ones(2))
         self.assertGreater(proc.returncode, 0)
         self.assertIn("smoge", proc.stderr.decode("utf-8"))
 
+    @unittest.skipIf(os.name != "posix", "return code check is POSIX only")
     def test_unhandled_exception_in_dynamo2(self):
         # segfaults in python 3.11 if shadow frame is freed improperly
         code = """\
