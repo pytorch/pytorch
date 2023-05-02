@@ -57,14 +57,28 @@ runs:
         env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
-    - name: Disable IPv6
+    - name: Manually resolve download.pytorch.org
       shell: bash
+      continue-on-error: true
       run: |
-        # TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400,
-        # cleaning this up once the issue is fixed. Note that doing this step inside Docker container
-        # would also apply the same configuration to the host itself
-        sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
-        sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+        set +e
+        set -x
 
-        # Print the configurations
-        sysctl -a 2>/dev/null | grep disable_ipv6
+        PT_DOMAIN=download.pytorch.org
+        # TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400,
+        # cleaning this up once the issue is fixed. There are more than one resolved IP here, the last
+        # one is returned at random
+        RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}"  | tail -n1)
+
+        if [ -z "${RESOLVED_IP}" ]; then
+          echo "Couldn't resolve ${PT_DOMAIN}, exiting..."
+          exit 1
+        fi
+
+        if grep -r "${PT_DOMAIN}" /etc/hosts; then
+          # Clean up any old records first
+          sudo sed -i "/${PT_DOMAIN}/d" /etc/hosts
+          echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
+        fi
+
+        host "${PT_DOMAIN}"
