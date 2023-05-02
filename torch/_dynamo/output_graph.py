@@ -913,7 +913,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # some of the tensor objects to be held alive for longer than necessary.
 
         self.root_tx = None
-
+        self.nn_modules.clear()
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
