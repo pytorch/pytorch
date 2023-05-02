@@ -1334,7 +1334,7 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 static struct PyGetSetDef THPFunction_properties[] = {
     {"saved_tensors",
      (getter)THPFunction_saved_tensors,
-     (setter),
+     nullptr,
      nullptr,
      nullptr},
     {"saved_variables",
