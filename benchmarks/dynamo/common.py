@@ -80,8 +80,6 @@ CI_SKIP[CI("eager", training=False)] = [
     "llama",  # does not support complex32
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
-    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
-    "torchrec_dlrm",
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
     # KeyError: '_ignore_torch_cuda_oom'
@@ -165,8 +163,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
     "llama",  # does not support complex32
-    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
-    "torchrec_dlrm",
     "demucs",  # OOM
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -222,8 +218,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "vision_maskrcnn",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
-    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
-    "torchrec_dlrm",
     # Huggingface
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
