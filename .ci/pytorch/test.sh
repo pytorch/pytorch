@@ -9,14 +9,6 @@ set -ex
 echo "Environment variables:"
 env
 
-# TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400.
-# Cleaning this up once the issue is fixed
-sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
-sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
-
-# Print the configurations
-sysctl -a 2>/dev/null | grep disable_ipv6
-
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib

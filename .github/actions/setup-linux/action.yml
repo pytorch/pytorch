@@ -56,3 +56,15 @@ runs:
       run: |
         env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
+    - name: Disable IPv6
+      shell: bash
+      run: |
+        # TODO: Flaky access to download.pytorch.org https://github.com/pytorch/pytorch/issues/100400,
+        # cleaning this up once the issue is fixed. Note that doing this step inside Docker container
+        # would also apply the same configuration to the host itself
+        sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
+        sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+
+        # Print the configurations
+        sysctl -a 2>/dev/null | grep disable_ipv6
