@@ -3109,6 +3109,25 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
+@register_meta(torch.ops.aten.t_)
+def t_(self):
+    ndims = self.ndim
+    assert ndims <= 2
+    size = self.size()
+
+    dim0 = size[0]
+    dim1 = size[1]
+
+    if dim0 == dim1:
+        return self
+
+    stride = self.stride()
+
+    stride[dim0], stride[dim1] = stride[dim1], stride[dim0]
+    size[dim0], size[dim1] = size[dim1], size[dim0]
+
+    self.as_strided_(size, stride)
+    return self
 
 def activate_meta():
     activate_meta_table = {}
