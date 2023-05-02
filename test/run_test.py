@@ -385,6 +385,7 @@ if dist.is_available():
             "UCX_TLS": "tcp",
             "UCC_TLS": "nccl,ucp",
             "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -545,13 +546,14 @@ def run_test(
     os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
+    should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    timeout = (
+        THRESHOLD * 3
+        if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        else None
     )
-    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
     with open(log_path, "w") as f:
@@ -562,7 +564,7 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1 if should_file_rerun else 0,
+            retries=2 if should_file_rerun else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
