@@ -102,7 +102,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     # Returns the completed process state and the directory containing the
     # minifier launcher script, if `code` outputted it.
     def _run_test_code(self, code, *, isolate=True):
-        proc = self._maybe_subprocess_run(["python3", "-c", code], isolate=isolate)
+        proc = self._maybe_subprocess_run(["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR)
 
         print("test stdout:", proc.stdout.decode("utf-8"))
         print("test stderr:", proc.stderr.decode("utf-8"))
@@ -139,7 +139,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
         self.assertTrue(os.path.exists(repro_file))
 
         repro_proc = self._maybe_subprocess_run(
-            ["python3", repro_file], isolate=isolate
+            ["python3", repro_file], isolate=isolate, cwd=repro_dir
         )
         print("repro stdout:", repro_proc.stdout.decode("utf-8"))
         print("repro stderr:", repro_proc.stderr.decode("utf-8"))
