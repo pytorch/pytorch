@@ -31,7 +31,7 @@ class MinifierTests(MinifierTestBase):
         )
 
         test_proc, _, repro_proc = self._run_full_test_nocode(
-            run_code, "dynamo", repro_level, ""
+            run_code, "dynamo", repro_level, "", isolate=False
         )
 
         self.assertIn(error_name, test_proc.stderr.decode("utf-8"))
@@ -148,7 +148,7 @@ class MinifierTests(MinifierTestBase):
         )
 
         (test_proc, _, repro_proc), (launch_code, _) = self._run_full_test(
-            run_code, "dynamo", 2, ""
+            run_code, "dynamo", 2, "", isolate=False
         )
 
         tb1 = test_proc.stderr.decode("utf-8")
@@ -208,7 +208,7 @@ class MinifierTests(MinifierTestBase):
         )
 
         (test_proc, _, repro_proc), (launch_code, repro_code) = self._run_full_test(
-            run_code, "dynamo", 2, ""
+            run_code, "dynamo", 2, "", isolate=False
         )
 
         tb1 = test_proc.stderr.decode("utf-8")
