@@ -1193,10 +1193,21 @@ class OpInfo:
         """Returns an iterable of SampleInputs that contain inputs with a
         specified sparse layout.
         """
-        sample_inputs_mth = getattr(
-            self, "sample_inputs_" + str(layout).split(".", 1)[-1]
+        layout_name = str(layout).split(".")[-1]
+        sample_inputs_mth = getattr(self, "sample_inputs_" + layout_name)
+
+        def non_empty_sampler(op, generator):
+            found_sample = False
+            for sample in generator:
+                found_sample = True
+                yield sample
+            if not found_sample:
+                raise unittest.SkipTest("NO SAMPLES!")
+
+        return non_empty_sampler(
+            self,
+            sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs),
         )
-        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
 
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
