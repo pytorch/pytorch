@@ -209,6 +209,8 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+          # Copy /etc/hosts that contains download.pytorch.org ipv4 int container
+          docker cp /etc/hosts ${container_name}:/etc/
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
