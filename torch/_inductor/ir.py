@@ -16,7 +16,6 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer, simplify
 
-import torch._dynamo.config as dynamo_config
 import torch._logging
 
 import torch.fx
@@ -872,19 +871,18 @@ class Reduction(Loops):
             }
             and config.split_reductions
         )
-        sr_qualified = split_reduction
-        if sr_qualified and dynamo_config.dynamic_shapes:
+        if split_reduction:
             # TODO(voz): dedup with sizevar util introduced in other PR
             def _is_static(x):
                 return isinstance(x, (int, sympy.Integer))
 
-            sr_qualified = (
+            split_reduction = (
                 all(_is_static(r) for r in ranges)
                 and all(_is_static(r) for r in reduction_ranges)
                 and _is_static(reduction_numel)
             )
 
-        if sr_qualified:
+        if split_reduction:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -914,11 +912,6 @@ class Reduction(Loops):
                     split,
                     reduction_hint,
                 )
-        elif split_reduction and dynamo_config.dynamic_shapes:
-            torch._logging.warning_once(
-                log,
-                "Could not do split reduction due to dynamic shapes; performance may be worse",
-            )
 
         return TensorBox.create(
             Reduction(
