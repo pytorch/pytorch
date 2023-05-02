@@ -5,6 +5,8 @@ import unittest
 
 import torch
 
+import torch._inductor
+
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -39,6 +41,8 @@ class ForeachTests(TestCase):
             ),
         )
 
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     @requires_cuda()
     def test_lowering_fusion(self):
         def fn(a0, a1, b0, b1):
@@ -54,6 +58,8 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
         )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     def test_scheduler_fusion(self):
@@ -73,6 +79,8 @@ class ForeachTests(TestCase):
             ),
         )
 
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     @requires_cuda()
     def test_broadcasting(self):
         def fn(a0, a1, b0, b1):
@@ -89,6 +97,7 @@ class ForeachTests(TestCase):
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     def test_type_promotion(self):
