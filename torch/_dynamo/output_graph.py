@@ -810,6 +810,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
             pl._dynamo_source = arg.source
+            del pl.meta["grapharg"]
 
         gm._param_name_to_source = self.param_name_to_source
 
@@ -916,9 +917,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.nn_modules = None
         self.param_name_to_source = None
 
-        for node in self.graph.nodes:
-            if "grapharg" in node.meta:
-                del node.meta["grapharg"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.keepalive = []
