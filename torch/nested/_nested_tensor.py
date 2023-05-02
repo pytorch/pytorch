@@ -87,6 +87,20 @@ class NestedTensor(Tensor):
             return self.sizes
         return self.sizes[dim]
 
+    def stride(self, dim=None):
+        def _calc_contiguous_strides(sizes):
+            strides = []
+            curr = 1
+            for i in range(len(sizes)-1, -1, -1):
+                strides.append(curr)
+                curr *= sizes[i]
+            return strides[::-1]
+
+        strides = _calc_contiguous_strides(self.sizes)
+        if dim is None:
+            return strides
+        return strides[dim]
+
     # Returns size for the ith component of the NT
     def _component_size(self, i):
         component_size = []
@@ -146,6 +160,8 @@ class NestedTensor(Tensor):
         def unwrap(t):
             return t.buffer if isinstance(t, NestedTensor) else t
 
+        # TODO: Fix this; the size is certainly wrong and we can't always naively operate
+        # on the buffer and rewrap.
         out = NestedTensor(
             func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)),
             args[0].sizes)

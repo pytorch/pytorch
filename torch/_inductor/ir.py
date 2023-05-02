@@ -344,7 +344,9 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix="i"):
         return [
-            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}")
+            # Carry forward "is_integer" status from the symbol. For nested tensor sizes,
+            # the relevant symbol has is_integer=False to indicate a ragged dim.
+            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}", integer=s.is_integer)
             for n, s in enumerate(ranges)
         ]
 
@@ -1749,10 +1751,28 @@ class FixedLayout(Layout):
         def indexer(index):
             assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
-            for idx, stride, sz in zip(index, self.stride, self.size):
-                if sz != 1:
-                    result = result + idx * stride
-            return result
+            has_std_size = any([not sz.is_integer for sz in self.size])
+            if has_std_size:
+                for idx, stride, sz in zip(index, self.stride, self.size):
+                    if sz != 1:
+                        result = result + idx * stride
+                return result
+            else:
+                # Handle ragged dims. Is this even possible??
+                # Closed form doesn't seem possible. However, maybe we can do
+                # a recursive, memoized approach (i.e. dynamic programming).
+
+                # For naive codegen, we need an extra layer of indirection:
+                # func(base_ptr, offsets_ptr, sizes_ptr, strides_ptr, index):
+                #    storage_offset = base_ptr[offsets_ptr[index]]
+                #    size = sizes_ptr[index]
+                #    stride = strides_ptr[index]
+                #    subfunc(storage_offset, size, stride)
+                #
+                # This is equivalent to naively iterating over a set of rectangular tensors.
+                #
+                # Flatten it for pointwise-only case, only need a single index over the buffer
+                pass
 
         return indexer
 

@@ -1147,6 +1147,13 @@ def create_functionalized_graph(
             for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args)):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
+
+                from torch.nested._nested_tensor import NestedTensor
+
+                # Skip functionalization for NestedTensors.
+                if isinstance(inpt_f, NestedTensor):
+                    continue
+
                 torch._sync(inpt_f)
                 inpt_new = torch._from_functional_tensor(inpt_f)
                 if meta.input_info[i].mutates_data and not meta.input_info[i].mutates_metadata:

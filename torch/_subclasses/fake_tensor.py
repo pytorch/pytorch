@@ -1118,6 +1118,9 @@ class FakeTensorMode(TorchDispatchMode):
 
         converter = self.fake_tensor_converter
 
+        if has_nested:
+            return func(*args, **kwargs)
+
         # To constant propagate through these functions:
         # 1, If this is a lift, the input tensor is guaranteed to be a
         #    constant, so we keep a copy of the original argument along so
@@ -1232,7 +1235,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             # Prefer Python decompositions over C++ ones
             if func in decomposition_table and (
-                (has_symbolic_sizes and not has_nested)
+                has_symbolic_sizes
                 or (
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely

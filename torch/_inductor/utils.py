@@ -353,11 +353,11 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
-def sympy_symbol(name):
+def sympy_symbol(name, integer=True):
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
-    return sympy.Symbol(name, integer=True, positive=True)
+    return sympy.Symbol(name, integer=integer, positive=True)
 
 
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):

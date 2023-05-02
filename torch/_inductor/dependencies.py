@@ -260,7 +260,8 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     var_ranges: VarRanges = collections.OrderedDict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy_symbol(f"{prefix}{next(cnt)}")
+        # Carry forward is_integer hack for nested tensors
+        v = sympy_symbol(f"{prefix}{next(cnt)}", integer=length.is_integer)
         var_ranges[v] = length
         return v
 
