@@ -302,6 +302,10 @@ if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
   export TORCHINDUCTOR_MAX_AUTOTUNE=1
 fi
 
+if [[ "${TEST_CONFIG}" == *coordesc_tuning* ]]; then
+  export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+fi
+
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -321,6 +325,11 @@ test_perf_for_dashboard() {
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+    elif [[ "${TEST_CONFIG}" == *coordesc_tuning* ]]; then
+      # Only run this one config for coordinate descent tuning
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_coordesc_tuning_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
     else
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
@@ -340,6 +349,11 @@ test_perf_for_dashboard() {
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
+    elif [[ "${TEST_CONFIG}" == *coordesc_tuning* ]]; then
+      # Only run this one config for coordinate descent tuning
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_coordesc_tuning_${suite}_${dtype}_${mode}_cuda_performance.csv"
     else
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
