@@ -3,6 +3,7 @@
 import unittest
 from copy import deepcopy
 from functools import wraps
+from unittest.mock import MagicMock
 
 import torch
 import torch.nn as nn
@@ -10,8 +11,10 @@ from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.distributed._spmd.graph_optimization import (
+    _optimized_func,
     comm_fusion_with_concat,
     get_all_fused_optimizer_blocks,
+    graph_optimization_pass,
     iter_move_grads_and_optimizers,
     remove_copy_from_optimizer,
     schedule_comm_wait,
@@ -50,6 +53,56 @@ class DummyModel(nn.Module):
 
     def forward(self, x):
         return self.mod(x)
+
+
+class GraphPassWrapperTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 1
+
+    def test_order(self):
+        @graph_optimization_pass(
+            prerequisites=[],
+            apply_after=[],
+        )
+        def my_pass1(gm) -> None:
+            return
+
+        @graph_optimization_pass(
+            prerequisites=[my_pass1],
+            apply_after=[],
+        )
+        def my_pass2(gm) -> None:
+            return
+
+        @graph_optimization_pass(
+            prerequisites=[],
+            apply_after=[my_pass1],
+        )
+        def my_pass3(gm) -> None:
+            return
+
+        gm = MagicMock(spec=IterGraphModule)
+        # No errors happen.
+        my_pass1(gm)
+        my_pass3(gm)
+        my_pass2(gm)
+        _optimized_func.clear()
+
+        # Only my_pass3 is okay as it has no prerequisites.
+        my_pass3(gm)
+        _optimized_func.clear()
+
+        # Prerequisite condition does not match.
+        with self.assertRaisesRegex(AssertionError, "are the prerequisites of"):
+            my_pass2(gm)
+        _optimized_func.clear()
+
+        # my_pass3 must be applied after my_pass1
+        with self.assertRaisesRegex(AssertionError, "must be applied after"):
+            my_pass3(gm)
+            my_pass1(gm)
+        _optimized_func.clear()
 
 
 class TransformationTest(DTensorTestBase):
