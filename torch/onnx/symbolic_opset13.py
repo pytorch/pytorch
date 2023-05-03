@@ -641,7 +641,9 @@ def repeat_interleave(
 
     # Check if all indices should be repeated the same number of times.
     if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-        return symbolic_helper._repeat_interleave_single_value_helper(g, self, repeats, dim)
+        return symbolic_helper._repeat_interleave_single_value_helper(
+            g, self, repeats, dim
+        )
 
     cond_dynamic_repeats = repeats_dim == 1 and repeats_sizes[0] is None
     # If input size is dynamic or repeats vector is dynamic

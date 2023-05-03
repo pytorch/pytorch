@@ -4294,7 +4294,9 @@ def repeat_interleave(
                 "Unsupported along dimension with unknown input size",
                 self,
             )
-        return symbolic_helper._repeat_interleave_single_value_helper(g, self, repeats, dim)
+        return symbolic_helper._repeat_interleave_single_value_helper(
+            g, self, repeats, dim
+        )
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
