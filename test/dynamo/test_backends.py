@@ -14,6 +14,7 @@ from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.testing._internal.inductor_utils import HAS_CUDA
+import random
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
@@ -214,18 +215,40 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
 
 
 class TestDynamoModeArgParser(torch._dynamo.test_case.TestCase):
-    def test_trace_numpy_int_into_symint_list_type(self):
-        class MyModule(torch.nn.Linear):
+    def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
+        class MyModule(torch.nn.Module):
             def __init__(self):
-                super().__init__(np.int_(16), np.int_(16))
+                super().__init__()
 
             def forward(self, x):
-                # passing numpy int into param of symlint_list type
-                # will be wrapped as FakeTensor, arg parser should
-                # support this use case.
-                return x.reshape(self.in_features)
+                # use numpy int so it's wrapped as fake tensor in dynamo
+                shape = np.int_(16)
+                # test shape as fake tensor, which param type is
+                # Sequence[Union[_int, SymInt]]
+                return x.reshape(shape)
 
         x = torch.rand([4, 4])
+        model = MyModule()
+        orig_out = model(x)
+        opt_model = torch._dynamo.optimize("eager")(MyModule())
+        opt_out = opt_model(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_dynamo_compiling_fake_tensor_to_int_or_vararg_int(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, input):
+                # use numpy int so it's wrapped as fake tensor in dynamo
+                shift = np.int_(1)
+                # test shift as fake tensor, which param type is
+                # Union[Union[_int, SymInt], Sequence[Union[_int, SymInt]]]
+                return torch.roll(input, shift, dims=2)
+
+        x = torch.rand([4, 4, 4, 4])
+
         model = MyModule()
         orig_out = model(x)
         opt_model = torch._dynamo.optimize("eager")(MyModule())
