@@ -13,7 +13,6 @@ from typing import List, NamedTuple, Optional, Union
 import torch
 
 from torch import SymInt
-from torch.utils.weak import TensorWeakRef
 from torch._guards import GuardSource
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
@@ -23,7 +22,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils.weak import WeakIdRef
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -156,7 +155,7 @@ class GraphArg:
         return self.source.reconstruct(tx)
 
     def erase(self):
-        self.example = None
+        self._example = None
 
 
 class VariableBuilder:
