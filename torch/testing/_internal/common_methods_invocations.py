@@ -9057,23 +9057,26 @@ op_db: List[OpInfo] = [
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
-    UnaryUfuncInfo('item',
-                   op=torch.Tensor.item,
-                   ref=np.ndarray.item,
-                   dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.chalf, torch.bool),
-                   supports_out=False,
-                   supports_autograd=False,
-                   error_inputs_func=error_inputs_item,
-                   sample_inputs_func=sample_inputs_item,
-                   skips=(
-                       # Error testing item function variant
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),
-                       # RuntimeError: Composite compliance check failed with the above error.
-                       DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-                       # Booleans mismatch: AssertionError: False is not true
-                       DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
-                       # Booleans mismatch: AssertionError: False is not true
-                       DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),)),
+    OpInfo('item',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.item, inp, *args, **kwargs),
+           ref=np.ndarray.item,
+           method_variant=None,
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.chalf, torch.bool),
+           supports_out=False,
+           supports_autograd=False,
+           error_inputs_func=error_inputs_item,
+           sample_inputs_func=sample_inputs_item,
+           skips=(
+               # Error testing item function variant
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.float32, torch.complex64)),
+               # RuntimeError: Composite compliance check failed with the above error.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               # Booleans mismatch: AssertionError: False is not true
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               # Booleans mismatch: AssertionError: False is not true
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
+           )),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
@@ -18473,21 +18476,15 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/85258
         supports_nvfuser=False,
     ),
-    ElementwiseUnaryPythonRefInfo(
+    PythonRefInfo(
         "_refs.item",
         torch_opinfo_name="item",
         supports_nvfuser=False,
         skips=(
-            # ValueError: Can't convert a tensor with 943593 elements to a number!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # ValueError: Can't convert a tensor with 943593 elements to a number!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             # RuntimeError: Cannot cast FakeTensor(FakeTensor(..., device='meta', size=()), cpu) to number
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # ValueError: Can't convert a tensor with 10 elements to a number!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-            # ValueError: Can't convert a tensor with 0 elements to a number!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.conj_physical",
