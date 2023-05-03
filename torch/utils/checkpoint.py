@@ -42,7 +42,7 @@ def _get_device_module(device='cuda'):
 
 class DefaultDevice(object):
     r"""Set/Get the default device type for checkpoint.
-        In func of `_infer_device_type`, if there are no no-CPU 
+        In func of `_infer_device_type`, if there are no no-CPU
         tensors, it will return the default device type, and the
         default vaule is `cuda`.
     """

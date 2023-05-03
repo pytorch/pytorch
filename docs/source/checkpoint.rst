@@ -15,12 +15,12 @@ torch.utils.checkpoint
     to ``checkpoint`` or ``checkpoint_sequential`` to omit stashing and
     restoring the RNG state during each checkpoint.
 
-    The stashing logic saves and restores the RNG state for CPU and another 
+    The stashing logic saves and restores the RNG state for CPU and another
     device type (infer the device type from Tensor arguments excluding CPU
     tensors by ``_infer_device_type``) to the ``run_fn``. If there are multiple
     device, Device state will only be saved for devices of a single device type,
-    and the remaining devices will be ignored. Consequently, if any checkpointed 
-    functions involve randomness, this may result in incorrect gradients. (Note 
+    and the remaining devices will be ignored. Consequently, if any checkpointed
+    functions involve randomness, this may result in incorrect gradients. (Note
     that if CUDA devices are among the devices detected, it will be prioritized;
     otherwise, the first device encountered will be selected.) If there are no
     CPU-tensors, the default device type(default value is `cuda`, and it could be
