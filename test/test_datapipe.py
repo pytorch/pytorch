@@ -1938,7 +1938,6 @@ class TestFunctionalMapDataPipe(TestCase):
             "concat",
             "map",
             "shuffle",
-            # "unzip",
             "zip",
         ]:
             docstring = pydoc.render_doc(thing=getattr(input_dp, dp_funcname))
