@@ -60,7 +60,7 @@ class InputAdapter:
     @_beartype.beartype
     def apply(
         self, *model_args, **model_kwargs
-    ) -> Sequence[Union[int, float, bool, "torch.Tensor"]]:
+    ) -> Sequence[Union[int, float, bool, "torch.Tensor", None]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
