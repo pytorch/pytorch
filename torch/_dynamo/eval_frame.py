@@ -936,7 +936,7 @@ def export(
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 if functionalize:
-                    torch._enable_functionalization(reapply_views=False)
+                    torch._enable_functionalization(reapply_views=True)
                     try:
                         return pytree.tree_map(
                             from_fun,
