@@ -101,7 +101,23 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     def test_type_promotion(self):
-        pass
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        fn_opt = torch._dynamo.optimize()(fn)
+
+        max32 = torch.iinfo(torch.int32).max
+        max64 = torch.iinfo(torch.int64).max
+        inputs = (
+            torch.randint(max32, (10, 10), device="cuda:0", dtype=torch.int32),
+            torch.randint(max32, (20, 20), device="cuda:0", dtype=torch.int32),
+            torch.randint(max32, (10, 10), device="cuda:0", dtype=torch.int32),
+            torch.randint(max64, (20, 20), device="cuda:0", dtype=torch.int64),
+        )
+        actual = fn_opt(*inputs)
+        expected = fn(*inputs)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     @requires_cuda()
     def test_kernel_split_arg_limit(self):

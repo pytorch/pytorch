@@ -249,8 +249,8 @@ def _register_foreach_lowering(
         validate_ir(out)
         return out
 
-    aten_fn = get_overloads(aten_fn)
-    lowerings.update({fn: wrapped for fn in aten_fn})
+    aten_fns = get_overloads(aten_fn)
+    lowerings.update({fn: wrapped for fn in aten_fns})
     return wrapped
 
 
