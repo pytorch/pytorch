@@ -189,9 +189,10 @@ class NNModuleToString:
         for param_name, param in gm._parameters.items():
             if param is None:
                 continue
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            maybe_device = ""
             if param.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+                maybe_device = ', device="cuda"'
+            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
