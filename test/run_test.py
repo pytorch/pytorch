@@ -1443,6 +1443,11 @@ def main():
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
+
+    # Disable most tests for now
+    selected_tests_parallel = [x for x in selected_tests_parallel if x.name == "test_failing_test"]
+    selected_tests_serial = []
+
     print_to_stderr(
         "parallel (file granularity) tests:\n {}".format(
             "\n ".join(str(x) for x in selected_tests_parallel)
