@@ -4128,8 +4128,6 @@ def fn():
             export_constraints=None,
             frame_state={"_id": 0},
         )
-        # Contrived property so as not to have it be None
-        graph.nn_modules = {}
         graph.nn_modules_sources = {}
         # Contrived generation timestamp
         graph.timestamp = 4

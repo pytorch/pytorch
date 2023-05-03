@@ -1019,14 +1019,14 @@ class TorchHigherOrderOperator(VariableTracker):
                 true_r,
                 true_graph,
                 true_guards,
-                true_nn_modules,
+                true_nn_modules_context,
                 true_cmp,
             ) = speculate_branch(True)
             (
                 false_r,
                 false_graph,
                 false_guards,
-                false_nn_modules,
+                false_nn_modules_context,
                 false_cmp,
             ) = speculate_branch(False)
 
@@ -1053,10 +1053,12 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             true_name = add_subgraph(
-                "true", torch.fx.GraphModule(true_nn_modules, true_graph)
+                "true",
+                torch.fx.GraphModule(true_nn_modules_context.nn_modules, true_graph),
             )
             false_name = add_subgraph(
-                "false", torch.fx.GraphModule(false_nn_modules, false_graph)
+                "false",
+                torch.fx.GraphModule(false_nn_modules_context.nn_modules, false_graph),
             )
 
             # Apply side effects (guaranteed to be equal)
@@ -1092,7 +1094,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 body_r,
                 body_graph,
                 body_guards,
-                body_nn_modules,
+                body_nn_modules_context,
                 body_cmp,
             ) = speculate_subgraph(
                 args[0],
@@ -1121,7 +1123,8 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             body_name = add_subgraph(
-                "body", torch.fx.GraphModule(body_nn_modules, body_graph)
+                "body",
+                torch.fx.GraphModule(body_nn_modules_context.nn_modules, body_graph),
             )
 
             body_node = make_attr(body_name)
