@@ -52,7 +52,7 @@ TEST(MathTest, GemmNoTransNoTrans) {
       &cpu_context);
   EXPECT_EQ(Y.numel(), 30);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 10) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 10, i);
   }
   // Test Accumulate
   math::Gemm<float, CPUContext>(
@@ -69,7 +69,7 @@ TEST(MathTest, GemmNoTransNoTrans) {
       &cpu_context);
   EXPECT_EQ(Y.numel(), 30);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 15) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 15, i);
   }
   // Test Accumulate
   math::Gemm<float, CPUContext>(
@@ -86,7 +86,7 @@ TEST(MathTest, GemmNoTransNoTrans) {
       &cpu_context);
   EXPECT_EQ(Y.numel(), 30);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 20) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 20, i);
   }
 }
 
@@ -127,7 +127,7 @@ TEST(MathTest, GemmNoTransTrans) {
       &cpu_context);
   EXPECT_EQ(Y.numel(), 30);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 10) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 10, i);
   }
   // Test Accumulate
   math::Gemm<float, CPUContext>(
@@ -144,7 +144,7 @@ TEST(MathTest, GemmNoTransTrans) {
       &cpu_context);
   EXPECT_EQ(Y.numel(), 30);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 15) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 15, i);
   }
   math::Gemm<float, CPUContext>(
       CblasNoTrans,
@@ -160,7 +160,7 @@ TEST(MathTest, GemmNoTransTrans) {
       &cpu_context);
   EXPECT_EQ(Y.numel(), 30);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 20) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 20, i);
   }
 }
 
@@ -322,7 +322,7 @@ TEST(MathTest, GemvNoTrans) {
       Y.mutable_data<float>(),
       &cpu_context);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 10) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 10, i);
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(
@@ -336,7 +336,7 @@ TEST(MathTest, GemvNoTrans) {
       Y.mutable_data<float>(),
       &cpu_context);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 15) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 15, i);
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(
@@ -350,7 +350,7 @@ TEST(MathTest, GemvNoTrans) {
       Y.mutable_data<float>(),
       &cpu_context);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 20) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 20, i);
   }
 }
 
@@ -388,7 +388,7 @@ TEST(MathTest, GemvTrans) {
       Y.mutable_data<float>(),
       &cpu_context);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 6) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 6, i);
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(
@@ -402,7 +402,7 @@ TEST(MathTest, GemvTrans) {
       Y.mutable_data<float>(),
       &cpu_context);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 9) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 9, i);
   }
   // Test Accumulate
   math::Gemv<float, CPUContext>(
@@ -416,7 +416,7 @@ TEST(MathTest, GemvTrans) {
       Y.mutable_data<float>(),
       &cpu_context);
   for (int i = 0; i < Y.numel(); ++i) {
-    TORCH_CHECK_EQ(Y.data<float>()[i], 12) << i;
+    TORCH_CHECK_EQ(Y.data<float>()[i], 12, i);
   }
 }
 

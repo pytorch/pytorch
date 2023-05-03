@@ -55,7 +55,7 @@ FileStoreHandler::FileStoreHandler(
   auto ret = mkdir(basePath_.c_str(), 0777);
 #endif // defined(_MSC_VER)
   if (ret == -1) {
-    TORCH_CHECK_EQ(errno, EEXIST) << "mkdir: " << strerror(errno);
+    TORCH_CHECK_EQ(errno, EEXIST, "mkdir: ", strerror(errno));
   }
 }
 
@@ -71,7 +71,7 @@ std::string FileStoreHandler::realPath(const std::string& path) {
   std::array<char, PATH_MAX> buf;
   auto ret = realpath(path.c_str(), buf.data());
 #endif
-  TORCH_CHECK_EQ(buf.data(), ret) << "realpath: " << strerror(errno);
+  TORCH_CHECK_EQ(buf.data(), ret, "realpath: ", strerror(errno));
   return std::string(buf.data());
 }
 

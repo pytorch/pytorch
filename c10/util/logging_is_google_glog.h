@@ -50,13 +50,6 @@ INSTANTIATE_FOR_CONTAINER(set)
 #include <glog/logging.h>
 
 // Additional macros on top of glog
-#define TORCH_CHECK_EQ(val1, val2) CHECK_EQ(val1, val2)
-#define TORCH_CHECK_NE(val1, val2) CHECK_NE(val1, val2)
-#define TORCH_CHECK_LE(val1, val2) CHECK_LE(val1, val2)
-#define TORCH_CHECK_LT(val1, val2) CHECK_LT(val1, val2)
-#define TORCH_CHECK_GE(val1, val2) CHECK_GE(val1, val2)
-#define TORCH_CHECK_GT(val1, val2) CHECK_GT(val1, val2)
-
 #ifndef NDEBUG
 #define TORCH_DCHECK_EQ(val1, val2) DCHECK_EQ(val1, val2)
 #define TORCH_DCHECK_NE(val1, val2) DCHECK_NE(val1, val2)

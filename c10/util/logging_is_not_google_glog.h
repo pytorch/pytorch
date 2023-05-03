@@ -140,14 +140,6 @@ static_assert(
   FATAL_IF(((val1)op(val2))) << "Check failed: " #val1 " " #op " " #val2 " (" \
                              << (val1) << " vs. " << (val2) << ") "
 
-// TORCH_CHECK_OP macro definitions
-#define TORCH_CHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)
-#define TORCH_CHECK_NE(val1, val2) TORCH_CHECK_OP(val1, val2, !=)
-#define TORCH_CHECK_LE(val1, val2) TORCH_CHECK_OP(val1, val2, <=)
-#define TORCH_CHECK_LT(val1, val2) TORCH_CHECK_OP(val1, val2, <)
-#define TORCH_CHECK_GE(val1, val2) TORCH_CHECK_OP(val1, val2, >=)
-#define TORCH_CHECK_GT(val1, val2) TORCH_CHECK_OP(val1, val2, >)
-
 #ifndef NDEBUG
 // Debug only versions of TORCH_CHECK_OP macros.
 #define TORCH_DCHECK_EQ(val1, val2) TORCH_CHECK_OP(val1, val2, ==)

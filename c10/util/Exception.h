@@ -449,6 +449,33 @@ inline C10_API const char* torchCheckMsgImpl(
   }
 #endif
 
+#define TORCH_EXCEPTION_CHECK_OP(op, val1, val2, ...)  \
+  do {                                                 \
+    const auto _a684 = (val1);                         \
+    const auto _b684 = (val2);                         \
+    TORCH_CHECK(                                       \
+        _a684 op _b684,                                \
+        "Check failed: " #val1 " " #op " " #val2 " (", \
+        _a684,                                         \
+        " vs. ",                                       \
+        _b684,                                         \
+        ")",                                           \
+        ##__VA_ARGS__);                                \
+  } while (false);
+
+#define TORCH_CHECK_EQ(val1, val2, ...) \
+  TORCH_EXCEPTION_CHECK_OP(==, val1, val2, ##__VA_ARGS__)
+#define TORCH_CHECK_NE(val1, val2, ...) \
+  TORCH_EXCEPTION_CHECK_OP(!=, val1, val2, ##__VA_ARGS__)
+#define TORCH_CHECK_LE(val1, val2, ...) \
+  TORCH_EXCEPTION_CHECK_OP(<=, val1, val2, ##__VA_ARGS__)
+#define TORCH_CHECK_LT(val1, val2, ...) \
+  TORCH_EXCEPTION_CHECK_OP(<, val1, val2, ##__VA_ARGS__)
+#define TORCH_CHECK_GE(val1, val2, ...) \
+  TORCH_EXCEPTION_CHECK_OP(>=, val1, val2, ##__VA_ARGS__)
+#define TORCH_CHECK_GT(val1, val2, ...) \
+  TORCH_EXCEPTION_CHECK_OP(>, val1, val2, ##__VA_ARGS__)
+
 namespace c10 {
 namespace detail {
 
