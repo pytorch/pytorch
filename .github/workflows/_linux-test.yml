@@ -107,10 +107,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
       
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        with:
-          cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
+      # - name: Download pytest cache
+      #   uses: ./.github/actions/pytest-cache-download
+      #   with:
+      #     cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
 
       - name: Set Test step time
         id: test-timeout
