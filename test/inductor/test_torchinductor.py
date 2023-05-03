@@ -90,6 +90,7 @@ class TestCase(TorchTestCase):
                     "cpp.min_chunk_size": 1,
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
+                    "generate_intermediate_hooks": True,
                 }
             )
         )
@@ -1813,6 +1814,17 @@ class CommonTemplate:
             code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
+
+    def test_aliased_buffer_reuse(self):
+        def fn(x, y):
+            x = 2 * x
+            y = 2 * y
+            c = torch.cat([x, y], dim=-1)
+            d = 1 + c
+            m = torch.mm(d, d)
+            return m[:, :2] + x
+
+        self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
 
     def test_view_detach(self):
         def fn(a):
@@ -4540,6 +4552,13 @@ class CommonTemplate:
 
     @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_1(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
+
+    @config.patch({"lowmem_dropout": True})
+    def test_dropout_trivial_1_lowmem(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
 
