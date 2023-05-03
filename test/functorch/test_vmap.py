@@ -4341,6 +4341,22 @@ class TestVmapOperatorsOpInfo(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 vmap(grad(bad_fn))(x)
 
+    def test_searchsorted_bucketize(self, device):
+        # OpInfo generates test with repeated samples in batch dim.
+        # Thus we test explicitily with different samples across a batch.
+
+        def test():
+            boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 6, 8, 10]], device=device)
+            v = torch.tensor(3, device=device)
+            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, None))
+            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (None, 0))
+            boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 4, 8, 9]], device=device)
+            v = torch.tensor([3, 3], device=device)
+            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, 0))
+            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (0, 0))
+
+        test()
+
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
         return generator.set_state(orig_state) if use_generator else torch.manual_seed(seed)
