@@ -17390,11 +17390,12 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
-            # AssertionError: Tensor-likes are not close!
-            # DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
+            DecorateInfo(toleranceOverride(
+                {torch.float32: tol(atol=5e-3, rtol=8e-6)}),
+                'TestCommon',
+                'test_noncontiguous_samples',
+                device_type='cuda'),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=0)}), 'TestDecomp', 'test_comprehensive'),
-            # RuntimeError: CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling `cublasGemmStridedBatchedExFix``
-            # DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive', device_type='cuda'),
 
             # TODO skip this for now since we can't skip on runtime arch support (taken from scaled_dot_product_attention)
             DecorateInfo(unittest.skip("Skipped!"), 'TestInductorOpInfo', 'test_comprehensive'),
@@ -17403,7 +17404,8 @@ op_db: List[OpInfo] = [
             # lambda impl
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_forward_ad'),),
         supports_out=False,
         supports_gradgrad=True,
         supports_forward_ad=True,
