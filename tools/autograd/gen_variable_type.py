@@ -1716,8 +1716,7 @@ def emit_body(
                 assert len(info.output_differentiability_conditions) == 1
                 requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && {requires_fw_grad}"
             content.append(
-                f"auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};\n"
-                f"(void){get_any_has_forward_grad_name(derivative.var_names)};"
+                f"[[maybe_unused]] auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};"
             )
         return content
 
