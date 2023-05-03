@@ -315,6 +315,7 @@ def run_ort(
         ort_model, providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+
     if len(input_names) != len(pytorch_inputs):
         raise AssertionError(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
@@ -411,7 +412,7 @@ QINT_TYPES = (
 FLOAT_TYPES = (
     torch.float16,
     torch.float32,
-    torch.float64,
+    # torch.float64,  ORT doesn't support
 )
 
 COMPLEX_TYPES = (
@@ -600,6 +601,13 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
+def reason_onnx_script_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX script doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX script"
+
+
 def reason_onnx_runtime_does_not_support(
     operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
@@ -612,6 +620,15 @@ def reason_onnx_does_not_support(
 ) -> str:
     """Formats the reason: ONNX doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
+
+
+def reason_dynamo_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: Dynamo doesn't support the given dtypes."""
+    return (
+        f"{operator} on {dtypes or 'certain dtypes'} not supported by the Dynamo Spec"
+    )
 
 
 def reason_jit_tracer_error(info: str) -> str:
