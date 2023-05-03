@@ -41,19 +41,33 @@ def _get_device_module(device='cuda'):
     return device_module
 
 class DefaultDevice(object):
-    r"""Set/Get the default device type for checkpoint.
-        In func of `_infer_device_type`, if there are no no-CPU
-        tensors, it will return the default device type, and the
-        default vaule is `cuda`.
+    r"""
+    A class that manages the default device type for checkpointing. 
+    If no non-CPU tensors are present, the default device type will be used.
+    The default value is 'cuda'. The device type is used in the checkpointing 
+    process when determining which device states to save and restore
+    for recomputation.
     """
     _default_device_type = "cuda"
 
     @staticmethod
     def set_device_type(device: str = "cuda"):
+        """
+        Set the default device type for checkpointing.
+
+        Args:
+            device (str): The device type to be set as default. Default is 'cuda'.
+        """
         DefaultDevice._default_device_type = device
 
     @staticmethod
-    def get_device_type():
+    def get_device_type() -> str:
+        """
+        Get the current default device type for checkpointing.
+
+        Returns:
+            str: The current default device type.
+        """
         return DefaultDevice._default_device_type
 
 def _infer_device_type(*args):
