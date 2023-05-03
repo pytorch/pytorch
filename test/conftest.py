@@ -255,6 +255,6 @@ class StepcurrentPlugin:
             return f"stepcurrent: {self.report_status}"
         return None
 
-    def pytest_runtest_protocol(self, item, nextitem) -> None:
-        self.lastrun = item.nodeid
+    def pytest_runtest_logreport(self, report: TestReport) -> None:
+        self.lastrun = report.nodeid
         self.cache.set(self.directory, self.lastrun)

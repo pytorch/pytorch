@@ -59,11 +59,11 @@ def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
 
 def udf_with_torch_ops(device=-1, use_record_function=False):
-    device_ctx = contextlib.nullcontext() if device == -1 else torch.cuda.device(device)
+    device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
     record_function_ctx = (
         torch.autograd.profiler.record_function("##forward##")
         if use_record_function
-        else contextlib.nullcontext()
+        else contextlib.suppress()
     )
     with device_ctx, record_function_ctx:
         t1, t2 = torch.ones(1), torch.ones(1)
@@ -2164,7 +2164,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         if self.rank == 1:
             with p() as prof:
                 record_function_ctx_mgr = (
-                    contextlib.nullcontext()
+                    contextlib.suppress()
                     if not use_record_function
                     else torch.autograd.profiler.record_function(
                         "foo"

@@ -10,7 +10,6 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
-ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
 
 def args_str(args):
@@ -224,7 +223,7 @@ class DDPOptimizer:
                 # only print the submod graphs, not their children
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
-        ddp_graph_log.debug(debug_str)
+        log.debug(debug_str)
 
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
@@ -324,9 +323,7 @@ class DDPOptimizer:
                         else:
                             curr_submod = real_mod
 
-                        ddp_graph_log.debug(
-                            "\n---%s graph---\n%s", n.target, curr_submod.graph
-                        )
+                        log.debug("\n---%s graph---\n%s", n.target, curr_submod.graph)
 
                         # When calling the compiler on the submod, inputs (new_args) are expected to
                         # be FakeTensors already since Dynamo would have made them FakeTensors in the
@@ -354,7 +351,5 @@ class DDPOptimizer:
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        ddp_graph_log.debug(
-            "\n---final graph---\n%s\n---------------\n", split_gm.graph
-        )
+        log.debug("\n---final graph---\n%s\n---------------\n", split_gm.graph)
         return split_gm

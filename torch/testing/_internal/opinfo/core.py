@@ -2550,7 +2550,6 @@ def sample_inputs_foreach(
     low=None,
     high=None,
     zero_size: bool,
-    requires_grad: bool,
 ):
     if zero_size:
         return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
@@ -2563,7 +2562,6 @@ def sample_inputs_foreach(
                 noncontiguous=noncontiguous,
                 low=low,
                 high=high,
-                requires_grad=requires_grad,
             )
             for _ in range(N)
         ]
@@ -2576,7 +2574,6 @@ def sample_inputs_foreach(
                 noncontiguous=noncontiguous,
                 low=low,
                 high=high,
-                requires_grad=requires_grad,
             )
             for i in range(N)
         ]

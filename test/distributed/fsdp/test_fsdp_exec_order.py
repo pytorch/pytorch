@@ -2,7 +2,7 @@
 
 import sys
 import warnings
-from contextlib import nullcontext
+from contextlib import suppress
 
 import torch
 from torch import distributed as dist
@@ -159,7 +159,7 @@ class TestFSDPExecOrder(FSDPTest):
                 expected_regex=regex,
             )
             if self.rank != 0
-            else nullcontext()
+            else suppress()
         )
         if self.rank != 0:
             fsdp_model.flip_path()

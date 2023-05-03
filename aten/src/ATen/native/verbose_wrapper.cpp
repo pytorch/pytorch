@@ -1,4 +1,5 @@
 #include <ATen/Config.h>
+#include <c10/macros/Export.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -7,12 +8,11 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #endif
-#include <ATen/native/verbose_wrapper.h>
 
 namespace torch {
 namespace verbose {
 
-int _mkl_set_verbose(int enable) {
+TORCH_API int _mkl_set_verbose(int enable) {
 #if AT_MKL_ENABLED()
   int ret = mkl_verbose(enable);
 
@@ -25,7 +25,7 @@ int _mkl_set_verbose(int enable) {
 #endif
 }
 
-int _mkldnn_set_verbose(int level) {
+TORCH_API int _mkldnn_set_verbose(int level) {
 #if AT_MKLDNN_ENABLED()
   return at::native::set_verbose(level);
 #else

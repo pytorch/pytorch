@@ -57,7 +57,7 @@ Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
 
   // Write the output tensor
   Tensor output = at::empty({static_cast<int64_t>(set.size())}, options);
-  scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
+  scalar_t *output_data = output.data_ptr<scalar_t>();
   std::copy(set.begin(), set.end(), output_data);
   if (sorted) {
     std::sort(output_data, output_data + set.size());
@@ -84,7 +84,7 @@ Tensor unique_elements(const bool* begin, const bool* end,
   // Write the output tensor
   int64_t num_elem = seen[false] + seen[true];
   Tensor output = at::empty({num_elem}, options);
-  bool *output_data = output.mutable_data_ptr<bool>();
+  bool *output_data = output.data_ptr<bool>();
 
   if (seen[false]) {
     *output_data++ = false;
