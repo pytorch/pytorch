@@ -612,7 +612,8 @@ class NNModuleVariable(VariableTracker):
                 isinstance(x, variables.TensorVariable)
                 for x in itertools.chain(args, kwargs.values())
             )
-            or name == "zero_grad"
+            or tc.train_step_context()
+            and name == "zero_grad"
         ):
             return generic_call_method_helper(name)
         else:

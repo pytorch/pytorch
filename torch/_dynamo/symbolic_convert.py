@@ -32,7 +32,7 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
-from .backends.train_step import _train_step_compiler
+from .backends.is_train_step import _is_train_step_compiler
 from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
@@ -1917,14 +1917,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         mutated_closure_cell_contents: Set[str],
         frame_state,
-        trainstep=False,
     ):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
         )
-        if trainstep:
-            compiler_fn = _train_step_compiler(compiler_fn)
         super().__init__(
             output=OutputGraph(
                 f_globals,
@@ -1946,8 +1943,11 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
+
+        # as soon as we create the tracing context we should keep it active, so any calls
+        # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context):
-            if trainstep:
+            if _is_train_step_compiler(compiler_fn):
                 TracingContext.trace_train_step()
 
             self.one_graph: bool = one_graph

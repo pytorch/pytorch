@@ -159,6 +159,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
+        assert TracingContext.get() is not None, "Expected active TracingContext"
         super().__init__()
         self.tx = tx
         self.source = source
@@ -538,7 +539,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, torch.optim.Optimizer) and tc.trainstep:
+        elif isinstance(value, torch.optim.Optimizer) and tc.train_step_context():
             return self.tx.output.register_optimizer(
                 value,
                 source=self.source,

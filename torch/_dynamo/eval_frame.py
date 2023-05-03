@@ -24,6 +24,7 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
+from torch._dynamo.backends.is_train_step import _is_train_step_compiler
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -495,7 +496,6 @@ def optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=False,
-    trainstep=False,
 ):
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -521,8 +521,6 @@ def optimize(
         def toy_example(a, b):
             ...
     """
-    if trainstep:
-        nopython = True
 
     check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
@@ -535,15 +533,17 @@ def optimize(
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
 
-    backend = get_compiler_fn(backend)
+    if _is_train_step_compiler(backend):
+        assert nopython, "nopython should be set whenever using train_step compile"
+    else:
+        # TODO(whc) the debug wrapper screws up `_is_train_step_compiler` logic, and hasn't been tested anyway.
+        backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
-    if nopython or trainstep:
-        return optimize_assert(
-            backend, dynamic=dynamic, hooks=hooks, trainstep=trainstep
-        )
+    if nopython:
+        return optimize_assert(backend, dynamic=dynamic, hooks=hooks)
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
         hooks,
@@ -1054,12 +1054,12 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=False,
-    trainstep=False,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
-    backend = get_compiler_fn(backend)
+    if not _is_train_step_compiler(backend):
+        backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
@@ -1069,7 +1069,6 @@ def optimize_assert(
             backend,
             export=export,
             export_constraints=export_constraints,
-            trainstep=trainstep,
         ),
         hooks,
         backend_ctx_ctor,
