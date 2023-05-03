@@ -559,14 +559,16 @@ def isolate_fails(
     )
     p.wait()
 
-    if p.returncode != 0:
-        stdout.seek(0)
-        stderr.seek(0)
-        print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
-        print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
-        # print(f"Isolated test failed - {file_name}")
-        return True
-    return False
+    stdout.seek(0)
+    stderr.seek(0)
+    print(
+        textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "), file=sys.stdout
+    )
+    print(
+        textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "), file=sys.stderr
+    )
+    # print(f"Isolated test failed - {file_name}")
+    return p.returncode != 0
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
