@@ -3139,7 +3139,7 @@ def t_(self):
         dense_dim = self.dense_dim()
         assert (
             sparse_dim <= 2 and dense_dim == 0
-        ), f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"
+        ), f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"  # noqa: B950
     else:
         assert (
             self.dim() <= 2
