@@ -1095,6 +1095,14 @@ class CompileProfiler:
                 self.op_count += 1
         return gm.forward
 
+    def __enter__(self):
+        self.old_report_guard_failure = config.report_guard_failures
+        config.report_guard_failures = True
+        return self
+
+    def __exit__(self, typ, val, traceback):
+        config.report_guard_failures = self.old_report_guard_failure
+
     def get_metrics(self):
         return {"guard_failures": guard_failures}
 
