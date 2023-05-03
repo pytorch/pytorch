@@ -194,6 +194,13 @@ jobs:
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 
+      - name: Upload pytest cache
+        uses: ./.github/actions/pytest-cache-upload
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
+          shard: ${{ matrix.shard }}
+          
       - name: Save test results
         if: always()
         run: |
