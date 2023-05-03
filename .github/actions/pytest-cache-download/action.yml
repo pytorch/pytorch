@@ -4,12 +4,8 @@ description: Uploads the pytest cache to S3
 
 inputs:
   cache_dir:
-    description: Path to the pytest cache directory. This folder will be zipped and uploaded to S3.
+    description: Path to the pytest cache directory. This is where the merged cache will be placed.
     required: true
-  shard:
-    description: Shard number for the current job
-    required: false
-    default: "0"
 
 outputs:
   pr-identifier:

@@ -66,9 +66,9 @@ def upload_pytest_cache(pr_identifier, workflow, job, shard, pytest_cache_dir, b
         print(f"Deleting {zip_file_path}")
         os.remove(zip_file_path)
 
-def download_pytest_cache(pr_identifier, workflow, job_name, temp_dir, pytest_cache_dir_new, bucket=BUCKET):
+def download_pytest_cache(pr_identifier, workflow, job, pytest_cache_dir_new, bucket=BUCKET, temp_dir=TEMP_DIR):
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job_name)
+    obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
     
     zip_download_dir = f"{temp_dir}/cache-zip-downloads/{obj_key_prefix}"
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
@@ -78,11 +78,11 @@ def download_pytest_cache(pr_identifier, workflow, job_name, temp_dir, pytest_ca
         
         for downloaded_zip_path in downloads:
             shard_id = os.path.splitext(os.path.basename(downloaded_zip_path))[0] # the file name of the zip is the shard id
-            pytest_cache_dir_for_shard = os.path.join(f"{temp_dir}/unzipped-caches", get_s3_key_prefix(pr_identifier, workflow, job_name, shard_id), PYTEST_CACHE_DIR_NAME)
+            pytest_cache_dir_for_shard = os.path.join(f"{temp_dir}/unzipped-caches", get_s3_key_prefix(pr_identifier, workflow, job, shard_id), PYTEST_CACHE_DIR_NAME)
 
             try:
                 unzip_folder(downloaded_zip_path, pytest_cache_dir_for_shard)
-                print(f"Merging cache for job {job_name} shard {shard_id} into {pytest_cache_dir_new}")
+                print(f"Merging cache for job {job} shard {shard_id} into {pytest_cache_dir_new}")
                 merge_pytest_caches(pytest_cache_dir_for_shard, pytest_cache_dir_new)
             finally:
                 # clean up the unzipped cache folder
@@ -179,18 +179,14 @@ if __name__ == '__main__':
 
     pr_identifier = get_sanitized_pr_identifier("read-deal")
     print(pr_identifier)
+    workflow = "test-workflow"
     job = "test-job-name"
     shard = "shard-3"
     pytest_cache_dir = f"/Users/zainr/test-infra/{PYTEST_CACHE_DIR_NAME}"
-    upload_pytest_cache(pr_identifier, BUCKET, job, shard, pytest_cache_dir)
+    upload_pytest_cache(pr_identifier, workflow, job, shard, pytest_cache_dir, BUCKET)
 
     temp_dir = "/Users/zainr/deleteme/tmp"
     
     pytest_cache_dir_new = f"/Users/zainr/deleteme/test_pytest_cache"
-    download_pytest_cache(pr_identifier, BUCKET, job, temp_dir, pytest_cache_dir_new)
-
-    # parser = argparse.ArgumentParser(description='')
-    # parser.add_argument('--pr_identifier', type=str, help='A unique identifier for the PR')
-
-    # args = parser.parse_args()
+    download_pytest_cache(pr_identifier, workflow, job, pytest_cache_dir_new, BUCKET)
 
