@@ -1,6 +1,15 @@
 import triton
 import triton.language as tl
 
+TRITON_HAS_REDUCE = False  # hasattr(tl, "reduce")
+
+
+@triton.jit
+def is_floating(x):
+    # Addition to promote scalars to tensor
+    x += tl.zeros((1,), tl.int1)
+    return x.dtype.is_floating()
+
 
 @triton.jit
 def _prod_accumulate(a, b):
@@ -28,14 +37,35 @@ def maximum(a, b):
     return tl.where(mask, a, b)
 
 
-@triton.jit
-def min(a, dim):
-    return tl.reduce(a, dim, minimum)
+if TRITON_HAS_REDUCE:
 
+    @triton.jit
+    def min2(a, dim):
+        return tl.reduce(a, dim, minimum)
 
-@triton.jit
-def max(a, dim):
-    return tl.reduce(a, dim, maximum)
+    @triton.jit
+    def max2(a, dim):
+        return tl.reduce(a, dim, maximum)
+
+else:
+
+    @triton.jit
+    def min2(a, dim):
+        min_values = tl.min(a, dim)
+        if is_floating(a):
+            has_nan = tl.sum(a != a, dim)
+            nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
+            min_values = tl.where(has_nan, nan, min_values)
+        return min_values
+
+    @triton.jit
+    def max2(a, dim):
+        max_values = tl.max(a, dim)
+        if is_floating(a):
+            has_nan = tl.sum(a != a, dim)
+            nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
+            max_values = tl.where(has_nan, nan, max_values)
+        return max_values
 
 
 @triton.jit
