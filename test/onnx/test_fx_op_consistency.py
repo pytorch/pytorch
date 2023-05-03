@@ -71,7 +71,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
-    xfail("unflatten", reason="AssertionError: Expected 1 inputs, got 3 (https://github.com/pytorch/pytorch/issues/99534)"),
+    xfail(
+        "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
+    ),
 )
 # fmt: on
 
