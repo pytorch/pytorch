@@ -264,9 +264,9 @@ jobs:
       cuda-version: cpu
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
         ]}
 
   linux-bionic-cpu-py3_10-gcc7-bazel-test:
