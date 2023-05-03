@@ -31,7 +31,7 @@ from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
 )
-from torch._functorch.aot_autograd import aot_module_simplified
+from torch._functorch.aot_autograd import aot_module_simplified, aot_export_module
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
@@ -1928,6 +1928,121 @@ def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition, dy
                  decompositions=default_decompositions,
                  dynamic=dynamic)(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
+
+class TestAOTExport(AOTTestCase):
+
+    def test_aot_export_module_joint(self):
+        class ConvBatchnormRelu(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                user_out = torch.nn.functional.relu(x)
+                loss = user_out.sum()
+                return loss, user_out
+
+        mod = ConvBatchnormRelu()
+        mod.train()
+        inp = torch.randn(1, 1, 3, 3)
+        o_ref = mod(inp)
+        fx_g, signature = aot_export_module(mod, [inp], trace_joint=True, output_loss_index=0)
+        # Some important characteristics of the exported graph below:
+        # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
+        # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+        self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+        # No stacktrace found for following nodes
+        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg1_1 = None
+        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  arg3_1 = arg4_1 = arg5_1 = None
+        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
+        getitem_1: f32[3] = _native_batch_norm_legit_functional[1]
+        getitem_2: f32[3] = _native_batch_norm_legit_functional[2]
+        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
+        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
+        detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
+        ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
+        expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
+        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, relu, 0);  expand = None
+        native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
+        getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
+        getitem_6: f32[3] = native_batch_norm_backward[1]
+        getitem_7: f32[3] = native_batch_norm_backward[2];  native_batch_norm_backward = None
+        convolution_backward = torch.ops.aten.convolution_backward.default(getitem_5, arg7_1, arg0_1, [3], [1, 1], [0, 0], [1, 1], False, [0, 0], 1, [False, True, True]);  getitem_5 = arg7_1 = arg0_1 = None
+        getitem_8 = convolution_backward[0]
+        getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
+        getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
+        return (getitem_3, getitem_4, add, sum_1, relu, getitem_9, getitem_10, getitem_6, getitem_7)
+        """)  # noqa: B950
+
+
+        self.assertExpectedInline(str(signature.parameters), """['conv.weight', 'conv.bias', 'bn.weight', 'bn.bias']""")
+        self.assertExpectedInline(str(signature.buffers), """['bn.running_mean', 'bn.running_var', 'bn.num_batches_tracked']""")
+        self.assertExpectedInline(str(signature.user_inputs), """['arg7_1']""")
+        self.assertExpectedInline(str(signature.inputs_to_parameters), """{'arg0_1': 'conv.weight', 'arg1_1': 'conv.bias', 'arg2_1': 'bn.weight', 'arg3_1': 'bn.bias'}""")  # noqa: B950
+        self.assertExpectedInline(str(signature.inputs_to_buffers), """{'arg4_1': 'bn.running_mean', 'arg5_1': 'bn.running_var', 'arg6_1': 'bn.num_batches_tracked'}""")  # noqa: B950
+        self.assertExpectedInline(str(signature.buffers_to_mutate), """{'getitem_3': 'bn.running_mean', 'getitem_4': 'bn.running_var', 'add': 'bn.num_batches_tracked'}""")  # noqa: B950
+        self.assertExpectedInline(str(signature.backward_signature.gradients_to_parameters), """{'getitem_9': 'conv.weight', 'getitem_10': 'conv.bias', 'getitem_6': 'bn.weight', 'getitem_7': 'bn.bias'}""")  # noqa: B950
+        self.assertExpectedInline(str(signature.backward_signature.gradients_to_user_inputs), """{}""")
+        self.assertExpectedInline(str(signature.backward_signature.loss_output), """getitem_3""")
+
+        # Also check the inference graph
+        # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
+        fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
+        self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[3, 1, 1, 1], arg1_1: f32[3], arg2_1: f32[3], arg3_1: f32[3], arg4_1: f32[3], arg5_1: f32[3], arg6_1: i64[], arg7_1: f32[1, 1, 3, 3]):
+        # No stacktrace found for following nodes
+        convolution: f32[1, 3, 3, 3] = torch.ops.aten.convolution.default(arg7_1, arg0_1, arg1_1, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  arg7_1 = arg0_1 = arg1_1 = None
+        add: i64[] = torch.ops.aten.add.Tensor(arg6_1, 1);  arg6_1 = None
+        _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(convolution, arg2_1, arg3_1, arg4_1, arg5_1, True, 0.1, 1e-05);  convolution = arg2_1 = arg3_1 = arg4_1 = arg5_1 = None
+        getitem: f32[1, 3, 3, 3] = _native_batch_norm_legit_functional[0]
+        getitem_3: f32[3] = _native_batch_norm_legit_functional[3]
+        getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+        relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
+        return (getitem_3, getitem_4, add, sum_1, relu)
+        """)  # noqa: B950
+        # Some important characteristics of the exported graph below:
+        # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
+        # 9 outputs: 2 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+
+    def test_aot_export_metadata_mutation_banned(self):
+        pass
+
+    def test_aot_export_input_mutation_on_parameter_banned(self):
+        pass
+
+    def test_aot_export_synthetic_bases_banned(self):
+        pass
+
+    def test_aot_export_input_dupes_banned(self):
+        pass
+
+    def test_aot_export_simplified_input_mutations_banned(self):
+        pass
+
+    def test_aot_export_functionalized_rng_banned(self):
+        pass
+
+    # Test for bug occurring at the intersection of fake tensors & functionalization.
+    def test_squeeze_mutation(self):
+        def f(a):
+            b = a.clone().squeeze(-1)
+            b.add_(1.)
+            return a + b
+
+        inp = [torch.randn(3, 1, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
+        inp = [torch.randn(3, 1, requires_grad=False)]
+        self.verify_aot_autograd(f, inp, dynamic=True)
 
 
 class TestPartitioning(AOTTestCase):
