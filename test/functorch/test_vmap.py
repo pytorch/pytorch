@@ -5018,7 +5018,7 @@ class TestTransformFailure(TestCase):
         def f(x):
             return Test.apply(x)
 
-        if transform == grad or transform == grad_and_value:
+        if transform in (grad, grad_and_value):
             input = torch.tensor(4.)
         else:
             input = torch.randn(5)
