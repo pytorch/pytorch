@@ -1815,6 +1815,17 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    def test_aliased_buffer_reuse(self):
+        def fn(x, y):
+            x = 2 * x
+            y = 2 * y
+            c = torch.cat([x, y], dim=-1)
+            d = 1 + c
+            m = torch.mm(d, d)
+            return m[:, :2] + x
+
+        self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
+
     def test_view_detach(self):
         def fn(a):
             return a[0].detach()
@@ -6125,6 +6136,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("to(tl.int64)" in code)
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        # See https://github.com/pytorch/pytorch/issues/100348
+        def test_inductor_detach_view(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                a = x * 2
+                return a, a.detach()
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inp = torch.ones(2, 2, requires_grad=True, device="cuda")
+            inp_ref = inp.clone().detach().requires_grad_(True)
+            out_ref = fn(inp_ref)
+            out = fn_opt(inp)
+            out_ref[0].sum().backward()
+            out[0].sum().backward()
+            self.assertEqual(inp.grad, inp_ref.grad)
 
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
