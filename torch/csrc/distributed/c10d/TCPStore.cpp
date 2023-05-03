@@ -146,11 +146,12 @@ enum class QueryType : uint8_t {
   GETNUMKEYS,
   WATCH_KEY,
   DELETE_KEY,
+  CANCEL_WAIT,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
-enum class WaitResponseType : uint8_t { STOP_WAITING };
+enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };
 
 enum class WatchResponseType : uint8_t {
   KEY_UPDATED,
@@ -170,6 +171,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void run();
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
+  void clearSocketWaitState(int socket);
 
   // The master runs on a single thread so only
   // one handler can be executed at a time
@@ -182,6 +184,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void deleteHandler(int socket);
   void waitHandler(int socket);
   void watchHandler(int socket);
+  void cancelWaitHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   // Helper function to alerts waiting workers, used in setHandler, getHandler
@@ -232,33 +235,37 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
       // exception, other connections will get an exception once they try to
       // use the store. We will go ahead and close this connection whenever
       // we hit an exception here.
+      clearSocketWaitState(fds[fdIdx].fd);
 
-      // Remove all the tracking state of the close FD
-      for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
-        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-          if (*vecIt == fds[fdIdx].fd) {
-            vecIt = it->second.erase(vecIt);
-          } else {
-            ++vecIt;
-          }
-        }
-        if (it->second.empty()) {
-          it = waitingSockets_.erase(it);
-        } else {
-          ++it;
-        }
-      }
-      for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
-        if (it->first == fds[fdIdx].fd) {
-          it = keysAwaited_.erase(it);
-        } else {
-          ++it;
-        }
-      }
       fds.erase(fds.begin() + fdIdx);
       sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
       --fdIdx;
       continue;
+    }
+  }
+}
+
+void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
+  // Remove all the tracking state of the close FD
+  for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+    for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
+      if (*vecIt == socket) {
+        vecIt = it->second.erase(vecIt);
+      } else {
+        ++vecIt;
+      }
+    }
+    if (it->second.empty()) {
+      it = waitingSockets_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
+    if (it->first == socket) {
+      it = keysAwaited_.erase(it);
+    } else {
+      ++it;
     }
   }
 }
@@ -297,7 +304,8 @@ void TCPStoreMasterDaemon::query(int socket) {
 
   } else if (qt == QueryType::WATCH_KEY) {
     watchHandler(socket);
-
+  } else if (qt == QueryType::CANCEL_WAIT) {
+    cancelWaitHandler(socket);
   } else {
     TORCH_CHECK(false, "Unexpected query type");
   }
@@ -480,6 +488,14 @@ void TCPStoreMasterDaemon::watchHandler(int socket) {
   // Send update to TCPStoreWorkerDaemon on client
   tcputil::sendValue<WatchResponseType>(
       socket, WatchResponseType::KEY_CALLBACK_REGISTERED);
+}
+
+void TCPStoreMasterDaemon::cancelWaitHandler(int socket) {
+  clearSocketWaitState(socket);
+
+  // Send update to TCPStoreWorkerDaemon on client
+  tcputil::sendValue<WaitResponseType>(
+      socket, detail::WaitResponseType::WAIT_CANCELED);
 }
 
 bool TCPStoreMasterDaemon::checkKeys(
@@ -859,7 +875,13 @@ class TCPClient {
   T receiveValue() {
     return tcputil::recvValue<T>(socket_.handle());
   }
-
+  template <typename T>
+  bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
+    if (!socket_.waitForInput(timeout))
+      return false;
+    t = tcputil::recvValue<T>(socket_.handle());
+    return true;
+  }
   void setTimeout(std::chrono::milliseconds value);
 
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
@@ -1148,16 +1170,34 @@ void TCPStore::wait(
 void TCPStore::doWait(
     c10::ArrayRef<std::string> keys,
     std::chrono::milliseconds timeout) {
-  // TODO: Should we revert to the original timeout at the end of the call?
-  client_->setTimeout(timeout);
-
   client_->sendCommand(detail::QueryType::WAIT);
   client_->sendStrings(keys);
 
-  auto response = client_->receiveValue<detail::WaitResponseType>();
-  if (response != detail::WaitResponseType::STOP_WAITING) {
-    TORCH_CHECK(false, "Stop_waiting response is expected");
+  detail::WaitResponseType response;
+  if (client_->receiveValueWithTimeout<detail::WaitResponseType>(
+          response, timeout)) {
+    if (response != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK(false, "Stop_waiting response is expected");
+    }
+    return;
   }
+  // this is the cancel wait timeout, once here we expect the server to respond
+  // in a timely fashion
+  client_->sendCommand(detail::QueryType::CANCEL_WAIT);
+
+  response = client_->receiveValue<detail::WaitResponseType>();
+  // this can happen if the server responds before we cancel, just ignorte it
+  if (response != detail::WaitResponseType::WAIT_CANCELED) {
+    if (response != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK(false, "Stop_waiting response is expected");
+    }
+
+    response = client_->receiveValue<detail::WaitResponseType>(); // ignore
+    if (response != detail::WaitResponseType::WAIT_CANCELED) {
+      TORCH_CHECK(false, "wait_canceled response is expected");
+    }
+  }
+  TORCH_CHECK(false, "Wait timeout");
 }
 
 } // namespace c10d
