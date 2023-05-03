@@ -12,11 +12,12 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
 import torch.fx as fx
+import torch.nn as nn
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -451,10 +452,8 @@ def save_graph_repro(
     stable_output=False,
     save_dir=None,
     command="run",
+    accuracy=None,
 ):
-    # TODO: not sure why we need this import
-    if "inductor" in compiler_name:
-        fd.write("import torch._inductor.overrides\n")
     fd.write(
         generate_compiler_repro_string(
             gm,
@@ -463,7 +462,8 @@ def save_graph_repro(
             save_dir=save_dir,
         )
     )
-    accuracy = "_accuracy" in compiler_name
+    if accuracy is None:
+        accuracy = "_accuracy" in compiler_name
     tracing_mode = "real"
     if config.dynamic_shapes:
         tracing_mode = "symbolic"
@@ -476,7 +476,7 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name):
+def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -485,7 +485,9 @@ def dump_compiler_graph_state(gm, args, compiler_name):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
-        save_graph_repro(fd, gm, args, compiler_name, save_dir=subdir)
+        save_graph_repro(
+            fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
+        )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
     try:
@@ -519,7 +521,7 @@ def isolate_fails(
     compiler_name: str,
     env=None,
     save_dir=None,
-    accuracy=False,
+    accuracy=None,
 ):
     if env is None:
         env = {}
@@ -535,6 +537,7 @@ def isolate_fails(
             compiler_name,
             save_dir=save_dir,
             command="minifier-query",
+            accuracy=accuracy,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -606,10 +609,18 @@ def inductor_fails(fx_g, args, check_str=None):
     return False
 
 
-def inductor_accuracy_fails(fx_g, args, check_str=None):
+def inductor_accuracy_fails(
+    fx_g, args, check_str=None, *, require_fp64=False, ignore_non_fp=False
+):
     from torch._inductor.compile_fx import compile_fx_inner
 
-    return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
+    return backend_aot_accuracy_fails(
+        fx_g,
+        args,
+        compile_fx_inner,
+        require_fp64=require_fp64,
+        ignore_non_fp=ignore_non_fp,
+    )
 
 
 backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)
@@ -663,9 +674,22 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
+ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
+    "": inductor_fails,
+    # This might look inverted but it's not.  strict_accuracy means "we will
+    # minify any time we see anything that diverges", whereas accuracy is more
+    # conservative, and will only minify if there is a meaningful fp64
+    # divergence
+    "accuracy": functools.partial(
+        inductor_accuracy_fails, require_fp64=True, ignore_non_fp=True
+    ),
+    "strict_accuracy": inductor_accuracy_fails,
+}
+
+
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
-    fail_fn = inductor_accuracy_fails if options.accuracy else inductor_fails
+    fail_fn = ACCURACY_FAILS[options.accuracy]
     if fail_fn(mod, args):
         sys.exit(1)
     else:
@@ -676,7 +700,7 @@ def repro_minify(options, mod, load_args):
     from functorch.compile import minifier
 
     mod, args = repro_common(options, mod, load_args)
-    compiler_name = "inductor_accuracy" if options.accuracy else "inductor"
+    compiler_name = "inductor_accuracy" if options.accuracy != "" else "inductor"
 
     favored_device = 1 if torch.cuda.device_count() >= 2 else 0
     env_variables = {"CUDA_VISIBLE_DEVICES": str(favored_device)}
@@ -684,14 +708,14 @@ def repro_minify(options, mod, load_args):
     module_fails: Any
     if options.isolate:
         module_fails = functools.partial(
-            isolate_fails,
+            functools.partial(isolate_fails, accuracy=options.accuracy),
             env=env_variables,
             compiler_name=compiler_name,
             save_dir=options.save_dir,
             accuracy=options.accuracy,
         )
     else:
-        module_fails = inductor_accuracy_fails if options.accuracy else inductor_fails
+        module_fails = ACCURACY_FAILS[options.accuracy]
 
     minifier(
         mod,
@@ -848,7 +872,9 @@ def repro_run(options, mod, load_args):
 
     compiled = compile_fx_inner(mod, args)
 
-    if options.accuracy:
+    if options.accuracy != "":
+        # We don't really respect --accuracy vs --strict-accuracy here, it
+        # seems counterintuitive
         if not same_two_models(mod, compiled, args, only_fwd=True):
             raise AccuracyError("Bad accuracy detected")
     else:
@@ -868,7 +894,7 @@ def run_repro(
     load_args,
     *,
     command="run",
-    accuracy=False,
+    accuracy: Union[bool, str] = "",
     save_dir=None,
     tracing_mode=None,
     patch_code=None,
@@ -879,6 +905,11 @@ def run_repro(
             "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
             k,
         )
+
+    if accuracy is True:
+        accuracy = "accuracy"
+    elif accuracy is False:
+        accuracy = ""
 
     if patch_code is not None:
         log.warning(
@@ -903,28 +934,64 @@ default settings on this script:
     def common_flags(parser):
         accuracy_group = parser.add_mutually_exclusive_group()
         accuracy_group.add_argument(
-            "--accuracy",
-            action="store_true",
-            default=accuracy,
-            help="test accuracy when running repro",
-        )
-        accuracy_group.add_argument(
             "--no-accuracy",
             dest="accuracy",
-            action="store_false",
+            action="store_const",
+            const="",
             default=accuracy,
-            help="do not test accuracy",
+            help="do not test accuracy, just run the module and see if it errors",
+        )
+        accuracy_group.add_argument(
+            "--accuracy",
+            action="store_const",
+            const="accuracy",
+            default=accuracy,
+            help="""\
+test if the RMSE between the compiled module and the fp64 reference is greater
+than eager and the fp64 reference. This is usually more reliable than the
+standard allclose test, as we expect numeric differences from compiling, often
+improving accuracy over eager.  RMSE test allows for compiled module to
+diverge greatly from eager, as long as this divergence moves it closer to the
+'true' mathematical value of the network.  Caveats: (1) double precision can
+still suffer from rounding error, so it is not a perfect reference (see for
+example 'Herbie: Automatically Improving Floating Point Accuracy') for
+approaches that detect the necessary working precision and compute it in
+arbitrary precision floating point; unfortunately, this is not practical for
+tensor computation; (2) if there are not enough samples in the output being
+compared, we may get unlucky and have an unlucky greater RMSE than eager; this
+could be overcome by applying a more rigorous statistical test at some
+p-value, which we leave for future work.
+""",
+        )
+        accuracy_group.add_argument(
+            "--strict-accuracy",
+            dest="accuracy",
+            action="store_const",
+            const="strict_accuracy",
+            default=accuracy,
+            help="""\
+by default, when doing accuracy minification we will reject reductions which
+change the divergence from a floating point divergence to a integral/boolean
+divergence.  This is because some operations like ReLU involve temporarily
+sharp boundaries that smooth out again afterwards; without requiring
+divergence on floating point, the minifier will often fixate on divergent
+boolean tensor even though this is not the true source of the divergence.
+However, rejecting these reductions makes it more difficult for the minifier
+to make process.  Using this option will let the minifier progress for ALL
+divergences--you just might not end up with a useful repro in the end.""",
         )
 
         parser.add_argument(
             "--save-dir",
             type=str,
             default=save_dir,
+            metavar="DIR",
             help="directory where saved inputs live",
         )
         parser.add_argument(
             "--tracing-mode",
             type=str,
+            metavar="{real,fake,symbolic}",
             default=tracing_mode,
             help="how to trace the repro module into a GraphModule with metadata",
         )
@@ -943,15 +1010,14 @@ default settings on this script:
         "minify", help="run the minifier on the repro"
     )
     common_flags(parser_minify)
-
-    isolate_group = parser_minify.add_mutually_exclusive_group()
-    isolate_group.add_argument(
+    parser_minify_isolate = parser_minify.add_mutually_exclusive_group()
+    parser_minify_isolate.add_argument(
         "--isolate",
         action="store_true",
         default=True,
-        help="run in separate processes to avoid interference",
+        help="run in separate processes to avoid interference (default)",
     )
-    isolate_group.add_argument(
+    parser_minify_isolate.add_argument(
         "--no-isolate",
         dest="isolate",
         action="store_false",
