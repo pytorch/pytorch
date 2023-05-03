@@ -2147,6 +2147,23 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
     return tuple(indices)
 
 
+# Code from UpSample.h, upsample_2d_get_memory_format
+def _upsample_2d_get_memory_format(input):
+    # convert output to correct memory format, if necessary
+    memory_format = utils.suggest_memory_format(input)
+
+    if input.shape[0] == 1:
+        input_memory_format = (
+            torch.channels_last
+            if input.is_contiguous(memory_format=torch.channels_last)
+            else torch.contiguous_format
+        )
+    if memory_format != input_memory_format:
+        memory_format = input_memory_format
+
+    return memory_format
+
+
 @register_decomposition(aten.upsample_nearest1d.default)
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
@@ -2173,14 +2190,7 @@ def upsample_nearest2d(
     )
     result = aten._unsafe_index(input, (None, None, h_indices, w_indices))
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
-
-    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    _, n_channels, _, _ = input.shape
-    if input.device.type == "cuda" and n_channels < 4:
-        memory_format = torch.contiguous_format
-
+    memory_format = _upsample_2d_get_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
 
     return result
@@ -2845,13 +2855,7 @@ def upsample_bilinear2d(
     q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
 
-    # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
-
-    # following "heuristic: only use channels_last path when it's faster than the contiguous path"
-    if input.device.type == "cuda" and n_channels < 16:
-        memory_format = torch.contiguous_format
-
+    memory_format = _upsample_2d_get_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
 
     return result

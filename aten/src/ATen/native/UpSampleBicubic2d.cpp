@@ -34,7 +34,6 @@ TORCH_META_FUNC(upsample_bicubic2d) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  // set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
   auto memory_format = native::upsample_2d_get_memory_format(input);
   set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(memory_format));
 }
@@ -75,7 +74,6 @@ TORCH_META_FUNC(_upsample_bicubic2d_aa) (
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  // set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(input.suggest_memory_format()));
   auto memory_format = native::upsample_2d_get_memory_format(input);
   set_output_raw_strided(0, full_output_size, {}, input.options().memory_format(memory_format));
 }

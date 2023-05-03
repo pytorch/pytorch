@@ -166,20 +166,38 @@ static C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
 
 static C10_UNUSED at::MemoryFormat upsample_2d_get_memory_format(const Tensor& input) {
   auto memory_format = input.suggest_memory_format();
-  auto input_memory_format = (input.is_contiguous(at::MemoryFormat::ChannelsLast)) ? \
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-  if (memory_format != input_memory_format) {
-    memory_format = input_memory_format;
+  // This is a work-around to the issue when input is a squeezed/unsqueezed channels last tensor 1CHW
+  // In this case input.suggest_memory_format() outputs "contiguous" memory format instead of "channels last".
+  // Example of squeezed/unsqueezed channels last tensor 1CHW:
+  //   x = torch.ones(1, 3, 256, 256).contiguous(memory_format=torch.channels_last)
+  //   x = x[0, ...].unsqueeze(0)
+  //   assert x.stride() == (3, 1, 768, 3)
+  // instead of (196608, 1, 768, 3)
+  if (input.size(0) == 1) {
+    auto input_memory_format = (input.is_contiguous(at::MemoryFormat::ChannelsLast)) ? \
+        at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+    if (memory_format != input_memory_format) {
+      memory_format = input_memory_format;
+    }
   }
   return memory_format;
 }
 
 static C10_UNUSED at::MemoryFormat upsample_3d_get_memory_format(const Tensor& input) {
+  // This is a work-around to the issue when input is a squeezed/unsqueezed channels last 3d tensor 1MCHW
+  // In this case input.suggest_memory_format() outputs "contiguous" memory format instead of "channels last 3d".
+  // Example of squeezed/unsqueezed channels last tensor 1MCHW:
+  //   x = torch.ones(1, 2, 3, 256, 256).contiguous(memory_format=torch.channels_last_3d)
+  //   x = x[0, ...].unsqueeze(0)
+  //   assert x.stride() == (2, 1, 131072, 512, 2)
+  // instead of (393216, 1, 131072, 512, 2)
   auto memory_format = input.suggest_memory_format();
-  auto input_memory_format = (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) ? \
-      at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::Contiguous;
-  if (memory_format != input_memory_format) {
-    memory_format = input_memory_format;
+  if (input.size(0) == 1) {
+    auto input_memory_format = (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) ? \
+        at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::Contiguous;
+    if (memory_format != input_memory_format) {
+      memory_format = input_memory_format;
+    }
   }
   return memory_format;
 }

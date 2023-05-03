@@ -305,7 +305,7 @@ class FakeTensorTest(TestCase):
                 unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
                 out.append(torch.ops.aten.upsample_bilinear2d.default(unsqueeze, [800, 1199], False))
 
-        self.assertTrue(out[1].is_contiguous())
+        self.assertTrue(out[1].is_contiguous(memory_format=torch.channels_last))
         self.checkMetaProps(out[0], out[1])
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
