@@ -10,7 +10,8 @@ import contextlib
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop"
+    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop",
+    "DefaultDevice"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -39,16 +40,21 @@ def _get_device_module(device='cuda'):
     device_module = getattr(torch, device)
     return device_module
 
-class _DefaultDevice(object):
+class DefaultDevice(object):
+    r"""Set/Get the default device type for checkpoint.
+        In func of `_infer_device_type`, if there are no no-CPU 
+        tensors, it will return the default device type, and the
+        default vaule is `cuda`.
+    """
     _default_device_type = "cuda"
 
     @staticmethod
-    def _set_device_type(device: str = "cuda"):
-        _DefaultDevice._default_device_type = device
+    def set_device_type(device: str = "cuda"):
+        DefaultDevice._default_device_type = device
 
     @staticmethod
-    def _get_device_type():
-        return _DefaultDevice._default_device_type
+    def get_device_type():
+        return DefaultDevice._default_device_type
 
 def _infer_device_type(*args):
     device_types = list({arg.device.type for arg in args
@@ -60,7 +66,7 @@ def _infer_device_type(*args):
                       "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
                       "detected, it will be prioritized; otherwise, the first device encountered will be selected.)")
     if len(device_types) == 0:
-        return _DefaultDevice._get_device_type()
+        return DefaultDevice.get_device_type()
     elif "cuda" in device_types:
         return "cuda"
     else:
