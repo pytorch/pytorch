@@ -1815,6 +1815,17 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    def test_aliased_buffer_reuse(self):
+        def fn(x, y):
+            x = 2 * x
+            y = 2 * y
+            c = torch.cat([x, y], dim=-1)
+            d = 1 + c
+            m = torch.mm(d, d)
+            return m[:, :2] + x
+
+        self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
+
     def test_view_detach(self):
         def fn(a):
             return a[0].detach()
