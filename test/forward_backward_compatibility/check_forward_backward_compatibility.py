@@ -330,6 +330,8 @@ ALLOW_LIST = [
     ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
     ("aten::_flash_attention_forward", datetime.date(2023, 5, 15)),
     ("aten::_flash_attention_backward", datetime.date(2023, 5, 15)),
+    ("aten::_efficient_attention_forward", datetime.date(2023, 5, 15)),
+    ("aten::_efficient_attention_backward", datetime.date(2023, 5, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionGuard", datetime.date(2023, 2, 1)),
