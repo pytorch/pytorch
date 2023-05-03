@@ -214,6 +214,14 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
+      - name: Upload pytest cache
+        uses: ./.github/actions/pytest-cache-upload
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
+          pr-identifier: ${{ steps.test.outputs.pr-identifier }}
+          shard: ${{ matrix.shard }}
+
       - name: Print remaining test logs
         shell: bash
         if: always() && steps.test.conclusion

@@ -1,17 +1,23 @@
 import boto3
 import os
 import json
+import re
+import shutil
 
-def zip_folder(folder_to_zip, zip_file_path):
-    import shutil
-    print(f"Zipping {folder_to_zip} to {zip_file_path}")
-    return shutil.make_archive(zip_file_path, 'zip', folder_to_zip)
+def zip_folder(folder_to_zip, zip_file_base_name):
+    """
+    Returns the path to the resulting zip file
+    """
+    print(f"Zipping {folder_to_zip} to {zip_file_base_name}")
+    return shutil.make_archive(zip_file_base_name, 'zip', folder_to_zip)
 
 
 def unzip_folder(zip_file_path, unzip_to_folder):
-    import shutil
+    """
+    Returns the path to the unzipped folder
+    """
     print(f"Unzipping {zip_file_path} to {unzip_to_folder}")
-    return shutil.unpack_archive(zip_file_path, unzip_to_folder, 'zip')
+    shutil.unpack_archive(zip_file_path, unzip_to_folder, 'zip')
 
 
 def ensure_dir_exists(dir):
@@ -20,6 +26,9 @@ def ensure_dir_exists(dir):
 
 
 def load_json_file(file_path):
+    """
+    Returns the deserialized json object
+    """
     with open(file_path, 'r') as f:
         return json.load(f)
 
@@ -30,6 +39,14 @@ def write_json_file(file_path, content):
 
     with open(file_path, 'w') as f:
         json.dump(content, f, indent=2)
+
+
+def sanitize_for_s3(text):
+    """
+    S3 keys can only contain alphanumeric characters, underscores, and dashes.
+    This function replaces all other characters with underscores.
+    """
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", text)
 
 
 def upload_file_to_s3(file_name, bucket, key):

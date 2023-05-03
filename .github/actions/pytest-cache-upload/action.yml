@@ -3,6 +3,9 @@ name: Upload PyTest cache
 description: Uploads the pytest cache to S3
 
 inputs:
+  cache_dir:
+    description: Unique identifier that only repeats when the same workflow is being run against the same PR
+    required: true
   pr-identifier:
     description: Unique identifier that only repeats when the same workflow is being run against the same PR
     required: true
@@ -23,9 +26,16 @@ runs:
       id: get-id
       shell: bash
       env:
+        CACHE_DIR: ${{ inputs.cache_dir }}
         PR_IDENTIFIER: ${{ inputs.pr-identifier }}
         WORKFLOW: ${{ github.workflow }}
         JOB: ${{ github.job }}
         SHARD: ${{ inputs.shard }}
       run: |
-        python3 .github/scripts/pytest_upload_cache.py --pr_identifier $PR_IDENTIFIER
+        python3 .github/scripts/pytest_upload_cache.py \
+          --cache_dir $CACHE_DIR \
+          --pr_identifier $PR_IDENTIFIER \
+          --workflow $WORKFLOW \
+          --job $JOB \
+          --shard $SHARD \
+          --temp_dir $RUNNER_TEMP \
