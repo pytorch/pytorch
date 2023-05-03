@@ -12,12 +12,11 @@ from ._infra import (
     Tag,
     ThreadFlowLocation,
 )
-from .engine import Diagnostic, DiagnosticContext, DiagnosticEngine
+from .context import Diagnostic, DiagnosticContext
 
 __all__ = [
     "Diagnostic",
     "DiagnosticContext",
-    "DiagnosticEngine",
     "DiagnosticOptions",
     "Graph",
     "Invocation",
