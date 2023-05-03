@@ -22,7 +22,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils.weak import WeakIdRef
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -125,7 +125,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    example: Union[torch.Tensor, torch.SymInt]
+    _example: Union[TensorWeakRef, torch.SymInt]
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
@@ -134,9 +134,23 @@ class GraphArg:
     # is_tensor lets us tell if this graph arg actually is a tensor
     # or not.
     is_tensor: bool = True
+    # Sometimes, the Tensor we pass to example is freshly allocated (smh).
+    # Then we cannot only keep a weak reference to it.  This lets you
+    # stash a strong reference too.
+    example_strong_ref: Optional[torch.Tensor] = None
+
+    @property
+    def example(self):
+        if isinstance(self._example, TensorWeakRef):
+            r = self._example()
+            assert r is not None
+            return r
+        else:
+            return self._example
 
     def __post_init__(self):
-        if isinstance(self.example, torch.Tensor):
+        if isinstance(self._example, torch.Tensor):
+            self._example = TensorWeakRef(self._example)
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
@@ -147,7 +161,7 @@ class GraphArg:
         return self.source.reconstruct(tx)
 
     def erase(self):
-        self.example = None
+        self._example = None
 
 
 class VariableBuilder:
@@ -918,6 +932,7 @@ class VariableBuilder:
                     isinstance(wrapped_value, torch.Tensor),
                     fake_tensor_value,
                     is_tensor=False,
+                    example_strong_ref=wrapped_value,
                 )
             return unspec_var
 
