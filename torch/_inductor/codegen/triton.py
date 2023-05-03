@@ -1385,7 +1385,7 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with torch.cuda._DeviceGuard({index}), torch.no_grad():")
             with result.indent():
                 result.writeline(
                     f"torch.cuda.set_device({index})"

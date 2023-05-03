@@ -92,7 +92,7 @@ class EnterCudaDeviceContextManagerLine:
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
-            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}):")
+            code.writeline(f"with torch.cuda._DeviceGuard({self.device_idx}), torch.no_grad():")
             device_cm_stack.enter_context(code.indent())
             code.writeline(
                 f"torch.cuda.set_device({self.device_idx}) # no-op to ensure context"
