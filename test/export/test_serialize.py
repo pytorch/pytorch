@@ -68,6 +68,7 @@ class TestSerialize(TestCase):
         self.assertEqual(orig_meta.in_spec, new_meta.in_spec)
         self.assertEqual(orig_meta.out_spec, new_meta.out_spec)
 
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_pickle_dynamic(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
             def __init__(self):
