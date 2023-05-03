@@ -1,9 +1,11 @@
+import dataclasses
 import io
 import logging
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import traceback
 from unittest.mock import patch
@@ -11,6 +13,26 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+
+
+@dataclasses.dataclass
+class MinifierTestResult:
+    minifier_code: str
+    repro_code: str
+
+    def _get_module(self, t):
+        r = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t).group(
+            0
+        )
+        r = re.sub(r"\s+$", "\n", r, flags=re.MULTILINE)
+        r = re.sub(r"\n{3,}", "\n\n", r)
+        return r.strip()
+
+    def minifier_module(self):
+        return self._get_module(self.minifier_code)
+
+    def repro_module(self):
+        return self._get_module(self.repro_code)
 
 
 class MinifierTestBase(torch._dynamo.test_case.TestCase):
@@ -95,6 +117,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                     log.removeHandler(log_handler)
                     if cwd is not None:
                         os.chdir(prev_cwd)
+                    # Make sure we don't leave buggy compiled frames lying
+                    # around
+                    torch._dynamo.reset()
             finally:
                 object.__setattr__(torch._dynamo.config, "_config", dynamo_config)
                 object.__setattr__(torch._inductor.config, "_config", inductor_config)
@@ -162,11 +187,12 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # `run_code` is the code to run for the test case.
     # `patch_code` is the code to be patched in every generated file; usually
     # just use this to turn on bugs via the config
-    def _gen_test_code(self, run_code, repro_after, repro_level, patch_code):
+    def _gen_test_code(self, run_code, repro_after, repro_level):
         return f"""\
 import torch
 import torch._dynamo
-{patch_code}
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
 torch._dynamo.config.repro_after = "{repro_after}"
 torch._dynamo.config.repro_level = {repro_level}
 torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
@@ -175,31 +201,31 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 
     # Runs a full minifier test.
     # Minifier tests generally consist of 3 stages:
-    # 1. Run the problematic code (in a separate process since it could segfault)
+    # 1. Run the problematic code
     # 2. Run the generated minifier launcher script
     # 3. Run the generated repro script
     #
     # If possible, you should run the test with isolate=False; use
     # isolate=True only if the bug you're testing would otherwise
     # crash the process
-    def _run_full_test(
-        self, run_code, repro_after, repro_level, patch_code, *, isolate
-    ):
-        test_code = self._gen_test_code(run_code, repro_after, repro_level, patch_code)
+    def _run_full_test(self, run_code, repro_after, expected_error, *, isolate):
+        if isolate:
+            repro_level = 3
+        else:
+            repro_level = 4 if expected_error == "AccuracyError" else 2
+        test_code = self._gen_test_code(run_code, repro_after, repro_level)
+        print("running test", file=sys.stderr)
         test_proc, repro_dir = self._run_test_code(test_code, isolate=isolate)
+        # NB: Intentionally do not test return code; we only care about
+        # actually generating the repro, we don't have to crash
+        self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
         self.assertIsNotNone(repro_dir)
-        print("running minifier")
-        launch_proc, launch_code = self._run_minifier_launcher(
+        print("running minifier", file=sys.stderr)
+        minifier_proc, minifier_code = self._run_minifier_launcher(
             repro_dir, isolate=isolate
         )
-        print("running repro")
+        print("running repro", file=sys.stderr)
         repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)
-        return (test_proc, launch_proc, repro_proc), (launch_code, repro_code)
-
-    def _run_full_test_nocode(
-        self, run_code, repro_after, repro_level, patch_code, *, isolate
-    ):
-        tbs, _ = self._run_full_test(
-            run_code, repro_after, repro_level, patch_code, isolate=isolate
-        )
-        return tbs
+        self.assertIn(expected_error, repro_proc.stderr.decode("utf-8"))
+        self.assertNotEqual(repro_proc.returncode, 0)
+        return MinifierTestResult(minifier_code=minifier_code, repro_code=repro_code)
