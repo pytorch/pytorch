@@ -4,12 +4,18 @@ import json
 import re
 import shutil
 
-def zip_folder(folder_to_zip, zip_file_base_name):
+def zip_folder(folder_to_zip, dest_file_base_name):
     """
-    Returns the path to the resulting zip file
+    Returns the path to the resulting zip file, with the appropriate extension added if needed
     """
-    print(f"Zipping {folder_to_zip} to {zip_file_base_name}")
-    return shutil.make_archive(zip_file_base_name, 'zip', folder_to_zip)
+    # shutil.make_archive will append .zip to the dest_file_name, so we need to remove it if it's already there
+    if dest_file_base_name.endswith(".zip"):
+        dest_file_base_name = dest_file_base_name[:-4]
+
+    ensure_dir_exists(dest_file_base_name)
+
+    print(f"Zipping {folder_to_zip} to {dest_file_base_name}")
+    return shutil.make_archive(dest_file_base_name, 'zip', folder_to_zip)
 
 
 def unzip_folder(zip_file_path, unzip_to_folder):

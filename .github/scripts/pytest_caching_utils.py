@@ -63,8 +63,9 @@ def upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, bucket=B
         obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}" # Keep the new file extension
         upload_file_to_s3(zip_file_path, bucket, obj_key)
     finally:
-        print(f"Deleting {zip_file_path}")
-        os.remove(zip_file_path)
+        if zip_file_path:
+            print(f"Deleting {zip_file_path}")
+            os.remove(zip_file_path)
 
 def download_pytest_cache(pr_identifier, workflow, job, dest_cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
 

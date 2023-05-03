@@ -214,7 +214,7 @@ jobs:
         uses: ./.github/actions/pytest-cache-upload
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
-          cache_dir: ${GITHUB_WORKSPACE}/pytorch/.pytest_cache
+          cache_dir: "${GITHUB_WORKSPACE}/pytorch/.pytest_cache"
 
       - uses: actions/upload-artifact@v3
         with:
