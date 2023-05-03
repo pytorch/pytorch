@@ -336,6 +336,11 @@ _SCALAR_TYPE_TO_DTYPE = {
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
 
+COMPLEX_TO_FLOAT = {
+    torch.complex32: torch.float16,
+    torch.complex64: torch.float32,
+    torch.complex128: torch.float64,  # NOTE: ORT doesn't support torch.float64
+}
 
 # NOTE: Belows are from torch/fx/node.py
 BaseArgumentTypes = Union[

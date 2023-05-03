@@ -214,12 +214,24 @@ def _fill_tensor_meta(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # We set node output sizes to be dynamic to continue the model conversion,
-        # and inputs are also set to be dynamic in add_input().
-        onnxscript_value.shape = tuple(
-            [dim if isinstance(dim, int) else None for dim in expected_value.size()]
-        )
-        onnxscript_value.dtype = expected_value.dtype
+        if expected_value.dtype in _type_utils.COMPLEX_TO_FLOAT:
+            # Like torch.view_as_real, we flatten complex tensors to real tensors with
+            # additional last dimension of 2
+            onnxscript_value.shape = tuple(
+                [dim if isinstance(dim, int) else None for dim in expected_value.size()]
+                + [2]
+            )
+            # complex64 -> float32, complex128 -> float64, etc.
+            onnxscript_value.dtype = _type_utils.COMPLEX_TO_FLOAT[expected_value.dtype]
+            # Dispatcher needs to know the value is complex
+            onnxscript_value.is_complex = True
+        else:
+            # We set node output sizes to be dynamic to continue the model conversion,
+            # and inputs are also set to be dynamic in add_input().
+            onnxscript_value.shape = tuple(
+                [dim if isinstance(dim, int) else None for dim in expected_value.size()]
+            )
+            onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
