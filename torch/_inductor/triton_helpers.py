@@ -1,7 +1,7 @@
 import triton
 import triton.language as tl
 
-TRITON_HAS_REDUCE = False  # hasattr(tl, "reduce")
+TRITON_HAS_REDUCE = hasattr(tl, "reduce")
 
 
 @triton.jit
