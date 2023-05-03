@@ -366,10 +366,18 @@ def all_dim(input, dim, keepdim=False):
 def copy(self, src, non_blocking=False):
     intermediate = src.to(self, non_blocking)
     # cheapest case
-    if self.size() == intermediate.size() and self.stride() == intermediate.stride() and self.storage_offset() == intermediate.storage_offset():
+    if (
+        self.size() == intermediate.size()
+        and self.stride() == intermediate.stride()
+        and self.storage_offset() == intermediate.storage_offset()
+    ):
         return intermediate
     # next cheapest case
-    if self.size() == intermediate.size() and self.is_contiguous() and self.storage_offset() == intermediate.storage_offset():
+    if (
+        self.size() == intermediate.size()
+        and self.is_contiguous()
+        and self.storage_offset() == intermediate.storage_offset()
+    ):
         return intermediate.contiguous()
     # next cheapest case (expand_copy is guaranteed to return a contiguous tensor)
     if self.is_contiguous() and self.storage_offset() == 0:
@@ -379,13 +387,16 @@ def copy(self, src, non_blocking=False):
     # But with the size/stride/storage_offset of "self" (... and any other metadata! neg, conj, etc).
     # A problem for another day
     assert not self.is_conj() and not self.is_neg()
-    out_buffer = torch.empty(self.untyped_storage().size(), dtype=self.dtype, device=self.device)
+    out_buffer = torch.empty(
+        self.untyped_storage().size(), dtype=self.dtype, device=self.device
+    )
     out_buffer_updated = aten.as_strided_scatter(
         out_buffer, src, self.size(), self.stride(), self.storage_offset()
     )
     return out_buffer_updated.as_strided(
         self.size(), self.stride(), self.storage_offset()
     )
+
 
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
