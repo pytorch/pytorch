@@ -26,7 +26,6 @@ from torch._dynamo.debug_utils import (
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
-    MAX_CONSTANT_NUMEL_INLINE,
     minifier_dir,
     NNModuleToString,
     same_two_models,
@@ -622,15 +621,7 @@ backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=
 
 def repro_common(options, mod, load_args):
     # Invariant for graphs we generate with the repro script
-    assert not any(mod.named_parameters())
-    for n, b in mod.named_buffers():
-        if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
-            log.warning(
-                "Constant %s was not serialized, generated random data instead. "
-                "If you think this is affecting you, please comment on "
-                "https://github.com/pytorch/pytorch/issues/100468",
-                n,
-            )
+    assert not any(mod.named_parameters()) and not any(mod.named_buffers())
 
     if not hasattr(load_args, "_version"):
         log.warning(
