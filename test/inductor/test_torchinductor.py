@@ -2375,7 +2375,7 @@ class CommonTemplate:
             (torch.randn([1, 1, 6, 7]),),
         )
 
-    #From https://github.com/pytorch/pytorch/issues/93384
+    # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d8(self):
         # dialtion is not 1, use fallback
         def fn(x):
@@ -4966,7 +4966,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
-    #From https://github.com/pytorch/pytorch/issues/93384
+    # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
         # dilation is not 1. Should fallback
         def fn(a, b, c):
