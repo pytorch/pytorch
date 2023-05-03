@@ -4760,8 +4760,7 @@ class TestSparseAny(TestCase):
 
 
     @onlyCUDA
-    @dtypes(*[torch.int8] if torch.cuda.get_device_capability()[0] == 8 else [],
-            *[torch.half] if torch.cuda.get_device_capability()[0] == 8 else [])
+    @dtypes(torch.int8, torch.half)
     def test_two_four_sparse_linear(self, device, dtype):
         def make_tensor(shape, dtype):
             if dtype.is_complex:
@@ -4804,6 +4803,9 @@ class TestSparseAny(TestCase):
                 c0, _ = torch._two_four_sparse_linear(a_sparse, b, meta)
                 torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
 
+        is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
+        if not is_sm8x:
+            pass
         for (m, n, k) in itertools.product(range(4), range(4), range(4)):
             m = (m + 1) * 32
             n = (n + 1) * 32
