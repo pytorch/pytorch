@@ -2,8 +2,7 @@ import math
 
 import torch
 
-from ..virtualized import ops
-
+from ..virtualized import ops, V
 from .common import OpOverrides
 
 
