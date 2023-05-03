@@ -13,6 +13,7 @@ from typing import List, NamedTuple, Optional, Union
 import torch
 
 from torch import SymInt
+from torch.utils.weak import TensorWeakRef
 from torch._guards import GuardSource
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
@@ -125,7 +126,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    example: Union[torch.Tensor, torch.SymInt]
+    _example: Union[TensorWeakRef, torch.SymInt]
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
@@ -135,8 +136,16 @@ class GraphArg:
     # or not.
     is_tensor: bool = True
 
+    @property
+    def example(self):
+        if isinstance(self._example, TensorWeakRef):
+            return self._example()
+        else:
+            return self._example
+
     def __post_init__(self):
-        if isinstance(self.example, torch.Tensor):
+        if isinstance(self._example, torch.Tensor):
+            self._example = TensorWeakRef(self._example)
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
