@@ -306,7 +306,7 @@ ScalarType TensorIteratorBase::compute_common_dtype() {
   return common_dtype_;
 }
 
-TensorOptions original_options(const OperandInfo& op) {
+static TensorOptions original_options(const OperandInfo& op) {
   if (op.original_tensor_base().defined()) {
     return op.original_tensor_base().options();
   } else {
