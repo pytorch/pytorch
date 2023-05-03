@@ -946,13 +946,13 @@ def forward(self, x):
 
         def pattern(x, y):
             return torch.add(x, y)
-        
+
         def replacement(x, y):
             return torch.sub(torch.mul(x, y), y)
 
         traced = symbolic_trace(M())
         matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement)
-        
+
         def check_replacement_nodes(self, traced, matches):
             replacement_nodes_in_graph = [node for node in traced.graph.nodes if node.target in {torch.sub, torch.mul}]
             replacement_nodes_in_res = [r for m in matches for r in m.replacements]
