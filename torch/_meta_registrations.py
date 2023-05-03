@@ -2403,19 +2403,6 @@ def meta__scaled_dot_product_flash(
     return_debug_mask: bool = False,
     scale: Optional[float] = None,
 ):
-    # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
-    # We have added logic to torch/_dynamo/variables/torch.py
-    # We need to check if scaled_dot_product_attention will run the flash attention
-    # kernel and if dropout is != 0.0. If that is the case then we want dynamo
-    # to graph break. The derivative calculation for _scaled_dot_product_flash_attention
-    # does not function correctly with cuda graphs because the full philox state is not captured
-    # the forward's return values. Another reason to graph break is that the the meta function
-    # returns the wrong outputs for philox seed and offset and these values get baked into the
-    # inductor fallback calls to the eager kernels.
-    check(
-        dropout_p == 0.0,
-        lambda: f"Can only trace _scaled_dot_product_flash_attention when dropout is set to 0 but got a dropout_p of {dropout_p}.",
-    )
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
@@ -2463,6 +2450,11 @@ def meta__scaled_dot_product_flash(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
+    # note: device for seed and offset below depends on whether we are
+    # capturing or not, but at the time of tracing we don't know if we
+    # are going to use cudagraphs or not, so we return cpu tensors here
+    # it's possible we'll need to have some special handling in inductor for sdpa
+
     return (
         output,
         logsumexp,
@@ -2470,8 +2462,8 @@ def meta__scaled_dot_product_flash(
         cumulative_sequence_length_k,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        1,  # Philox Seed will not be used, see note at top.
-        1,  # Philox Offset will not be used, see note at top.
+        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((), dtype=torch.long, device="meta"),
         debug_mask,
     )
 
