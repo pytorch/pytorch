@@ -545,6 +545,9 @@ class FXGraphExtractor(abc.ABC):
             # ONNX does not support None inputs. During graph building, all None inputs
             # are removed. Here we register this step to input adapter.
             self.adapt_input(fx_exporter.RemoveNoneInputStep, fx_module_args, {})
+            # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
+            # Dynamo doesn't support non-tensor inputs.
+            self.adapt_input(fx_exporter.RemoveNonTensorInputStep, fx_module_args, {})
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
             self.output_adapter.append_step(fx_exporter.FlattenOutputStep())
