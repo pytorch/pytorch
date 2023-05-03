@@ -363,8 +363,8 @@ void upsample_avx_bilinear_uint8(
   at::Tensor buffer_horiz, buffer_vert;
   // Minor optimization: we can avoid allocating an extra buffer if we're performing
   // horizontal-only or vertical-only interpolation, and if the tensor doesn't
-  // need unpacking
-  if (need_horizontal && !(skip_packing && !need_vertical)) {
+  // need repacking
+  if (need_horizontal && (need_vertical || !skip_packing)) {
     auto c = (skip_unpacking) ? num_channels : 4;
     buffer_horiz = at::empty({c, yin, xout}, input.options());
   }
@@ -379,7 +379,7 @@ void upsample_avx_bilinear_uint8(
     at::Tensor unpacked_output;
 
     if (need_horizontal) {
-      at::Tensor unpacked_output_temp = (skip_packing && !need_vertical) ? output[i] : buffer_horiz;
+      at::Tensor unpacked_output_temp = (need_vertical || !skip_packing) ? buffer_horiz : output[i];
 
       if (skip_unpacking && num_channels == 3) {
         ImagingResampleHorizontal<3>(

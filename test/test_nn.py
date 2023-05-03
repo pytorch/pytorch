@@ -9698,7 +9698,9 @@ class TestNNDeviceType(NNTestCase):
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
 
-        # Check if output is CF for unsqueezed 3d CL tensor
+        # FIXME if-clause shows the current behaviour which is definitely unexpected.
+        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
+        # See for more details: https://github.com/pytorch/pytorch/pull/100373
         if check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
             self.assertTrue(input_ui8.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(output_ui8.is_contiguous())
