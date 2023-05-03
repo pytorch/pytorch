@@ -1,6 +1,6 @@
-name: Upload PyTest cache
+name: Download PyTest cache
 
-description: Uploads the pytest cache to S3
+description: Downloads the pytest cache to S3
 
 inputs:
   cache_dir:
