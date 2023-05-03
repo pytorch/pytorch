@@ -865,6 +865,16 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
+  if (source.dim() != 0) {
+    TORCH_CHECK(source.dim() == index.numel(), "source tensor shape along dim does not match index tensor length.");
+
+    auto self_sizes = self.sizes().vec();
+    auto source_sizes = source.sizes().vec();
+    self_sizes.erase(self_sizes.begin() + dim);
+    source_sizes.erase(source_sizes.begin() + dim);
+    TORCH_CHECK(self_sizes == source_sizes, "source tensor shape must match self tensor shape (excluding the specified dimension)");
+  }
+
   if (globalContext().deterministicAlgorithms()){
     torch::List<c10::optional<Tensor>> indices;
     indices.reserve(dim + 1);
