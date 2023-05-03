@@ -2555,7 +2555,7 @@ def scatter_object_list(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
-    my_rank = get_rank(group)
+    my_rank = get_rank()
     pg_device = _get_pg_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
