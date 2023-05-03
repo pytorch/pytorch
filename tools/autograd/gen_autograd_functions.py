@@ -109,11 +109,7 @@ if (task_should_compute_output({ ${name}_ix })) {
   std::vector<Tensor> grad_result;
   grad_result.reserve(grads.size());
   for (const auto & i : c10::irange(grads.size())) {
-    if (grads[i].defined()) {
-      grad_result.emplace_back(${derivative});
-    } else {
-      grad_result.emplace_back(Tensor());
-    }
+    grad_result.emplace_back(${derivative});
   }
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }

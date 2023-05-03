@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import dataclasses
 import json
 import re
@@ -118,7 +116,7 @@ def pretty_print_item_title(
 
 @_beartype.beartype
 def format_argument(obj: Any) -> str:
-    return f"{type(obj)}"
+    return f"{str(obj)}: {type(obj)}"
 
 
 @_beartype.beartype

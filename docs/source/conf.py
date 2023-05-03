@@ -361,10 +361,10 @@ torch_version = str(torch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'main (' + torch_version + ' )'
+version = 'master (' + torch_version + ' )'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
-release = 'main'
+release = 'master'
 
 # Customized html_title here.
 # Default is " ".join(project, release, "documentation") if not set

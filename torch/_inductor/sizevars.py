@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Union
+from typing import Callable, Dict, List
 
 import sympy
 from sympy import Expr
@@ -12,6 +12,30 @@ from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+
+
+# Note [maybe_guard vs guard]
+#
+# maybe_guard should only be used in situations where we would generate
+# correct code even if the guard always returned False; in other words,
+# it should be used to guard optional optimizations which could be applied,
+# but only if we can statically determine that the condition we're guarding on
+# is true.  NB: this means that
+#
+#   maybe_guard_leq(lhs, rhs)
+#
+# and
+#
+#   not maybe_guard_lt(rhs, lhs)
+#
+# are not equivalent!
+#
+# maybe_guard is useful in two situations: (1) we have an optional
+# optimization that may be valid if some condition holds, but we do not know
+# for certain if the condition holds,  and (2) with dynamic shapes, we may
+# decide we don't want to do the optimization if it would require a guard on a
+# dynamic shape, because guarding on it would force us to generate multiple
+# kernels as this size varies.
 
 
 class SizeVarAllocator:
@@ -97,7 +121,7 @@ class SizeVarAllocator:
                     if m and v not in m[rest].free_symbols:
                         gcd = sympy.gcd(m[rest], divisor)
                         if gcd == divisor:
-                            if self.statically_known_leq(var_ranges[v], divisor):
+                            if self.maybe_guard_leq(var_ranges[v], divisor):
                                 base = m[rest]
             return base
 
@@ -106,7 +130,6 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
-            base_pos = True
             if isinstance(base, ModularIndexing):
                 # for modular indexing, biggest values from the ranges don't necessarily result in
                 # the biggest result, the biggest result is modulus - 1
@@ -115,16 +138,14 @@ class SizeVarAllocator:
                 # actual iteration range is to size-1
                 iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
                 base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.statically_known_leq(0, base_lowest):
+                if self.maybe_guard_lt(base_lowest, 0):
                     # can't replace with indexing div if base can be negative
-                    base_pos = True
-                else:
-                    base_pos = False
+                    return ModularIndexing(base, divisor, modulus)
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
                 base_s = base
-            if self.statically_known_lt(base_s, modulus * divisor) and base_pos:
+            if self.maybe_guard_lt(base_s, modulus * divisor):
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -222,90 +243,46 @@ class SizeVarAllocator:
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
-    # Note - [On Statically Known]
-    #
-    # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
-    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
-    # true, we add a guard and return True, otherwise, False.
-    #
-    # def maybe_guard_foo(args):
-    #   if size_hinted_check(args):
-    #       return False # No guard, no optim
-    #   guard(args) # Make a guard
-    #   return True # Safe to apply optimization
-    #
-    # The prior system incurred a guard, and green lit an optimization.
-    #
-    # The new system works in reverse - in the new system, if we know that the inputs are static, and evaluate the
-    # condition as true, we green light the optimization, and we do not incur a guard. If we cannot prove that, we
-    # return False.
-    #
-    # def maybe_guard_foo(args):
-    #   if all_static(args):
-    #       return True # Safe to apply optimization
-    #   else:
-    #       return False # No guard, no optim
-
-    # See Note - [On Statically Known]
-
-    def is_expr_static_and_true(self, expr: Union[Expr, int]) -> bool:
-        if expr in (True, False):
-            return expr
-
-        try:
-            simplified = self.shape_env._maybe_evaluate_static(expr)
-            if simplified is not None:
-                return bool(simplified)
-        except Exception:
-            log.debug("Could not simplify %s", expr)
-
-        return False
-
-    def statically_known_equals(self, left: Expr, right: Expr) -> bool:
-        """
-        Returns a bool indicating if it is sound to optimize as if left and right are equal.
-        """
+    # See Note [maybe_guard vs guard]
+    def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
+        """if left==right, guard on that fact and return true"""
         if left == right:
             return True
-        return self.is_expr_static_and_true(sympy.Eq(left, right))
-
-    # See Note - [On Statically Known]
-    def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
-        """
-        Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
-        """
-        if len(left) != len(right):
-            return False
-        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
+        if self.size_hint(left - right) == 0:
+            self.guard_equals(left, right)
             return True
         return False
 
-    # See Note - [On Statically Known]
-    def statically_known_leq(self, left: Expr, right: Expr) -> bool:
-        """
-        Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
-        """
-        expr = left <= right
-        return self.is_expr_static_and_true(expr)
-
-    # See Note - [On Statically Known]
-    def statically_known_lt(self, left: Expr, right: Expr) -> bool:
-        """
-        Returns a bool indicating if it is sound to optimize as if left is less than right.
-        """
-        expr = left < right
-        return self.is_expr_static_and_true(expr)
-
-    # See Note - [On Statically Known]
-    def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
-        """
-        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
-        """
-        if sympy.gcd(numerator, denominator) == denominator:
-            # can prove it symbolically
+    # See Note [maybe_guard vs guard]
+    def maybe_guard_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
+        """if left==right, guard on that fact and return true"""
+        if len(left) != len(right):
+            return False
+        if all(self.size_hint(a - b) == 0 for a, b in zip(left, right)):
+            for a, b in zip(left, right):
+                self.guard_equals(a, b)
             return True
-        expr = sympy.Eq(numerator % denominator, 0)
-        return self.is_expr_static_and_true(expr)
+        return False
+
+    # See Note [maybe_guard vs guard]
+    def maybe_guard_leq(self, left: Expr, right: Expr) -> bool:
+        try:
+            if self.size_hint(left) > self.size_hint(right):
+                return False
+        except TypeError:
+            return False
+        self.guard_leq(left, right)
+        return True
+
+    # See Note [maybe_guard vs guard]
+    def maybe_guard_lt(self, left: Expr, right: Expr) -> bool:
+        try:
+            if self.size_hint(left) >= self.size_hint(right):
+                return False
+        except TypeError:
+            return False
+        self.guard_lt(left, right)
+        return True
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
@@ -333,6 +310,17 @@ class SizeVarAllocator:
     def guard_max(self, left: Expr, right: Expr) -> Expr:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
+
+    # See Note [maybe_guard vs guard]
+    def maybe_guard_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+        """if denominator divides numerator, return True and guard on that fact"""
+        if sympy.gcd(numerator, denominator) == denominator:
+            # can prove it symbolically
+            return True
+        if self.size_hint(numerator) % self.size_hint(denominator) == 0:
+            self.guard_equals(numerator % denominator, 0)
+            return True
+        return False
 
     def guard_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)

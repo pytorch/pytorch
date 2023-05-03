@@ -1,4 +1,5 @@
 import copy
+import functools
 import logging
 from typing import Optional
 
@@ -17,7 +18,7 @@ from .. import config, overrides
 
 from ..fx_utils import matches_module_function_pattern
 from ..mkldnn import mkldnn_fuse_fx
-from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
+from ..pattern_matcher import PatternMatcherPass
 from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
@@ -25,16 +26,12 @@ log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
 
 
-@init_once_fakemode
+@functools.lru_cache(None)
 def lazy_init():
     from .split_cat import _split_cat_init
 
-    _split_cat_init()
-
-    if config.is_fbcode():
-        from .fb.split_cat import _split_cat_init as _fb_split_cat_init
-
-        _fb_split_cat_init()
+    if config.split_cat_fx_passes:
+        _split_cat_init()
 
 
 def pre_grad_passes(gm, example_inputs):

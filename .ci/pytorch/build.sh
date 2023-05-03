@@ -40,9 +40,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
-    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
-    export USE_UCC=0
-    export USE_SYSTEM_UCC=0
+    export USE_UCC=1
+    export USE_SYSTEM_UCC=1
   fi
 fi
 

@@ -93,7 +93,6 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
 
 class TestSparseLegacyAndDeprecation(TestCase):
 
-    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_legacy_warnings(self):
 
         def f1():

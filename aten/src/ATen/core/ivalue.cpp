@@ -535,7 +535,7 @@ std::ostream& printDict(
 }
 
 // Properly disambiguate the type of an empty dict
-static std::ostream& printMaybeAnnotatedDict(
+std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
     IValueFormatter formatter) {
@@ -550,7 +550,7 @@ static std::ostream& printMaybeAnnotatedDict(
   return out;
 }
 
-static std::ostream& printComplex(std::ostream & out, const IValue & v) {
+std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
   auto sign = "";
@@ -642,7 +642,7 @@ std::ostream& IValue::repr(
   }
 }
 
-static bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
 }
 
@@ -759,7 +759,7 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   };
 }
 
-static std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
   out << v.qualifiedClassName() << "." << v.name();
   return out;
 }
