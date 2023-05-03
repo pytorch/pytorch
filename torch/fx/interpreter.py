@@ -435,7 +435,7 @@ class Transformer(Interpreter):
             def __init__(self, graph: Graph):
                 super().__init__()
                 self.graph = graph
-                self.tensor_attrs: Dict[torch.Tensor, str] = {}
+                self.tensor_attrs = {}
 
             def is_leaf_module(self, _, __) -> bool:
                 return True

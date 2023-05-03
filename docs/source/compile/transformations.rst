@@ -256,7 +256,7 @@ Note:
 ::
 
    The nodes created by the subgraph rewriter will not have the metadata that
-   is populated in the matched nodes, but you can use 
+   is populated in the matched nodes, but you can use
    `ReplacedPatterns.nodes_map` to find the nodes in the original graph that
    were matched, and `ReplacedPatterns.replacements` to find the nodes that
    were replaced in the transformed graph.
