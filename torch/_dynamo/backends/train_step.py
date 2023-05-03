@@ -3,15 +3,14 @@ import logging
 from contextlib import contextmanager
 from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Union
-from unittest import mock
 
 import torch
 import torch.utils._pytree as pytree
-from torch import _C, _TorchCompileInductorWrapper, fx
+from torch import _C, fx
 from torch._guards import detect_fake_mode, TracingContext
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 from torch._inductor.decomposition import select_decomp_table
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
@@ -24,7 +23,6 @@ def _compile_train_step(
     *,
     dynamic: builtins.bool = False,
     backend: Union[str, Callable] = "inductor",
-    mode: Union[str, None] = None,
     options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> Callable:
@@ -57,16 +55,24 @@ def _compile_train_step(
     _C._log_api_usage_once("torch._dynamo.backends.train_step._compile_train_step")
 
     import torch._dynamo
+    from torch._inductor.compile_fx import (
+        compile_fx as inductor_compile_fx,
+        compile_fx_inner as inductor_compile_fx_inner,
+    )
 
-    if mode is not None and options is not None:
+    unsupported_backends = {"inductor", "aot_eager", inductor_compile_fx}
+    supported_backends = {"eager", inductor_compile_fx_inner}
+    if backend in unsupported_backends:
         raise RuntimeError(
-            "Either mode or options can be specified, but both can't be specified at the same time."
+            f"_compile_train_step does not support {backend}, possibly becuase it calls aot_autograd."
+            f" Try using one of these supported backends: {', '.join([str(s) for s in supported_backends])}"
         )
-    if mode is None and options is None:
-        mode = "default"
-    if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
-
+    if backend not in supported_backends:
+        log.warning(
+            "_compile_train_step is not known to work with backend %s,"
+            " but as long as it accepts a graphmodule that represents a functional train step and does not"
+            " call AOTAutograd internally, it may work."
+        )
     return torch._dynamo.optimize(
         backend=backend, nopython=True, dynamic=dynamic, disable=disable, trainstep=True
     )(train_step_fn)
@@ -207,19 +213,13 @@ def _train_step_compiler(backend_compile_fn):
             opt = optimizers["__optimizer_0"]
             dev = params_flat[0].device
 
-            # allow_non_fake_inputs
-            #
-            # the reason for allow_non_fake_inputs is that we are initializing optimizer states implicitly
-            # on the first invocation, and the _init_group function creates size-0 tensors with real values
-            # which upset FakeTensor otherwise.
-
             # In practice, the adam optimizer sets its state_dict["step"] values to real tensors
             # which i'm afraid means we aren't quite tracing the program correctly unless we can
             # restore it, which we attempt below with .zero_()
 
             # Question: can we enforce that 'capturable' is true for the param_groups? this codepath
             # looks like it would avoid this problem entirely but I'm not sure how to set it.
-            with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+            with fake_mode:
                 # This adds fake state tensors to the previously empty optimizer state dicts.
                 _ = functional_call(*fake_params_flat + fake_inputs)
 
@@ -249,15 +249,17 @@ def _train_step_compiler(backend_compile_fn):
         """
         Step 2: Trace the full graph.
         """
-        with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
-            fx_g = make_fx(functional_call, decomposition_table=select_decomp_table())(*full_fake_args)
+        with fake_mode:
+            fx_g = make_fx(functional_call, decomposition_table=select_decomp_table())(
+                *full_fake_args
+            )
         log.debug("\n---functional_call graph---\n%s\n\n", fx_g.graph)
 
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.
         """
-        with torch.inference_mode(), mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+        with fake_mode, torch.inference_mode():
             # We need to disable grad, since we will be inplace-updating leaf nodes (optimizer acting on params)
             functional_fx_g = make_fx(functionalize(fx_g))(*full_fake_args)
             log.debug("\n---functionalized graph---\n%s\n\n", functional_fx_g.graph)
@@ -268,7 +270,6 @@ def _train_step_compiler(backend_compile_fn):
         """
         with torch.inference_mode():
             backend_fx_g = backend_compile_fn(functional_fx_g, full_fake_args)
-            log.debug("\n---backend compiled graph---\n%s\n\n", backend_fx_g.graph)
 
         """
         Step 5: Reverse the calling-convention change we made above with _reparametrize_module,
@@ -278,6 +279,7 @@ def _train_step_compiler(backend_compile_fn):
         def call_without_params(*runtime_args):
             with torch.inference_mode():
                 # See note above about disabling grad
+                # TODO how can i detect inductor backend and set the args correctly?
                 return backend_fx_g(
                     *params_flat + named_states_flat + list(runtime_args)
                 )

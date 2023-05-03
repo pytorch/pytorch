@@ -11,6 +11,7 @@ from torch._dynamo.backends.train_step import _compile_train_step
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx_inner as inductor_compile_fx_inner
 
+
 class Seq(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -224,9 +225,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [
             torch.randn((128, 10)),
         ]
-        opt_train_step = _compile_train_step(
-            train_step_multi_backward, backend="eager"
-        )
+        opt_train_step = _compile_train_step(train_step_multi_backward, backend="eager")
         with self.assertRaisesRegex(AssertionError, r"multiple \.backward\(\) calls"):
             opt_train_step(opt_model, opt_optimizer, inputs)
 
@@ -235,9 +234,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss = out.sum()
             loss.backward(loss)
 
-        opt_train_step = _compile_train_step(
-            train_step_backward_args, backend="eager"
-        )
+        opt_train_step = _compile_train_step(train_step_backward_args, backend="eager")
 
         with self.assertRaisesRegex(
             AssertionError, r"\.backward\(\) call with non-empty args"
@@ -268,13 +265,28 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             if step > 0:
                 # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
                 self.assertTrue(loss[-2] > loss[-1])
-        
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 57)
-        
-        torch._dynamo.reset()
 
-        ind_train_step = _compile_train_step(train_step, backend=inductor_compile_fx_inner)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 61)
+
+    def test_inductor_backend(self):
+        def train_step(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            return loss
+
+        opt_model = Seq()
+        opt_model.apply(init_weights)
+        opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
+        inputs = [torch.randn((128, 10))]
+
+        torch._dynamo.reset()
+        ind_train_step = _compile_train_step(
+            train_step, backend=inductor_compile_fx_inner
+        )
 
         loss = []
         for step in range(10):
@@ -282,7 +294,13 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss.append(ind_loss)
             if step > 0:
                 self.assertTrue(loss[-2] > loss[-1])
-        
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            RuntimeError, r"_compile_train_step does not support inductor"
+        ):
+            ind_train_step = _compile_train_step(train_step, backend="inductor")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
