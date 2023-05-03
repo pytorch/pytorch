@@ -5,7 +5,6 @@ from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from . import config
-import torch
 import torch.fx.traceback as fx_traceback
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
