@@ -1,5 +1,5 @@
 from collections import defaultdict, namedtuple
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import math
 import operator
