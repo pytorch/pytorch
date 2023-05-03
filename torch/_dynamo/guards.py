@@ -93,9 +93,6 @@ if sys.version_info[:2] <= (3, 8):
         def _ast_unparse(node: ast.AST) -> str:
             return astunparse.unparse(node).replace("\n", "")
 
-        def _ast_unparse_implemented(node: ast.AST) -> bool:
-            return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
-
         HAS_UNPARSE_FUNCTIONS = True
     except ImportError:
         HAS_UNPARSE_FUNCTIONS = False
@@ -105,10 +102,6 @@ else:
 
     def _ast_unparse(node: ast.AST) -> str:
         return ast.unparse(node).replace("\n", "")
-
-    def _ast_unparse_implemented(node: ast.AST) -> bool:
-        return True
-
 
 
 def strip_function_call(name):
