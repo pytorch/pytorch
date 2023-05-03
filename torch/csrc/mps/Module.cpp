@@ -74,7 +74,7 @@ static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
 
 static PyObject* MPSModule_synchronize(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  at::detail::getMPSHooks().deviceSynchronize();
+  at::detail::getMPSHooks().synchronizeStream();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
