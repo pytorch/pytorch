@@ -124,6 +124,13 @@ def _disallowed_function_ids():
         if isinstance(obj, type(torch.FloatStorage))
     ]
     remove += storage
+
+    # Distributed APIs don't work well with torch.compile.
+    if torch.distributed.is_available():
+        remove.extend(
+            torch.distributed.distributed_c10d.dynamo_unsupported_distributed_c10d_ops
+        )
+
     return {id(x) for x in remove}
 
 
