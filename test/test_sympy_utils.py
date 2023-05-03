@@ -222,7 +222,6 @@ class TestValueRanges(TestCase):
                         r = getattr(ReferenceAnalysis, fn)(
                             sympy.Integer(a0), sympy.Integer(b0)
                         )
-                        print(r)
                         if r.is_finite:
                             self.assertIn(r, ref_r)
 
@@ -230,6 +229,10 @@ class TestValueRanges(TestCase):
 class TestSympyInterp(TestCase):
     @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
     def test_interp(self, fn):
+        # SymPy does not implement truncation for Expressions
+        if fn in ("div", "truncdiv"):
+            return
+
         from sympy.abc import x, y
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:

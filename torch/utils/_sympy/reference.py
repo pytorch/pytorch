@@ -92,6 +92,7 @@ class ReferenceAnalysis:
         result = a / b
         if result.is_finite:
             result = sympy.Integer(result)
+
         return result
 
     @staticmethod
