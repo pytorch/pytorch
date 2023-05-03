@@ -430,6 +430,8 @@ struct KinetoObserverContext : public at::ObserverContext {
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
 
+constexpr int SCALAR_LIST_LENGTH_LIMIT = 30;
+
 // InputOutputEncoder
 // Stores each op_events' shapes and dtypes into a contiguous AppendOnlyList
 // so that we no longer create vectors for shapes and dtypes on every op.
@@ -440,20 +442,33 @@ class InputOutputEncoder final {
 
   // Used during post-processing to create vectors for shapes and dtype.
   auto getNextShapesAndDtypes();
+  auto getConcreteArgGenerator();
+
+  bool isSupportedScalarList(const c10::IValue& list_candidate);
 
   void clear();
 
- private:
   enum class Tag {
     Tensor = 0,
     UndefinedTensor,
     TensorListBegin, // TODO: generalize to other lists.
+    ScalarList,
     Scalar,
     Other,
     TERMINATOR
   };
 
+  enum class IOType {
+    Shapes,
+    ConcreteArgs,
+    None
+  };
+
+ private:
   void push(const at::Tensor& t);
+
+  // Implementation detail for (TODO: dberard: fill out docstring)
+  auto getIValueGenerator(const IOType& io_type);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>

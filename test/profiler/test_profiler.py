@@ -2947,3 +2947,5 @@ aten::mm""")
 
 if __name__ == '__main__':
     run_tests()
+
+# TODO(dberard): add test for symints & meta tensors w/ InputOutputEncoder
