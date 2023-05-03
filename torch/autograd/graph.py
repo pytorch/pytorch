@@ -58,7 +58,7 @@ class Node(abc.ABC):
 
 
         The hook should not modify its argument, but it can optionally return
-        a new gradient which will be used in place of :attr:`grad_inputs`.
+        a new gradient which will be used in place of :attr:`grad_outputs`.
 
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.

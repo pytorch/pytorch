@@ -31,7 +31,12 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import (
+    developer_warning,
+    get_dtype_size,
+    has_incompatible_cudagraph_ops,
+    is_cpu_device,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -520,15 +525,14 @@ def compile_fx_with_cpp_wrapper(
     and run it to generate autotuned kernel binaries in the first pass; and then generate
     cpp wrapper code and compile it to a dynamic library in the second pass.
     """
+    from torch.ao.quantization.fx.utils import assert_and_get_unique_device
+
     # Turns off cpp_wrapper before calling back into compile_fx
     config_patches = {"cpp_wrapper": False}
-    devices = (
-        {t.device.type for t in module.parameters()}
-        | {t.device.type for t in module.buffers()}
-        | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
-    )
+    device = assert_and_get_unique_device(module)
 
-    if "cuda" not in devices:
+    if is_cpu_device(example_inputs):
+        assert device is None or device.type == "cpu"
         with config.patch(config_patches):
             return compile_fx(
                 module,
@@ -539,6 +543,8 @@ def compile_fx_with_cpp_wrapper(
                 decompositions=decompositions,
             )
     else:
+        assert device is None or device.type == "cuda"
+
         config_patches.update(
             {
                 "triton.cudagraphs": False,

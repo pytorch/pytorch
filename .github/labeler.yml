@@ -9,7 +9,6 @@
 - test/inductor/**
 
 "ciflow/inductor":
-- torch/_decomp/**
 - torch/_dynamo/**
 - torch/_inductor/**
 - benchmarks/dynamo/**
@@ -20,7 +19,6 @@
 - test/distributed/test_inductor_collectives.py
 - functorch/_src/partitioners.py
 - functorch/_src/aot_autograd.py
-- .ci/docker/ci_commit_pins/triton.txt
 
 "module: cpu":
 - aten/src/ATen/cpu/**

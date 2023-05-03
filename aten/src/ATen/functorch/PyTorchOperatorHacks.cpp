@@ -25,8 +25,6 @@ namespace at { namespace functorch {
 // pytorch/pytorch.
 
 // TODO: upstream into core
-
-namespace {
 Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
 }
@@ -158,18 +156,15 @@ Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
   grad_input = grad_input.index_put({indices}, grad);
   return grad_input.view(sizes);
 }
-}
 
 // dropout hack
 // TODO: make the following changes in pytorch/pytorch
 namespace dropout_hack {
 
-namespace {
-
 template<bool inplace>
 using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 
-static Tensor make_feature_noise(const Tensor& input) {
+Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
@@ -184,7 +179,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   return at::empty(sizes, input.options());
 }
 
-static bool is_fused_kernel_acceptable(const Tensor& input, double p) {
+bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
@@ -253,7 +248,7 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-static Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
@@ -293,7 +288,6 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-}
 } // dropout_hack
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {

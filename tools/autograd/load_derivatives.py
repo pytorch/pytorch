@@ -46,8 +46,7 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
-from torchgen.yaml_utils import YamlLoader
+from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 

@@ -16,7 +16,6 @@ enum class C10_API_ENUM ActivityType {
   CPU = 0,
   XPU, // XPU kernels, runtime
   CUDA, // CUDA kernels, runtime
-  MTIA, // MTIA kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
 

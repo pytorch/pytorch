@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -924,8 +923,8 @@ reflectable_magic_methods = {
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
     'pow': lambda a, b: Pow(a, b),
-    'and': lambda a, b: sympy.And(a, b),
-    'or': lambda a, b: sympy.Or(a, b),
+    'and': lambda a, b: a & b,
+    'or': lambda a, b: a | b,
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
@@ -1636,7 +1635,7 @@ class DimConstraints:
             symbol, val = solution.args
             assert symbol == s, f"Expected a constraint on {s} instead of on {symbol}"
             # because this is univariate, the solution is a specialization
-            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
+            self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} = {val}")
             # add this as a substitution to simplify other constraints
             self._substitutions[s] = val
 
@@ -1676,34 +1675,22 @@ class DimConstraints:
                 if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
                     self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
 
-    def prettify_results(self, original_signature: inspect.Signature):
-        # Note: Model inputs are wrapped as LocalSource in dynamo.
-        # LocalSource.name() wraps the name with L[""]. We use regular
-        # expression to do the replacement to avoid traversing up
-        # the source hierarchy manually.
-        def unwrap_local_source(source_name):
-            return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
-
+    def prettify_results(self):
         buf = ""
-        indent = 4 * " "
         if self._static_results:
-            sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
             buf += "\nNOTE: Specializations will happen by default with `assume_static_by_default=True`."
-            buf += f"\n```\ndef specializations{str(original_signature)}:"
-            buf += f"\n{indent}return (" + f" and\n{indent}".join(sorted_static_results) + ")"
-            buf += "\n```\n"
+            for result in self._static_results:
+                buf += f"\n\t{result}"
+            buf += "\n"
         if self._dynamic_results:
-            sorted_dynamic_results = sorted(self._dynamic_results)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
-            buf += f"\n```\ndef specify_constraints{str(original_signature)}:"
-            buf += f"\n{indent}return ["
-            for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{unwrap_local_source(result)},"
-            buf += f"\n{indent}]\n```\n"
+            buf += "\n```\nconstraints=["
+            for result in self._dynamic_results:
+                buf += f"\n\t{result},"
+            buf += "\n]\n```"
         return buf
-
 
 
 TLS = threading.local()
@@ -1783,7 +1770,6 @@ class ShapeEnv:
         self.log = ShapeEnvLoggerAdapter(log, {'envid': env_id})
         self.log.info("create_env")
         self.frozen = False
-        self.dim_constraints: Optional[DimConstraints] = None
 
     def freeze(self):
         self.frozen = True
@@ -2214,7 +2200,7 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
-        self.dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
+        dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
 
         if not _simplified:
             for source, expr in input_guards:
@@ -2235,7 +2221,7 @@ class ShapeEnv:
                         continue
 
                 if is_dim(source):
-                    self.dim_constraints.add_equality(source, expr)
+                    dim_constraints.add_equality(source, expr)
 
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
@@ -2253,7 +2239,7 @@ class ShapeEnv:
             g = self.simplify(g)
             try:
                 if any(is_dim(source) for s in g.free_symbols for source in symbol_to_source[s]):
-                    self.dim_constraints.add(g)
+                    dim_constraints.add(g)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
                 # A non-relational constraint on a single sizevar can violate
@@ -2315,7 +2301,7 @@ class ShapeEnv:
                 bounds = []
                 if r.lower != -sympy.oo:
                     if any(is_dim(source) for source in sources):
-                        self.dim_constraints.add(sympy.Ge(symbol, r.lower))
+                        dim_constraints.add(sympy.Ge(symbol, r.lower))
                     bounds.append(str(r.lower))
                 bounds.append(source_ref(sources[0]))
                 # NB: This looks like an off-by-one error but it's not: the
@@ -2327,10 +2313,14 @@ class ShapeEnv:
                 # the 64-bit limit.
                 if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                     if any(is_dim(source) for source in sources):
-                        self.dim_constraints.add(sympy.Le(symbol, r.upper))
+                        dim_constraints.add(sympy.Le(symbol, r.upper))
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
+
+        if torch._dynamo.config.dynamic_shapes and torch._dynamo.config.summarize_dim_constraints:
+            dim_constraints.solve()
+            log.warning("Summary of dimension constraints:%s", dim_constraints.prettify_results())
 
         if constraint_violations:
             warn_msgs = []
