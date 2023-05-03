@@ -420,12 +420,12 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     // Keep the head as the most recently used cache entry.
     // If the hit cache entry is not the head of the linked list,
     // move it to the head
-    if (prev != NULL) {
-        CacheEntry* extra = get_cache_entry(frame->f_code);
-        prev->next = e->next;
-        e->next = extra;
-        set_cache_entry(frame->f_code, e);
-    }
+    // if (prev != NULL) {
+    //     CacheEntry* extra = get_cache_entry(frame->f_code);
+    //     prev->next = e->next;
+    //     e->next = extra;
+    //     set_cache_entry(frame->f_code, e);
+    // }
     return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
