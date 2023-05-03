@@ -1045,21 +1045,41 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def gen_assert_indirect_indexing(self, buffer, original_index, mask):
-        if mask == "None":
+    def gen_assert_indirect_indexing(self, buffer, index, mask):
+        if mask == "None" or isinstance(index, sympy.Integer):
             return
+
         body = self.current_node._body
         indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
         indirect_name = body.indirect_new
+
+        var_mask = f"({mask})" if "&" in mask else mask
+
+        # Try to bound the variable via static analysis
+        # TODO We may be able to do this for dynamic shapes as well
+        if not dynamo_config.dynamic_shapes:
+            bounds = body.bounds().get_bounds()
+            indirect_bounds = {}
+            for var, rg in bounds.items():
+                var = str(var)
+                if var.startswith("set_indirect"):
+                    idx = int(var[len("set_indirect") :])
+                    indirect_var = body.indirect_vars[idx]
+                    indirect_bounds[indirect_name[indirect_var]] = rg
+
+        def gen_min_max(var, size):
+            if dynamo_config.dynamic_shapes:
+                return (True, True)
+            bound = indirect_bounds[var]
+            return (bound.lower < 0, bound.upper > size)
+
         # Many indirect variables may be mapped to the same CSE'd variable
-        # For example when you do x[y, y] for x = randn(3, 8)
+        # For example when you do x[y, y] for x.shape = (3, 8)
         var_size = collections.defaultdict(set)
         for ind, size in indirect_size.items():
             var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
 
-        indirect_vars = [
-            s for s in original_index.free_symbols if s.name.startswith("tmp")
-        ]
+        indirect_vars = (s for s in index.free_symbols if s.name.startswith("tmp"))
         for var in indirect_vars:
             sizes = list(var_size[var])
             if all(isinstance(s, sympy.Integer) for s in sizes):
@@ -1073,16 +1093,24 @@ class TritonKernel(Kernel):
                         return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
 
                 size = print_min(sizes)
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less # error-prone to use and/or/not, which is suported by triton
-            cond = f"((0 <= {var}) & ({var} < {size}))"
-            cond_print = f"0 <= {var} < {size}"
-            if not isinstance(original_index, sympy.Integer):
-                var_mask = f"({mask})" if "&" in mask else mask
-                var_mask = f" | ~{var_mask}"
+            gen_min, gen_max = gen_min_max(var, size)
+            # FooBar
+            if not (gen_min or gen_max):
+                continue
+            elif gen_min and gen_max:
+                # The conditions need to be in parens because of Python's operator precedence.
+                # It'd be less # error-prone to use and/or/not, which is suported by triton
+                cond = f"(0 <= {var}) & ({var} < {size})"
+                cond_print = f"0 <= {var} < {size}"
+            elif gen_min:
+                cond = f"0 <= {var}"
+                cond_print = cond
             else:
-                var_mask = ""
-            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond_print}")'
+                # gen_max
+                cond = f"{var} <= {size}"
+                cond_print = cond
+
+            line = f'tl.device_assert(({cond}) | ~{var_mask}, "index out of bounds: {cond_print}")'
             self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):

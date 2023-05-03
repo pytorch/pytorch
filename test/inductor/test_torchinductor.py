@@ -6137,6 +6137,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_optimize_indexing_assert(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                s = torch.arange(x.shape[0] - 1, device=x.device)
+                return x[s + 1]
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inps = [torch.randn(8, 3).cuda()]
+            code = run_and_get_triton_code(fn_opt, *inps)
+            self.assertFalse("device_assert" in code)
+            self.assertEqual(fn_opt(*inps), fn(*inps))
+
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
