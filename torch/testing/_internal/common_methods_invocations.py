@@ -133,6 +133,10 @@ from torch.testing._internal.opinfo.definitions.special import (
 from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
+from torch.testing._internal.opinfo.definitions.sparse import (
+    error_inputs_sparse_reduction_sum,
+    sample_inputs_sparse_reduction_sum
+)
 
 if TEST_SCIPY:
     from scipy import stats
@@ -2804,22 +2808,32 @@ reference_inputs_bucketize = partial(sample_inputs_bucketize, reference_inputs_m
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
-    for size, noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
+    # (unsorted tensor size, (input sizes,))
+    sizes = (
+        ((0,), ((0,),)),
+        ((M,), ((), (M,), (M, M))),
+        ((0, 0), ((0, 0),)),
+        ((M, M), ((M, M),)),
+        ((0, 0, 0), ((0, 0, 0),)),
+        ((M, M, M), ((M, M, M),)),
+    )
+
+    for (size, input_sizes), noncontiguous, out_int32, right in product(sizes, [False, True], [False, True], [False, True]):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
-        input_tensor = make_arg(size, noncontiguous=noncontiguous)
-        if np.product(size) == 0:
-            boundary_tensor = unsorted_tensor
-            sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
-        else:
-            boundary_tensor, sorter = torch.sort(unsorted_tensor)
-        side = "right" if right else "left"
+        for input_size in input_sizes:
+            input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
+            if np.product(size) == 0:
+                boundary_tensor = unsorted_tensor
+                sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
+            else:
+                boundary_tensor, sorter = torch.sort(unsorted_tensor)
+            side = "right" if right else "left"
 
-        yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, right=right)
-        yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, side=side)
+            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, right=right)
+            yield SampleInput(boundary_tensor, input_tensor, out_int32=out_int32, side=side)
 
-        yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, right=right, sorter=sorter)
-        yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, side=side, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, right=right, sorter=sorter)
+            yield SampleInput(unsorted_tensor, input_tensor, out_int32=out_int32, side=side, sorter=sorter)
 
 def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
@@ -3173,46 +3187,6 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
                      error_regex="Trying to create tensor with negative dimension")
-
-
-def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
-    op_supports_layout = getattr(op_info, 'supports_' + layout_name)
-    if not op_supports_layout:
-        return
-
-    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        if sample_input.input.ndim == 0:
-            # scalar sparse tensors are not supported
-            continue
-
-        yield SampleInput(
-            sample_input.input.detach().to_sparse(layout=layout,
-                                                  blocksize=blocksize).requires_grad_(requires_grad),
-            args=sample_input.args,
-            kwargs=sample_input.kwargs)
-
-        if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
-            # uncoalesced samples
-            inp = sample_input.input.detach().to_sparse(layout=layout)
-            inp = torch.sparse_coo_tensor(inp.indices().repeat(1, 2),
-                                          inp.values().repeat(2),
-                                          inp.shape,
-                                          dtype=inp.dtype,
-                                          device=inp.device)
-            assert not inp.is_coalesced()
-            yield SampleInput(inp.requires_grad_(requires_grad),
-                              args=sample_input.args,
-                              kwargs=sample_input.kwargs)
-
-        if sample_input.input.ndim > 2:
-            # hybrid samples
-            yield SampleInput(
-                sample_input.input.detach().to_sparse(layout=layout,
-                                                      blocksize=blocksize,
-                                                      dense_dim=sample_input.input.ndim - 2).requires_grad_(requires_grad),
-                args=sample_input.args,
-                kwargs=sample_input.kwargs)
 
 
 class _TestParamsMaxPoolBase:
@@ -8167,12 +8141,14 @@ class foreach_inputs_sample_func:
         return kwargs
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
-        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        num_input_tensors_specified = "num_input_tensors" in kwargs
+        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         # zero_size tensor
-        if dtype == torch.float32 and ("cuda" in device):
+        if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
             rightmost_arg_type = self._rightmost_arg_types[0]
             zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
             zero_size_foreach_inputs_kwargs["zero_size"] = True
@@ -8230,6 +8206,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2)):
             for zero_size in (False, True) if "cuda" in device and dtype == torch.float32 and ord not in (-1, -2) else (False,):
@@ -8273,12 +8250,14 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         return dtype in integral_types_and(torch.bool) and opinfo.ref in (torch.addcmul,)
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
-        num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
+        num_input_tensors_specified = "num_input_tensors" in kwargs
+        num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         # zero_size tensor
-        if dtype == torch.float32 and ("cuda" in device):
+        if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
             input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
             args = [
                 sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
@@ -10473,6 +10452,8 @@ op_db: List[OpInfo] = [
                        # 76047
                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                                     dtypes=(torch.bfloat16, torch.float32, torch.float64)),
+                       DecorateInfo(unittest.skip("unexpected success on ASAN"), 'TestNNCOpInfo',
+                                    'test_nnc_correctness', dtypes=(torch.bfloat16,), active_if=TEST_WITH_ASAN),
                    )),
     OpInfo('stft',
            decorators=[
@@ -12658,7 +12639,10 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
-           sample_inputs_func=sample_inputs_max_pool),
+           sample_inputs_func=sample_inputs_max_pool,
+           decorators=(
+               DecorateInfo(slowTest, 'TestJit', 'test_variant_consistency_jit', active_if=TEST_WITH_ASAN),
+           )),
     OpInfo('max_pool2d_with_indices_backward',
            op=max_pool2d_backward,
            # We've defined a custom op, so there's no corresponding aten op
@@ -14783,7 +14767,8 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda')],
+                                    device_type='cuda'),
+                       DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_backward', active_if=TEST_WITH_ASAN)],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
@@ -16118,6 +16103,8 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # See https://github.com/pytorch/pytorch/issues/66357
+           check_batched_forward_grad=False,
            assert_autodiffed=True,
            skips=(
                # https://github.com/pytorch/pytorch/issues/89353
@@ -16127,7 +16114,11 @@ op_db: List[OpInfo] = [
                #               'tensors' but instead found type 'Tensor (inferred)'.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
                # see https://github.com/pytorch/pytorch/issues/71286
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),)),
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+               # see https://github.com/pytorch/pytorch/issues/99806
+               # RuntimeError: The size of tensor a (25) must match the size of tensor b (0) at non-singleton dimension 0.
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad'),
+           )),
     OpInfo('unbind',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            ref=reference_unbind,
@@ -17673,16 +17664,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_sparse=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
-        sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_coo),
-        sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csr),
-        sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csc),
-        sample_inputs_sparse_bsr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsr),
-        sample_inputs_sparse_bsc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsc),
+        error_inputs_sparse_func=error_inputs_sparse_reduction_sum,
+        sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_coo),
+        sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_csr),
+        sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_csc),
+        sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_bsr),
+        sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_bsc),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
