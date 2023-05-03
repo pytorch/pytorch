@@ -177,8 +177,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
-        rtol: float = 1e-3,
-        atol: float = 1e-7,
+        rtol: Optional[float] = 1e-3,
+        atol: Optional[float] = 1e-7,
         opset_version: int = 18,
         has_mutation: bool = False,
         verbose: bool = False,
@@ -349,8 +349,8 @@ def _compare_pytorch_onnx_with_ort(
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
-    atol: float,
-    rtol: float,
+    atol: Optional[float] = None,
+    rtol: Optional[float] = None,
     has_mutation: bool = False,
 ):
     if has_mutation:
