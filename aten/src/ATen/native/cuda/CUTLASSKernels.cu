@@ -383,7 +383,7 @@ std::tuple<Tensor, Tensor> _two_four_sparse_linear(
       const Tensor& mask_or_meta) {
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
-    
+
     // For now, only CC 8.x devices are supported.
     const auto dprops = at::cuda::getCurrentDeviceProperties();
     const auto is_sm8x = dprops->major == 8;
