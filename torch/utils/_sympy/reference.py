@@ -76,6 +76,12 @@ class ReferenceAnalysis:
 
     @staticmethod
     def div(a, b):
+        return a / b
+
+    @staticmethod
+    def floordiv(a, b):
+        if b == 0:
+            return sympy.nan if a == 0 else sympy.zoo
         return a // b
 
     @staticmethod

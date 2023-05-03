@@ -273,7 +273,7 @@ class ValueRangeAnalysis:
                 return ValueRanges(0.0, 1.0)
             else:
                 return ValueRanges(0, 1)
-        return ValueRanges.wrap(x)
+        return x
 
     @staticmethod
     def constant(value, dtype):
@@ -307,17 +307,30 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def truediv(a, b):
+        a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if 0 in b:
+        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
             return ValueRanges.unknown()
         else:
-            return ValueRangeAnalysis.mul(a, ValueRanges(1 / b.upper, 1 / b.lower))
+            return ValueRanges.coordinatewise_monotone_map(a, b, operator.truediv)
 
     @staticmethod
     def div(a, b):
-        # We think of this as floor(a / b)
-        out = ValueRangeAnalysis.truediv(a, b)
-        return ValueRangeAnalysis.floor(out)
+        return ValueRangeAnalysis.truediv(a, b)
+
+    @staticmethod
+    def floordiv(a, b):
+        def is_integer(val):
+            return isinstance(val, int) or (
+                hasattr(val, "is_integer") and val.is_integer
+            )
+
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
+            return ValueRanges.unknown()
+        else:
+            return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
 
     @staticmethod
     def add(a, b):
@@ -345,12 +358,15 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def log(x):
+        x = ValueRanges.wrap(x)
         if x.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.log)
 
     @staticmethod
     def mod(x, y):
+        x = ValueRanges.wrap(x)
+        y = ValueRanges.wrap(y)
         if x.is_singleton() and y.is_singleton() and y.lower != 0:
             return ValueRanges.wrap(x.lower % y.lower)
         if y.lower <= 0:
@@ -359,6 +375,7 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def sqrt(x):
+        x = ValueRanges.wrap(x)
         if x.lower < 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.sqrt)
@@ -414,19 +431,7 @@ class ValueRangeAnalysis:
         )
 
     @staticmethod
-    def floor_ceil(x, fn_int):
-        def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
-            )
-
-        if is_integer(x):
-            fn = fn_int
-        else:
-
-            def fn(x):
-                return sympy.Float(fn_int(x))
-
+    def floor_ceil(x, fn):
         return ValueRanges.increasing_map(x, fn)
 
     def __getattr__(self, name):
