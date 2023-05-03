@@ -18,7 +18,6 @@ from torch.utils import _pytree
 
 @_beartype.beartype
 def validate_op_between_ort_torch(
-    diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
     symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
     torch_args: tuple,
@@ -60,7 +59,7 @@ def validate_op_between_ort_torch(
                 f"IndexError: \n{index_error}.\n This is possibly raised by "
                 f"unsupported input args of randomnized dim/indices(INT64).\n"
             )
-            diagnostic = diagnostic_context.inflight_diagnostic()
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
@@ -72,7 +71,7 @@ def validate_op_between_ort_torch(
                 f"\nFail the test of running on PyTorch Op {node.target} with "
                 f"RuntimeError: \n{runtime_error}.\n"
             )
-            diagnostic = diagnostic_context.inflight_diagnostic()
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug fails on PyTorch\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
@@ -102,7 +101,7 @@ def validate_op_between_ort_torch(
                 f"ValueError: \n{value_error}.\n This is possibly raised by "
                 f"unsupported input args due to lack of Opschema.\n"
             )
-            diagnostic = diagnostic_context.inflight_diagnostic()
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
@@ -114,7 +113,7 @@ def validate_op_between_ort_torch(
                 f"\nFail the test of running on ONNX Op {function_name} with "
                 f"RuntimeError: \n{runtime_error}.\n"
             )
-            diagnostic = diagnostic_context.inflight_diagnostic()
+            diagnostic = diagnostics.export_context().inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug fails on ONNXRUNTIME:\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
@@ -150,7 +149,7 @@ def validate_op_between_ort_torch(
                     f"Op {node.target} has mismatch outputs. "
                     f"Please check the implementation of {function_name}.\n"
                 )
-                diagnostic = diagnostic_context.inflight_diagnostic()
+                diagnostic = diagnostics.export_context().inflight_diagnostic()
                 diagnostic.with_additional_message(
                     f"### Validation failed\n"
                     f"{diagnostics.decorator.format_exception_in_markdown(e)}"

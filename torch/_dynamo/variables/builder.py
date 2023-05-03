@@ -22,7 +22,6 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils.weak import WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -54,7 +53,6 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
-    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -591,11 +589,6 @@ class VariableBuilder:
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
             guards = self.make_guards(GuardBuilder.LIST_LENGTH)
-
-        for item in value:
-            if item is value:
-                unimplemented("list elements are pointing to the list itself")
-
         output = [
             VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
                 item
@@ -788,15 +781,7 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
-        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
-        # When we've discovered an untracked tensor, then we actually need
-        # to get Dynamo to track the tensor (which is what this function does)
-        # and put it as a graph input on the root tracer. Later on,
-        # if the input is actually used in the body of the HigherOrderOperator,
-        # then the relevant SubgraphTracer will lift it to being an input of
-        # the subgraph.
-        # See NOTE [HigherOrderOperator tracing design] for more details.
-        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+        tensor_proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
         tensor_variable = wrap_fx_proxy(
@@ -894,7 +879,7 @@ class VariableBuilder:
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
 
-            proxy = self.tx.output.root_tracer.create_graph_input(
+            proxy = self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
@@ -914,10 +899,7 @@ class VariableBuilder:
                         )
                     )
                 fake_tensor_value = None
-                if isinstance(unspec_var, ConstantVariable):
-                    example_value = unspec_var.value
-                else:
-                    example_value = unspec_var.proxy.node.meta["example_value"]
+                example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
                 proxy.node.meta["grapharg"] = GraphArg(
@@ -1091,8 +1073,7 @@ def wrap_fx_proxy_cls(
                 )
             else:
                 unpacked.append(
-                    wrap_fx_proxy_cls(
-                        target_cls,
+                    wrap_fx_proxy(
                         tx,
                         proxy.tracer.create_proxy(
                             "call_function", operator.getitem, (proxy, i), {}
@@ -1125,15 +1106,6 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
-        proxy.node.meta["example_value"] = example_value
-        return target_cls(proxy, **options)
-    elif isinstance(example_value, int) and proxy.node.target in [
-        getattr,
-        operator.getitem,
-    ]:
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1278,10 +1250,6 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
-        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
-            "size": fake_e.size(),
-            "stride": fake_e.stride(),
-        }
         return fake_e
     else:
         return e

@@ -7,7 +7,6 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/functorch/PlumbingHelper.h>
 
 namespace at { namespace functorch {
 

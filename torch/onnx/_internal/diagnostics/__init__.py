@@ -4,14 +4,12 @@ from ._diagnostic import (
     engine,
     export_context,
     ExportDiagnostic,
-    ExportDiagnosticEngine,
 )
 from ._rules import rules
 from .infra import levels
 
 __all__ = [
     "ExportDiagnostic",
-    "ExportDiagnosticEngine",
     "rules",
     "levels",
     "engine",

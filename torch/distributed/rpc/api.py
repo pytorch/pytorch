@@ -916,7 +916,7 @@ def _get_should_profile():
 
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
-    ctx_manager = contextlib.nullcontext()
+    ctx_manager = contextlib.suppress()
 
     if should_profile:
         # Create appropriate string representation based on type of func
