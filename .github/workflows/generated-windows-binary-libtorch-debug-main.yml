@@ -29,7 +29,7 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -142,7 +142,7 @@ jobs:
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-debug-build
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
