@@ -9,7 +9,7 @@ import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
 from torch._dynamo.backends.train_step import _compile_train_step
 from torch._dynamo.testing import same
-
+from torch._inductor.compile_fx import compile_fx_inner as inductor_compile_fx_inner
 
 class Seq(torch.nn.Module):
     def __init__(self):
@@ -224,7 +224,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [
             torch.randn((128, 10)),
         ]
-        opt_train_step = _compile_train_step(train_step_multi_backward, backend="eager")
+        opt_train_step = _compile_train_step(
+            train_step_multi_backward, backend="eager"
+        )
         with self.assertRaisesRegex(AssertionError, r"multiple \.backward\(\) calls"):
             opt_train_step(opt_model, opt_optimizer, inputs)
 
@@ -233,7 +235,9 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss = out.sum()
             loss.backward(loss)
 
-        opt_train_step = _compile_train_step(train_step_backward_args, backend="eager")
+        opt_train_step = _compile_train_step(
+            train_step_backward_args, backend="eager"
+        )
 
         with self.assertRaisesRegex(
             AssertionError, r"\.backward\(\) call with non-empty args"
@@ -264,22 +268,21 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             if step > 0:
                 # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
                 self.assertTrue(loss[-2] > loss[-1])
-
+        
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 57)
+        
+        torch._dynamo.reset()
 
-        # WIP - something is broken about decomps/faketensors when using inductor
-        # torch._dynamo.reset()
+        ind_train_step = _compile_train_step(train_step, backend=inductor_compile_fx_inner)
 
-        # ind_train_step = _compile_train_step(train_step, backend=inductor_compile_fx_inner)
-
-        # loss = []
-        # for step in range(10):
-        #     ind_loss = ind_train_step(opt_model, opt_optimizer, inputs)
-        #     loss.append(ind_loss)
-        #     if step > 0:
-        #         self.assertTrue(loss[-2] > loss[-1])
-
+        loss = []
+        for step in range(10):
+            ind_loss = ind_train_step(opt_model, opt_optimizer, inputs)
+            loss.append(ind_loss)
+            if step > 0:
+                self.assertTrue(loss[-2] > loss[-1])
+        
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

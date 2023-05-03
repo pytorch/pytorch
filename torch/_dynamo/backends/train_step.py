@@ -11,6 +11,7 @@ from torch import _C, _TorchCompileInductorWrapper, fx
 from torch._guards import detect_fake_mode, TracingContext
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
+from torch._inductor.decomposition import select_decomp_table
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
@@ -248,14 +249,15 @@ def _train_step_compiler(backend_compile_fn):
         """
         Step 2: Trace the full graph.
         """
-        fx_g = make_fx(functional_call)(*full_fake_args)
+        with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+            fx_g = make_fx(functional_call, decomposition_table=select_decomp_table())(*full_fake_args)
         log.debug("\n---functional_call graph---\n%s\n\n", fx_g.graph)
 
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
                 as an epilogue for any inplace/mutating ops such as optimizer update.
         """
-        with torch.inference_mode():
+        with torch.inference_mode(), mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
             # We need to disable grad, since we will be inplace-updating leaf nodes (optimizer acting on params)
             functional_fx_g = make_fx(functionalize(fx_g))(*full_fake_args)
             log.debug("\n---functionalized graph---\n%s\n\n", functional_fx_g.graph)
