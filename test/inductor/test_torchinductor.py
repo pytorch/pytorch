@@ -2387,7 +2387,7 @@ class CommonTemplate:
             (torch.randn([2, 2, 3, 6]),),
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
-        
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -4993,7 +4993,7 @@ class CommonTemplate:
             ],
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
-        
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
